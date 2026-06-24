@@ -14,7 +14,7 @@
 
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 import * as dataAccessModels from '@adobe/spacecat-shared-data-access';
-import { hostnameFromUrlString } from '../url-utils.js';
+import { hostnameFromUrlString, isPublicHostname } from '../url-utils.js';
 
 // `Site` is a runtime value (the model class carrying the DELIVERY_TYPES static
 // map) but the data-access package's .d.ts re-exports its models as types only,
@@ -104,6 +104,16 @@ export async function ensureMarketSite(ctx, {
   const hostname = hostnameFromUrlString(domain);
   if (!hostname || !hasText(hostname)) {
     log?.warn?.('ensureMarketSite: domain did not resolve to a hostname; skipping', { brandId, domain });
+    return null;
+  }
+  // SSRF guard: a market domain becomes a Site base_url that downstream workers
+  // fetch, and Site.create only validates the scheme — so refuse internal/private
+  // hosts (localhost, loopback, link-local, RFC1918, *.internal, bare IPs) here,
+  // the single chokepoint shared by the brand-create / market-create / activate
+  // callers. Skip (return null) rather than throw — keeps the best-effort contract
+  // and, on the required activate path, leaves the brand pending (502) for a fix.
+  if (!isPublicHostname(hostname)) {
+    log?.warn?.('ensureMarketSite: domain is not a public hostname; refusing to mirror as a Site', { brandId, domain, hostname });
     return null;
   }
   const baseURL = composeBaseURL(hostname);

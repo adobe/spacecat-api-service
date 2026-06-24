@@ -301,9 +301,17 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
   workspaceId,
   log,
   brandOwnUrls = [],
+  prefetchedProjects = null,
 ) {
-  const listing = await transport.listProjects(workspaceId);
-  const projects = Array.isArray(listing?.items) ? listing.items : [];
+  // Reuse a pre-fetched project listing when supplied (the brand-edit path lists
+  // once and shares it across the URL/competitor/alias syncs), else list here.
+  let projects;
+  if (Array.isArray(prefetchedProjects)) {
+    projects = prefetchedProjects;
+  } else {
+    const listing = await transport.listProjects(workspaceId);
+    projects = Array.isArray(listing?.items) ? listing.items : [];
+  }
 
   // The brand's own domains across all its markets — every project's domain (the
   // primary is one of them) plus the brand's own website URLs. A competitor whose

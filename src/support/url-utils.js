@@ -37,3 +37,47 @@ export function hostnameFromUrlString(value) {
     return null;
   }
 }
+
+/**
+ * True when `hostname` is a routable PUBLIC domain name — i.e. NOT a loopback,
+ * link-local, private, single-label, IP-literal, or reserved-TLD host.
+ *
+ * Guards the side-effect Site-creation paths (e.g. `ensureMarketSite`): a market
+ * domain becomes a SpaceCat Site `base_url`, and downstream workers fetch/scrape
+ * Sites — so an attacker-influenced internal hostname (`localhost`,
+ * `169.254.169.254`, an RFC1918 address, `*.internal`) would be an SSRF primitive.
+ * `Site.create`'s `isValidUrl` only checks the scheme, so this is the host gate.
+ * Conservative by design: it rejects only clearly-non-public hosts and never a
+ * legitimate registrable domain (e.g. `example.com`, `www.acme.co.uk`).
+ *
+ * @param {string} hostname - a bare hostname (as returned by hostnameFromUrlString)
+ * @returns {boolean} true when the host is a public domain name
+ */
+export function isPublicHostname(hostname) {
+  if (!hasText(hostname)) {
+    return false;
+  }
+  const host = hostname.toLowerCase().trim().replace(/\.$/, '');
+  // localhost (and any *.localhost) is never public.
+  if (host === 'localhost' || host.endsWith('.localhost')) {
+    return false;
+  }
+  // IPv6 literal (a hostname containing ':') — we mirror domains, not IPs.
+  if (host.includes(':')) {
+    return false;
+  }
+  // IPv4 literal — rejects loopback/link-local/RFC1918 numeric addresses outright.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    return false;
+  }
+  // Must be a dotted domain. A bare single label ("intranet", "metadata") is
+  // never a public site.
+  if (!host.includes('.')) {
+    return false;
+  }
+  // Reserved / internal-use TLDs (RFC 6761 + the common `.internal`/`.local`).
+  if (/\.(local|internal|localdomain|intranet|home|corp|lan|test|invalid|example|localhost)$/.test(host)) {
+    return false;
+  }
+  return true;
+}

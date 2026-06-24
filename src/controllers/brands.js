@@ -1788,6 +1788,12 @@ function BrandsController(ctx, log, env) {
         // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
         const imsToken = getImsUserTokenStrict(context);
         const transport = createSerenityTransport({ env: context.env, imsToken });
+        // List the sub-workspace's projects ONCE and share the result across the
+        // URL/competitor/alias syncs below — the listing is stable across the
+        // brand-row write above, so this collapses up to three redundant
+        // listProjects round-trips into one on a single edit.
+        const sharedListing = await transport.listProjects(updated.semrushWorkspaceId);
+        const sharedProjects = Array.isArray(sharedListing?.items) ? sharedListing.items : [];
         try {
           if (urlsTouched) {
             await syncBrandUrlsAcrossMarkets(
@@ -1799,6 +1805,7 @@ function BrandsController(ctx, log, env) {
               },
               updated.semrushWorkspaceId,
               log,
+              sharedProjects,
             );
           }
           if (competitorsTouched) {
@@ -1813,6 +1820,7 @@ function BrandsController(ctx, log, env) {
               // is reserved from the project listing) so a competitor can't be one
               // of the brand's own properties.
               updated.urls,
+              sharedProjects,
             );
             rejectedAliases.push(...(competitorResult?.rejected ?? []));
           }
@@ -1823,6 +1831,7 @@ function BrandsController(ctx, log, env) {
               updated.name,
               updated.semrushWorkspaceId,
               log,
+              sharedProjects,
             );
             rejectedAliases.push(...(aliasResult?.rejected ?? []));
           }

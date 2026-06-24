@@ -76,7 +76,6 @@ describe('serenity site-linkage: ensureMarketSite', () => {
       type: SERENITY_BRAND_SITE_TYPE,
       updated_by: 'tester',
     });
-    expect(SERENITY_BRAND_SITE_TYPE).to.equal('serenity');
     expect(opts).to.deep.equal({ onConflict: 'brand_id,site_id' });
   });
 
@@ -178,6 +177,31 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     expect(result).to.equal(null);
     expect(Site.findByBaseURL).to.not.have.been.called;
     expect(log.warn).to.have.been.calledOnce;
+  });
+
+  it('refuses to mirror a non-public hostname (SSRF guard) without creating a Site', async () => {
+    // Internal/private hosts must never become a Site base_url (downstream
+    // workers fetch Sites). Each is skipped (null) before any Site write.
+    const internalHosts = [
+      'localhost',
+      'http://127.0.0.1/x',
+      '169.254.169.254',
+      '10.0.0.5',
+      'http://192.168.1.10:8080',
+      'metadata',
+      'db.internal',
+    ];
+    for (const domain of internalHosts) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, domain, log,
+      });
+      expect(result, `expected ${domain} to be refused`).to.equal(null);
+    }
+    expect(Site.findByBaseURL).to.not.have.been.called;
+    expect(Site.create).to.not.have.been.called;
+    expect(fromStub).to.not.have.been.called;
+    expect(log.warn.callCount).to.equal(internalHosts.length);
   });
 
   it('returns null (does not throw) when ctx is null', async () => {

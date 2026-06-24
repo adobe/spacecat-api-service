@@ -56,7 +56,7 @@ import {
   logSiteOrphanedAfterCreate,
   resolveProductCode,
 } from '../support/tier-provisioning.js';
-import { getBrandBySite } from '../support/brands-storage.js';
+import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -844,13 +844,34 @@ function SitesController(ctx, log, env) {
     if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
       const postgrestClient = context.dataAccess?.services?.postgrestClient;
       if (postgrestClient?.from) {
-        const attachedBrand = await getBrandBySite(
-          site.getOrganizationId(),
-          site.getId(),
-          postgrestClient,
-          log,
-        );
-        if (hasText(attachedBrand?.semrushWorkspaceId)) {
+        // Two ways a site can back a Semrush-managed brand, both immutable:
+        //  - the brand's OWN primary site (brands.site_id) — getBrandBySite, or
+        //  - a Semrush market mirror linked via brand_sites (type='serenity'),
+        //    which a serenity brand shell (no brands.site_id) reaches ONLY here.
+        // The lookups can throw on a transient PostgREST error; map that to a 5xx
+        // rather than letting it escape this catch-less handler as an opaque 500.
+        let attachedToSemrushBrand = false;
+        try {
+          const attachedBrand = await getBrandBySite(
+            site.getOrganizationId(),
+            site.getId(),
+            postgrestClient,
+            log,
+          );
+          attachedToSemrushBrand = hasText(attachedBrand?.semrushWorkspaceId)
+            || await isSemrushMarketMirrorSite(
+              site.getOrganizationId(),
+              site.getId(),
+              postgrestClient,
+            );
+        } catch (lookupError) {
+          log.error('updateSite: failed to resolve Semrush-brand attachment for URL-immutability guard', {
+            siteId: site.getId(),
+            error: lookupError?.message,
+          });
+          return internalServerError('Could not verify whether this site URL is editable; please retry');
+        }
+        if (attachedToSemrushBrand) {
           return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
         }
       }

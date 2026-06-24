@@ -330,6 +330,91 @@ describe('brand-aliases helpers', () => {
       });
     });
 
+    it('PUTs the benchmark when ONLY the alias set drifts (brand_names unchanged), then republishes', async () => {
+      // brand_names already match the desired set (display + 'Acme'), so no PATCH;
+      // the own-brand benchmark's brand_aliases are empty, so the PUT must still
+      // fire on its own. Exercises the benchmark-only drift path in isolation.
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Brand', 'Acme'] })],
+        {
+          'p-us': [{
+            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: [],
+          }],
+        },
+      );
+
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Acme', regions: [] }],
+        'Brand',
+        WS,
+        undefined,
+      );
+
+      expect(transport.updateProject).to.not.have.been.called;
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
+        brand_name: 'Brand',
+        domain: 'brand.com',
+        brand_aliases: ['Acme'],
+      });
+      expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us');
+      expect(result).to.deep.equal({
+        markets: 1, projectsUpdated: 0, benchmarksUpdated: 1, rejected: [],
+      });
+    });
+
+    it('logs the failing market and rethrows (hard-fail) when the benchmark PUT throws', async () => {
+      const error = sandbox.stub();
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Brand'] })],
+        {
+          'p-us': [{
+            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: [],
+          }],
+        },
+      );
+      // The PATCH succeeds; the benchmark PUT throws — the catch must still name
+      // the market and rethrow so the brand edit hard-fails.
+      transport.updateBenchmark.rejects(new SerenityTransportError(409, 'benchmark conflict'));
+
+      await expect(syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Acme', regions: [] }],
+        'Brand',
+        WS,
+        { error, info: () => {}, warn: () => {} },
+      )).to.be.rejectedWith('benchmark conflict');
+      expect(transport.updateProject).to.have.been.calledOnce;
+      expect(error).to.have.been.calledWithMatch('brand-aliases: market sync failed', {
+        workspaceId: WS, projectId: 'p-us', market: 'us', status: 409,
+      });
+    });
+
+    it('reuses a pre-fetched project listing instead of calling listProjects', async () => {
+      const transport = makeTransport(
+        [], // listProjects would return no projects if called
+        {
+          'p-us': [{
+            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: [],
+          }],
+        },
+      );
+      const prefetched = [projectWith('p-us', 'us', { brandNames: ['Brand'] })];
+
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Acme', regions: [] }],
+        'Brand',
+        WS,
+        undefined,
+        prefetched,
+      );
+
+      expect(transport.listProjects).to.not.have.been.called;
+      expect(result.markets).to.equal(1);
+      expect(transport.updateProject).to.have.been.calledOnce;
+    });
+
     it('treats a non-array listProjects response as no projects', async () => {
       const transport = {
         listProjects: sandbox.stub().resolves({}),

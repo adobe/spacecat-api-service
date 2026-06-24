@@ -327,6 +327,28 @@ describe('competitor-benchmarks helpers', () => {
       });
     });
 
+    it('reuses a pre-fetched project listing instead of calling listProjects', async () => {
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [] }), // would be empty if called
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['x'], existing_count: 0 }),
+        deleteBenchmarks: sandbox.stub().resolves(null),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncCompetitorBenchmarksAcrossMarkets(
+        transport,
+        [{ name: 'US rival', url: 'https://us-rival.com', regions: ['us'] }],
+        [],
+        WS,
+        undefined,
+        [],
+        [projectWith('p-us', 'us')],
+      );
+      expect(transport.listProjects).to.not.have.been.called;
+      expect(result.markets).to.equal(1);
+      expect(result.created).to.equal(1);
+    });
+
     it('drops self-referential competitors (own primary, other market domains, brand URLs)', async () => {
       const competitors = [
         { name: 'US rival', url: 'https://rival.com', regions: ['us'] },

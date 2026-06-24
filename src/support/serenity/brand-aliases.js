@@ -82,9 +82,17 @@ export async function syncBrandAliasesAcrossMarkets(
   displayName,
   workspaceId,
   log,
+  prefetchedProjects = null,
 ) {
-  const listing = await transport.listProjects(workspaceId);
-  const projects = Array.isArray(listing?.items) ? listing.items : [];
+  // Reuse a pre-fetched project listing when supplied (the brand-edit path lists
+  // once and shares it across the URL/competitor/alias syncs), else list here.
+  let projects;
+  if (Array.isArray(prefetchedProjects)) {
+    projects = prefetchedProjects;
+  } else {
+    const listing = await transport.listProjects(workspaceId);
+    projects = Array.isArray(listing?.items) ? listing.items : [];
+  }
 
   let markets = 0;
   let projectsUpdated = 0;
@@ -143,7 +151,11 @@ export async function syncBrandAliasesAcrossMarkets(
         if (!sameAliasSet(currentAliases, desiredAliases)) {
           // eslint-disable-next-line no-await-in-loop
           await transport.updateBenchmark(workspaceId, projectId, String(own.id), {
-            brand_name: hasText(own.brand_name) ? own.brand_name : (display || project?.domain),
+            // Keep brand_name deterministic: own → display → project domain → ''
+            // (never undefined, which would make the PUT body non-deterministic).
+            brand_name: hasText(own.brand_name)
+              ? own.brand_name
+              : (display || project?.domain || ''),
             domain: own.domain ?? project?.domain,
             brand_aliases: desiredAliases,
           });

@@ -1591,6 +1591,31 @@ describe('SerenityController', () => {
       expect(brand.setStatus).to.have.been.calledWith('active');
     });
 
+    it('activate returns 200 for a full re-activate of an ALREADY-active brand (all markets 201, site linked)', async () => {
+      // Gap coverage: an already-active brand (getStatus 'active') re-supplying
+      // markets where every market provisions fresh (201) AND the site mirror
+      // links → fullySucceeded → setStatus('active') + save, HTTP 200. (Distinct
+      // from the all-409 idempotent case and the 207 partial-failure case.)
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      ensureMarketSiteStub.resolves('site-uuid-1');
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+        },
+      }));
+      expect(response.status).to.equal(200);
+      const { status } = await readBody(response);
+      expect(status).to.equal('active');
+      expect(ensureMarketSiteStub).to.have.been.called;
+      expect(brand.setStatus).to.have.been.calledWith('active');
+      expect(brand.save).to.have.been.called;
+    });
+
     it('activate emits SERENITY_ACTIVATE_SAVE_DIVERGENCE and returns 502 (stays pending) when the status save fails', async () => {
       // The markets are live + the site is linked upstream, but persisting the
       // 'active' flip fails → the brand stays pending (divergence). The seam emits

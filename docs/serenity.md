@@ -154,20 +154,39 @@ A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_
 - **flat** (pointer NULL): markets resolve through the shared org parent workspace via the `BrandSemrushProject` mapping.
 - **subworkspace** (pointer set): the brand has its own Semrush sub-workspace; markets resolve live from it via `listProjects`.
 
-`POST /serenity/activate` moves a brand into sub-workspace mode:
+`POST /serenity/activate` moves a brand into sub-workspace mode. Two shapes:
+
+- **Sub-workspace-only (no resolved `brandDomain`):** a brand with no primary URL
+  has nothing to provision a project against, so activate only ensures the
+  sub-workspace (which IS the active-brand anchor) and flips the brand active —
+  **HTTP 200 with an empty `markets[]`**, no project, no Site mirror. The user
+  adds markets later from the Markets tab. `generatePrompts` is rejected here
+  (no project to attach prompts to). NOTE: this is the only path that does NOT
+  require `brandDomain` — see the resolution rules below.
+- **Project activation (resolved `brandDomain`):**
 
 ```
 1. ensure the sub-workspace ONCE for the whole batch (create + settle, or re-grant)
-2. for each supplied market: create-or-resume a draft project, attach models +
-   generated topic prompts + brand URLs + competitor benchmarks, then publish
+2. for each market (resolved below; empty -> a single US/en fallback project):
+   create-or-resume a draft project, attach models + generated topic prompts +
+   brand URLs + competitor benchmarks, then publish
 3. mirror every live market as a Site + brand_sites row (type='serenity')
 4. ALL-OR-NOTHING: set brands.status = 'active' ONLY when EVERY market is live
    AND the brand_sites mirror succeeded. If any step fails, a pending brand
    STAYS pending (stash + workspace pointer left intact for an idempotent retry).
 ```
 
+All markets in one activate batch share the single resolved `brandDomain`, so
+they collapse to one Site mirror; the all-or-nothing site-link guarantee is
+therefore satisfied by that one mirror. (Distinct-domain markets under one brand
+are not produced by this path today; if that changes, step 4 must require a
+linked Site per distinct market domain.)
+
 - Body: `{ brandDomain?, brandNames?, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. **All body fields are optional** (the schema no longer marks any required): a pending-draft activation can send an empty body and resolve everything from the stash (see below). `markets` is **capped at 50** (400 above that) — each market is a sequential upstream create+publish.
-- **Deferred-provisioning fallback (pending/draft brands).** `markets` and `brandDomain` are optional in the body: a brand saved via the wizard's "Save as pending" path carries its intended market(s) and primary URL in `brands.pending_semrush_provisioning`. When the body omits them, activate falls back to the stash — `markets` come from `pendingSemrushProvisioning.markets`, and `brandDomain` is derived from `pendingSemrushProvisioning.primaryUrl` (hostname only, via the shared `hostnameFromUrlString`). The body always wins when both are present. After resolution `markets` must be non-empty (else 400) and `brandDomain` must resolve (else 400) — a draft saved without a primary URL must supply `brandDomain` in the body.
+- **Deferred-provisioning fallback (pending/draft brands).** `markets` and `brandDomain` are optional in the body: a brand saved via the wizard's "Save as pending" path carries its intended market(s) and primary URL in `brands.pending_semrush_provisioning`. When the body omits them, activate falls back to the stash — `markets` come from `pendingSemrushProvisioning.markets`, and `brandDomain` is derived from `pendingSemrushProvisioning.primaryUrl` (hostname only, via the shared `hostnameFromUrlString`). The body always wins when both are present. Resolution rules after the fallback:
+  - **No URL/domain supplied at all** (neither body nor stash): the brand activates **sub-workspace-only** (HTTP 200, empty `markets[]`, no project) — see the sub-workspace-only shape above. This is NOT a 400.
+  - **A URL/domain was supplied but did not resolve to a hostname**: 400 (`brandDomain is required to provision a Semrush market`) — a typo must not silently strand the user with a project-less brand.
+  - **`markets` empty after resolution** (but `brandDomain` resolved): a single `US`/`en` fallback project is provisioned (matching the direct-create default). There is no longer a 400 for empty `markets`.
 - **Stash lifecycle.** The deferred-provisioning stash is cleared (column set to `null`) **only on a fully-succeeded activation** (every market live AND the brand_sites mirror linked), saved atomically with the `active` flip. If any market fails — or every market is live but the site mirror fails — a pending brand STAYS pending and its stash (with the primaryUrl) is left intact for an idempotent retry; live markets return 409 `sliceExists` on the retry and the site-link + stash-clear re-run.
 - Response: **200** when fully succeeded (pending brand flips to `active`). **502 `serenityActivationIncomplete`** when a *pending* brand's activation did not complete every step — any market failed, OR all markets are live but the `brand_sites` mirror failed; the brand stays `pending` and `markets[]` carries the per-market outcomes for a retry. **207 Multi-Status** applies ONLY to an *already-active* brand re-supplying markets where at least one fails — the brand is never downgraded and stays `active`.
 - Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live brand is a 200.

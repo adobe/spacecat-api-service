@@ -267,9 +267,23 @@ export function marketOf(project) {
  *
  * @returns {Promise<{markets: number, created: number, deleted: number}>}
  */
-export async function syncBrandUrlsAcrossMarkets(transport, sources, workspaceId, log) {
-  const listing = await transport.listProjects(workspaceId);
-  const projects = Array.isArray(listing?.items) ? listing.items : [];
+export async function syncBrandUrlsAcrossMarkets(
+  transport,
+  sources,
+  workspaceId,
+  log,
+  prefetchedProjects = null,
+) {
+  // Reuse a pre-fetched project listing when the caller already has one (the
+  // brand-edit path lists once and shares it across the URL/competitor/alias
+  // syncs), else list here. The listing is stable across a brand-row write.
+  let projects;
+  if (Array.isArray(prefetchedProjects)) {
+    projects = prefetchedProjects;
+  } else {
+    const listing = await transport.listProjects(workspaceId);
+    projects = Array.isArray(listing?.items) ? listing.items : [];
+  }
 
   let created = 0;
   let deleted = 0;

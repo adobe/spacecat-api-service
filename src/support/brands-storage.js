@@ -743,6 +743,43 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
 }
 
 /**
+ * True when the site is a Semrush market mirror — i.e. it is linked to a brand
+ * via a `brand_sites` row tagged `type='serenity'`. These rows are written ONLY
+ * for Semrush-managed brands (see `ensureMarketSite`), so a hit means the site's
+ * base_url is pinned to a Semrush project domain and must be treated as immutable.
+ *
+ * This is the second linkage path the URL-immutability guard must check:
+ * `getBrandBySite` resolves a brand only via `brands.site_id` (the brand's OWN
+ * primary site), but a serenity brand shell has no `site_id` — its market sites
+ * are reachable only through `brand_sites`. Checking only `getBrandBySite` would
+ * leave every market mirror's URL editable and free to desync from Semrush.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {string} siteId - Site UUID
+ * @param {object} postgrestClient - PostgREST client
+ * @returns {Promise<boolean>} true when a serenity-typed brand_sites row exists
+ */
+export async function isSemrushMarketMirrorSite(organizationId, siteId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(organizationId) || !hasText(siteId)) {
+    return false;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brand_sites')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('site_id', siteId)
+    .eq('type', SERENITY_BRAND_SITE_TYPE)
+    .limit(1);
+
+  if (error) {
+    throw new Error(`Failed to resolve market-mirror link for site: ${error.message}`);
+  }
+
+  return Array.isArray(data) && data.length > 0;
+}
+
+/**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
  *

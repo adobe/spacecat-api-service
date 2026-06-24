@@ -22,6 +22,7 @@ import {
   getBrandUrlSources,
   getBrandCompetitors,
   getBrandBySite,
+  isSemrushMarketMirrorSite,
   upsertBrand,
   updateBrand,
   deleteBrand,
@@ -660,6 +661,37 @@ describe('brands-storage', () => {
 
       await expect(getBrandBySite(ORG_ID, SITE_ID, postgrestClient))
         .to.be.rejectedWith('Failed to resolve brand for site');
+    });
+  });
+
+  describe('isSemrushMarketMirrorSite', () => {
+    const SITE_ID = '33333333-3333-4333-8333-333333333333';
+
+    it('returns false on missing client / org / site', async () => {
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, null)).to.equal(false);
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, {})).to.equal(false);
+      expect(await isSemrushMarketMirrorSite('', SITE_ID, { from: () => {} })).to.equal(false);
+      expect(await isSemrushMarketMirrorSite(ORG_ID, '', { from: () => {} })).to.equal(false);
+    });
+
+    it('returns true when a serenity-typed brand_sites row exists for the site', async () => {
+      const query = createChainableQuery({ data: [{ site_id: SITE_ID }], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient)).to.equal(true);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('brand_sites');
+    });
+
+    it('returns false when no serenity brand_sites row matches', async () => {
+      const query = createChainableQuery({ data: [], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient)).to.equal(false);
+    });
+
+    it('throws on database error (so the caller can fail closed)', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to resolve market-mirror link for site');
     });
   });
 

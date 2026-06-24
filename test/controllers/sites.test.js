@@ -151,17 +151,20 @@ describe('Sites Controller', () => {
   let context;
   let updateRumConfigStub;
   let getBrandBySiteStub;
+  let isSemrushMarketMirrorSiteStub;
   let SitesControllerMocked;
 
   before(async () => {
     updateRumConfigStub = sandbox.stub().resolves(true);
     getBrandBySiteStub = sandbox.stub().resolves(null);
+    isSemrushMarketMirrorSiteStub = sandbox.stub().resolves(false);
     SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
       '../../src/support/rum-config-service.js': {
         updateRumConfig: updateRumConfigStub,
       },
       '../../src/support/brands-storage.js': {
         getBrandBySite: getBrandBySiteStub,
+        isSemrushMarketMirrorSite: isSemrushMarketMirrorSiteStub,
       },
     })).default;
   });
@@ -799,6 +802,61 @@ describe('Sites Controller', () => {
     expect(getBrandBySiteStub).to.have.not.been.called;
     expect(site.save).to.have.been.calledOnce;
     expect(response.status).to.equal(200);
+  });
+
+  it('returns forbidden when changing the URL of a Semrush market-mirror site (linked via brand_sites)', async () => {
+    // A serenity brand shell has no brands.site_id, so getBrandBySite finds
+    // nothing; the market mirror is reachable only via the brand_sites lookup.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    isSemrushMarketMirrorSiteStub.reset();
+    isSemrushMarketMirrorSiteStub.resolves(true);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(isSemrushMarketMirrorSiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property(
+      'message',
+      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
+    );
+    isSemrushMarketMirrorSiteStub.reset();
+    isSemrushMarketMirrorSiteStub.resolves(false);
+  });
+
+  it('returns 500 (not an opaque throw) when the brand-attachment lookup fails', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.rejects(new Error('postgrest down'));
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(500);
+    expect(error).to.have.property(
+      'message',
+      'Could not verify whether this site URL is editable; please retry',
+    );
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
   });
 
   it('returns bad request when updating a site if id not provided', async () => {

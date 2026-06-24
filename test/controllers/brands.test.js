@@ -774,7 +774,7 @@ describe('Brands Controller', () => {
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const contextWithEmail = {
         ...context,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       };
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
         if (table === 'prompts') {
@@ -3043,7 +3043,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID },
         data: { name: 'My Category' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
       const body = await response.json();
@@ -3290,7 +3290,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID },
         data: { name: 'My Category' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       // info call includes {organization_id, category_id, outcome} for
@@ -3337,7 +3337,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         data: { name: 'Updated Category' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(200);
       const body = await response.json();
@@ -3529,7 +3529,7 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, categoryId: CATEGORY_UUID },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(204);
     });
@@ -3805,7 +3805,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID },
         data: { name: 'My Topic' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
       const body = await response.json();
@@ -3988,7 +3988,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID, topicId: 'my-topic' },
         data: { name: 'Updated Topic' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(200);
       const body = await response.json();
@@ -4133,7 +4133,7 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, topicId: 'my-topic' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(204);
     });
@@ -4394,7 +4394,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID },
         data: { name: 'New Brand' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
     });
@@ -4444,7 +4444,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { ...semrushData },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4479,7 +4479,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { ...semrushData },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4507,7 +4507,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { ...semrushData, status: 'pending' },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4529,7 +4529,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { ...semrushData, socialAccounts: social, earnedContent: earned },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4553,7 +4553,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { ...semrushData, competitors },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4574,7 +4574,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { ...semrushData },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(400);
@@ -4600,7 +4600,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { ...semrushData },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         // The DB write failed, so the create still errors out...
@@ -4621,7 +4621,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { name: 'New Brand', urls: [{ value: 'https://acme.com' }], semrushMarket: { market: 'us' } },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(400);
@@ -4643,7 +4643,7 @@ describe('Brands Controller', () => {
             generatePrompts: true,
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(400);
@@ -4665,7 +4665,7 @@ describe('Brands Controller', () => {
             generatePrompts: true,
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(400);
@@ -4689,7 +4689,7 @@ describe('Brands Controller', () => {
             generatePrompts: false,
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4708,7 +4708,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { name: 'New Brand', urls: [], semrushMarket: { market: 'us', languageCode: 'en' } },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(400);
@@ -4724,7 +4724,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { name: 'New Brand' },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4750,7 +4750,7 @@ describe('Brands Controller', () => {
             semrushMarket: { market: 'us', languageCode: 'en' },
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4785,7 +4785,7 @@ describe('Brands Controller', () => {
             semrushMarket: { market: 'us', languageCode: 'en' },
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4817,7 +4817,7 @@ describe('Brands Controller', () => {
             semrushModelIds: ['chatgpt', 'perplexity'],
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -4838,7 +4838,7 @@ describe('Brands Controller', () => {
           params: { spaceCatId: ORGANIZATION_ID },
           data: { name: 'New Brand', status: 'pending', semrushMarket: { market: 'us' } },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(400);
@@ -4885,7 +4885,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID },
         data: { name: 'New Brand', brandContext: padded },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
     });
@@ -5001,7 +5001,7 @@ describe('Brands Controller', () => {
             ],
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -5032,7 +5032,7 @@ describe('Brands Controller', () => {
             generatePrompts: false,
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -5062,7 +5062,7 @@ describe('Brands Controller', () => {
             generatePrompts: false,
           },
           dataAccess: mockDataAccess,
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
@@ -5119,7 +5119,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         data: { name: 'Updated Brand' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(200);
     });
@@ -5162,7 +5162,7 @@ describe('Brands Controller', () => {
       };
       const updateBrandStub = sinon.stub().resolves(updated);
       const syncStub = sinon.stub().resolves({ markets: 1, created: 1, deleted: 0 });
-      const transport = { name: 't' };
+      const transport = { name: 't', listProjects: sinon.stub().resolves({ items: [] }) };
       const createTransportStub = sinon.stub().returns(transport);
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
@@ -5176,7 +5176,7 @@ describe('Brands Controller', () => {
         data: { socialAccounts: [{ url: 'https://x.com/acme', regions: ['us'] }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5197,7 +5197,7 @@ describe('Brands Controller', () => {
       };
       const updateBrandStub = sinon.stub().resolves(updated);
       const aliasSyncStub = sinon.stub().resolves({ rejected: [] });
-      const transport = { name: 't' };
+      const transport = { name: 't', listProjects: sinon.stub().resolves({ items: [] }) };
       const createTransportStub = sinon.stub().returns(transport);
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
@@ -5211,7 +5211,7 @@ describe('Brands Controller', () => {
         data: { brandAliases: [{ name: 'Acme', regions: [] }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5236,7 +5236,7 @@ describe('Brands Controller', () => {
       const controller = await buildUpdateController({
         updateBrand: sinon.stub().resolves(updated),
         syncBrandAliasesAcrossMarkets: sinon.stub().resolves({ rejected }),
-        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
       });
 
       const response = await controller.updateBrandForOrg({
@@ -5245,7 +5245,7 @@ describe('Brands Controller', () => {
         data: { brandAliases: [{ name: 'bogus', regions: [] }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5268,7 +5268,7 @@ describe('Brands Controller', () => {
         data: { description: 'just a description change' },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5298,7 +5298,7 @@ describe('Brands Controller', () => {
         },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5332,7 +5332,7 @@ describe('Brands Controller', () => {
         data: { pendingSemrushProvisioning: stash },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5368,7 +5368,7 @@ describe('Brands Controller', () => {
         },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5393,7 +5393,7 @@ describe('Brands Controller', () => {
         data: { urls: [{ value: 'https://acme.com' }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5410,7 +5410,7 @@ describe('Brands Controller', () => {
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
-        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
       });
 
       const response = await controller.updateBrandForOrg({
@@ -5419,7 +5419,7 @@ describe('Brands Controller', () => {
         data: { urls: [{ value: 'https://acme.com' }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(502);
@@ -5431,7 +5431,7 @@ describe('Brands Controller', () => {
         id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
       const syncStub = sinon.stub().resolves({});
-      const createTransportStub = sinon.stub().returns({ name: 't' });
+      const createTransportStub = sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) });
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
@@ -5464,7 +5464,7 @@ describe('Brands Controller', () => {
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
-        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
       });
 
       const response = await controller.updateBrandForOrg({
@@ -5473,7 +5473,7 @@ describe('Brands Controller', () => {
         data: { urls: [{ value: 'https://acme.com' }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(502);
@@ -5499,7 +5499,7 @@ describe('Brands Controller', () => {
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
-        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
       });
 
       const response = await controller.updateBrandForOrg({
@@ -5508,7 +5508,7 @@ describe('Brands Controller', () => {
         data: { urls: [{ value: 'https://acme.com' }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(401);
@@ -5528,7 +5528,7 @@ describe('Brands Controller', () => {
       };
       const updateBrandStub = sinon.stub().resolves(updated);
       const ciSyncStub = sinon.stub().resolves({ markets: 1, changed: 1 });
-      const transport = { name: 't' };
+      const transport = { name: 't', listProjects: sinon.stub().resolves({ items: [] }) };
       const createTransportStub = sinon.stub().returns(transport);
       // Old list had an extra competitor that is now gone → it must be reported removed.
       const getBrandCompetitorsStub = sinon.stub().resolves([
@@ -5548,7 +5548,7 @@ describe('Brands Controller', () => {
         data: { competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5572,7 +5572,7 @@ describe('Brands Controller', () => {
       const getBrandCompetitorsStub = sinon.stub().resolves([]);
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
-        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
         syncCompetitorBenchmarksAcrossMarkets: ciSyncStub,
         getBrandCompetitors: getBrandCompetitorsStub,
       });
@@ -5583,7 +5583,7 @@ describe('Brands Controller', () => {
         data: { urls: [{ value: 'https://acme.com' }] },
         dataAccess: mockDataAccess,
         pathInfo: { headers: { authorization: 'Bearer tok' } },
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
       expect(response.status).to.equal(200);
@@ -5718,7 +5718,7 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         data: { name: 'Updated Brand' },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(404);
     });
@@ -5791,7 +5791,7 @@ describe('Brands Controller', () => {
           },
           dataAccess: mockDataAccess,
           pathInfo: { headers: { authorization: 'Bearer tok' } },
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(200);
@@ -5841,11 +5841,14 @@ describe('Brands Controller', () => {
           },
           dataAccess: mockDataAccess,
           pathInfo: { headers: { authorization: 'Bearer tok' } },
-          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(200);
-        expect(listProjectsStub).to.have.been.calledOnceWith('ws-7');
+        // listProjects is read twice on a competitor edit: once by the pre-commit
+        // self-reference guard (resolveReservedDomains) and once by the post-commit
+        // shared sync pre-fetch; both target the brand's workspace.
+        expect(listProjectsStub).to.have.been.calledWith('ws-7');
         const { updates } = updateBrandStub.firstCall.firstArg;
         expect(updates.competitors.map((c) => c.url)).to.deep.equal(['https://rival.com']);
         expect(loggerStub.info).to.have.been.calledWithMatch(
@@ -5878,7 +5881,7 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(204);
     });
@@ -5980,7 +5983,7 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         dataAccess: mockDataAccess,
-        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(404);
     });
@@ -6038,7 +6041,7 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
         Organization: { findById: stub().resolves({ getId: () => ORG_ID }) },
         services: { postgrestClient: { from: () => ({}) } },
       },
-      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
     };
   }
 
@@ -6249,7 +6252,7 @@ describe('Brands Controller — defensive branch coverage', () => {
         ],
       },
       dataAccess: ctx.dataAccess,
-      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
     });
 
     expect(response.status).to.equal(201);
@@ -6306,7 +6309,7 @@ describe('Brands Controller — defensive branch coverage', () => {
         semrushModelIds: ['model-a'],
       },
       dataAccess: ctx.dataAccess,
-      attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
     });
 
     expect(response.status).to.equal(201);
