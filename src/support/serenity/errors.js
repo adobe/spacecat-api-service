@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { SerenityTransportError } from './rest-transport.js';
 
 /**
@@ -50,4 +52,7 @@ export function isUpstreamGone(e) {
  */
 export const ERROR_CODES = Object.freeze({
   MARKET_NOT_FOUND: 'marketNotFound',
+  // Subworkspace provisioning (serenity dual-mode, subworkspace path).
+  AMBIGUOUS_WORKSPACE: 'ambiguousWorkspace',
+  LINKED_SUBWORKSPACES: 'linkedSubworkspaces',
 });

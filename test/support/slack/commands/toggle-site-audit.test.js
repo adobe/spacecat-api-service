@@ -107,7 +107,7 @@ describe('UpdateSitesAuditsCommand', () => {
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}The \`audit enable\` command is deprecated. Use one-off \`run audit\` from Slack without enabling the site. To disable audits, use \`audit disable\`.`),
+      slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}The \`audit enable\` command is deprecated. Use one-off \`run audit\` from Slack without enabling the site. To enable Preflight, use \`ensure preflight <site>\`. To disable audits, use \`audit disable\`.`),
       'Expected deprecation message for audit enable',
     ).to.be.true;
     expect(configurationMock.enableHandlerForSite.called).to.be.false;

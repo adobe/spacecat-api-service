@@ -130,6 +130,7 @@ describe('Sites Controller', () => {
     'getAuditForSite',
     'getByBaseURL',
     'getByID',
+    'getIdentity',
     'getBrandProfile',
     'removeSite',
     'updateSite',
@@ -1349,6 +1350,160 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.findById).to.have.been.calledOnce;
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+  });
+
+  describe('getIdentity (GET /sites/:siteId/identity)', () => {
+    const ORG_ID = '11111111-1111-4111-b111-111111111111';
+
+    function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
+      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
+    }
+
+    function makeFreshConsumer({
+      id = 'consumer-id-1',
+      capabilities = ['site:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    it('admin: returns the site identity and resolves imsOrgId via the org join', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => 'ABC123DEF456@AdobeOrg' });
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.findById).to.have.been.calledOnceWith(SITE_IDS[0]);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith(ORG_ID);
+      expect(body).to.deep.equal({
+        siteId: SITE_IDS[0],
+        organizationId: ORG_ID,
+        imsOrgId: 'ABC123DEF456@AdobeOrg',
+        baseURL: 'https://site1.com',
+        deliveryType: 'aem_edge',
+      });
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] GET \/sites\/:siteId\/identity granted via admin bypass siteId=.* requestId=unknown/,
+      );
+    });
+
+    it('returns 404 for an unknown site without touching the org lookup', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const result = await sitesController.getIdentity({ params: { siteId: 'not-a-uuid' } });
+
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('returns 200 with imsOrgId null when the owning org has no imsOrgId', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => null });
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.organizationId).to.equal(ORG_ID);
+      expect(body.imsOrgId).to.equal(null);
+    });
+
+    it('returns 200 with imsOrgId null when the organizationId is orphaned (org not found)', async () => {
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith(ORG_ID);
+      expect(body.organizationId).to.equal(ORG_ID);
+      expect(body.imsOrgId).to.equal(null);
+    });
+
+    it('returns 200 with null ids when the site has no organization', async () => {
+      sites[0].getOrganizationId = () => undefined;
+
+      const result = await sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.organizationId).to.equal(null);
+      expect(body.imsOrgId).to.equal(null);
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('propagates a data-access failure to the error wrapper (no silent swallow)', async () => {
+      // Documents the contract: like getByID, getIdentity does not try/catch the data
+      // layer - a thrown Organization.findById propagates and is mapped to a 500 by the
+      // middleware error wrapper rather than being swallowed into a misleading 200.
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.rejects(new Error('boom'));
+
+      await expect(
+        sitesController.getIdentity({ params: { siteId: SITE_IDS[0] } }),
+      ).to.be.rejectedWith('boom');
+    });
+
+    it('grants access to an S2S consumer holding site:readAll', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-identity-1' };
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sandbox.stub().resolves(makeFreshConsumer()),
+      };
+      sites[0].getOrganizationId = () => ORG_ID;
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => 'ABC123DEF456@AdobeOrg' });
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.imsOrgId).to.equal('ABC123DEF456@AdobeOrg');
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites\/:siteId\/identity granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll siteId=.* requestId=req-identity-1/,
+      );
+    });
+
+    it('denies an S2S consumer that only holds site:read', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sandbox.stub().resolves(makeFreshConsumer({ capabilities: ['site:read'] })),
+      };
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
+      );
+    });
   });
 
   it('gets a site by base URL', async () => {
@@ -4198,6 +4353,101 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('detectedCdn validation', () => {
+    it('accepts a valid enum value', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: 'aem-cs-fastly' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.llmo.detectedCdn).to.equal('aem-cs-fastly');
+    });
+
+    it('rejects an array value', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: ['Adobe-managed Fastly'] } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('rejects a stringified array (prod marriottvacationclubs.com case)', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: '["Adobe-managed Fastly"]' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('rejects a human display name', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: 'Adobe-managed Fastly' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('does not validate detectedCdn when llmo patch omits it', async () => {
+      const site = sites[0];
+      // Pre-existing (possibly legacy) value must not be re-rejected by an unrelated llmo patch.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        llmo: { detectedCdn: 'Adobe-managed Fastly', brand: 'Old' },
+      });
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { brand: 'New' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.llmo.brand).to.equal('New');
+      expect(merged.llmo.detectedCdn).to.equal('Adobe-managed Fastly');
+    });
+  });
+
   describe('enableMoneyPageUrls config flag', () => {
     it('allows disabling money page URLs via config patch', async () => {
       const site = sites[0];
@@ -4466,22 +4716,65 @@ describe('Sites Controller', () => {
     });
   });
 
-  describe('isPrimaryLocale, language, and region updates', () => {
-    it('updates site with projectId', async () => {
+  describe('projectId, isPrimaryLocale, language, and region updates', () => {
+    it('returns forbidden when trying to update projectId', async () => {
       const site = sites[0];
       const currentProjectId = '550e8400-e29b-41d4-a716-446655440000';
       const newProjectId = '650e8400-e29b-41d4-a716-446655440000';
       site.getProjectId = sandbox.stub().returns(currentProjectId);
       site.setProjectId = sandbox.stub();
-      site.save = sandbox.stub().resolves(site);
+      site.save = sandbox.spy(site.save);
 
       const response = await sitesController.updateSite({
         params: { siteId: SITE_IDS[0] },
         data: { projectId: newProjectId },
         ...defaultAuthAttributes,
       });
+      const error = await response.json();
 
-      expect(site.setProjectId).to.have.been.calledWith(newProjectId);
+      expect(site.setProjectId).to.have.not.been.called;
+      expect(site.save).to.have.not.been.called;
+      expect(response.status).to.equal(403);
+      expect(error).to.have.property('message', 'Updating project ID is not allowed');
+    });
+
+    it('ignores projectId when it matches the current projectId', async () => {
+      const site = sites[0];
+      const currentProjectId = '550e8400-e29b-41d4-a716-446655440000';
+      site.getProjectId = sandbox.stub().returns(currentProjectId);
+      site.setProjectId = sandbox.stub();
+      site.getIsPrimaryLocale = sandbox.stub().returns(false);
+      site.setIsPrimaryLocale = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { projectId: currentProjectId, isPrimaryLocale: true },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setProjectId).to.have.not.been.called;
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('ignores an empty-string projectId (guarded by hasText)', async () => {
+      const site = sites[0];
+      site.getProjectId = sandbox.stub().returns('550e8400-e29b-41d4-a716-446655440000');
+      site.setProjectId = sandbox.stub();
+      site.getIsPrimaryLocale = sandbox.stub().returns(false);
+      site.setIsPrimaryLocale = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { projectId: '', isPrimaryLocale: true },
+        ...defaultAuthAttributes,
+      });
+
+      // Empty string is not "text", so the guard is skipped — no 403 — and the
+      // other field still saves.
+      expect(site.setProjectId).to.have.not.been.called;
       expect(site.save).to.have.been.calledOnce;
       expect(response.status).to.equal(200);
     });

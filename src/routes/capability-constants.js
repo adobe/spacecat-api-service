@@ -30,3 +30,5 @@ export const CAP_SITE_CREATE = 'site:create';
 export const CAP_FIX_ENTITY_CREATE = 'fixEntity:create';
 
 export const CAP_SUGGESTION_WRITE = 'suggestion:write';
+
+export const CAP_TRIAL_USER_READ = 'trialUser:read';

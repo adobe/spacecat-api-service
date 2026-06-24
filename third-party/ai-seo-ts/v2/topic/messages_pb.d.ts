@@ -450,6 +450,8 @@ export declare const MetricsByFTSGroupedByLLMResponse_MetricsByFTSByLLMSchema: G
  */
 export declare type GapTopicsRequest = Message<"semrush.services.ai_seo.v2.topic.GapTopicsRequest"> & {
   /**
+   * deprecated: use target_date instead
+   *
    * @generated from field: semrush.services.ai_seo.common.v1.Date date = 1;
    */
   date?: Date;
@@ -515,6 +517,13 @@ export declare type GapTopicsRequest = Message<"semrush.services.ai_seo.v2.topic
    * @generated from field: string dimension_filter_ql = 10;
    */
   dimensionFilterQl: string;
+
+  /**
+   * target_date specifies the requested snapshot date in YYYY-MM or YYYY-MM-DD format.
+   *
+   * @generated from field: optional string target_date = 11;
+   */
+  targetDate?: string;
 };
 
 /**
@@ -693,6 +702,8 @@ export declare const GapTopicsResponse_Topic_MentionsByBrandSchema: GenMessage<G
  */
 export declare type GapTopicsTotalsRequest = Message<"semrush.services.ai_seo.v2.topic.GapTopicsTotalsRequest"> & {
   /**
+   * deprecated: use target_date instead
+   *
    * @generated from field: semrush.services.ai_seo.common.v1.Date date = 1;
    */
   date?: Date;
@@ -738,6 +749,13 @@ export declare type GapTopicsTotalsRequest = Message<"semrush.services.ai_seo.v2
    * @generated from field: string dimension_filter_ql = 7;
    */
   dimensionFilterQl: string;
+
+  /**
+   * target_date specifies the requested snapshot date in YYYY-MM or YYYY-MM-DD format.
+   *
+   * @generated from field: optional string target_date = 8;
+   */
+  targetDate?: string;
 };
 
 /**

@@ -35,6 +35,7 @@ import worldCountries from 'world-countries';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
+  STATUS_UNAUTHORIZED,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
 // Two signals indicate a previous paid onboarding:
@@ -567,13 +568,22 @@ export async function findDeliveryType(url) {
 }
 
 /**
- * Error class with a status code property.
+ * Error class with a status code property. An optional machine-readable `code`
+ * may be assigned by callers after construction (e.g. serenity handlers tag
+ * errors with `ERROR_CODES.*` for downstream branching).
  * @extends Error
  */
 export class ErrorWithStatusCode extends Error {
+  /**
+   * @param {string} message human-readable error message
+   * @param {number} status HTTP status code to surface
+   */
   constructor(message, status) {
     super(message);
+    /** @type {number} */
     this.status = status;
+    /** @type {string|undefined} */
+    this.code = undefined;
   }
 }
 
@@ -661,6 +671,25 @@ export function getImsUserToken(context) {
     throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
   }
   return authorizationHeader.substring(BEARER_PREFIX.length);
+}
+
+/**
+ * Get the IMS user token, but ONLY when the caller authenticated via IMS.
+ * The Semrush gateway only understands IMS user tokens, so any flow that
+ * forwards the caller's bearer upstream (serenity proxy, brand provisioning,
+ * brand-edit re-sync) must refuse a non-IMS credential rather than proxy it.
+ * An S2S consumer reaching an `organization:write` route would otherwise have
+ * its non-IMS bearer forwarded to Semrush.
+ * @param {object} context - The request context (attributes.authInfo + headers).
+ * @returns {string} imsUserToken - The validated IMS user access token.
+ * @throws {ErrorWithStatusCode} 401 when the caller is not IMS-authenticated.
+ */
+export function getImsUserTokenStrict(context) {
+  const authInfo = context?.attributes?.authInfo;
+  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+    throw new ErrorWithStatusCode('IMS authentication required', STATUS_UNAUTHORIZED);
+  }
+  return getImsUserToken(context);
 }
 
 /**

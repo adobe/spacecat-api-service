@@ -255,7 +255,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -1193,10 +1193,11 @@ function SuggestionsController(ctx, sqs, env) {
       if (invalidEntry !== undefined) {
         return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
-      const configuration = await Configuration.findLatest();
-      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-      }
+      // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+      // intentionally. Auto-fix deploys are user-initiated one-off actions; gating them
+      // on the scheduled-audit enabled-list blocked legitimate ad-hoc deploys for sites
+      // that simply weren't on that list. Access control (`auto_fix` permission) above
+      // still rejects unauthorized callers.
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
       // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
       await sqs.sendMessage(queueUrl, {
@@ -1227,10 +1228,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const configuration = await Configuration.findLatest();
-    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-    }
+    // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+    // intentionally — see the matching note in the assess-urls branch above.
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );
@@ -1907,24 +1906,31 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('Missing required environment variables');
         }
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          const newStatus = SuggestionModel.STATUSES.NEW;
-          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
-          const top15ByContentGainRatio = [...allNew]
-            .filter((s) => s.getData()?.isDomainWide !== true)
-            .sort((a, b) => (b.getData()?.contentGainRatio || 0)
-              - (a.getData()?.contentGainRatio || 0))
-            .slice(0, 15);
-          promptSources = top15ByContentGainRatio
-            .sort((a, b) => (b.getData()?.agenticTraffic || 0) - (a.getData()?.agenticTraffic || 0))
-            .slice(0, 10);
-        } else {
-          promptSources = validSuggestions;
-        }
         const domainWideSuggestionIds = new Set(
           domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
         );
+        let promptSources;
+        if (domainWideSuggestions.length > 0) {
+          promptSources = [...allSuggestions]
+            .filter((s) => {
+              const data = s.getData() || {};
+              return !domainWideSuggestionIds.has(s.getId())
+                && s.getStatus() === SuggestionModel.STATUSES.NEW
+                && !data.edgeDeployed
+                && data.aiSummary
+                && data.valuable === true;
+            })
+            .sort((a, b) => {
+              const aScore = (a.getData()?.agenticTraffic || 0)
+                * (a.getData()?.contentGainRatio || 0);
+              const bScore = (b.getData()?.agenticTraffic || 0)
+                * (b.getData()?.contentGainRatio || 0);
+              return bScore - aScore;
+            })
+            .slice(0, 100);
+        } else {
+          promptSources = validSuggestions;
+        }
         urls = promptSources
           .filter((s) => !domainWideSuggestionIds.has(s.getId()))
           .map((s) => s.getData()?.url)
@@ -1998,6 +2004,7 @@ function SuggestionsController(ctx, sqs, env) {
             triggerImmediately: true,
             enableBrandPresence: true,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
+            timeout: 12_000,
           });
           preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
           if (!preScheduleId) {
