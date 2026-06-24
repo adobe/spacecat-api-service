@@ -10824,6 +10824,32 @@ describe('Suggestions Controller', () => {
       expect(context.log.warn.calledWithMatch('IMPORT_WORKER_QUEUE_URL not configured')).to.equal(true);
     });
 
+    it('logs warning but still returns 207 when pattern-based-covered-cleanup SQS enqueue fails', async () => {
+      const failingSqs = { sendMessage: sandbox.stub().rejects(new Error('SQS unavailable')) };
+      const suggestionsControllerWithFailingSqs = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, failingSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker',
+      });
+
+      const response = await suggestionsControllerWithFailingSqs.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(context.log.warn.calledWithMatch('Failed to queue domain-wide covered cleanup')).to.equal(true);
+    });
+
     it('passes undefined updatedBy when profile email is missing (shared client applies fallbacks)', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
