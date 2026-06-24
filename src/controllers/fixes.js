@@ -111,13 +111,13 @@ export class FixesController {
     const { fixCreatedDate } = context.data || {};
     const locale = context.data?.locale ?? null;
 
-    if (!isValidLocale(locale)) {
-      return badRequest('Invalid locale format');
-    }
-
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) {
       return res;
+    }
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
     }
 
     let fixEntities = [];
@@ -268,13 +268,13 @@ export class FixesController {
     const { siteId, opportunityId, fixId } = context.params;
     const locale = context.data?.locale ?? null;
 
-    if (!isValidLocale(locale)) {
-      return badRequest('Invalid locale format');
-    }
-
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
     if (res) {
       return res;
+    }
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
     }
 
     const fix = await this.#FixEntity.findById(fixId);
