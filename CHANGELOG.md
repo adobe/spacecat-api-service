@@ -1,3 +1,10 @@
+## [1.593.3](https://github.com/adobe/spacecat-api-service/compare/v1.593.2...v1.593.3) (2026-06-24)
+
+
+### Bug Fixes
+
+* reactivate soft-deleted prompts on bulk re-upload | LLMO-5669 ([#2672](https://github.com/adobe/spacecat-api-service/issues/2672)) ([aa7b8f7](https://github.com/adobe/spacecat-api-service/commit/aa7b8f74cf99e374e052e259da3d2c05e7455b07))
+
 ## [1.593.2](https://github.com/adobe/spacecat-api-service/compare/v1.593.1...v1.593.2) (2026-06-24)
 
 
