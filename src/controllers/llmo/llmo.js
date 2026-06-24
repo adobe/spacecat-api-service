@@ -1629,7 +1629,7 @@ function LlmoController(ctx) {
         }
       }
 
-      if (!baseUrlHasPathname(effectiveBaseUrl)) {
+      if (!baseUrlHasPathname(baseURL)) {
         // CDN routing — only when cdnType is provided
         if (cdnTypeNormalized) {
         // Exchange promise token from cookie for an IMS user token

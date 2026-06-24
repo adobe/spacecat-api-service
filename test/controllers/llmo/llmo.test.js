@@ -6207,13 +6207,26 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.include('not available in stage');
       });
 
-      it('returns 200 with skip message when site baseURL has a non-root path (subpath site)', async () => {
+      it('skips CDN routing and returns metaconfig when site baseURL has a non-root path (subpath site)', async () => {
         mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
-        expect((await result.json()).message).to.include('pathname scoped sites');
         expect(mockLog.info).to.have.been.calledWith(
-          sinon.match(/Site scoped to pathname cannot use host-level auto-routing/),
+          sinon.match(/Skipping CDN routing for subpath-scoped site/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+      });
+
+      it('skips CDN routing when baseURL has a subpath, even with a root-level overrideBaseURL', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        mockConfig.getFetchConfig = sinon.stub().returns({
+          overrideBaseURL: 'https://override.example.com',
+        });
+        mockSite.getConfig = sinon.stub().returns(mockConfig);
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/Skipping CDN routing for subpath-scoped site/),
         );
         expect(callCdnRoutingApiStub).to.not.have.been.called;
       });

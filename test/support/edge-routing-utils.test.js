@@ -415,6 +415,14 @@ describe('edge-routing-utils', () => {
     it('returns false for a malformed URL', () => {
       expect(baseUrlHasPathname('not a url %%')).to.be.false;
     });
+
+    it('returns false for a URL with only a port and no path', () => {
+      expect(baseUrlHasPathname('https://example.com:8080')).to.be.false;
+    });
+
+    it('returns true for a URL with a path and a port', () => {
+      expect(baseUrlHasPathname('https://example.com:8080/subpath')).to.be.true;
+    });
   });
 
   describe('detectAemCsFastlyForDomain (integration)', () => {
