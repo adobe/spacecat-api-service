@@ -1197,7 +1197,7 @@ describe('edge-optimize support', () => {
             ETag: 'cp-etag',
           },
           UpdateDistribution: {},
-          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net' }] } },
+          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net', Status: 'Deployed' }] } },
         },
         {
           GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
@@ -1265,7 +1265,7 @@ describe('edge-optimize support', () => {
             },
             ETag: 'cp-etag',
           },
-          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net' }] } },
+          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net', Status: 'Deployed' }] } },
         },
         {
           GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
@@ -1280,11 +1280,73 @@ describe('edge-optimize support', () => {
       const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
 
       expect(statusOf(out.steps, 'associate')).to.equal('done');
+      expect(statusOf(out.steps, 'propagation')).to.equal('done');
       expect(statusOf(out.steps, 'verify')).to.equal('done');
       expect(out.routingDeployed).to.equal(true);
       expect(out.verified).to.equal(true);
+      // verify probe surfaces the per-UA result the wizard renders.
+      const verifyProbe = out.steps.find((s) => s.key === 'verify').probe;
+      expect(verifyProbe.bot).to.deep.include({ ua: 'chatgpt-user', requestId: 'req-1', failover: false });
+      expect(verifyProbe.human.requestId).to.equal(null);
       // idempotent gate: behavior already associated → no UpdateDistribution at all.
       expect(cfCalls('UpdateDistribution')).to.have.length(0);
+    });
+
+    it('holds at propagation (verify pending) while the distribution is still Deploying', async () => {
+      const lambdaVersionArn = 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:3';
+      wire(
+        {
+          GetDistributionConfig: () => ({
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'dev.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              DefaultCacheBehavior: {
+                CachePolicyId: 'cp-1',
+                FunctionAssociations: { Items: [{ EventType: 'viewer-request', FunctionARN: 'arn:fn/edgeoptimize-routing' }] },
+                LambdaFunctionAssociations: { Items: [{ EventType: 'origin-request', LambdaFunctionARN: 'arn:edgeoptimize-origin:3' }] },
+              },
+            },
+            ETag: 'etag',
+          }),
+          DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+          ListCachePolicies: { CachePolicyList: { Items: [] } },
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'p',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: {
+                HeadersConfig: { HeaderBehavior: 'whitelist', Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] } },
+              },
+            },
+            ETag: 'cp-etag',
+          },
+          // distribution still deploying → propagation gate holds, verify never runs.
+          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net', Status: 'InProgress' }] } },
+        },
+        {
+          GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
+          ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: lambdaVersionArn, CodeSha256: 'sha' }] },
+        },
+        { GetRole: { Role: { Arn: 'arn:role' } } },
+      );
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'associate')).to.equal('done');
+      expect(statusOf(out.steps, 'propagation')).to.equal('in_progress');
+      expect(statusOf(out.steps, 'verify')).to.equal('pending');
+      expect(out.steps.find((s) => s.key === 'propagation').detail).to.include('Deploying');
+      expect(out.verified).to.equal(false);
     });
 
     it('marks the step error (earlier done, later pending) and does not throw when a step fails', async () => {
@@ -1421,7 +1483,7 @@ describe('edge-optimize support', () => {
             },
             ETag: 'cp-etag',
           },
-          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net' }] } },
+          ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net', Status: 'Deployed' }] } },
         },
         {
           // Active + idle, NO published version yet → createEdgeOptimizeLambda must publish one.

@@ -1161,9 +1161,11 @@ export async function verifyEdgeOptimizeRouting(url) {
   if (!hasText(url)) {
     throw new Error('url is required');
   }
+  const botUa = 'chatgpt-user';
+  const humanUa = 'Mozilla/5.0';
   const [bot, human] = await Promise.all([
-    fetchEdgeOptimizeHeaders(url, 'chatgpt-user'),
-    fetchEdgeOptimizeHeaders(url, 'Mozilla/5.0'),
+    fetchEdgeOptimizeHeaders(url, botUa),
+    fetchEdgeOptimizeHeaders(url, humanUa),
   ]);
 
   const requestId = bot.headers['x-edgeoptimize-request-id'] || null;
@@ -1172,7 +1174,12 @@ export async function verifyEdgeOptimizeRouting(url) {
     && !human.headers['x-edgeoptimize-fo']
     && human.headers['x-edgeoptimize-proxy'] !== '1';
 
-  return { passed, requestId, details: { bot, human } };
+  // `ua` is carried through so the wizard can show which User-Agent each probe used.
+  return {
+    passed,
+    requestId,
+    details: { bot: { ua: botUa, ...bot }, human: { ua: humanUa, ...human } },
+  };
 }
 
 // The ordered deploy steps + their human labels, in the sequence the orchestrator advances them.
@@ -1183,6 +1190,7 @@ export const EDGE_OPTIMIZE_DEPLOY_STEPS = [
   { key: 'cache', label: 'Cache policy' },
   { key: 'lambda', label: 'Lambda@Edge' },
   { key: 'associate', label: 'Association' },
+  { key: 'propagation', label: 'Propagation' },
   { key: 'verify', label: 'Verify routing' },
 ];
 
@@ -1376,27 +1384,67 @@ export async function runEdgeOptimizeDeployStep(
     return { routingDeployed, verified, steps };
   }
 
-  // ── 6. verify — BEST-EFFORT: in_progress (not error) until CloudFront propagation lets pass. ──
+  // ── 6. propagation — GATE: wait for the distribution to finish deploying before we verify. ──
+  // CloudFront reports `Status: 'InProgress'` while it propagates the new behavior/Lambda globally
+  // (the console shows "Deploying"); once `Deployed`, edge nodes have the change. Verifying before
+  // that just churns, so we hold here and surface the propagation status. distDomain is reused by
+  // the verify step so we only list distributions once.
+  let distDomain = '';
+  try {
+    const distributions = await listCloudFrontDistributions(credentials, region);
+    const match = distributions.find((d) => d.id === distributionId);
+    distDomain = match?.domainName || '';
+    if (!match) {
+      byKey('propagation').status = 'in_progress';
+      byKey('propagation').detail = 'waiting for the distribution to appear';
+      return { routingDeployed, verified, steps };
+    }
+    if (match.status !== 'Deployed') {
+      byKey('propagation').status = 'in_progress';
+      byKey('propagation').detail = `Deploying — CloudFront is propagating the change globally (status: ${match.status})`;
+      return { routingDeployed, verified, steps };
+    }
+    byKey('propagation').status = 'done';
+    byKey('propagation').detail = 'Propagated — the change is live on all edge locations';
+  } catch (err) {
+    byKey('propagation').status = 'in_progress';
+    byKey('propagation').detail = cleanupHeaderValue(err.message);
+    return { routingDeployed, verified, steps };
+  }
+
+  // ── 7. verify — BEST-EFFORT: in_progress (not error) until the agentic probe is optimized. ──
   try {
     // TEMP (testing only -- DO NOT MERGE): verify against the distribution's own *.cloudfront.net
     // domain (from the dist id) because the dev test domain is not pointed at the distribution.
     // PROD/main verifies the customer's real host -- RESTORE the next line before merge:
-    // let domain = String(originHeaders?.forwardedHost || '').trim();
-    let domain = '';
-    if (!hasText(domain)) {
-      const distributions = await listCloudFrontDistributions(credentials, region);
-      const match = distributions.find((d) => d.id === distributionId);
-      domain = match?.domainName || '';
-    }
+    // const domain = String(originHeaders?.forwardedHost || '').trim() || distDomain;
+    const domain = distDomain;
     if (!hasText(domain)) {
       byKey('verify').status = 'in_progress';
       byKey('verify').detail = 'waiting for domain';
       return { routingDeployed, verified, steps };
     }
     const result = await verifyEdgeOptimizeRouting(`https://${domain}/`);
+    // Per-probe summary the wizard renders (Human vs Agentic): UA, HTTP status, the
+    // x-edgeoptimize-request-id value (or null), and whether it failed over to the origin.
+    const toProbe = (d) => ({
+      ua: d.ua,
+      status: d.status,
+      requestId: d.headers['x-edgeoptimize-request-id'] || null,
+      failover: Boolean(d.headers['x-edgeoptimize-fo']),
+    });
+    byKey('verify').probe = {
+      domain,
+      bot: toProbe(result.details.bot),
+      human: toProbe(result.details.human),
+    };
     if (result.passed) {
       verified = true;
       byKey('verify').status = 'done';
+      byKey('verify').detail = `Agentic routing verified — x-edgeoptimize-request-id: ${result.requestId}`;
+    } else if (result.details.bot.headers['x-edgeoptimize-fo'] || result.details.human.headers['x-edgeoptimize-fo']) {
+      byKey('verify').status = 'in_progress';
+      byKey('verify').detail = 'Edge Optimize returned failover (x-edgeoptimize-fo) — serving the origin, not optimized; still retrying';
     } else {
       byKey('verify').status = 'in_progress';
       byKey('verify').detail = 'waiting for propagation';
