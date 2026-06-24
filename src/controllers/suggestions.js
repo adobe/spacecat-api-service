@@ -1805,8 +1805,10 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
-    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
-    context.log.info(`[edge-deploy] allSuggestions count: ${allSuggestions.length}`);
+    const requestedSuggestions = await Promise.all(
+      suggestionIds.map((suggestionId) => Suggestion.findById(suggestionId)),
+    );
+    context.log.info(`[edge-deploy] requestedSuggestions count: ${requestedSuggestions.filter(Boolean).length}`);
 
     const isEdgeDeployableStatus = (status) => status === SuggestionModel.STATUSES.NEW
       || status === SuggestionModel.STATUSES.PENDING_VALIDATION;
@@ -1819,9 +1821,9 @@ function SuggestionsController(ctx, sqs, env) {
     let coveredSuggestionsCount = 0;
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
-      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+      const suggestion = requestedSuggestions[index];
 
-      if (!suggestion) {
+      if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
         context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} not found`);
         failedSuggestions.push({
           uuid: suggestionId,
@@ -1941,6 +1943,8 @@ function SuggestionsController(ctx, sqs, env) {
         );
         let promptSources;
         if (domainWideSuggestions.length > 0) {
+          const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+          context.log.info(`[edge-geo-exp] allSuggestions count: ${allSuggestions.length}`);
           promptSources = [...allSuggestions]
             .filter((s) => {
               const data = s.getData() || {};
@@ -2176,7 +2180,6 @@ function SuggestionsController(ctx, sqs, env) {
         site,
         opportunity,
         targetSuggestions: allTargetSuggestions,
-        allSuggestions,
         updatedBy: profile?.email || 'tokowaka-deployment',
       });
 
@@ -2493,10 +2496,10 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
-    // Fetch all suggestions for this opportunity
-    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
-
-    context.log.info(`[edge-rollback] allSuggestions count: ${allSuggestions.length}`);
+    const requestedSuggestions = await Promise.all(
+      suggestionIds.map((suggestionId) => Suggestion.findById(suggestionId)),
+    );
+    context.log.info(`[edge-rollback] requestedSuggestions count: ${requestedSuggestions.filter(Boolean).length}`);
 
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
@@ -2504,9 +2507,9 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Check each requested suggestion
     suggestionIds.forEach((suggestionId, index) => {
-      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+      const suggestion = requestedSuggestions[index];
 
-      if (!suggestion) {
+      if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
         context.log.warn(`[edge-rollback-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} not found`);
         failedSuggestions.push({
           uuid: suggestionId,
@@ -2540,7 +2543,7 @@ function SuggestionsController(ctx, sqs, env) {
       `[edge-rollback] valid: ${validSuggestions.length}`
       + ` (pattern=${validPatterns.length}, perUrl=${validPerUrl.length}),`
       + ` failed: ${failedSuggestions.length},`
-      + ` allSuggestions: ${allSuggestions.length}`,
+      + ` selectedSuggestions: ${requestedSuggestions.filter(Boolean).length}`,
     );
     validPatterns.forEach((s) => {
       const d = s.getData();
@@ -2564,7 +2567,6 @@ function SuggestionsController(ctx, sqs, env) {
           opportunity,
           validSuggestions,
           {
-            allSuggestions,
             updatedBy: profile?.email,
           },
         );
