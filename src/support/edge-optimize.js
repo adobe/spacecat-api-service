@@ -1523,7 +1523,13 @@ export async function planEdgeOptimizeDeploy(
     }
     const targetBehavior = getBehaviorFromConfig(config, behavior);
     const policyId = targetBehavior.CachePolicyId;
-    const minTtlNote = ' (MinTTL forced to 0 unless already <= 5s)';
+    // Only mention the MinTTL change when it would ACTUALLY change — i.e. the current MinTTL is
+    // above the keep threshold (<= 5s is left as-is). Empty string otherwise so we don't show it.
+    const ttlNote = (currentMinTtl) => (
+      Number(currentMinTtl ?? 0) > EDGE_OPTIMIZE_MIN_TTL_KEEP_THRESHOLD
+        ? ' Minimum TTL will be set to 0.'
+        : ''
+    );
     if (!policyId) {
       // Legacy: ForwardedValues. 'exists' when EO headers are already forwarded.
       const fv = targetBehavior.ForwardedValues || {};
@@ -1532,10 +1538,10 @@ export async function planEdgeOptimizeDeploy(
         || EDGE_OPTIMIZE_CACHE_HEADERS.every((h) => lower.includes(h));
       if (allForwarded) {
         byKey('cache').action = 'exists';
-        byKey('cache').detail = 'legacy behaviour already forwards the Edge Optimize headers';
+        byKey('cache').detail = 'This behavior already forwards the Edge Optimize headers.';
       } else {
         byKey('cache').action = 'update';
-        byKey('cache').detail = `legacy behaviour: add Edge Optimize headers to ForwardedValues${minTtlNote}`;
+        byKey('cache').detail = `Add the Edge Optimize headers to this behavior.${ttlNote(targetBehavior.MinTTL)}`;
       }
     } else {
       const managedList = await client.send(new ListCachePoliciesCommand({ Type: 'managed' }));
@@ -1544,12 +1550,28 @@ export async function planEdgeOptimizeDeploy(
       );
       const isManaged = managedIds.has(policyId);
       if (!isManaged) {
-        byKey('cache').action = 'update';
-        byKey('cache').detail = `update existing custom cache policy in place to add the Edge Optimize headers${minTtlNote}`;
+        // Custom policy → updated in place (idempotent). If our headers are already in the cache
+        // key AND the MinTTL won't change, it is already configured (e.g. our own clone from a
+        // prior deploy) → 'No change'; otherwise 'update'. Mirrors applyEdgeOptimizeCacheHeaders.
+        const pcResult = await client.send(new GetCachePolicyConfigCommand({ Id: policyId }));
+        const pc = pcResult.CachePolicyConfig || {};
+        const hc = pc.ParametersInCacheKeyAndForwardedToOrigin?.HeadersConfig || {};
+        const headerItems = (hc.Headers?.Items || []).map((x) => x.toLowerCase());
+        const headersPresent = hc.HeaderBehavior === 'allViewer' || hc.HeaderBehavior === 'all'
+          || EDGE_OPTIMIZE_CACHE_HEADERS.every((h) => headerItems.includes(h));
+        const ttlChange = ttlNote(pc.MinTTL);
+        if (headersPresent && !ttlChange) {
+          byKey('cache').action = 'exists';
+          byKey('cache').detail = `Current policy: ${pc.Name || 'custom'}. Already has the Edge Optimize headers.`;
+        } else {
+          byKey('cache').action = 'update';
+          byKey('cache').detail = `Current policy: ${pc.Name || 'custom'}. Add the Edge Optimize headers in place.${ttlChange}`;
+        }
       } else {
         // Managed → must clone. 'exists' when the per-dist clone already exists (idempotent).
         const srcResult = await client.send(new GetCachePolicyCommand({ Id: policyId }));
-        const sourceName = srcResult.CachePolicy?.CachePolicyConfig?.Name || 'cache';
+        const srcConfig = srcResult.CachePolicy?.CachePolicyConfig || {};
+        const sourceName = srcConfig.Name || 'cache';
         const clonedName = buildEoClonedCachePolicyName(sourceName, distributionId);
         const customList = await client.send(new ListCachePoliciesCommand({ Type: 'custom' }));
         const cloneExists = (customList.CachePolicyList?.Items || []).some(
@@ -1557,10 +1579,10 @@ export async function planEdgeOptimizeDeploy(
         );
         if (cloneExists) {
           byKey('cache').action = 'exists';
-          byKey('cache').detail = `managed policy already cloned into ${clonedName}`;
+          byKey('cache').detail = `Current policy: ${sourceName}. Already cloned to ${clonedName}.`;
         } else {
           byKey('cache').action = 'create';
-          byKey('cache').detail = `managed policy '${sourceName}' cannot be edited: clone into ${clonedName}${minTtlNote}`;
+          byKey('cache').detail = `Current policy: ${sourceName} (AWS-managed, can't be edited). A copy will be created: ${clonedName}.${ttlNote(srcConfig.MinTTL)}`;
         }
       }
     }

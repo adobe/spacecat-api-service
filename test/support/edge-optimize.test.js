@@ -1522,7 +1522,7 @@ describe('edge-optimize support', () => {
       expect(stepOf(result.steps, 'origin').action).to.equal('create');
       expect(stepOf(result.steps, 'function').action).to.equal('create');
       expect(stepOf(result.steps, 'cache').action).to.equal('update');
-      expect(stepOf(result.steps, 'cache').detail).to.include('legacy');
+      expect(stepOf(result.steps, 'cache').detail).to.include('Add the Edge Optimize headers');
       expect(stepOf(result.steps, 'lambda').action).to.equal('create');
       expect(stepOf(result.steps, 'associate').action).to.equal('create');
       // no `verify` row in the plan
@@ -1613,7 +1613,7 @@ describe('edge-optimize support', () => {
 
       const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
       expect(stepOf(result.steps, 'cache').action).to.equal('exists');
-      expect(stepOf(result.steps, 'cache').detail).to.include('already cloned');
+      expect(stepOf(result.steps, 'cache').detail).to.include('Already cloned');
     });
 
     it('marks function + lambda + origin "exists" when already present', async () => {
@@ -1640,8 +1640,15 @@ describe('edge-optimize support', () => {
           },
           // function gate: already published to LIVE.
           DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
-          // cache: custom (not managed) → update in place.
+          // cache: custom (not managed), without our headers → update in place.
           ListCachePolicies: { CachePolicyList: { Items: [] } },
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'my-custom-policy',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: { HeadersConfig: { HeaderBehavior: 'none' } },
+            },
+          },
         },
         {
           // lambda: exists + has a published version → ready.
@@ -1658,10 +1665,43 @@ describe('edge-optimize support', () => {
       expect(stepOf(result.steps, 'origin').action).to.equal('exists');
       expect(stepOf(result.steps, 'function').action).to.equal('exists');
       expect(stepOf(result.steps, 'cache').action).to.equal('update');
-      expect(stepOf(result.steps, 'cache').detail).to.include('custom');
+      expect(stepOf(result.steps, 'cache').detail).to.include('my-custom-policy');
       expect(stepOf(result.steps, 'lambda').action).to.equal('exists');
       expect(stepOf(result.steps, 'associate').action).to.equal('create');
       expect(result.canProceed).to.equal(true);
+    });
+
+    it('marks the custom cache step "exists" when our headers are already present (idempotent re-deploy)', async () => {
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: { Items: [] },
+              DefaultCacheBehavior: { CachePolicyId: 'eo-clone' },
+            },
+          },
+          DescribeFunction: throwNamed('NoSuchFunctionExists', 'no fn'),
+          ListCachePolicies: { CachePolicyList: { Items: [] } }, // eo-clone not managed → custom
+          GetCachePolicyConfig: {
+            CachePolicyConfig: {
+              Name: 'CachingOptimized-adobe-E2EXAMPLE123',
+              MinTTL: 0,
+              ParametersInCacheKeyAndForwardedToOrigin: {
+                HeadersConfig: {
+                  HeaderBehavior: 'whitelist',
+                  Headers: { Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+                },
+              },
+            },
+          },
+        },
+        { GetFunctionConfiguration: throwNamed('ResourceNotFoundException', 'nope') },
+        { GetRole: throwNamed('NoSuchEntityException', 'no role') },
+      );
+
+      const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
+      expect(stepOf(result.steps, 'cache').action).to.equal('exists');
+      expect(stepOf(result.steps, 'cache').detail).to.include('Already has the Edge Optimize headers');
     });
 
     it('throws when distributionId is missing', async () => {
