@@ -72,11 +72,9 @@ export function getHostnameWithoutWww(url, log) {
 
 /**
  * Returns true when a site baseURL contains a non-root pathname (e.g. https://example.com/docs).
- * The AEMCS Fastly routing API operates at domain level — enabling it for a subpath site would
- * intercept all traffic on the host, not just the intended subpath.
  *
  * @param {string} baseURL - The site base URL.
- * @returns {boolean} True if the URL has a subpath, false otherwise (including unparseable URLs).
+ * @returns {boolean} True if the URL has pathname, false otherwise (including unparseable URLs).
  */
 export function baseUrlHasPathname(baseURL) {
   if (!isValidUrl(baseURL)) {
