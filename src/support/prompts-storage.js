@@ -643,18 +643,21 @@ export async function upsertPrompts({
     .map((p) => p.id || p.prompt_id)
     .filter(hasText);
 
-  let existingQuery = postgrestClient
-    .from('prompts')
-    .select('id,prompt_id,text,regions,status,intent')
-    .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid);
-
-  if (incomingIds.length > 0) {
-    existingQuery = existingQuery.in('prompt_id', incomingIds);
-  }
-
   const [{ data: existing }, lookups] = await Promise.all([
-    existingQuery,
+    withMissingIntentFallback(postgrestClient, (includeIntent) => {
+      const cols = includeIntent
+        ? 'id,prompt_id,text,regions,status,intent'
+        : 'id,prompt_id,text,regions,status';
+      let q = postgrestClient
+        .from('prompts')
+        .select(cols)
+        .eq('organization_id', organizationId)
+        .eq('brand_id', brandUuid);
+      if (incomingIds.length > 0) {
+        q = q.in('prompt_id', incomingIds);
+      }
+      return q;
+    }),
     buildLookupMaps(organizationId, postgrestClient),
   ]);
 
