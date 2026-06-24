@@ -1,3 +1,10 @@
+## [1.593.2](https://github.com/adobe/spacecat-api-service/compare/v1.593.1...v1.593.2) (2026-06-24)
+
+
+### Bug Fixes
+
+* timebox overrideBaseURL detection so onboarding beats the CDN timeout | LLMO-5606 ([#2675](https://github.com/adobe/spacecat-api-service/issues/2675)) ([580b98a](https://github.com/adobe/spacecat-api-service/commit/580b98a66c6f3169b32693e40f02778a13c58e8e))
+
 ## [1.593.1](https://github.com/adobe/spacecat-api-service/compare/v1.593.0...v1.593.1) (2026-06-24)
 
 
