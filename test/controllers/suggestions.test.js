@@ -7349,6 +7349,7 @@ describe('Suggestions Controller', () => {
     it('excludes domain-wide prompt source candidates that are already deployed, missing aiSummary, or not valuable', async () => {
       const domainWideSugg = {
         getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
         getStatus: () => 'APPROVED',
         getData: () => ({ isDomainWide: true, allowedRegexPatterns: ['.*\\.html'] }),
         setData: sandbox.stub(),
@@ -7376,6 +7377,7 @@ describe('Suggestions Controller', () => {
       // already deployed — excluded by !data.edgeDeployed
       const deployedSugg = {
         getId: () => SUGGESTION_IDS[2],
+        getOpportunityId: () => OPPORTUNITY_ID,
         getStatus: () => 'NEW',
         getData: () => ({
           url: 'https://example.com/deployed',
@@ -7388,6 +7390,7 @@ describe('Suggestions Controller', () => {
       // missing aiSummary — excluded by data.aiSummary check
       const noSummarySugg = {
         getId: () => '11111111-1111-1111-1111-111111111111',
+        getOpportunityId: () => OPPORTUNITY_ID,
         getStatus: () => 'NEW',
         getData: () => ({
           url: 'https://example.com/no-summary',
@@ -7398,6 +7401,7 @@ describe('Suggestions Controller', () => {
       // valuable !== true — excluded by data.valuable === true check
       const notValuableSugg = {
         getId: () => '22222222-2222-2222-2222-222222222222',
+        getOpportunityId: () => OPPORTUNITY_ID,
         getStatus: () => 'NEW',
         getData: () => ({
           url: 'https://example.com/not-valuable',
@@ -11104,9 +11108,9 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Verify allSuggestions is passed so the client can clean up covered suggestions
+      // Covered cleanup is async now; the API passes only selected suggestions.
       const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
-      expect(options.allSuggestions).to.include(coveredPerUrlSuggestion);
+      expect(options).to.not.have.property('allSuggestions');
     });
 
     it('handles error during path rollback and marks suggestion as failed', async () => {
@@ -11292,11 +11296,11 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.metadata.success).to.equal(1);
 
-      // Verify rollbackSuggestions was called with allSuggestions (for cascade cleanup)
+      // Covered cleanup is async now; the API passes only selected suggestions.
       expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
       const [, , suggestions, options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
       expect(suggestions).to.include(domainWideSuggestion);
-      expect(options.allSuggestions).to.include(deployedPathSuggestion);
+      expect(options).to.not.have.property('allSuggestions');
     });
 
     it('clears coveredByDomainWide on per-URL suggestions covered by the path during cascade', async () => {
@@ -11308,9 +11312,9 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Verify allSuggestions contains the covered suggestion so the client can clean it up
+      // Covered cleanup is async now; the API passes only selected suggestions.
       const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
-      expect(options.allSuggestions).to.include(pathCoveredSuggestion);
+      expect(options).to.not.have.property('allSuggestions');
     });
 
     it('passes undefined updatedBy when profile email is missing (shared client applies domain-wide-rollback-cascade fallback)', async () => {
@@ -11368,9 +11372,9 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       // Domain-wide rollback still succeeds (rollbackSuggestions returns it)
       expect(body.metadata.success).to.equal(1);
-      // Verify allSuggestions is passed so the client can determine no cascade is needed
+      // Covered cleanup is async now; the API passes only selected suggestions.
       const [, , , options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
-      expect(options.allSuggestions).to.include(undeployedPathSuggestion);
+      expect(options).to.not.have.property('allSuggestions');
     });
   });
 
