@@ -1514,8 +1514,14 @@ export async function planEdgeOptimizeDeploy(
           (i) => i.CachePolicy.CachePolicyConfig.Name === clonedName,
         );
         if (cloneExists) {
-          byKey('cache').action = 'exists';
-          byKey('cache').detail = `Current policy: ${sourceName}. Already cloned to ${clonedName}.`;
+          // The copy exists from a prior run, but the behavior is still on the AWS-managed policy
+          // (if it were already on the copy we'd be in the custom branch above) — created but not
+          // associated. The deploy will switch the behavior to the copy, so this is an 'update',
+          // not a no-op. Surface both names + that it isn't associated yet.
+          byKey('cache').action = 'update';
+          byKey('cache').detail = `Current policy: ${sourceName} (AWS-managed). A copy `
+            + `"${clonedName}" already exists but is not associated with this behavior `
+            + `yet — the behavior will be switched to it.${ttlNote(srcConfig.MinTTL)}`;
         } else {
           byKey('cache').action = 'create';
           byKey('cache').detail = `Current policy: ${sourceName} (AWS-managed, can't be edited). A copy will be created: ${clonedName}.${ttlNote(srcConfig.MinTTL)}`;

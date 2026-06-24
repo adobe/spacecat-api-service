@@ -1652,7 +1652,7 @@ describe('edge-optimize support', () => {
       expect(result.canProceed).to.equal(true);
     });
 
-    it('marks the managed cache step "exists" when the per-dist clone already exists', async () => {
+    it('marks the managed cache step "update" when the clone exists but the behavior is not associated with it', async () => {
       wire(
         {
           GetDistributionConfig: {
@@ -1674,8 +1674,12 @@ describe('edge-optimize support', () => {
       );
 
       const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
-      expect(stepOf(result.steps, 'cache').action).to.equal('exists');
-      expect(stepOf(result.steps, 'cache').detail).to.include('Already cloned');
+      // The clone exists but the behavior is still on the managed policy → the deploy will switch
+      // the behavior to the existing copy, so this is an 'update' with a clear created-but-not-
+      // associated message that names both the current policy and the copy.
+      expect(stepOf(result.steps, 'cache').action).to.equal('update');
+      expect(stepOf(result.steps, 'cache').detail).to.include('not associated');
+      expect(stepOf(result.steps, 'cache').detail).to.include('CachingOptimized-adobe-E2EXAMPLE123');
     });
 
     it('marks function + lambda + origin "exists" when already present', async () => {
