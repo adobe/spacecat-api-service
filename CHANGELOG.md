@@ -1,3 +1,31 @@
+## [1.593.1](https://github.com/adobe/spacecat-api-service/compare/v1.593.0...v1.593.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* match prompts region filter case-insensitively | LLMO-5755 ([#2667](https://github.com/adobe/spacecat-api-service/issues/2667)) ([bd652c2](https://github.com/adobe/spacecat-api-service/commit/bd652c28fa2572321f7b720efaff3b6a1a69844b))
+
+# [1.593.0](https://github.com/adobe/spacecat-api-service/compare/v1.592.1...v1.593.0) (2026-06-24)
+
+
+### Features
+
+* **i18n:** add locale query param to opportunity and suggestion GET endpoints | LLMO-5430 ([#2651](https://github.com/adobe/spacecat-api-service/issues/2651)) ([5d427b5](https://github.com/adobe/spacecat-api-service/commit/5d427b5b5694475603fd3db9647e24b7ff7ffb6b))
+
+## [1.592.1](https://github.com/adobe/spacecat-api-service/compare/v1.592.0...v1.592.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **auth:** restore read-only admin access on by-key + agentic-traffic reads ([#2674](https://github.com/adobe/spacecat-api-service/issues/2674)) ([ff1d4c3](https://github.com/adobe/spacecat-api-service/commit/ff1d4c3e22c51864445fc6b80671b2f7dcc82fe5)), closes [#2640](https://github.com/adobe/spacecat-api-service/issues/2640)
+
+# [1.592.0](https://github.com/adobe/spacecat-api-service/compare/v1.591.0...v1.592.0) (2026-06-23)
+
+
+### Features
+
+* **preflight:** swap callMysticatAnalyze headers — Authorization for IMS, x-page-auth for page-auth (SITES-46967) ([#2673](https://github.com/adobe/spacecat-api-service/issues/2673)) ([c5a803d](https://github.com/adobe/spacecat-api-service/commit/c5a803da72897f37347742b36fa5df595d6e53a1))
+
 # [1.591.0](https://github.com/adobe/spacecat-api-service/compare/v1.590.0...v1.591.0) (2026-06-23)
 
 
