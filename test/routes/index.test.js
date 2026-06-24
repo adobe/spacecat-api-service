@@ -587,6 +587,15 @@ describe('getRouteHandlers', () => {
     getPreview: sinon.stub(),
   };
 
+  const mockTaskManagementController = {
+    listConnections: sinon.stub(),
+    getConnection: sinon.stub(),
+    listTickets: sinon.stub(),
+    getTicketBySuggestion: sinon.stub(),
+    listTicketsByOpportunity: sinon.stub(),
+    createTicket: sinon.stub(),
+  };
+
   const mockRedirectsController = {
     getRedirects: sinon.stub(),
   };
@@ -654,6 +663,7 @@ describe('getRouteHandlers', () => {
       mockAgenticPageTypesController,
       mockSerenityController,
       mockProxyController,
+      mockTaskManagementController,
       mockRedirectsController,
     );
 
@@ -1254,6 +1264,13 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'GET /organizations/:organizationId/task-management/connections',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId',
+      'DELETE /organizations/:organizationId/task-management/connections/:connectionId',
+      'GET /organizations/:organizationId/task-management/tickets',
+      'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
+      'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
+      'POST /organizations/:organizationId/task-management/:provider/tickets',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 

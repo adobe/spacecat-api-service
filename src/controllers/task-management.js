@@ -16,8 +16,6 @@ import {
 } from '@aws-sdk/client-secrets-manager';
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
-// eslint-disable-next-line import/no-unresolved
-import { TicketClientFactory } from '@adobe/spacecat-shared-ticket-client';
 
 import {
   STATUS_BAD_REQUEST,
@@ -27,6 +25,19 @@ import {
   STATUS_NO_CONTENT,
   STATUS_OK,
 } from '../utils/constants.js';
+
+// @adobe/spacecat-shared-ticket-client is not yet published (unmerged PR #1701).
+// Top-level await + catch lets the module load in test/utils.js (bare import of
+// src/index.js) before the package is installed. esmock intercepts the import
+// during individual test setup and injects the mock factory via its loader hook.
+let TicketClientFactory;
+try {
+  // eslint-disable-next-line import/no-unresolved
+  ({ TicketClientFactory } = await import('@adobe/spacecat-shared-ticket-client'));
+} catch {
+  // Package not yet installed — createTicket() gates on this and returns 503
+  TicketClientFactory = null;
+}
 
 const STATUS_CONFLICT = 409;
 
@@ -56,6 +67,9 @@ function serializeConnection(conn) {
     organizationId: conn.getOrganizationId(),
     provider: conn.getProvider(),
     status: conn.getStatus(),
+    displayName: conn.getDisplayName?.(),
+    instanceUrl: conn.getInstanceUrl?.(),
+    connectedBy: conn.getConnectedBy?.(),
     metadata: conn.getMetadata(),
     createdAt: conn.getCreatedAt?.(),
     updatedAt: conn.getUpdatedAt?.(),
@@ -418,44 +432,34 @@ function TaskManagementController(context) {
       return createResponse({ message: 'opportunityId is required' }, STATUS_BAD_REQUEST);
     }
 
-    // Find all bridge rows for this opportunity, then deduplicate by ticketId.
-    let bridges;
+    // v1: one ticket per opportunity (optional FK via Ticket.opportunityId).
+    // TicketSuggestion has no index on opportunityId — query via the Ticket FK directly.
+    // v2 will relax the 1:1 constraint when multi-suggestion grouped tickets land.
+    let ticket;
     try {
-      bridges = await TicketSuggestion.allByOpportunityId(opportunityId);
+      ticket = await Ticket.findByOpportunityId(opportunityId);
     } catch (err) {
-      log.error({ organizationId, opportunityId, err }, 'Failed to list TicketSuggestions for opportunity');
+      log.error({ organizationId, opportunityId, err }, 'Failed to find ticket for opportunity');
       return createResponse({ message: 'Failed to list tickets' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    // Group bridge rows by ticketId — a ticket may have multiple suggestions in v2.
-    const ticketIdToSuggestions = new Map();
-    for (const bridge of bridges) {
-      const tid = bridge.getTicketId();
-      if (!ticketIdToSuggestions.has(tid)) {
-        ticketIdToSuggestions.set(tid, []);
-      }
-      ticketIdToSuggestions.get(tid).push({
-        suggestionId: bridge.getSuggestionId(),
-        opportunityId: bridge.getOpportunityId(),
-      });
+    if (!ticket || ticket.getOrganizationId() !== organizationId) {
+      return createResponse([], STATUS_OK);
     }
 
-    // Load unique tickets in parallel, filtering out any that belong to another org.
-    const ticketEntries = await Promise.all(
-      [...ticketIdToSuggestions.keys()].map(async (ticketId) => {
-        try {
-          const ticket = await Ticket.findById(ticketId);
-          if (!ticket || ticket.getOrganizationId() !== organizationId) {
-            return null;
-          }
-          return serializeTicket(ticket, ticketIdToSuggestions.get(ticketId));
-        } catch {
-          return null;
-        }
-      }),
-    );
+    // Load bridge rows for the ticket (may be 0 when no suggestions linked in v1).
+    let suggestions = [];
+    try {
+      const bridges = await TicketSuggestion.allByTicketId(ticket.getId());
+      suggestions = bridges.map((b) => ({
+        suggestionId: b.getSuggestionId(),
+        opportunityId: b.getOpportunityId(),
+      }));
+    } catch {
+      // Bridge load failure does not fail the list — return empty suggestions array.
+    }
 
-    return createResponse(ticketEntries.filter(Boolean), STATUS_OK);
+    return createResponse([serializeTicket(ticket, suggestions)], STATUS_OK);
   }
 
   // ─── Ticket creation ──────────────────────────────────────────────────────
@@ -561,6 +565,9 @@ function TaskManagementController(context) {
         id: connection.getId(),
         organizationId: connection.getOrganizationId(),
         provider: connection.getProvider(),
+        // instanceUrl is required by TicketClientFactory — it merges it into config as siteUrl
+        // for the JiraCloudClient SSRF-safe gateway URL construction.
+        instanceUrl: connection.getInstanceUrl?.(),
         metadata: connection.getMetadata(),
       };
       const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
@@ -572,9 +579,16 @@ function TaskManagementController(context) {
         issueType: data.issueType ?? 'Task',
       });
     } catch (err) {
-      if (err.status === 401) {
+      // Detect both direct Jira API 401 (err.status) and OAuthCredentialManager's
+      // refresh-token-revoked error (plain Error without .status, but with a
+      // specific message). Both require marking the connection for re-auth and
+      // surfacing a 409 so the UI can prompt the user to reconnect.
+      const isReauthNeeded = err.status === 401
+        || err.message?.includes('requires re-authorization');
+
+      if (isReauthNeeded) {
         await connection.markRequiresReauth().catch((updateErr) => {
-          log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after 401');
+          log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after auth failure');
         });
         return createResponse(
           { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
