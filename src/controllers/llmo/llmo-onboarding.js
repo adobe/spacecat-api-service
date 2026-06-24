@@ -63,6 +63,36 @@ export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 export const ASO_CRITICAL_SITES = [];
 const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
 
+// Cap for the best-effort Ahrefs/SEO overrideBaseURL detection during onboarding.
+// It can fire many slow SEO API calls (~10s observed) and, on the synchronous
+// onboarding path, push the response past the CDN first-byte timeout (~15s) — the
+// client gets a 503 even though onboarding succeeded. (LLMO-5606 follow-up.)
+const OVERRIDE_DETECT_TIMEOUT_MS = 5000;
+
+/**
+ * Awaits `promise`, but resolves to `fallback` if it rejects or doesn't settle
+ * within `timeoutMs`. The underlying promise is left running and any late
+ * rejection is swallowed, so a slow/flaky best-effort step can neither block past
+ * the cap nor surface as an unhandled rejection.
+ * @param {Promise<*>} promise - The in-flight work.
+ * @param {number} timeoutMs - Max time to wait before giving up.
+ * @param {*} fallback - Value to resolve to on timeout or rejection.
+ * @returns {Promise<*>} The promise's value, or `fallback`.
+ */
+export async function settleWithin(promise, timeoutMs, fallback) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise).catch(() => fallback),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function resolveUpdatedBy(context) {
   return context.attributes?.authInfo?.profile?.email
     || context.attributes?.authInfo?.getProfile?.()?.email
@@ -1526,7 +1556,15 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Only determine override if one doesn't already exist
     if (!currentFetchConfig.overrideBaseURL) {
-      const overrideBaseURL = await determineOverrideBaseURL(baseURL, context);
+      // Timebox the best-effort SEO override detection: it only tunes which host
+      // audits scrape (www vs apex), but can run ~10s (dozens of SEO calls) and push
+      // the synchronous response past the CDN first-byte timeout (~15s) → client 503
+      // even though onboarding succeeded. On timeout/error we skip it. (LLMO-5606.)
+      const overrideBaseURL = await settleWithin(
+        determineOverrideBaseURL(baseURL, context),
+        OVERRIDE_DETECT_TIMEOUT_MS,
+        null,
+      );
       if (overrideBaseURL) {
         siteConfig.updateFetchConfig({
           ...currentFetchConfig,
