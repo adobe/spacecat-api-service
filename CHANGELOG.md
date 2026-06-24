@@ -1,3 +1,10 @@
+# [1.594.0](https://github.com/adobe/spacecat-api-service/compare/v1.593.3...v1.594.0) (2026-06-24)
+
+
+### Features
+
+* **brands:** integrate Brand Governance Agent as primary source in /brand-guidelines (LLMO-4918) ([#2419](https://github.com/adobe/spacecat-api-service/issues/2419)) ([42d2af0](https://github.com/adobe/spacecat-api-service/commit/42d2af0702eb4183af1e0fb20fd21ef0b510e3b1))
+
 ## [1.593.3](https://github.com/adobe/spacecat-api-service/compare/v1.593.2...v1.593.3) (2026-06-24)
 
 
