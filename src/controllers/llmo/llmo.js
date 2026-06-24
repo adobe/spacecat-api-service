@@ -33,6 +33,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
+import yaml from 'js-yaml';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
   assumeConnectorRole,
@@ -110,6 +111,20 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+
+// CloudFormation templates use intrinsic-function tags (!Ref/!Sub/!GetAtt/...) that plain YAML
+// rejects. This schema tolerates them (constructing each to its raw value) so the permissions
+// endpoint can read the human-readable Metadata.AdobeLLMOptimizerPermissions block out of the
+// connector role template — the SINGLE SOURCE shared with the actual IAM policy.
+const CFN_INTRINSIC_TAGS = [
+  'Ref', 'Sub', 'GetAtt', 'Join', 'Select', 'Split', 'GetAZs', 'ImportValue',
+  'FindInMap', 'Base64', 'Cidr', 'And', 'Or', 'Not', 'Equals', 'If', 'Condition', 'Transform',
+];
+const CFN_YAML_SCHEMA = yaml.DEFAULT_SCHEMA.extend(
+  CFN_INTRINSIC_TAGS.flatMap((tag) => ['scalar', 'sequence', 'mapping'].map(
+    (kind) => new yaml.Type(`!${tag}`, { kind, construct: (data) => data }),
+  )),
+);
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
@@ -3135,6 +3150,10 @@ function LlmoController(ctx) {
       if (!hasText(bucket) || !s3?.s3Client || !s3?.GetObjectCommand) {
         return badRequest('Edge optimize template hosting is not configured for this environment');
       }
+      // SINGLE SOURCE OF TRUTH: read the high-level permission summary from the connector role
+      // template's Metadata block — the same file (and the same S3 object) that defines the actual
+      // IAM policy — so the displayed permissions can never drift from what the role grants.
+      const key = env.EDGE_OPTIMIZE_TEMPLATE_KEY || 'customer-bootstrap-role.yaml';
 
       // TEMPORARY (testing only): default the Adobe principal to the dev signer's Lambda execution
       // role. TODO: REMOVE before prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN via env.
@@ -3145,16 +3164,28 @@ function LlmoController(ctx) {
       try {
         const response = await s3.s3Client.send(new s3.GetObjectCommand({
           Bucket: bucket,
-          Key: 'permissions-manifest.json',
+          Key: key,
         }));
         const body = await response.Body.transformToString();
-        manifest = JSON.parse(body);
+        const doc = yaml.load(body, { schema: CFN_YAML_SCHEMA });
+        const perms = doc?.Metadata?.AdobeLLMOptimizerPermissions;
+        if (!Array.isArray(perms?.groups) || perms.groups.length === 0) {
+          throw new Error('connector template has no AdobeLLMOptimizerPermissions metadata');
+        }
+        // Map the template's {name, scope, summary} groups to the UI's {name, items[]} shape.
+        manifest = {
+          appName: perms.appName || 'Adobe LLM Optimizer',
+          groups: perms.groups.map((g) => ({
+            name: g.name,
+            items: [g.scope ? `Scoped to ${g.scope}` : null, g.summary].filter(Boolean),
+          })),
+        };
       } catch (s3Error) {
-        log.error(`[edge-optimize-permissions] Failed to read permissions manifest for site ${siteId}: ${s3Error.message}`);
-        return badRequest('Edge optimize permissions manifest is not available');
+        log.error(`[edge-optimize-permissions] Failed to read permissions from connector template for site ${siteId}: ${s3Error.message}`);
+        return badRequest('Edge optimize permissions are not available');
       }
 
-      log.info(`[edge-optimize-permissions] Returned permissions manifest for site ${siteId}`);
+      log.info(`[edge-optimize-permissions] Returned permissions for site ${siteId}`);
       return ok({ adobeAccount, manifest });
     } catch (error) {
       log.error(`Failed to read edge optimize permissions for site ${siteId}:`, error);

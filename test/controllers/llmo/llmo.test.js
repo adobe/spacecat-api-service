@@ -9256,16 +9256,39 @@ describe('LlmoController', () => {
     let permissionsContext;
     let s3SendStub;
 
-    const sampleManifest = {
+    // The connector role template (with the Metadata block) the endpoint reads from S3 — including
+    // a CloudFormation intrinsic tag (!Ref) to exercise the CFN-tolerant YAML schema.
+    const sampleTemplate = [
+      "AWSTemplateFormatVersion: '2010-09-09'",
+      'Metadata:',
+      '  AdobeLLMOptimizerPermissions:',
+      '    appName: Adobe LLM Optimizer Deployer',
+      '    groups:',
+      '      - name: CloudFront',
+      '        scope: All distributions',
+      '        summary: Add the Edge Optimize origin and routing function.',
+      '      - name: IAM',
+      "        scope: 'role/edgeoptimize-* only'",
+      '        summary: Create the execution role.',
+      'Resources:',
+      '  ConnectorRole:',
+      '    Type: AWS::IAM::Role',
+      '    Properties:',
+      '      RoleName: !Ref RoleName',
+    ].join('\n');
+
+    // The endpoint maps the template's {name, scope, summary} groups to the UI's {name, items[]}.
+    const expectedManifest = {
       appName: 'Adobe LLM Optimizer Deployer',
       groups: [
-        { name: 'CloudFront', items: ['Read & update distributions'] },
+        { name: 'CloudFront', items: ['Scoped to All distributions', 'Add the Edge Optimize origin and routing function.'] },
+        { name: 'IAM', items: ['Scoped to role/edgeoptimize-* only', 'Create the execution role.'] },
       ],
     };
 
     beforeEach(() => {
       s3SendStub = sinon.stub().resolves({
-        Body: { transformToString: async () => JSON.stringify(sampleManifest) },
+        Body: { transformToString: async () => sampleTemplate },
       });
       permissionsContext = {
         ...mockContext,
@@ -9285,11 +9308,11 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.manifest).to.deep.equal(sampleManifest);
+      expect(body.manifest).to.deep.equal(expectedManifest);
       expect(body.adobeAccount).to.equal('arn:aws:iam::682033462621:role/spacecat-role-lambda-generic');
       expect(s3SendStub.calledOnce).to.equal(true);
       const [cmd] = s3SendStub.firstCall.args;
-      expect(cmd.Key).to.equal('permissions-manifest.json');
+      expect(cmd.Key).to.equal('customer-bootstrap-role.yaml');
       expect(cmd.Bucket).to.equal('llmo-edgeoptimize-cf-template');
     });
 
@@ -9323,8 +9346,8 @@ describe('LlmoController', () => {
       expect(body.message).to.include('not available');
     });
 
-    it('returns 400 when the manifest is not valid JSON', async () => {
-      s3SendStub.resolves({ Body: { transformToString: async () => 'not-json{' } });
+    it('returns 400 when the template has no permissions metadata', async () => {
+      s3SendStub.resolves({ Body: { transformToString: async () => 'Resources:\n  Foo:\n    Type: AWS::IAM::Role\n' } });
       const result = await controller.getEdgeOptimizePermissions(permissionsContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
