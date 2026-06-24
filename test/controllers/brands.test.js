@@ -457,6 +457,7 @@ describe('Brands Controller', () => {
             update: sandbox.stub().returnsThis(),
             or: sandbox.stub().returnsThis(),
             contains: sandbox.stub().returnsThis(),
+            overlaps: sandbox.stub().returnsThis(),
             range: sandbox.stub().resolves({
               data: table === 'prompts' ? [promptRow] : [],
               error: null,
@@ -613,6 +614,7 @@ describe('Brands Controller', () => {
           update: sandbox.stub().returnsThis(),
           or: sandbox.stub().returnsThis(),
           contains: sandbox.stub().returnsThis(),
+          overlaps: sandbox.stub().returnsThis(),
           range: sandbox.stub().rejects(new Error('DB connection lost')),
           maybeSingle: sandbox.stub().callsFake(() => {
             if (table === 'brands') {
@@ -4275,6 +4277,7 @@ describe('Brands Controller', () => {
             update: sandbox.stub().returnsThis(),
             or: sandbox.stub().returnsThis(),
             contains: sandbox.stub().returnsThis(),
+            overlaps: sandbox.stub().returnsThis(),
             range: sandbox.stub().resolves({
               data: table === 'prompts' ? [promptRow] : [],
               error: null,
