@@ -14,7 +14,6 @@
 import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
-import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
 
@@ -630,8 +629,6 @@ export async function upsertPrompts({
   prompts,
   postgrestClient,
   updatedBy = 'system',
-  classifyIntent,
-  classifyIntentBatchTimeoutMs,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -772,35 +769,6 @@ export async function upsertPrompts({
       const keep = (r) => !droppedIds.has(r.prompt_id);
       toInsert.splice(0, toInsert.length, ...toInsert.filter(keep));
       processed.splice(0, processed.length, ...processed.filter(keep));
-    }
-  }
-
-  // Best-effort intent classification for prompts that arrived WITHOUT an
-  // intent (typically human-added). Pipeline prompts already carry a
-  // normalized intent and are skipped. Failures leave intent null; they MUST
-  // NOT block the write — the backfill/reconciliation path covers them later.
-  if (typeof classifyIntent === 'function') {
-    const rowsNeedingIntent = [...toInsert, ...toUpdate]
-      .filter((r) => r.intent === null && hasText(r.text));
-    if (rowsNeedingIntent.length > 0) {
-      const intentByText = await classifyIntents(
-        classifyIntent,
-        rowsNeedingIntent.map((r) => r.text),
-        { timeoutMs: classifyIntentBatchTimeoutMs },
-      );
-      const apply = (r) => {
-        const classified = intentByText.get(r.text);
-        // Only overwrite when we actually got a bucket back — a null/absent
-        // result (failed or timed-out classification) leaves intent as null.
-        if (r.intent === null && hasText(r.text) && classified != null) {
-          // eslint-disable-next-line no-param-reassign
-          r.intent = classified;
-        }
-      };
-      toInsert.forEach(apply);
-      toUpdate.forEach(apply);
-      // Keep the returned payload consistent with what was persisted.
-      processed.forEach(apply);
     }
   }
 
