@@ -58,6 +58,7 @@ const STATUS_CONFLICT = 409;
 const TICKET_MODE_INDIVIDUAL = 'individual';
 const TICKET_MODE_GROUPED = 'grouped';
 const SUGGESTION_IDS_MAX = 10;
+const ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024; // 3 MB per spec §30
 
 // Secret path mirrors TicketClientFactory.buildSecretPath — both IDs UUID-validated
 // before interpolation to prevent path traversal.
@@ -570,6 +571,39 @@ function TaskManagementController(context) {
 
     const primarySuggestionId = suggestionIds[0];
 
+    // --- Optional attachment validation (spec §30) ----------------------------
+    // attachment: { content: base64 string, mimeType: string, filename: string }
+    // Decoded content is held in memory; all MIME/size/magic-byte checks happen
+    // inside ticketClient.uploadAttachment — we only pre-validate shape + size here
+    // so the caller gets a clear 400 before any downstream work is done.
+
+    let attachmentBuffer;
+    if (data.attachment) {
+      const att = data.attachment;
+      if (!hasText(att.content) || !hasText(att.mimeType) || !hasText(att.filename)) {
+        return createResponse(
+          { message: 'attachment must have content (base64), mimeType, and filename' },
+          STATUS_BAD_REQUEST,
+        );
+      }
+      let decoded;
+      try {
+        decoded = Buffer.from(att.content, 'base64');
+      } catch {
+        return createResponse({ message: 'attachment.content must be valid base64' }, STATUS_BAD_REQUEST);
+      }
+      if (decoded.length === 0) {
+        return createResponse({ message: 'attachment.content must not be empty' }, STATUS_BAD_REQUEST);
+      }
+      if (decoded.length > ATTACHMENT_MAX_BYTES) {
+        return createResponse(
+          { message: `attachment exceeds maximum size of ${ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB` },
+          STATUS_BAD_REQUEST,
+        );
+      }
+      attachmentBuffer = decoded;
+    }
+
     // --- Idempotency-Key enforcement (spec §Idempotent Ticket Creation) --------
 
     const idempotencyKey = getHeader(requestContext, 'idempotency-key');
@@ -701,18 +735,19 @@ function TaskManagementController(context) {
 
     // --- Create the ticket via the provider client ----------------------------
 
+    const connectionObj = {
+      id: connection.getId(),
+      organizationId: connection.getOrganizationId(),
+      provider: connection.getProvider(),
+      // instanceUrl is required by TicketClientFactory — it merges it into config as siteUrl
+      // for the JiraCloudClient SSRF-safe gateway URL construction.
+      instanceUrl: connection.getInstanceUrl(),
+      metadata: connection.getMetadata(),
+    };
+    const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
+
     let ticketResult;
     try {
-      const connectionObj = {
-        id: connection.getId(),
-        organizationId: connection.getOrganizationId(),
-        provider: connection.getProvider(),
-        // instanceUrl is required by TicketClientFactory — it merges it into config as siteUrl
-        // for the JiraCloudClient SSRF-safe gateway URL construction.
-        instanceUrl: connection.getInstanceUrl(),
-        metadata: connection.getMetadata(),
-      };
-      const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
       ticketResult = await ticketClient.createTicket({
         projectKey: data.projectKey,
         summary: data.summary,
@@ -816,9 +851,31 @@ function TaskManagementController(context) {
       }
     }
 
+    // --- Upload attachment (spec §30) — partial success: ticket already exists -
+
+    let attachmentWarning;
+    if (attachmentBuffer) {
+      try {
+        await ticketClient.uploadAttachment(ticketResult.ticketKey, {
+          content: attachmentBuffer,
+          mimeType: data.attachment.mimeType,
+          filename: data.attachment.filename,
+        });
+      } catch (err) {
+        // Spec §Attachment failure handling: "partial success acceptable; retry via
+        // attachment endpoint". Ticket is already created — do not roll back.
+        log.warn(
+          { ticketKey: ticketResult.ticketKey, err },
+          'Ticket created but attachment upload failed',
+        );
+        attachmentWarning = 'Ticket created but attachment upload failed. Retry via the attachment endpoint.';
+      }
+    }
+
     const responseBody = {
       ...serializeTicket(ticket),
       suggestionId: primarySuggestionId ?? undefined,
+      ...(attachmentWarning ? { attachmentWarning } : {}),
     };
     await markIdempotencyDone(STATUS_CREATED, responseBody);
     return createResponse(responseBody, STATUS_CREATED);

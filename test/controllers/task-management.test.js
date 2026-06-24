@@ -181,6 +181,7 @@ describe('TaskManagementController', () => {
               ticketUrl: 'https://mysite.atlassian.net/browse/PROJ-42',
               ticketStatus: 'To Do',
             }),
+            uploadAttachment: sinon.stub().resolves(),
           }),
         },
       },
@@ -1203,6 +1204,158 @@ describe('TaskManagementController', () => {
         data: { summary: 'Fix it', projectKey: 'PROJ', suggestionIds: [SUGGESTION_ID] },
       }));
       expect(res.status).to.equal(500);
+    });
+
+    // ── Attachment validation (spec §30) ───────────────────────────────────────
+
+    it('returns 400 when attachment is missing content', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { mimeType: 'image/png', filename: 'a.png' } },
+      }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('attachment must have');
+    });
+
+    it('returns 400 when attachment is missing mimeType', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: Buffer.from('x').toString('base64'), filename: 'a.png' } },
+      }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when attachment is missing filename', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: Buffer.from('x').toString('base64'), mimeType: 'image/png' } },
+      }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when attachment content is empty after decoding', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      // base64 of empty string decodes to zero bytes
+      const res = await createTicket(makeReqCtx({
+        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: '', mimeType: 'image/png', filename: 'a.png' } },
+      }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when attachment exceeds 3 MB', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const oversized = Buffer.alloc(3 * 1024 * 1024 + 1, 0x00);
+      const res = await createTicket(makeReqCtx({
+        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: oversized.toString('base64'), mimeType: 'image/png', filename: 'big.png' } },
+      }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('exceeds maximum size');
+    });
+
+    it('creates ticket with attachment and returns 201', async () => {
+      const conn = makeConnection();
+      const ticket = makeTicket();
+      const uploadStub = sinon.stub().resolves();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Ticket: { create: sinon.stub().resolves(ticket) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().resolves({
+                ticketId: 'PROJ-42', ticketKey: 'PROJ-42', ticketUrl: 'https://x.net/PROJ-42', ticketStatus: 'To Do',
+              }),
+              uploadAttachment: uploadStub,
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic bytes
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix it',
+          projectKey: 'PROJ',
+          suggestionIds: [SUGGESTION_ID],
+          attachment: { content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' },
+        },
+      }));
+
+      expect(res.status).to.equal(201);
+      expect(uploadStub).to.have.been.calledOnce;
+      const body = await res.json();
+      expect(body).to.not.have.property('attachmentWarning');
+    });
+
+    it('returns 201 with attachmentWarning when upload fails (partial success)', async () => {
+      const conn = makeConnection();
+      const ticket = makeTicket();
+      const uploadStub = sinon.stub().rejects(new Error('Jira returned 403'));
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Ticket: { create: sinon.stub().resolves(ticket) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().resolves({
+                ticketId: 'PROJ-42', ticketKey: 'PROJ-42', ticketUrl: 'https://x.net/PROJ-42', ticketStatus: 'To Do',
+              }),
+              uploadAttachment: uploadStub,
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix it',
+          projectKey: 'PROJ',
+          suggestionIds: [SUGGESTION_ID],
+          attachment: { content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' },
+        },
+      }));
+
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body).to.have.property('attachmentWarning');
+      expect(body.attachmentWarning).to.include('attachment upload failed');
     });
   });
 
