@@ -1,3 +1,10 @@
+## [1.593.1](https://github.com/adobe/spacecat-api-service/compare/v1.593.0...v1.593.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* match prompts region filter case-insensitively | LLMO-5755 ([#2667](https://github.com/adobe/spacecat-api-service/issues/2667)) ([bd652c2](https://github.com/adobe/spacecat-api-service/commit/bd652c28fa2572321f7b720efaff3b6a1a69844b))
+
 # [1.593.0](https://github.com/adobe/spacecat-api-service/compare/v1.592.1...v1.593.0) (2026-06-24)
 
 
