@@ -186,23 +186,8 @@ function OrganizationsController(ctx, env) {
       return notFound(`Organization not found by IMS org ID: ${imsOrgId}`);
     }
 
-    // Cross-tenant resolution: admins and S2S consumers holding `organization:readAll` may
-    // look up any organization by IMS org ID (platform enumeration). Everyone else must
-    // belong to the organization. hasS2SCapability returns `not-s2s` without a DB call for
-    // non-S2S callers, so the extra fetch only happens for actual S2S consumers.
-    // See READALL_CAPABILITY_DESIGN.md.
-    const { log } = ctx;
-    const requestId = context?.invocation?.id || 'unknown';
-    const isAdmin = accessControlUtil.hasAdminReadAccess();
-    const s2sResult = isAdmin
-      ? { allowed: false, reason: 'admin-bypass' }
-      : await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
-    if (!isAdmin && !s2sResult.allowed && !(await accessControlUtil.hasAccess(organization))) {
-      log.info(`[acl] Denied GET /organizations/by-ims-org-id - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+    if (!await accessControlUtil.hasAccess(organization)) {
       return forbidden('Only users belonging to the organization can view it');
-    }
-    if (s2sResult.allowed) {
-      log.info(`[s2s-readall] GET /organizations/by-ims-org-id granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_ORG_READ_ALL} requestId=${requestId}`);
     }
 
     return ok(OrganizationDto.toJSON(organization));
