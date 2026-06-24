@@ -1291,3 +1291,40 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     expect(transport.listPromptsByTags).to.have.callCount(2);
   });
 });
+
+describe('handlers/prompts.js — defensive branch coverage', () => {
+  // Line 152: `Number.isFinite(resp?.total)?resp.total:items.length` else branch —
+  // fires when a full page is returned (items.length >= limit) but resp.total is
+  // missing or non-finite. The else falls back to items.length as the best available
+  // count estimate.
+  it('handleListPrompts: falls back to items.length when total is missing on a full upstream page', async () => {
+    const project = {
+      getSemrushProjectId: () => 'proj-us-en',
+      getGeoTargetId: () => 2840,
+      getLanguageCode: () => 'en',
+    };
+    const dataAccess = {
+      BrandSemrushProject: {
+        allByBrandId: () => Promise.resolve([project]),
+        findBySlice: () => Promise.resolve(project),
+      },
+    };
+    // Return exactly `limit` items (10) with no `total` field — items.length (10)
+    // is NOT < limit (10) so the else branch fires; Number.isFinite(undefined)
+    // is false so total = items.length = 10.
+    const fullPage = Array.from({ length: 10 }, (_, i) => ({ id: `s-${i}`, name: `prompt ${i}` }));
+    const transport = {
+      listPromptsByTags: () => Promise.resolve({ items: fullPage /* no total */ }),
+    };
+    const { handleListPrompts: hlp } = await import(
+      '../../../../src/support/serenity/handlers/prompts.js'
+    );
+    const brandId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const workspaceId = 'workspace-1';
+    const result = await hlp(transport, dataAccess, brandId, workspaceId, {
+      geoTargetId: 2840, languageCode: 'en', limit: 10,
+    });
+    // items.length (10) >= limit (10) → else branch; total is undefined → items.length.
+    expect(result.total).to.equal(10);
+  });
+});

@@ -14,46 +14,14 @@
 import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
-/**
- * The 6 canonical intent buckets persisted in `prompts.intent`. Mirrors the
- * buckets DRS emits (see DRS `prompt_generation_agentic_traffic` generation
- * prompts) and that the stats intent breakdown aggregates over.
- */
-const INTENT_VALUES = ['informational', 'instructional', 'comparative', 'transactional', 'planning', 'delegation'];
-const CANONICAL_INTENTS = new Set(INTENT_VALUES);
+import { classifyIntents } from './intent-classifier.js';
+import { throwOnPgConstraintViolation } from './errors.js';
+import { INTENT_VALUES, normalizeIntent } from './intent.js';
 
-/**
- * Legacy intent labels remapped onto the canonical buckets. Mirrors DRS
- * `INTENT_REMAP` (src/providers/prompt_generation_agentic_traffic/utils/
- * hard_validate.py) so values produced by older generations or external
- * callers collapse onto the supported set instead of dropping to NULL.
- */
-const INTENT_REMAP = {
-  statistical: 'informational',
-  navigational: 'informational',
-  commercial: 'transactional',
-};
-
-/**
- * Normalizes a caller-supplied intent for persistence into `prompts.intent`.
- *
- * Lowercases the value, applies the legacy remap, then validates against the
- * 6 canonical buckets. Absent, empty, or values that are still invalid after
- * remapping yield `null` — gap-filling (e.g. LLM classification of
- * human-added prompts) is handled elsewhere, so we never coerce to a default
- * bucket here.
- *
- * @param {*} intent - Raw intent value from the request body
- * @returns {string|null} Canonical lowercase intent, or null
- */
-export function normalizeIntent(intent) {
-  if (!hasText(intent)) {
-    return null;
-  }
-  const lowered = intent.trim().toLowerCase();
-  const remapped = INTENT_REMAP[lowered] || lowered;
-  return CANONICAL_INTENTS.has(remapped) ? remapped : null;
-}
+// Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
+// live in `./intent.js` so the LLM intent classifier can reuse them without an
+// import cycle. Existing importers of these from `prompts-storage.js` keep working.
+export { INTENT_VALUES, normalizeIntent };
 
 /**
  * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
@@ -176,26 +144,32 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
 }
 
 /**
- * Resolves category business key or UUID to categories.id (uuid).
- * When categoryId is a UUID it is looked up by primary key scoped to the
- * organization (consistent with resolveBrandUuid) — this validates org
- * ownership rather than blindly trusting the caller-supplied UUID.
- * When categoryId is a business key it is looked up by category_id as before.
+ * Resolves a category UUID to categories.id (uuid), validating that the row
+ * belongs to the organization. The v2 API exposes only the UUID primary key
+ * (`categories.id`) as the category identifier, so the input must be a UUID.
+ *
+ * Returns null for anything that is not a valid UUID or does not resolve to a
+ * row in the org. Callers that filter by category MUST treat null as "no
+ * match" (return empty), never as "no filter" — the legacy dual-path
+ * (UUID-or-business-key) silently dropped the filter when a UUID-shaped
+ * business key failed to resolve, returning every prompt for the brand
+ * (LLMO-5515).
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} categoryId - Business key or UUID
+ * @param {string} categoryId - categories.id UUID
  * @param {object} postgrestClient - PostgREST client
  * @returns {Promise<string|null>} categories.id (uuid) or null
  */
 export async function resolveCategoryUuid(organizationId, categoryId, postgrestClient) {
-  if (!hasText(categoryId) || !postgrestClient?.from) {
+  if (!hasText(categoryId) || !isValidUUID(categoryId) || !postgrestClient?.from) {
     return null;
   }
-  const query = postgrestClient.from('categories').select('id').eq('organization_id', organizationId);
-  const { data, error } = await (isValidUUID(categoryId)
-    ? query.eq('id', categoryId)
-    : query.eq('category_id', categoryId)
-  ).maybeSingle();
+  const { data, error } = await postgrestClient
+    .from('categories')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('id', categoryId)
+    .maybeSingle();
   return !error && data?.id ? data.id : null;
 }
 
@@ -256,7 +230,9 @@ async function buildLookupMaps(organizationId, postgrestClient) {
  * Ensures that all referenced categories and topics exist in their respective
  * tables. Creates any missing ones (by name) and updates the lookup maps in place.
  * Map keys are normalized (lowercase + trim) for case-insensitive matching.
- * The name is also used as the business key (category_id / topic_id) for new entries.
+ * New categories dedup on (organization_id, name) — the legacy `category_id`
+ * business key is no longer set and falls to its random DB default (LLMO-5515).
+ * New topics still set the `topic_id` business key from the name.
  */
 // eslint-disable-next-line max-len
 async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy) {
@@ -281,13 +257,12 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .upsert(
           missingCatNames.map((name) => ({
             organization_id: organizationId,
-            category_id: name,
             name,
             origin: 'human',
             status: 'active',
             updated_by: updatedBy,
           })),
-          { onConflict: 'organization_id,category_id' },
+          { onConflict: 'organization_id,name' },
         )
         .select('id,name')
         .then(({ data, error }) => {
@@ -398,8 +373,8 @@ function mapRowToPrompt(row) {
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
  * @param {string} [params.brandId] - Filter by brand (uuid or config id)
- * @param {string} [params.categoryId] - Filter by category business key
- * @param {string} [params.topicId] - Filter by topic business key
+ * @param {string} [params.categoryId] - Filter by category UUID (categories.id)
+ * @param {string} [params.topicId] - Filter by topic business key or UUID
  * @param {string} [params.status] - Filter by status (active, pending, deleted)
  * @param {string} [params.search] - Free-text search across prompt text, name,
  * topic name, category name
@@ -448,15 +423,29 @@ export async function listPrompts({
   const pageNum = Math.max(1, Number(page) || 1);
   const offset = (pageNum - 1) * limitNum;
 
+  // Resolve category/topic filters up front and FAIL CLOSED: when a filter is
+  // requested but does not resolve to a row in this org, return an empty page
+  // rather than dropping the filter and returning every prompt for the brand.
+  // Mirrors the brandUuid guard above. The unfiltered-leak this prevents was
+  // LLMO-5515 (a UUID-shaped category business key that resolved to no row).
+  const emptyPage = {
+    items: [], total: 0, limit: limitNum, page: pageNum,
+  };
+
   let categoryUuid = null;
+  if (hasText(categoryId)) {
+    categoryUuid = await resolveCategoryUuid(organizationId, categoryId, postgrestClient);
+    if (!categoryUuid) {
+      return emptyPage;
+    }
+  }
+
   let topicUuid = null;
-  if (hasText(categoryId) || hasText(topicId)) {
-    categoryUuid = hasText(categoryId)
-      ? await resolveCategoryUuid(organizationId, categoryId, postgrestClient)
-      : null;
-    topicUuid = hasText(topicId)
-      ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
-      : null;
+  if (hasText(topicId)) {
+    topicUuid = await resolveTopicUuid(organizationId, topicId, postgrestClient);
+    if (!topicUuid) {
+      return emptyPage;
+    }
   }
 
   const buildSelect = (includeIntent) => `
@@ -476,7 +465,7 @@ export async function listPrompts({
     updated_at,
     updated_by,
     brands(id,name),
-    categories(id,category_id,name,origin),
+    categories(id,name,origin),
     topics(id,topic_id,name)
   `;
 
@@ -599,7 +588,7 @@ export async function getPromptById({
       updated_at,
       updated_by,
       brands(id,name),
-      categories(id,category_id,name,origin),
+      categories(id,name,origin),
       topics(id,topic_id,name)
     `)
     .eq('organization_id', organizationId)
@@ -638,6 +627,8 @@ export async function upsertPrompts({
   prompts,
   postgrestClient,
   updatedBy = 'system',
+  classifyIntent,
+  classifyIntentBatchTimeoutMs,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -669,7 +660,7 @@ export async function upsertPrompts({
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    return `${String(p.prompt || p.text || '').trim()}:${norm.join(',')}`;
+    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}`;
   };
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
@@ -728,6 +719,78 @@ export async function upsertPrompts({
     }
   }
 
+  // Guard against uq_prompt_text_region_per_brand: deduplicate toInsert by
+  // (lower(text), sorted_regions) before the bulk INSERT. For a new brand
+  // existingByKey is empty, so cross-topic text collisions all land here.
+  // Deterministic tie-break: sort by (topic_id, prompt_id) asc, keep first.
+  // Each drop is logged (warn) with a text hash — auditable without echoing
+  // customer data. Dropped entries are removed from processed so counts stay
+  // honest. Guard is > 1: a single-row batch cannot collide with itself.
+  if (toInsert.length > 1) {
+    const dedupKey = (row) => {
+      const t = String(row.text || '').trim().toLowerCase();
+      const r = [...(row.regions || [])].map((x) => String(x).toLowerCase()).sort().join(',');
+      return `${t}:${r}`;
+    };
+    const sortedForDedup = [...toInsert].sort((a, b) => {
+      const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
+      return tCmp !== 0 ? tCmp : String(a.prompt_id).localeCompare(String(b.prompt_id));
+    });
+    const winnerByKey = new Map();
+    const droppedIds = new Set();
+    for (const row of sortedForDedup) {
+      const key = dedupKey(row);
+      if (winnerByKey.has(key)) {
+        droppedIds.add(row.prompt_id);
+        // eslint-disable-next-line no-console
+        console.warn('[upsertPrompts] dedup-drop', {
+          brand_id: row.brand_id,
+          text_hash: crypto.createHash('sha256').update(row.text || '').digest('hex').slice(0, 12),
+          dropped_prompt_id: row.prompt_id,
+          dropped_topic_id: row.topic_id ?? null,
+          winning_prompt_id: winnerByKey.get(key).prompt_id,
+          winning_topic_id: winnerByKey.get(key).topic_id ?? null,
+        });
+      } else {
+        winnerByKey.set(key, row);
+      }
+    }
+    if (droppedIds.size > 0) {
+      const keep = (r) => !droppedIds.has(r.prompt_id);
+      toInsert.splice(0, toInsert.length, ...toInsert.filter(keep));
+      processed.splice(0, processed.length, ...processed.filter(keep));
+    }
+  }
+
+  // Best-effort intent classification for prompts that arrived WITHOUT an
+  // intent (typically human-added). Pipeline prompts already carry a
+  // normalized intent and are skipped. Failures leave intent null; they MUST
+  // NOT block the write — the backfill/reconciliation path covers them later.
+  if (typeof classifyIntent === 'function') {
+    const rowsNeedingIntent = [...toInsert, ...toUpdate]
+      .filter((r) => r.intent === null && hasText(r.text));
+    if (rowsNeedingIntent.length > 0) {
+      const intentByText = await classifyIntents(
+        classifyIntent,
+        rowsNeedingIntent.map((r) => r.text),
+        { timeoutMs: classifyIntentBatchTimeoutMs },
+      );
+      const apply = (r) => {
+        const classified = intentByText.get(r.text);
+        // Only overwrite when we actually got a bucket back — a null/absent
+        // result (failed or timed-out classification) leaves intent as null.
+        if (r.intent === null && hasText(r.text) && classified != null) {
+          // eslint-disable-next-line no-param-reassign
+          r.intent = classified;
+        }
+      };
+      toInsert.forEach(apply);
+      toUpdate.forEach(apply);
+      // Keep the returned payload consistent with what was persisted.
+      processed.forEach(apply);
+    }
+  }
+
   let created = 0;
   let updated = 0;
   const skipped = prompts.length - toInsert.length - toUpdate.length;
@@ -743,6 +806,9 @@ export async function upsertPrompts({
         .select(),
     );
     if (error) {
+      throwOnPgConstraintViolation(error, {
+        23505: { status: 409, message: 'A prompt with the same text and region already exists for this brand.' },
+      });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
     created = inserted?.length ?? toInsert.length;
@@ -793,6 +859,9 @@ export async function upsertPrompts({
  * @param {object} params.updates - Partial prompt fields to update
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
+ *   Optional best-effort classifier; used only when the text changes WITHOUT an
+ *   explicit intent. Non-fatal: a null result simply leaves intent unset.
  * @returns {Promise<object|null>} Updated prompt or null if not found
  */
 export async function updatePromptById({
@@ -802,6 +871,7 @@ export async function updatePromptById({
   updates,
   postgrestClient,
   updatedBy = 'system',
+  classifyIntent,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -826,6 +896,13 @@ export async function updatePromptById({
   if (updates.intent !== undefined) {
     // The shared fallback strips intent when the column is known-absent.
     patch.intent = normalizeIntent(updates.intent);
+  } else if (typeof classifyIntent === 'function' && hasText(patch.text)) {
+    // No intent supplied but the text changed: best-effort classify the new
+    // text. Non-fatal — a null result simply leaves intent unset on the patch.
+    const intent = await classifyIntent(patch.text).catch(() => null);
+    if (intent !== null) {
+      patch.intent = intent;
+    }
   }
   if (updates.categoryId !== undefined) {
     patch.category_id = hasText(updates.categoryId)
@@ -865,6 +942,96 @@ export async function updatePromptById({
     promptId,
     postgrestClient,
   });
+}
+
+/**
+ * Normalizes a regions array for set comparison: lower-cased, trimmed, non-empty
+ * codes, sorted. Used by the brand-region consistency guard so casing/order
+ * differences never defeat the removed-region comparison.
+ *
+ * @param {string[]} regions
+ * @returns {string[]} normalized, sorted region codes
+ */
+function normalizeRegionsForCompare(regions) {
+  if (!Array.isArray(regions)) {
+    return [];
+  }
+  return regions
+    .filter((r) => r != null)
+    .map((r) => (typeof r === 'string' ? r : String(r)).trim().toLowerCase())
+    .filter((r) => r.length > 0)
+    .sort();
+}
+
+/**
+ * Counts, per region, how many of a brand's non-deleted prompts still use each
+ * of the given regions (LLMO-5645). Used to guard a brand-level region change:
+ * DRS schedules off each prompt's `regions`, so a region must not be removed
+ * from a brand while prompts still reference it (that would orphan those
+ * prompts on a market the brand no longer covers). The operator relocates the
+ * prompts first; comparison is case-insensitive. Deleted prompts are skipped.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id (uuid)
+ * @param {string[]} params.oldRegions - brand regions BEFORE the update
+ * @param {string[]} params.newRegions - brand regions AFTER the update
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} [params.log] - Logger
+ * @returns {Promise<Record<string, number>>} map of removed region (lowercase)
+ *   → count of prompts still using it; empty when nothing blocks the change
+ */
+export async function findPromptsBlockingRegionRemoval({
+  organizationId,
+  brandUuid,
+  oldRegions,
+  newRegions,
+  postgrestClient,
+  log = console,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const newSet = new Set(normalizeRegionsForCompare(newRegions));
+  const removed = normalizeRegionsForCompare(oldRegions).filter((r) => !newSet.has(r));
+  if (removed.length === 0) {
+    return {};
+  }
+
+  // Fetch the brand's non-deleted prompts. A single brand carries tens to a few
+  // hundred prompts in practice; cap the read and warn (never silently truncate)
+  // if a brand somehow exceeds it so the operator knows the check was partial.
+  const READ_CAP = 5000;
+  const { data, error } = await postgrestClient
+    .from('prompts')
+    .select('id, regions')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandUuid)
+    .neq('status', 'deleted')
+    .limit(READ_CAP);
+
+  if (error) {
+    throw new Error(`Failed to read prompts for region consistency check: ${error.message}`);
+  }
+
+  const prompts = data || [];
+  if (prompts.length >= READ_CAP) {
+    log.warn?.(`findPromptsBlockingRegionRemoval: brand ${brandUuid} has >= ${READ_CAP} prompts; `
+      + 'consistency check may be partial');
+  }
+
+  const counts = {};
+  prompts.forEach((p) => {
+    const promptRegions = new Set(normalizeRegionsForCompare(p.regions));
+    removed.forEach((r) => {
+      if (promptRegions.has(r)) {
+        counts[r] = (counts[r] || 0) + 1;
+      }
+    });
+  });
+
+  return counts;
 }
 
 /**

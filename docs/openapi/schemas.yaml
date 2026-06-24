@@ -159,6 +159,7 @@ AuditType:
     - 'related-urls'
     - 'summarization'
     - 'faqs'
+    - 'money-pages'
   example: 'cwv'
 URL:
   type: string
@@ -704,6 +705,38 @@ Site:
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
+SiteIdentity:
+  type: object
+  description: |
+    The minimal routing identity for a single site, returned by
+    `GET /sites/{siteId}/identity`. Exposes only what a platform `site:readAll` consumer
+    needs to resolve a site's owning organization and mint a customer-scoped token.
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    organizationId:
+      description: The ID of the organization this site belongs to, or null if unresolved
+      oneOf:
+        - $ref: '#/Id'
+        - type: 'null'
+    imsOrgId:
+      description: The Adobe IMS organization ID of the owning organization, or null if unresolved
+      oneOf:
+        - $ref: '#/ImsOrganizationId'
+        - type: 'null'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
+  example:
+    siteId: '7511d4b9-1234-4abc-8def-0123456789ab'
+    organizationId: '160da889-5678-4cde-9f01-23456789abcd'
+    imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg'
+    baseURL: 'https://example.com'
+    deliveryType: 'aem_edge'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
@@ -1078,6 +1111,17 @@ AuditResult:
           type: string
         finalUrl:
           description: The final URL for the audited page.
+          type: string
+    - type: object
+      description: |
+        The result of money-pages audit.
+      properties:
+        siteUrl:
+          description: The resolved site URL the money-pages audit was run against.
+          type: string
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
     - type: array
       description: Information about the provided URLs in the Google index.
@@ -3772,6 +3816,39 @@ Brand:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
       type: string
       readOnly: true
+    semrushWorkspaceId:
+      description: >-
+        Read-only. The brand's own Semrush sub-workspace id (dual-mode). Null
+        for brands still in flat mode (no sub-workspace minted yet). Used to
+        scope per-brand Semrush views to the sub-workspace.
+      type: [string, 'null']
+      readOnly: true
+    pendingSemrushProvisioning:
+      description: >-
+        Read-only. Deferred Semrush provisioning data for a pending (draft)
+        brand: the primary URL + initial market chosen at "Save as pending"
+        before the brand's sub-workspace + project exist. Fed into activation;
+        each market that provisions is removed and the field is nulled once none
+        remain (failed markets stay for retry). Null for a non-pending brand (or
+        a draft with no provisioning data yet). primaryUrl may be null (saved as
+        pending before a URL was entered).
+      type: [object, 'null']
+      readOnly: true
+      properties:
+        primaryUrl:
+          type: [string, 'null']
+        markets:
+          type: array
+          items:
+            type: object
+            required:
+              - market
+              - languageCode
+            properties:
+              market:
+                type: string
+              languageCode:
+                type: string
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
@@ -4011,6 +4088,20 @@ Fix:
       format: date-time
     executedBy:
       type: string
+      description: IMS user ID of the caller who executed the fix. Server-derived; not client-settable.
+      readOnly: true
+    executedByUser:
+      type: object
+      description: Resolved IMS profile for the user who executed the fix. Present on getAllForOpportunity and getByID when the executor identity was successfully resolved. Omitted from getByStatus.
+      readOnly: true
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
     executedAt:
       type: string
       format: date-time
@@ -4154,9 +4245,6 @@ FixUpdate:
       description: Optional array of suggestion IDs to associate with this fix. Replaces existing associations.
       items:
         $ref: '#/Id'
-    executedBy:
-      type: string
-      description: Email or identifier of who executed the fix
     executedAt:
       $ref: '#/DateTime'
       description: ISO timestamp when the fix was executed
@@ -4453,6 +4541,62 @@ PredominantTrafficResult:
           minimum: 0
           maximum: 100
           example: 4.2
+
+LlmoOnboardSiteRequest:
+  type: object
+  required:
+    - domain
+    - brandName
+  properties:
+    domain:
+      type: string
+      format: hostname
+      description: The domain name to onboard (without protocol).
+      example: "example.com"
+    brandName:
+      type: string
+      description: |
+        The brand label for the site's LLMO config (set via
+        `siteConfig.updateLlmoBrand`). This is NOT a brand entity.
+      example: "Example Brand"
+    deliveryType:
+      type: string
+      description: Optional delivery type forwarded to site creation.
+      example: "aem_edge"
+
+LlmoOnboardSiteResponse:
+  type: object
+  required:
+    - siteId
+    - organizationId
+    - baseURL
+    - dataFolder
+    - status
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: The created or existing site ID.
+      example: "987fcdeb-51a2-43d1-9f12-345678901234"
+    organizationId:
+      type: string
+      format: uuid
+      description: The organization ID.
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    baseURL:
+      type: string
+      format: uri
+      description: The normalized base URL of the onboarded site.
+      example: "https://example.com"
+    dataFolder:
+      type: string
+      description: The LLMO data folder for the site.
+      example: "example-com"
+    status:
+      type: string
+      enum: ["processing"]
+      description: Always `processing` — triggered audits run asynchronously.
+      example: "processing"
 
 LlmoQuestion:
   type: object
@@ -5063,7 +5207,29 @@ LlmoConfig:
           description: A record of ignored prompts keyed by UUID
           additionalProperties:
             $ref: '#/LlmoIgnoredPrompt'
+    claims:
+      $ref: '#/LlmoClaimsGuidance'
   additionalProperties: true
+
+LlmoClaimsGuidance:
+  type: object
+  description: |
+    Optional customer guidance for brand claims extraction and sentiment classification.
+    Each field is limited to 4000 characters to keep downstream LLM prompts bounded.
+    Guidance text is stored for processing but is never written to application logs.
+  properties:
+    brandContext:
+      type: string
+      maxLength: 4000
+      description: Customer-provided brand context used as background guidance for claims extraction.
+      example: "Treat Firefly as part of the Adobe product family."
+    sentimentGuidance:
+      type: string
+      maxLength: 4000
+      description: Customer-provided guidance for interpreting claim sentiment.
+      example: "Claims about setup friction should be classified as unfavorable."
+  # Keep claims guidance closed because these free-text fields are passed to downstream LLM prompts.
+  additionalProperties: false
 
 LlmoDeletedPrompt:
   type: object
@@ -6246,7 +6412,8 @@ V2Prompt:
       description: Regions where this prompt is applicable
     categoryId:
       type: string
-      description: Category business key
+      format: uuid
+      description: Category UUID (categories.id)
     topicId:
       type: string
       description: Topic business key
@@ -6293,14 +6460,17 @@ V2Prompt:
       properties:
         id:
           type: string
+          format: uuid
           description: |
-            Currently the UUID PK (categories.id) for backward compat —
-            aligning this to the category_id business key is a deferred
-            breaking change. Use `uuid` for FK linkage today.
+            UUID primary key (categories.id). The sole category identifier
+            (the legacy category_id business key was retired — LLMO-5515).
+            `id` and `uuid` carry the same value; either works for FK linkage.
         uuid:
           type: string
           format: uuid
-          description: UUID primary key (categories.id)
+          description: |
+            UUID primary key (categories.id). Alias of `id`, kept for
+            backward compatibility.
         name:
           type: string
         origin:
@@ -6651,6 +6821,20 @@ CustomerConfigBrand:
       type: string
       description: Detailed description of the brand
       example: "Adobe's flagship image editing software"
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Blank values clear the stored value.
+      example: "Adobe Photoshop is Adobe's image editing product for creative professionals."
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Blank values clear the stored value.
+      example: "Treat comparisons about subscription cost as neutral unless the answer explicitly recommends against the brand."
     updatedAt:
       $ref: '#/DateTime'
       description: When the brand was last updated
@@ -7297,6 +7481,18 @@ V2Brand:
         - string
         - 'null'
       description: Brand description
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Blank values clear the stored value.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Blank values clear the stored value.
     vertical:
       type:
         - string
@@ -7360,6 +7556,8 @@ V2Brand:
     status: 'active'
     origin: 'human'
     description: 'An example brand'
+    brandContext: "Example Brand is a B2B analytics platform."
+    mentionSentimentGuidance: "Treat factual pricing mentions as neutral unless the response recommends against the brand."
     vertical: 'technology'
     region: ['US', 'DE']
     urls:
@@ -7402,6 +7600,18 @@ V2BrandInput:
       default: human
     description:
       type: string
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Omit to preserve, blank or null to clear.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Omit to preserve, blank or null to clear.
     vertical:
       type: string
     region:
@@ -7443,6 +7653,18 @@ V2BrandUpdateInput:
       enum: [human, ai]
     description:
       type: string
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Omit to preserve, blank or null to clear.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Omit to preserve, blank or null to clear.
     vertical:
       type: string
     region:
@@ -7493,12 +7715,16 @@ V2Category:
   properties:
     id:
       type: string
-      description: Category business key (category_id slug). Stable once assigned.
-      example: 'baseurl-discovery-research'
+      format: uuid
+      description: |
+        UUID primary key (categories.id) — the sole category identifier.
+        Use this value on the CRUD path params and the `?categoryId=` prompt
+        filter. The legacy category_id business key was retired (LLMO-5515).
+      example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
     uuid:
       type: string
       format: uuid
-      description: UUID primary key (categories.id)
+      description: UUID primary key (categories.id). Alias of `id`.
     name:
       type: string
       description: |
@@ -7541,12 +7767,6 @@ V2CategoryInput:
   required:
     - name
   properties:
-    id:
-      type: string
-      description: |
-        Client-supplied slug. Used only when inserting a brand-new row; for
-        existing rows the stored `id` is preserved (FK stability).
-      example: 'discovery-research'
     name:
       type: string
       description: Human-readable category name. Canonicalized on write.
@@ -9429,6 +9649,19 @@ AiVisibilitySemrushCountry:
     - VN
     - WORLDWIDE
 
+AiVisibilitySemrushDate:
+  type: object
+  description: Date message from ai-seo-ts common/types_pb
+  properties:
+    day:
+      type: integer
+    month:
+      type: integer
+    year:
+      type: integer
+  required: [day, month, year]
+  additionalProperties: true
+
 AiVisibilitySemrushTopicIntent:
   type: string
   description: TOPIC_INTENT from ai-seo-ts common/types_pb
@@ -9489,6 +9722,102 @@ AiVisibilitySemrushTopicIntentEntry:
     weight:
       type: integer
       description: Intent weight within the distribution (0–100 scale per Semrush)
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByLLMEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByLLMResponse.LLMEntry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    citations:
+      description: Citations for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+    aiVisibility:
+      type: integer
+      description: AI Visibility score for the brand
+    isoDate:
+      type: string
+      description: Normalized ISO date (`YYYY-MM` or `YYYY-MM-DD`)
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByLLMResponse:
+  type: object
+  description: |
+    Brand statistics by LLM from `GET /llmo/ai-visibility/v1/brand/stats-by-llm`.
+    Native Semrush v2 `StatsByLLMResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    target:
+      $ref: '#/AiVisibilitySemrushBrand'
+    llm:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByLLMEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByCountryEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByCountryResponse.ByCountry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    country:
+      description: Market for the grouped statistics
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByCountryResponse:
+  type: object
+  description: |
+    Brand statistics by country from `GET /llmo/ai-visibility/v1/brand/stats-by-country`.
+    Native Semrush v2 `StatsByCountryResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    byCountry:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByCountryEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
 AiVisibilityV1TopicBrandTopicRow:
@@ -9818,6 +10147,40 @@ AiVisibilityV1PromptPromptResponse:
         $ref: '#/AiVisibilitySemrushSource'
   additionalProperties: true
 
+AiVisibilityV1MetaCountry:
+  type: object
+  description: Country entry from Semrush `cr.v1 Meta/Meta` protobuf JSON.
+  properties:
+    country:
+      $ref: '#/AiVisibilitySemrushCountry'
+    daily:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushDate'
+    monthly:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushDate'
+    is_coming_soon:
+      type: boolean
+  required: [country, daily, monthly, is_coming_soon]
+  additionalProperties: true
+
+AiVisibilityV1Meta:
+  type: object
+  description: |
+    Metadata from Semrush `cr.v1 Meta/Meta` with an appended computed `WORLDWIDE`
+    country entry when Semrush does not already return one.
+  properties:
+    countries:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1MetaCountry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [countries]
+  additionalProperties: true
+
 AiVisibilityV1PromptBrandPromptsResponse:
   type: object
   description: |
@@ -9965,6 +10328,168 @@ AiVisibilityV1PromptGapPromptsExportResponse:
       type: string
       description: Suggested CSV file name from `ExportResponse.file_name`.
       example: gap-prompts.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1PromptGapPromptsTotalsResponse:
+  type: object
+  description: |
+    Per-kind gap prompts counts from `GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals`.
+    Returns only the totals array without paginated data.
+  properties:
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptGapPromptsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainRow:
+  type: object
+  description: |
+    One domain from Semrush v2 `GapSourceDomainsResponse.Domain` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    domain:
+      type: string
+    gapMentions:
+      type: array
+      description: Per-brand mention counts included in the gap for this source domain
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicMentionsByBrand'
+    targetMentions:
+      description: Mentions of the target brand sourced from this domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    sourcesCount:
+      description: Number of URLs from the domain used as a source (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    promptsCount:
+      description: Number of prompt responses using sources from the domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    organicTraffic:
+      description: Estimated organic traffic to the domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    totalBrandMentions:
+      description: All brand mentions sourced from this domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsResponse:
+  type: object
+  description: |
+    Gap source domains list from `GET /llmo/ai-visibility/v1/source/gap-source-domains`.
+    Wraps Semrush v2 source `GapSourceDomains` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceGapSourceDomainRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsTotalRow:
+  type: object
+  description: |
+    One row from Semrush `GapSourceDomainsTotalsResponse.TotalByKind` as protobuf JSON (camelCase).
+    Structurally identical to `AiVisibilityV1TopicGapTopicsTotalRow`.
+  properties:
+    kind:
+      description: Gap kind (`GAP_KIND` enum name or integer)
+      oneOf:
+        - type: string
+          enum:
+            - UNSPECIFIED
+            - ALL
+            - MISSING
+            - WEAK
+            - SHARED
+            - STRONG
+            - UNIQUE
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6]
+    count:
+      description: Total source domains for this gap kind (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsTotalsResponse:
+  type: object
+  description: |
+    Per-kind gap source domains counts from
+    `GET /llmo/ai-visibility/v1/source/gap-source-domains-totals`.
+    Returns only the totals array without paginated data.
+  properties:
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceGapSourceDomainsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsExportResponse:
+  type: object
+  description: |
+    Gap source domains CSV export from
+    `GET /llmo/ai-visibility/v1/source/gap-source-domains-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: gap-source-domains.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityPromptResearchExportResponse:
+  type: object
+  description: |
+    Prompt Research CSV export from the `GET /llmo/ai-visibility/v1/prompt-research/*-export`
+    endpoints (prompts, brands, source-domains, topics). Native Semrush v2 `ExportResponse`
+    protobuf JSON plus `srFilters` from the API layer. The CSV columns are produced by Semrush
+    and passed through unchanged. Omitting `engine` exports all engines in a single call.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: prompts_by_topic_fts_coffee_us.csv
     contentType:
       type: string
       description: MIME type from `ExportResponse.content_type`.
@@ -10303,6 +10828,16 @@ SerenityBulkDeletePromptsResponse:
           status: { type: integer }
           message: { type: string }
 
+SerenityMarketStatus:
+  type: string
+  description: |
+    Publish state of the market's upstream project, surfaced only in
+    sub-workspace mode where markets are read live from the brand's own
+    workspace. Maps 1:1 from the upstream `publish_status`
+    (`initial_publish_failed` → `publish_failed`). Absent in flat mode,
+    where market existence is a pure DB-row contract.
+  enum: [draft, publishing, publish_failed, live, live_with_unpublished_updates]
+
 SerenityMarket:
   type: object
   description: |
@@ -10327,6 +10862,15 @@ SerenityMarket:
       oneOf:
         - $ref: '#/DateTime'
         - type: 'null'
+    # Additive, sub-workspace mode only. In flat mode the list
+    # is a pure DB read and omits both. status reflects the live publish state;
+    # semrushProjectId is the upstream project id for the slice (same value the
+    # market-detail endpoint exposes). Optional so flat-mode responses still validate.
+    status:
+      $ref: '#/SerenityMarketStatus'
+    semrushProjectId:
+      type: string
+      description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
 
 SerenityMarketListResponse:
   type: object
@@ -10353,6 +10897,107 @@ SerenityMarketDetail:
         semrushProjectId:
           type: string
           description: Upstream Semrush AIO project id for this slice (provider-specific by design).
+        initialized:
+          description: |
+            AIO readiness for this slice's project (sub-workspace mode only). `true`/`false`
+            from the upstream init-status probe, or `null` when the probe is
+            unavailable or the read failed (best-effort enrichment — never fails
+            the detail read). Absent in flat mode.
+          oneOf:
+            - type: boolean
+            - type: 'null'
+
+SerenityActivateRequest:
+  type: object
+  description: |
+    Activates a brand into sub-workspace mode: ensures the brand's own
+    Semrush sub-workspace exists (creating + resourcing it on first call),
+    then per supplied market creates-or-resumes a draft and publishes it once.
+    Markets are caller-supplied — reactivation re-supplies them (there is no
+    stored market memory). Sets the brand status to `active` once ≥1 market is live.
+  required: [brandDomain, brandNames, markets]
+  properties:
+    brandDomain:
+      type: string
+      description: Primary domain for the brand's upstream projects.
+    brandNames:
+      type: array
+      minItems: 1
+      items: { type: string }
+      description: Brand name variants tracked upstream; the first is the display name.
+    brandDisplayName:
+      type: string
+      description: Prefix for each market's default project name when `name` is omitted.
+    markets:
+      type: array
+      minItems: 1
+      maxItems: 50
+      description: |
+        Markets to bring live for this brand. Capped at 50 per request: each
+        market drives sequential upstream create+publish calls, so a larger
+        array is rejected with 400 (rather than risking a Lambda timeout).
+      items:
+        type: object
+        required: [market, languageCode]
+        properties:
+          market:
+            type: string
+            pattern: '^[A-Za-z]{2}$'
+            description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
+          languageCode:
+            type: string
+            pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+          name:
+            type: string
+            description: Optional display name for this market's upstream project.
+
+SerenityActivateResponse:
+  type: object
+  required: [brandId, status, markets]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [active, pending]
+      description: |
+        `active` when at least one market went live; `pending` when none did
+        (the response is HTTP 207 in that case). Mirrors the persisted brand status.
+    markets:
+      type: array
+      description: Per-market outcome, in request order.
+      items:
+        type: object
+        required: [market, languageCode, status]
+        properties:
+          market:
+            type: string
+          languageCode:
+            type: string
+          status:
+            type: integer
+            description: Per-market HTTP-style status (201 live, 409 already-live, 4xx validation).
+          body:
+            type: object
+            additionalProperties: true
+            description: The per-market handler result body.
+
+SerenityDeactivateResponse:
+  type: object
+  description: |
+    Result of decommissioning a brand's sub-workspace: every project is
+    deleted and the allocation released back to the parent pool, but the
+    workspace and its `semrush_workspace_id` pointer are KEPT for reuse
+    (never-delete). The brand status is set to `pending`.
+  required: [brandId, status]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [pending]
 
 SerenityCreateMarketRequest:
   type: object
@@ -10420,6 +11065,46 @@ SerenityModelListResponse:
       type: array
       items: { $ref: '#/SerenityModel' }
 
+SerenityLanguage:
+  type: object
+  required: [name]
+  properties:
+    id:
+      type: [string, 'null']
+      description: Semrush language catalog id (null when the catalog omits it).
+    name:
+      type: string
+      description: English language name as Semrush spells it (the match key).
+
+SerenityLanguageListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityLanguage' }
+
+SerenityUpdateModelsRequest:
+  type: object
+  description: |
+    Desired AI-model set for one (geoTargetId, languageCode) slice. The server
+    diffs this against the currently-assigned models and applies the minimal
+    add/remove, then publishes. `modelIds` are catalog model ids (the `id` from
+    `GET /serenity/models`), not assignment-row ids.
+  required: [geoTargetId, languageCode, modelIds]
+  properties:
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    modelIds:
+      type: array
+      maxItems: 50
+      items: { type: string }
+      description: Catalog model ids to track for this slice. Empty array clears all.
+
 SerenityErrorResponse:
   type: object
   description: |
@@ -10432,3 +11117,492 @@ SerenityErrorResponse:
   properties:
     error: { type: string }
     message: { type: string }
+
+# ── Referral Traffic PG schemas ───────────────────────────────────────────────
+
+ReferralTrafficSource:
+  type: string
+  enum: [optel, cdn, adobe_analytics, ga4, cja]
+  default: optel
+  description: "Referral traffic data source. Unrecognised values are silently coerced to `optel` (the default) — the server does not reject out-of-enum values."
+
+ReferralTrafficBusinessImpactSource:
+  type: string
+  enum: [adobe_analytics, ga4, cja]
+  default: adobe_analytics
+  description: "Business-impact data source. Unlike the generic referral-traffic endpoints, an unrecognised or non-business-impact source (optel/cdn) returns HTTP 400."
+
+ReferralTrafficHasData:
+  type: object
+  description: Whether the site has referral traffic data and which sources are available
+  properties:
+    hasData:
+      type: boolean
+      example: true
+    availableSources:
+      type: array
+      description: Available sources in priority order; items are `optel` or `cdn` only (optel first)
+      items:
+        type: string
+        enum: [optel, cdn]
+      example: ['optel', 'cdn']
+  required:
+    - hasData
+    - availableSources
+
+ReferralTrafficFilterDimensions:
+  type: object
+  description: Distinct referral traffic filter values for the selected site and date range
+  properties:
+    platforms:
+      type: array
+      items:
+        type: string
+      example: ['ChatGPT', 'Perplexity']
+    regions:
+      type: array
+      items:
+        type: string
+      example: ['US', 'DE']
+    devices:
+      type: array
+      items:
+        type: string
+      example: ['desktop', 'mobile']
+    pageIntents:
+      type: array
+      items:
+        type: string
+      example: ['informational', 'transactional']
+    availableSources:
+      type: array
+      items:
+        type: string
+      example: ['optel', 'cdn']
+  required:
+    - platforms
+    - regions
+    - devices
+    - pageIntents
+    - availableSources
+
+ReferralTrafficKpis:
+  type: object
+  description: Aggregated KPI metrics for a site's referral traffic
+  properties:
+    totalPageviews:
+      type: number
+      example: 12450
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja; meaningful for optel / ga4
+      example: 42.1
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja; meaningful for optel / ga4
+      example: 88.0
+  required:
+    - totalPageviews
+    - bounceRate
+    - consentRate
+
+ReferralTrafficTrendRow:
+  type: object
+  description: Referral traffic metrics for a single day
+  properties:
+    date:
+      type: string
+      format: date
+      example: '2026-03-02'
+    pageviews:
+      type: number
+      example: 600
+    entries:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 540
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 1250.5
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 41.0
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 87.0
+    avgSessionDuration:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 132.4
+    pagesPerVisit:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 2.3
+    orders:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 18
+    conversionRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 3.1
+  required:
+    - date
+    - pageviews
+
+ReferralTrafficTrend:
+  type: object
+  description: Referral traffic KPI time series ordered by date ascending
+  properties:
+    trend:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficTrendRow'
+  required:
+    - trend
+
+ReferralTrafficByPlatformRow:
+  type: object
+  properties:
+    platform:
+      type: string
+      example: 'ChatGPT'
+    pageviews:
+      type: number
+      example: 4200
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 39.5
+    channels:
+      type: array
+      items:
+        type: string
+      example: ['referral', 'organic']
+    visits:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 3800
+    avgTimeOnSite:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 142.0
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 980.0
+    visitors:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 3100
+    orders:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 12
+  required:
+    - platform
+    - pageviews
+    - channels
+
+ReferralTrafficByPlatform:
+  type: object
+  description: Referral traffic grouped by platform, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByPlatformRow'
+  required:
+    - rows
+
+ReferralTrafficByRegionRow:
+  type: object
+  properties:
+    region:
+      type: string
+      example: 'US'
+    pageviews:
+      type: number
+      example: 3200
+  required:
+    - region
+    - pageviews
+
+ReferralTrafficByRegion:
+  type: object
+  description: Referral traffic grouped by region, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByRegionRow'
+  required:
+    - rows
+
+ReferralTrafficByPageIntentRow:
+  type: object
+  properties:
+    pageIntent:
+      type: string
+      example: 'informational'
+    pageviews:
+      type: number
+      example: 2100
+  required:
+    - pageIntent
+    - pageviews
+
+ReferralTrafficByPageIntent:
+  type: object
+  description: Referral traffic grouped by page intent, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByPageIntentRow'
+  required:
+    - rows
+
+ReferralTrafficByUrlRow:
+  type: object
+  properties:
+    urlPath:
+      type: string
+      example: '/blog/my-post'
+    host:
+      type: string
+      example: 'www.adobe.com'
+    pageviews:
+      type: number
+      example: 1500
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 38.0
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 86.0
+    pageIntent:
+      oneOf:
+        - type: string
+        - type: 'null'
+      example: 'informational'
+    entries:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 1320
+    exits:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 980
+    avgTimeOnSite:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 128.5
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 540.0
+  required:
+    - urlPath
+    - host
+    - pageviews
+
+ReferralTrafficByUrl:
+  type: object
+  description: Paginated per-URL referral traffic performance analysis
+  properties:
+    totalCount:
+      type: number
+      description: Total number of URLs matching the filters (across all pages)
+      example: 1240
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByUrlRow'
+      description: URLs for the requested page
+  required:
+    - totalCount
+    - rows
+
+ReferralTrafficUrlTrendRow:
+  type: object
+  properties:
+    weekStart:
+      type: string
+      format: date
+      example: '2026-03-02'
+    pageviews:
+      type: number
+      example: 320
+  required:
+    - weekStart
+    - pageviews
+
+ReferralTrafficUrlTrend:
+  type: object
+  description: Weekly pageview trend for a single URL
+  properties:
+    trend:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficUrlTrendRow'
+  required:
+    - trend
+
+ReferralTrafficByDeviceRow:
+  type: object
+  properties:
+    device:
+      type: string
+      example: 'desktop'
+    pageviews:
+      type: number
+      example: 5400
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja sources
+      example: 40.0
+  required:
+    - device
+    - pageviews
+
+ReferralTrafficByDevice:
+  type: object
+  description: Referral traffic grouped by device, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByDeviceRow'
+  required:
+    - rows
+
+ReferralTrafficBusinessImpact:
+  type: object
+  description: Aggregated business impact metrics; only available for adobe_analytics / ga4 / cja sources
+  properties:
+    source:
+      type: string
+      enum: [adobe_analytics, ga4, cja]
+      example: 'adobe_analytics'
+    totalPageviews:
+      type: number
+      example: 12450
+    metrics:
+      type: object
+      properties:
+        visits:
+          type: number
+          example: 9800
+        bounceRate:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 41.0
+        entries:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 8900
+        avgSessionDuration:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 135.0
+        pagesPerVisit:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 2.4
+        conversionRate:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 3.0
+        orders:
+          type: number
+          example: 120
+        revenue:
+          type: number
+          example: 15400.0
+      required:
+        - visits
+        - orders
+        - revenue
+  required:
+    - source
+    - totalPageviews
+    - metrics
+
+ReferralTrafficWeekEntry:
+  type: object
+  description: An ISO week for which the site has referral traffic data
+  properties:
+    week:
+      type: string
+      description: ISO week label (YYYY-WNN)
+      example: '2026-W10'
+    startDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-02'
+    endDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-08'
+  required:
+    - week
+
+ReferralTrafficWeeks:
+  type: object
+  description: Available ISO weeks for the site's referral traffic data
+  properties:
+    weeks:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficWeekEntry'
+  required:
+    - weeks

@@ -28,6 +28,7 @@ import {
   getPromptStats,
   normalizeIntent,
   isMissingIntentColumnError,
+  findPromptsBlockingRegionRemoval,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -153,10 +154,13 @@ describe('prompts-storage', () => {
       expect(result).to.be.null;
     });
 
-    it('returns category id when found by business key', async () => {
+    it('returns null when categoryId is not a valid UUID (business-key lookup retired, LLMO-5515)', async () => {
+      // Pre-LLMO-5515 this resolved a TEXT business key to its UUID. The
+      // category_id business key is gone — the only accepted identifier is
+      // the categories.id UUID. A non-UUID never hits the DB and fails closed.
       const client = { from: () => makeChain({ data: { id: 'cat-uuid' }, error: null }) };
       const result = await resolveCategoryUuid(ORG_ID, 'cat-1', client);
-      expect(result).to.equal('cat-uuid');
+      expect(result).to.be.null;
     });
 
     it('resolves by primary key scoped to org when categoryId is a valid UUID', async () => {
@@ -508,7 +512,14 @@ describe('prompts-storage', () => {
       expect(result.items[0].status).to.equal('pending');
     });
 
-    it('skips category filter when categoryId not found', async () => {
+    it('fails closed (empty page) when a categoryId filter does not resolve', async () => {
+      // Regression guard for LLMO-5515: a categoryId that does not resolve to
+      // a category in this org must return an EMPTY page, never the full
+      // unfiltered set. The old behavior silently dropped the filter (fail
+      // open), surfacing every prompt for the brand as a phantom count. We
+      // use a valid-but-unknown UUID so the DB lookup actually fires and
+      // returns no row.
+      const unknownUuid = 'c3333333-3333-4333-b333-333333333333';
       const row = {
         prompt_id: PROMPT_ID,
         name: 'Test',
@@ -536,13 +547,77 @@ describe('prompts-storage', () => {
       const result = await listPrompts({
         organizationId: ORG_ID,
         brandId: BRAND_UUID,
+        categoryId: unknownUuid,
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(0);
+      expect(result.total).to.equal(0);
+    });
+
+    it('fails closed (empty page) when a categoryId is not a valid UUID', async () => {
+      // A non-UUID categoryId can never match (business keys are retired,
+      // LLMO-5515). It must fail closed without even hitting the DB.
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          return makeChain({ data: null, error: null });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
         categoryId: 'nonexistent-category',
         postgrestClient: client,
       });
-      expect(result.items).to.have.lengthOf(1);
+      expect(result.items).to.have.lengthOf(0);
+      expect(result.total).to.equal(0);
+    });
+
+    it('fails closed (empty page) when a topicId filter does not resolve', async () => {
+      // Regression guard for LLMO-5515: symmetric with the categoryId guard
+      // above. A topicId that does not resolve to a topic in this org must
+      // return an EMPTY page, never the full unfiltered set. We use a
+      // valid-but-unknown UUID so the topics lookup actually fires and
+      // returns no row.
+      const unknownUuid = 'd4444444-4444-4444-b444-444444444444';
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Prompt',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: null, error: null });
+          }
+          return makeChain({ data: [row], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        topicId: unknownUuid,
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(0);
+      expect(result.total).to.equal(0);
     });
 
     it('applies categoryId and topicId filters when provided', async () => {
+      const categoryUuid = 'a1111111-1111-4111-b111-111111111111';
       const row = {
         id: 'prompt-pk-uuid-2',
         prompt_id: PROMPT_ID,
@@ -555,10 +630,10 @@ describe('prompts-storage', () => {
         updated_by: 'system',
         brands: { id: BRAND_UUID, name: 'Brand' },
         categories: {
-          id: 'cat-uuid', category_id: 'photoshop', name: 'Photoshop', origin: 'human',
+          id: categoryUuid, name: 'Photoshop', origin: 'human',
         },
         topics: {
-          id: 'topic-uuid', topic_id: 'editing', name: 'Editing', category_id: 'photoshop',
+          id: 'topic-uuid', topic_id: 'editing', name: 'Editing', category_id: categoryUuid,
         },
       };
       const client = {
@@ -567,7 +642,7 @@ describe('prompts-storage', () => {
             return makeChain({ data: { id: BRAND_UUID }, error: null });
           }
           if (table === 'categories') {
-            return makeChain({ data: { id: 'cat-uuid' }, error: null });
+            return makeChain({ data: { id: categoryUuid }, error: null });
           }
           if (table === 'topics') {
             return makeChain({ data: { id: 'topic-uuid' }, error: null });
@@ -578,7 +653,7 @@ describe('prompts-storage', () => {
       const result = await listPrompts({
         organizationId: ORG_ID,
         brandId: BRAND_UUID,
-        categoryId: 'photoshop',
+        categoryId: categoryUuid,
         topicId: 'editing',
         postgrestClient: client,
       });
@@ -589,7 +664,7 @@ describe('prompts-storage', () => {
       // topic.uuid to populate brand_presence_executions.category_id /
       // .topic_id FKs.
       expect(result.items[0].category).to.deep.equal({
-        id: 'cat-uuid', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
+        id: categoryUuid, uuid: categoryUuid, name: 'Photoshop', origin: 'human',
       });
       expect(result.items[0].topic).to.deep.equal({
         id: 'topic-uuid', uuid: 'topic-uuid', name: 'Editing',
@@ -850,6 +925,145 @@ describe('prompts-storage', () => {
       ]);
     });
 
+    it('classifies prompts with no intent and persists the result', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'a', prompt: 'Figma vs Sketch', regions: [] }],
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.calledOnceWith('Figma vs Sketch')).to.be.true;
+      expect(insertStub.firstCall.args[0][0].intent).to.equal('comparative');
+    });
+
+    it('does NOT re-classify prompts that already carry an intent', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'a', prompt: 'pipeline prompt', regions: [], intent: 'transactional',
+        }],
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.called).to.be.false;
+      expect(insertStub.firstCall.args[0][0].intent).to.equal('transactional');
+    });
+
+    it('persists null and does not fail when classification rejects', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const classifyIntent = sinon.stub().rejects(new Error('LLM down'));
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'a', prompt: 'some prompt', regions: [] }],
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(result.created).to.equal(1);
+      expect(insertStub.firstCall.args[0][0].intent).to.be.null;
+    });
+
+    it('does not classify when no classifier is provided', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'a', prompt: 'no classifier', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(insertStub.firstCall.args[0][0].intent).to.be.null;
+    });
+
     it('updates existing prompts by id', async () => {
       const existingData = {
         data: [{
@@ -1108,7 +1322,10 @@ describe('prompts-storage', () => {
               }),
             }),
             upsert: (rows) => {
-              if (rows[0]?.category_id !== undefined) {
+              // Categories dedup on (organization_id, name) and carry an
+              // `origin` field; topics still carry the `topic_id` business
+              // key (out of scope for LLMO-5515).
+              if (rows[0]?.origin !== undefined) {
                 upsertedRows.categories = rows;
               }
               if (rows[0]?.topic_id !== undefined) {
@@ -1137,9 +1354,11 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.created).to.equal(1);
-      // Verify the upserted rows use the name as both category_id/topic_id and name
+      // Categories dedup on name only — no category_id business key is set
+      // anymore (LLMO-5515); the DB default fills the deprecated column.
       expect(upsertedRows.categories[0].name).to.equal('New Cat');
-      expect(upsertedRows.categories[0].category_id).to.equal('New Cat');
+      expect(upsertedRows.categories[0]).to.not.have.property('category_id');
+      // Topics still set the topic_id business key from the name.
       expect(upsertedRows.topics[0].name).to.equal('New Topic');
       expect(upsertedRows.topics[0].topic_id).to.equal('New Topic');
     });
@@ -1610,6 +1829,304 @@ describe('prompts-storage', () => {
       expect(result.prompts[0].categoryId).to.be.undefined;
       expect(result.prompts[0].topicId).to.be.undefined;
     });
+
+    it('throws a typed 409 when INSERT returns a 23505 unique-constraint error', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({
+                select: () => thenable({
+                  data: null,
+                  error: {
+                    code: '23505',
+                    message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+                  },
+                }),
+              }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const err = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'p-1', prompt: 'Synthetic prompt text', regions: ['us'] }],
+        postgrestClient: client,
+      }).catch((e) => e);
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(409);
+    });
+
+    it('deduplicates duplicate text+regions in toInsert and does not throw', async () => {
+      // Mock: >1 row in INSERT → 23505 (simulates uq_prompt_text_region_per_brand);
+      // exactly 1 row → success. RED before the intra-batch dedup fix; GREEN after.
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable(
+          Array.isArray(rows) && rows.length > 1
+            ? {
+              data: null,
+              error: {
+                code: '23505',
+                message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+              },
+            }
+            : { data: rows.map((r) => ({ prompt_id: r.prompt_id })), error: null },
+        ),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-topic-alpha', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-topic-beta', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.prompts).to.have.lengthOf(1);
+      const insertedRows = insertStub.firstCall.args[0];
+      expect(insertedRows).to.have.lengthOf(1);
+      // p-topic-alpha wins: both topic_id=null, 'p-topic-alpha' < 'p-topic-beta' alphabetically
+      expect(insertedRows[0].prompt_id).to.equal('p-topic-alpha');
+    });
+
+    it('dedup-drop fires once per duplicate and splice reduces toInsert to exactly one row', async () => {
+      // Three prompts with the same synthetic text+regions. Only the winner
+      // (lexicographically first prompt_id when all topic_ids are null) reaches
+      // INSERT. The drop path (lines 740-749) fires twice and the splice mutations
+      // (lines 755-757) reduce toInsert to 1, covering the uncovered block.
+      const warnSpy = sandbox.spy(console, 'warn');
+      const toRow = (r) => ({ prompt_id: r.prompt_id });
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable({ data: rows.map(toRow), error: null }),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      // Input order is [p-c, p-a, p-b] — winner is always p-a (lex-first prompt_id)
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          { id: 'p-c', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-a', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-b', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+        ],
+        postgrestClient: client,
+      });
+
+      // one row inserted, two dropped
+      expect(result.created).to.equal(1);
+      expect(insertStub.firstCall.args[0]).to.have.lengthOf(1);
+      expect(insertStub.firstCall.args[0][0].prompt_id).to.equal('p-a');
+
+      // drop-log fired twice — once for each duplicate
+      const dropLogs = warnSpy.args.filter(([msg]) => msg === '[upsertPrompts] dedup-drop');
+      expect(dropLogs).to.have.lengthOf(2);
+      dropLogs.forEach(([, payload]) => {
+        expect(payload.winning_prompt_id).to.equal('p-a');
+      });
+    });
+
+    it('picks winner by (topic_id, promptId) asc regardless of input order', async () => {
+      // Two UUIDs with an unambiguous lexicographic ordering: T_ALPHA < T_BETA.
+      // The dedup sort key is (topic_id, promptId) asc, so T_ALPHA must always win.
+      const T_ALPHA = '00000000-0000-4000-b000-000000000001';
+      const T_BETA = 'ffffffff-ffff-4fff-bfff-fffffffffffe';
+
+      const warnSpy = sandbox.spy(console, 'warn');
+
+      // topics table returns both rows pre-populated so topicMap resolves UUIDs
+      // immediately and ensureLookupEntries makes no upsert calls.
+      // INSERT always succeeds — dedup fires before the row reaches the DB.
+      const makeClient = (insertStub) => ({
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            return makeChain({
+              data: [{ id: T_ALPHA, name: 'Alpha' }, { id: T_BETA, name: 'Beta' }],
+              error: null,
+            });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      });
+
+      const makeInsertStub = () => sinon.stub().callsFake((rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      }));
+
+      const findDropLog = () => warnSpy.args
+        .find(([msg]) => msg === '[upsertPrompts] dedup-drop')?.[1];
+
+      // Pass 1: feed [alpha, beta]
+      const stub1 = makeInsertStub();
+      const result1 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: makeClient(stub1),
+      });
+
+      // (a) exactly one row reaches INSERT
+      expect(stub1.firstCall.args[0]).to.have.lengthOf(1);
+      // (b) surviving row carries T_ALPHA
+      expect(stub1.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result1.created).to.equal(1);
+      // (c) log entry correctly identifies winner and dropped topic_id
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+
+      // Pass 2: feed [beta, alpha] — (d) input-order invariance
+      warnSpy.resetHistory();
+      const stub2 = makeInsertStub();
+      const result2 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+        ],
+        postgrestClient: makeClient(stub2),
+      });
+
+      expect(stub2.firstCall.args[0]).to.have.lengthOf(1);
+      expect(stub2.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result2.created).to.equal(1);
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+    });
+
+    it('routes case-variant text to update not insert when an active row already exists', async () => {
+      // Scenario: DB has "hello world" (lowercase); incoming prompt uses "Hello World" (mixed).
+      // The DB constraint uses lower(text), so they collide. getKey must lowercase the text
+      // component to match existingByKey correctly and route to toUpdate, not toInsert.
+      // RED on current (case-sensitive) getKey: misses existingByKey → INSERT stub is called.
+      // GREEN after fix: matches existingByKey → UPDATE path, INSERT stub never reached.
+      const existingRow = {
+        id: 'row-uuid-existing',
+        prompt_id: 'p-existing',
+        text: 'hello world',
+        regions: ['us'],
+        status: 'active',
+      };
+      const toInsertResult = (rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      });
+      const insertStub = sinon.stub().callsFake(toInsertResult);
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [existingRow], error: null }),
+                    in: () => thenable({ data: [existingRow], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Hello World', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(insertStub.notCalled).to.be.true;
+      expect(result.created).to.equal(0);
+      expect(result.updated).to.equal(1);
+    });
   });
 
   describe('updatePromptById', () => {
@@ -1802,6 +2319,171 @@ describe('prompts-storage', () => {
       expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.true;
       expect(updateStub.firstCall.args[0].intent).to.be.null;
       expect(result.intent).to.be.null;
+    });
+
+    it('classifies new text on update when no intent is supplied', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'T',
+        text: 'Figma vs Sketch',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: 'comparative',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { prompt: 'Figma vs Sketch' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.calledOnceWith('Figma vs Sketch')).to.be.true;
+      expect(updateStub.firstCall.args[0].intent).to.equal('comparative');
+    });
+
+    it('does NOT classify on update when an intent is explicitly supplied', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'T',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: 'transactional',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { prompt: 'new text', intent: 'transactional' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(classifyIntent.called).to.be.false;
+      expect(updateStub.firstCall.args[0].intent).to.equal('transactional');
+    });
+
+    it('leaves intent unset on update when classification rejects', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'T',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().rejects(new Error('LLM down'));
+      const result = await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { prompt: 'new text' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      expect(result).to.not.be.null;
+      expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.false;
+    });
+
+    it('does NOT classify on update when only non-text fields change', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'New name',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        intent: null,
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const classifyIntent = sinon.stub().resolves('comparative');
+      await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        updates: { name: 'New name' },
+        postgrestClient: client,
+        classifyIntent,
+      });
+      // No text change and no explicit intent -> classifier must not be invoked.
+      expect(classifyIntent.called).to.be.false;
+      expect(Object.prototype.hasOwnProperty.call(updateStub.firstCall.args[0], 'intent')).to.be.false;
     });
 
     it('sets categoryId and topicId to null when empty string', async () => {
@@ -2857,6 +3539,131 @@ describe('prompts-storage', () => {
       // Known-unsupported client: intent never set on the patch up front, so the
       // second update's patch carries no `intent` key.
       expect(updateStub.getCall(2).args[0]).to.not.have.property('intent');
+    });
+  });
+
+  describe('findPromptsBlockingRegionRemoval (LLMO-5645)', () => {
+    // Read-only mock: the consistency check fetches non-deleted prompts and
+    // counts, per removed region, how many still reference it.
+    function makeReadClient(promptRows, opts = {}) {
+      return {
+        from: () => ({
+          select() { return this; },
+          eq() { return this; },
+          neq() { return this; },
+          limit() {
+            return Promise.resolve(
+              opts.error ? { data: null, error: opts.error } : { data: promptRows, error: null },
+            );
+          },
+        }),
+      };
+    }
+
+    it('returns empty when no region is removed (new set is a superset)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US'],
+        newRegions: ['US', 'DE'],
+        postgrestClient: makeReadClient([{ id: 'p1', regions: ['US'] }]),
+      });
+      expect(result).to.deep.equal({});
+    });
+
+    it('returns empty when a removed region has no prompts using it', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US'] },
+          { id: 'p2', regions: ['US'] },
+        ]),
+      });
+      expect(result).to.deep.equal({});
+    });
+
+    it('counts prompts still using a removed region (incl. multi-market prompts)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US', 'DE'] }, // multi-market → still references DE
+          { id: 'p2', regions: ['DE'] }, // DE-only
+          { id: 'p3', regions: ['de'] }, // case-insensitive
+          { id: 'p4', regions: ['US'] }, // unaffected
+          { id: 'p5', regions: null }, // non-array → normalized to [], ignored
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 3 });
+    });
+
+    it('counts each removed region independently when several are stripped at once', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE', 'FR'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['DE'] },
+          { id: 'p2', regions: ['FR'] },
+          { id: 'p3', regions: ['DE', 'FR'] }, // counts toward both
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 2, fr: 2 });
+    });
+
+    it('treats WW like any other region (strict — blocks WW removal)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['WW'] },
+          { id: 'p2', regions: ['ww'] },
+        ]),
+      });
+      expect(result).to.deep.equal({ ww: 2 });
+    });
+
+    it('throws when the PostgREST client is missing', async () => {
+      await expect(findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: {},
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('throws when the prompt read fails', async () => {
+      await expect(findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient(null, { error: { message: 'read boom' } }),
+      })).to.be.rejectedWith('Failed to read prompts for region consistency check: read boom');
+    });
+
+    it('warns when the brand exceeds the read cap', async () => {
+      const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `p${i}`, regions: ['US'] }));
+      const warn = sinon.spy();
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient(rows),
+        log: { warn },
+      });
+      expect(result).to.deep.equal({});
+      expect(warn.calledOnce).to.equal(true);
     });
   });
 });

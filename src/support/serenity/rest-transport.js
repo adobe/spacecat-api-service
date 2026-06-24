@@ -10,10 +10,18 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../utils.js';
 
 const API_PREFIX = '/enterprise/projects/api';
+// Workspace lifecycle (create subworkspace / status / family / resources / members)
+// is served by a DIFFERENT gateway service than project ops — the
+// "user-manager" API under /enterprise/users/api (verified live 2026-06-15
+// against the dev parent; the project prefix 404s these routes). Project ops
+// stay on API_PREFIX above.
+const USERS_API_PREFIX = '/enterprise/users/api';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.
@@ -32,6 +40,22 @@ export class SerenityTransportError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+/**
+ * Returns a client-safe message for an error that may be a SerenityTransportError.
+ * A SerenityTransportError's message embeds the gateway URL (internal host +
+ * workspace/project UUIDs), so it must never be echoed to clients (response
+ * bodies, per-item `failed[].message`). App-level errors carry safe messages and
+ * pass through unchanged.
+ */
+export function redactUpstreamMessage(e) {
+  if (e instanceof SerenityTransportError) {
+    return (e.status === 401 || e.status === 403)
+      ? 'Upstream authorization failed'
+      : 'Upstream request failed';
+  }
+  return e?.message;
 }
 
 /**
@@ -161,6 +185,10 @@ function aioPromptsPath(semrushWorkspaceId, projectId, suffix) {
   return `${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/prompts${suffix}`;
 }
 
+function aioBrandUrlsPath(semrushWorkspaceId, projectId, benchmarkId) {
+  return `${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/benchmarks/${enc(benchmarkId)}/brand_urls`;
+}
+
 /**
  * Creates the Semrush HTTP client. Each request is authenticated with the
  * caller's IMS bearer token; the Adobe gateway exchanges it server-side for
@@ -172,6 +200,15 @@ function aioPromptsPath(semrushWorkspaceId, projectId, suffix) {
  */
 export function createSerenityTransport({ env, imsToken }) {
   const root = baseUrl(env);
+
+  // Fail-closed guard for the destructive workspace delete. Deleting a
+  // sub-workspace must be IMPOSSIBLE in every deployed environment
+  // (dev/stage/prod) — production decommission empties and releases a
+  // workspace but never deletes it (design §6); upstream deprovisioning is
+  // Semrush CS's act. The capability is retained only so the net-zero live
+  // smoke can tidy up after itself, and is unlocked solely by this explicit
+  // opt-in flag, which no deployed environment sets (local test-cleanup only).
+  const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
   return {
     /**
@@ -196,8 +233,12 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v2/.../aio/prompts/tagged — creates prompts grouped by tag names.
-     * Body shape: { prompts: { [tagName]: [promptText, ...] } }.
+     * POST /v2/.../aio/prompts/tagged — bulk-creates prompts with their tags.
+     * Body shape: { prompts: { [promptText]: [tagName, ...] } } — keyed by
+     * prompt text, each value the list of tag names to attach. Both flat and
+     * subworkspace callers send this same prompt-text-keyed shape; `promptsByTag`
+     * is a legacy parameter name kept for continuity, not an indication of the
+     * key.
      */
     async createTaggedPrompts(semrushWorkspaceId, projectId, promptsByTag) {
       const url = `${root}${aioPromptsPath(semrushWorkspaceId, projectId, '/tagged')}`;
@@ -238,6 +279,34 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * GET /v1/workspaces/{ws}/brand-topics?domain=&country= — generates the top
+     * brand topics (with up to 100 prompt strings each) for a domain + market,
+     * fetched live from the AI-SEO service. Workspace-scoped, NOT project-scoped.
+     * Returns an array of `{ topic, volume, prompts: string[] }`. Used at
+     * brand-create to seed the new project's prompts (tagged `topic:<NAME>`).
+     */
+    async getBrandTopics(semrushWorkspaceId, { domain, country }) {
+      const params = new URLSearchParams({
+        domain: String(domain ?? ''),
+        country: String(country ?? ''),
+      });
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/brand-topics?${params.toString()}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v2/workspaces/{ws}/projects/{pid}/aio/tags — creates project-level
+     * AIO tags (the standard taxonomy: intent/source/type) independent of any
+     * prompt. Body shape: { names: string[] } (model.TreeNodeListRequest; flat —
+     * `parent_id` omitted). Tags already attached to prompts are reused by name,
+     * so pre-creating a tag that a later prompt also carries does not duplicate.
+     */
+    async createProjectTags(semrushWorkspaceId, projectId, names) {
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/aio/tags`;
+      return request('POST', url, imsToken, { names });
+    },
+
+    /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      */
     async createProject(semrushWorkspaceId, body) {
@@ -261,12 +330,16 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v1/workspaces/{ws}/projects/{pid}/ai_models — adds one AI model
+     * POST /v2/workspaces/{ws}/projects/{pid}/ai_models — adds one AI model
      * to a project. `modelId` is the catalog model identifier from
      * `AIModelResponse.id` on the GET listing. Returns the new assignment row.
+     * V2: identical request (CreateProjectAIModelRequest `{ model_id }`) and
+     * response (ProjectAIModelResponse) to the v1 route, so it is a drop-in —
+     * matching the createBenchmarks v2 move. The sibling list/delete ai_models
+     * routes have no v2 variant (v2 ai_models is POST-only) and stay on v1.
      */
     async addAiModel(semrushWorkspaceId, projectId, modelId) {
-      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(semrushWorkspaceId)}/projects/${enc(projectId)}/ai_models`;
       return request('POST', url, imsToken, { model_id: modelId });
     },
 
@@ -300,6 +373,213 @@ export function createSerenityTransport({ env, imsToken }) {
     async listLanguages() {
       const url = `${root}${API_PREFIX}/v1/languages`;
       return request('GET', url, imsToken, undefined);
+    },
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Sub-workspace lifecycle (serenity dual-mode, subworkspace path).
+    //
+    // These are thin URL+verb wrappers, deliberately colocated with the
+    // project ops so the later swap to the typed sub-workspace-API client is
+    // mechanical (call sites don't change, only these internals). Behaviour
+    // pins live in serenity-docs brand-semrush-workspace-provisioning-details
+    // §4/§5/§7 and the design's §6 error classification (see errors.js).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /v2/workspaces/{parent}/child — create a brand's child (sub-)workspace
+     * under the parent. The route is `/child`, NOT `/subworkspace` (the latter is
+     * unrouted and returns a bare gateway 404; `/child` returns 405 to GET/OPTIONS,
+     * confirming a POST-only route — verified live 2026-06-16 against the LLMO-Dev-2
+     * parent). v2 takes NO `X-Upload-Receipt` header (v1-only); tier/products
+     * inherit from the parent. The new workspace settles `not ready → created` in
+     * seconds; poll getWorkspaceStatus before creating projects against it.
+     */
+    async createSubworkspace(parentWorkspaceId, title, resources) {
+      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(parentWorkspaceId)}/child`;
+      return request('POST', url, imsToken, { title, resources });
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/status — poll until `created` after a subworkspace
+     * create (creating projects against `not ready` can 500).
+     */
+    async getWorkspaceStatus(workspaceId) {
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}/status`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{parent}/family — list the parent's sub-workspaces
+     * (and nested sub-workspaces). Used for ambiguous-create recovery: on a
+     * timed-out create, match the exact title and adopt a `created`,
+     * project-empty sub-workspace (design §6).
+     */
+    async listWorkspaceFamily(parentWorkspaceId) {
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(parentWorkspaceId)}/family`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v2/workspaces/{ws}/resources/transfer — grant an allocation onto a
+     * subworkspace (activation / re-grant) and release it back to the parent pool
+     * (decommission). A public user-token endpoint (workspace doc §5/§7).
+     * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
+     * → createWorkspaceV2Resources); `payload` is the bare resources object
+     * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it
+     * here. That `ai` shape is the SAME one already proven live as the v2 child-create
+     * `resources` body (createSubworkspace), so this is contract-compatible — the v1
+     * route's documented body (flat WorkspaceResources, no `ai` key) never matched
+     * what we send. The exact allocation values remain a Gate-A live-smoke pin.
+     */
+    async transferWorkspaceResources(workspaceId, payload) {
+      const url = `${root}${USERS_API_PREFIX}/v2/workspaces/${enc(workspaceId)}/resources/transfer`;
+      return request('POST', url, imsToken, { resources: payload });
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY, and fail-closed: throws
+     * unless SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which
+     * no deployed environment (dev/stage/prod) does. Production flows NEVER
+     * delete sub-workspaces (decommission empties and disconnects them but
+     * never deletes — design §6); workspace deprovisioning at offboarding is
+     * Semrush CS's act. Kept here so the
+     * net-zero live smoke can tidy up after itself. Delete cascades over the
+     * workspace's projects; subsequent reads return 403 (workspace doc §4).
+     */
+    async deleteWorkspace(workspaceId) {
+      if (!allowWorkspaceDelete) {
+        throw new Error(
+          'Serenity workspace deletion is disabled. It is test-cleanup only and '
+          + 'must never run in a deployed environment; set '
+          + 'SERENITY_ALLOW_WORKSPACE_DELETE=true to enable it locally.',
+        );
+      }
+      const url = `${root}${USERS_API_PREFIX}/v1/workspaces/${enc(workspaceId)}`;
+      return request('DELETE', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects?type=ai — the v1 DEFAULT view, the only
+     * draft-faithful listing (workspace doc §6/§10 V1). The `type=ai` query is
+     * REQUIRED (verified live 2026-06-15: omitting it 500s; the v2 list 400s
+     * with "type query parameter is required"). Subworkspace mode enumerates a brand's
+     * markets from this; never the v2 list for draft settings (v2 returns a
+     * live-view shape with `brand_names: null` for drafts).
+     */
+    async listProjects(workspaceId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects?type=ai`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid}?draft=&type=ai — a single project
+     * with its full settings (`settings.ci.competitors`, `settings.ai…`). The
+     * `draft` query is REQUIRED upstream; we read the draft view (draft=true) so
+     * pre-publish edits and Semrush's auto-generated CI competitors are both
+     * visible. Used by the CI-competitor sync to read the current list before the
+     * destructive PUT.
+     */
+    async getProject(workspaceId, projectId, { draft = true } = {}) {
+      const params = new URLSearchParams({ draft: String(draft), type: 'ai' });
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}?${params.toString()}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * PUT /v1/workspaces/{ws}/projects/{pid}/ci/competitors — FULL replace of the
+     * project's CI competitor list (deletes all, inserts exactly the body).
+     * Body: { ci_competitors: [{ domain, color? }] }. Because it is destructive
+     * and Semrush auto-generates its own competitors, callers must read-merge
+     * (getProject → merge → put) rather than send only our list. Returns the
+     * resulting { ci_competitors: [...] }.
+     */
+    async updateCiCompetitors(workspaceId, projectId, ciCompetitors) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ci/competitors`;
+      return request('PUT', url, imsToken, { ci_competitors: ciCompetitors });
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid}/aio/init_status — AIO readiness
+     * for a live project (`{ initialized: bool }`). Surfaced on the single
+     * market-detail read only, never per-item in the list (would be N+1).
+     */
+    async getInitStatus(workspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/aio/init_status`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Brand URLs (project benchmarks). A project's "main brand" benchmark is
+    // auto-created from the project's brand_name_display/brand_names/domain;
+    // brand URLs (own site, social, earned) attach to that benchmark. URLs are
+    // unique per PROJECT — a duplicate create is silently skipped upstream and
+    // reported via `existing_count`. Used to push brand-level URLs onto every
+    // market/project in the brand (mirrors brand_names/alias propagation).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — list the
+     * project's benchmarks (the project's own brand plus competitors). The own
+     * brand carries `main_brand: true`; its `id` is the `benchmark_id` the brand
+     * URL endpoints require. Returns `{ aio_benchmarks: [...] }`.
+     */
+    async listBenchmarks(workspaceId, projectId) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v2/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-create
+     * benchmarks. Body is an ARRAY of `{ brand_name, domain, brand_aliases?,
+     * color? }`. The API cannot set `main_brand` (system-managed); a created
+     * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
+     * We use it to create the project's own-brand benchmark when Semrush has not
+     * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
+     */
+    async createBenchmarks(workspaceId, projectId, benchmarks) {
+      const url = `${root}${API_PREFIX}/v2/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
+      return request('POST', url, imsToken, benchmarks);
+    },
+
+    /**
+     * DELETE /v1/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-delete
+     * benchmarks by id (body `{ ids: [...] }`). The main-brand benchmark cannot be
+     * deleted (409). Used by the competitor-benchmark edit re-sync to drop a
+     * competitor that was removed from the brand.
+     */
+    async deleteBenchmarks(workspaceId, projectId, ids) {
+      const url = `${root}${API_PREFIX}/v1/workspaces/${enc(workspaceId)}/projects/${enc(projectId)}/ai_models/benchmarks`;
+      return request('DELETE', url, imsToken, { ids });
+    },
+
+    /**
+     * GET /v2/.../aio/benchmarks/{bid}/brand_urls — list a benchmark's brand
+     * URLs. Returns `{ brand_urls: [{ id, url, type, ... }] }`. Used by the
+     * brand-edit re-sync to diff the live set before adding/removing.
+     */
+    async listBrandUrls(workspaceId, projectId, benchmarkId) {
+      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
+      return request('GET', url, imsToken, undefined);
+    },
+
+    /**
+     * POST /v2/.../aio/benchmarks/{bid}/brand_urls — batch-create brand URLs
+     * under a benchmark. Body is an ARRAY of `{ url, type }` (url must be https,
+     * type ≤ 32 chars). URLs already present in the project are skipped (not
+     * duplicated) and counted in the response `existing_count`.
+     */
+    async createBrandUrls(workspaceId, projectId, benchmarkId, entries) {
+      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
+      return request('POST', url, imsToken, entries);
+    },
+
+    /**
+     * DELETE /v2/.../aio/benchmarks/{bid}/brand_urls — batch-delete brand URLs
+     * by id. Body `{ ids: [...] }`. Ids not in this benchmark are ignored.
+     */
+    async deleteBrandUrls(workspaceId, projectId, benchmarkId, ids) {
+      const url = `${root}${aioBrandUrlsPath(workspaceId, projectId, benchmarkId)}`;
+      return request('DELETE', url, imsToken, { ids });
     },
   };
 }

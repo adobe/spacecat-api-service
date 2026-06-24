@@ -132,8 +132,8 @@
 			"security-vulnerabilities-auto-suggest": {},
 			"structured-data": {},
 			"sitemap": {},
-			"toc": {},
-			"wikipedia-analysis": {}
+			"money-pages": {},
+			"cwv-trends-audit": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -142,6 +142,8 @@
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
+			"cwv-trends-onboard": {},
+			"cwv-trends-daily": {},
 			"cwv-weekly": {},
 			"ahref-paid-pages": {}
 		},

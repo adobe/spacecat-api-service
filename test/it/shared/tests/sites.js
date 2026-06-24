@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
+  ORG_1_IMS_ORG_ID,
   ORG_2_ID,
   SITE_1_ID,
   SITE_1_BASE_URL,
@@ -25,6 +26,7 @@ import {
   SITE_NEW_LLMO_ID,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
+  PROJECT_2_ID,
 } from '../seed-ids.js';
 
 // LLMO-4176 mode-resolution test sites are seeded with intentionally
@@ -267,6 +269,67 @@ export default function siteTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /sites/:siteId/identity', () => {
+      // readAll-class single-site route: returns only the routing identity and resolves
+      // imsOrgId via the site->organization join. Gated on site:readAll, NOT site:read,
+      // so it is cross-tenant and there is no hasAccess(site) per-entity check.
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('admin: returns the routing identity with the resolved imsOrgId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadAll: returns the identity for any site (site:readAll, cross-tenant)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        // Full-shape assertion (like the admin case) so an accidental extra field
+        // leaking through the readAll path is caught, not just siteId/imsOrgId.
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies — the route maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${NON_EXISTENT_SITE_ID}/identity`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for an invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/identity');
+        expect(res.status).to.equal(400);
+      });
+    });
+
     describe('GET /sites/by-base-url/:baseURL', () => {
       it('admin: finds site by base64-encoded URL', async () => {
         const http = getHttpClient();
@@ -497,6 +560,17 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
           organizationId: ORG_2_ID,
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 403 when trying to change projectId', async () => {
+        // Re-parenting a site to a project in another org via this endpoint is
+        // disallowed (projects are org-scoped) — SITES-46200. SITE_1 belongs to
+        // PROJECT_1_ID, so patching it to PROJECT_2_ID must be rejected.
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
+          projectId: PROJECT_2_ID,
         });
         expect(res.status).to.equal(403);
       });

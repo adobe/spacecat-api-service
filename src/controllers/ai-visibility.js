@@ -33,9 +33,6 @@ import {
 } from '../support/ai-visibility/handlers/brands.js';
 import {
   handleCompetitorsMetrics,
-  handleCompetitorsGapTopics,
-  handleCompetitorsGapSourceDomains,
-  handleCompetitorsGapPrompts,
 } from '../support/ai-visibility/handlers/competitors.js';
 import {
   handlePromptsResponses,
@@ -59,7 +56,18 @@ import { handleBrandPrompts as handleBrandPromptsV1 } from '../support/ai-visibi
 import { handleBrandPromptsExport as handleBrandPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts-export.js';
 import { handleGapPrompts as handleGapPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts.js';
 import { handleGapPromptsExport as handleGapPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js';
+import { handleGapPromptsTotals as handleGapPromptsTotalsV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts-totals.js';
 import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-visibility/handlers/v1/prompt/prompt-response.js';
+import { handleGapSourceDomains as handleGapSourceDomainsV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains.js';
+import { handleGapSourceDomainsExport as handleGapSourceDomainsExportV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains-export.js';
+import { handleGapSourceDomainsTotals as handleGapSourceDomainsTotalsV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains-totals.js';
+import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
+import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
+import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
+import { handlePromptsResearchExport as handlePromptsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/prompts-export.js';
+import { handleBrandsResearchExport as handleBrandsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/brands-export.js';
+import { handleSourceDomainsResearchExport as handleSourceDomainsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/source-domains-export.js';
+import { handleTopicsResearchExport as handleTopicsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/topics-export.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
 const ROUTE_MAP = [
@@ -73,9 +81,6 @@ const ROUTE_MAP = [
   ['/brands/source-opportunities', handleBrandSourceOpportunities],
   ['/brands/competitors', handleBrandCompetitors],
   ['/competitors/metrics', handleCompetitorsMetrics],
-  ['/competitors/gap-topics', handleCompetitorsGapTopics],
-  ['/competitors/gap-source-domains', handleCompetitorsGapSourceDomains],
-  ['/competitors/gap-prompts', handleCompetitorsGapPrompts],
   ['/meta', handleMeta],
   ['/prompts/responses/latest', handlePromptsResponsesLatest],
   ['/prompts/responses', handlePromptsResponses],
@@ -95,7 +100,18 @@ const ROUTE_MAP = [
   ['/v1/prompt/brand-prompts-export', handleBrandPromptsExportV1],
   ['/v1/prompt/gap-prompts', handleGapPromptsV1],
   ['/v1/prompt/gap-prompts-export', handleGapPromptsExportV1],
+  ['/v1/prompt/gap-prompts-totals', handleGapPromptsTotalsV1],
   ['/v1/prompt/prompt-response', handlePromptResponseV1],
+  ['/v1/source/gap-source-domains', handleGapSourceDomainsV1],
+  ['/v1/source/gap-source-domains-export', handleGapSourceDomainsExportV1],
+  ['/v1/source/gap-source-domains-totals', handleGapSourceDomainsTotalsV1],
+  ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
+  ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
+  ['/v1/meta/meta', handleMetaV1],
+  ['/v1/prompt-research/prompts-export', handlePromptsResearchExportV1],
+  ['/v1/prompt-research/brands-export', handleBrandsResearchExportV1],
+  ['/v1/prompt-research/source-domains-export', handleSourceDomainsResearchExportV1],
+  ['/v1/prompt-research/topics-export', handleTopicsResearchExportV1],
 ];
 
 function extractSearchParams(context) {

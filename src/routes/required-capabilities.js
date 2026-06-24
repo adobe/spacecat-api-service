@@ -18,6 +18,7 @@ import {
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
   CAP_SUGGESTION_WRITE,
+  CAP_TRIAL_USER_READ,
 } from './capability-constants.js';
 
 /**
@@ -45,6 +46,9 @@ export const INTERNAL_ROUTES = [
   'POST /hooks/site-detection/rum/:hookSecret',
   // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
   'POST /webhooks/github',
+
+  // ASO redirect overlay - authenticated by X-ASO-API-Key (AsoOverlayKeyHandler), not S2S JWT
+  'GET /config/:service/redirects.txt',
 
   // Suggestion edge ops (edge-deploy, etc.): not yet required by S2S
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
@@ -89,17 +93,16 @@ export const INTERNAL_ROUTES = [
   // Agentic traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
   'GET /sites/:siteId/agentic-traffic/url-brand-presence',
   'GET /sites/:siteId/agentic-traffic/kpis',
-  'GET /sites/:siteId/agentic-traffic/kpis-trend',
   'GET /sites/:siteId/agentic-traffic/by-region',
   'GET /sites/:siteId/agentic-traffic/by-category',
   'GET /sites/:siteId/agentic-traffic/by-page-type',
   'GET /sites/:siteId/agentic-traffic/by-status',
   'GET /sites/:siteId/agentic-traffic/by-user-agent',
   'GET /sites/:siteId/agentic-traffic/by-url',
+  'POST /sites/:siteId/agentic-traffic/hits-by-urls',
   'GET /sites/:siteId/agentic-traffic/filter-dimensions',
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
-  'GET /sites/:siteId/agentic-traffic/has-data',
   'POST /sites/:siteId/agentic-traffic/urls/export',
   'GET /sites/:siteId/agentic-traffic/urls/export/:exportId',
 
@@ -122,6 +125,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
+  'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
   'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
@@ -138,9 +142,8 @@ export const INTERNAL_ROUTES = [
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
 
-  // Tier-specific - user activities (POST only), trial users, user details: end-user/admin flows
+  // Tier-specific - user activities (POST only), user details: end-user/admin flows
   'POST /sites/:siteId/user-activities',
-  'GET /organizations/:organizationId/trial-users',
   'GET /admin/users/:userId',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
@@ -222,8 +225,10 @@ const routeRequiredCapabilities = {
   // Audits
   'GET /audits/latest/:auditType': 'audit:read',
 
-  // Consent Banner
-  'POST /consent-banner': 'organization:write',
+  // Consent Banner — POST is a screenshot *scrape* trigger, so it's gated like
+  // the sibling `/tools/scrape/jobs` POST (scrapeJob:write) rather than
+  // organization:write, letting S2S scrape consumers (e.g. Mystique) trigger it.
+  'POST /consent-banner': 'scrapeJob:write',
   'GET /consent-banner/:jobId': 'organization:read',
 
   // Configuration
@@ -280,6 +285,12 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
   'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:write',
+  // Org-level Semrush catalogue lookups (brand-independent): read-only, org
+  // access enforced in the controller (listOrgModels / listOrgLanguages).
+  'GET /v2/orgs/:spaceCatId/serenity/models': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/fanout-report': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
@@ -340,6 +351,10 @@ const routeRequiredCapabilities = {
   // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
+  // GET /sites/:siteId/identity is a readAll-class single-site route: it returns only the
+  // routing identity (org ids, baseURL, deliveryType) a site:readAll holder can already
+  // derive from the bulk list + org join, so it is gated on site:readAll, not site:read.
+  'GET /sites/:siteId/identity': CAP_SITE_READ_ALL,
   'POST /sites': CAP_SITE_CREATE,
   'POST /sites/detect/jobs': 'site:write',
   'GET /sites/detect/jobs/:jobId': 'site:read',
@@ -365,6 +380,12 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/url-store': 'site:write',
   'POST /sites/:siteId/url-store/delete': 'site:write',
 
+  // Agentic traffic
+  'GET /sites/:siteId/agentic-traffic/has-data': 'site:read',
+  // UI-facing read; mapped to site:read so read-only admins hit the read fast-path
+  // (RO-admin wrapper) instead of the ownership gate. SITES — RO-admin 403 regression.
+  'GET /sites/:siteId/agentic-traffic/kpis-trend': 'site:read',
+
   // Agentic URL classification rules
   'GET /sites/:siteId/agentic-categories': 'site:read',
   'POST /sites/:siteId/agentic-categories': 'site:write',
@@ -378,8 +399,8 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',
   'GET /sites/:siteId/experiments': 'experiment:read',
-  'GET /sites/:siteId/geo-experiments': 'geoExperiment:read',
-  'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'geoExperiment:read', // detail includes prompts
+  'GET /sites/:siteId/geo-experiments': 'site:read',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'site:read', // detail includes prompts
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
@@ -586,9 +607,6 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/brands/source-opportunities': 'report:read',
   'GET /llmo/ai-visibility/brands/competitors': 'report:read',
   'GET /llmo/ai-visibility/competitors/metrics': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-topics': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-source-domains': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/meta': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses/latest': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses': 'report:read',
@@ -608,13 +626,27 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt-research/topics-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
+  'GET /llmo/ai-visibility/v1/meta/meta': 'report:read',
 
   // User Activities
   'GET /sites/:siteId/user-activities': 'trialUser:read',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
+
+  // Trial Users
+  'GET /organizations/:organizationId/trial-users': CAP_TRIAL_USER_READ,
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
