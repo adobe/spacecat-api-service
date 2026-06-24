@@ -509,7 +509,10 @@ export async function listPrompts({
     }
 
     if (hasText(region)) {
-      baseQuery = baseQuery.contains('regions', [region]);
+      // Stored region codes can be lower- or upper-case, so match both
+      // variants — a case-sensitive `.contains` would miss the other. (LLMO-5755)
+      const regionVariants = [...new Set([region.toLowerCase(), region.toUpperCase()])];
+      baseQuery = baseQuery.overlaps('regions', regionVariants);
     }
 
     if (hasText(search)) {
