@@ -51,6 +51,7 @@ describe('prompts-storage', () => {
       ilike: () => chain,
       or: () => chain,
       contains: () => chain,
+      overlaps: () => chain,
       in: () => chain,
       upsert: () => chain,
       insert: () => ({ select: () => thenable(result) }),
@@ -346,6 +347,48 @@ describe('prompts-storage', () => {
       });
       expect(result.limit).to.equal(100);
       expect(result.page).to.equal(1);
+    });
+
+    it('filters by region case-insensitively via array overlap (LLMO-5755)', async () => {
+      // Stored region codes can be lower- or upper-case, so the filter must
+      // match both variants via array overlap rather than a case-sensitive
+      // contains. (LLMO-5755)
+      let overlapsCall = null;
+      const recordingChain = (result) => {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          neq: () => chain,
+          order: () => chain,
+          or: () => chain,
+          contains: () => chain,
+          overlaps: (column, value) => {
+            overlapsCall = { column, value };
+            return chain;
+          },
+          in: () => chain,
+          range: () => thenable(result),
+          maybeSingle: () => thenable(result),
+          single: () => thenable(result),
+          then: (resolve) => resolve(result),
+        };
+        return chain;
+      };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? recordingChain({ data: { id: BRAND_UUID }, error: null })
+          : recordingChain({ data: [], error: null, count: 0 })),
+      };
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        region: 'us',
+        postgrestClient: client,
+      });
+      expect(overlapsCall).to.not.be.null;
+      expect(overlapsCall.column).to.equal('regions');
+      expect(overlapsCall.value).to.have.members(['us', 'US']);
+      expect(overlapsCall.value).to.have.lengthOf(2);
     });
 
     it('uses explicit limit and page values', async () => {
