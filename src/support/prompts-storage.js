@@ -306,6 +306,8 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
   }
 }
 
+const UPDATE_CONCURRENCY = 20;
+
 const SORT_COLUMN_MAP = {
   topic: 'topics(name)',
   prompt: 'text',
@@ -795,20 +797,38 @@ export async function upsertPrompts({
     created = inserted?.length ?? toInsert.length;
   }
 
-  for (const row of toUpdate) {
-    const { id, ...patch } = row;
-    // eslint-disable-next-line no-await-in-loop
-    const { error } = await withMissingIntentFallback(
-      postgrestClient,
-      (includeIntent) => postgrestClient
-        .from('prompts')
-        .update(includeIntent ? patch : stripIntent(patch))
-        .eq('id', id),
+  if (toUpdate.length > 0) {
+    let cursor = 0;
+    const errors = [];
+    const worker = async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= toUpdate.length) {
+          return;
+        }
+        const { id, ...patch } = toUpdate[index];
+        // eslint-disable-next-line no-await-in-loop
+        const { error } = await withMissingIntentFallback(
+          postgrestClient,
+          (includeIntent) => postgrestClient
+            .from('prompts')
+            .update(includeIntent ? patch : stripIntent(patch))
+            .eq('id', id),
+        );
+        if (error) {
+          errors.push(error);
+        } else {
+          updated += 1;
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(UPDATE_CONCURRENCY, toUpdate.length) }, () => worker()),
     );
-    if (error) {
-      throw new Error(`Failed to update prompt: ${error.message}`);
+    if (errors.length > 0) {
+      throw new Error(`Failed to update prompt: ${errors[0].message}`);
     }
-    updated += 1;
   }
 
   const promptsOut = processed.map((r) => ({
