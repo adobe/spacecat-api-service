@@ -82,12 +82,8 @@ export function baseUrlHasPathname(baseURL) {
   if (!isValidUrl(baseURL)) {
     return false;
   }
-  try {
-    const { pathname } = new URL(baseURL);
-    return pathname !== '/';
-  } catch {
-    return false;
-  }
+  const { pathname } = new URL(baseURL);
+  return pathname !== '/';
 }
 
 /**
