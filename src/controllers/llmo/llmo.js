@@ -46,6 +46,7 @@ import {
   applyEdgeOptimizeAssociations,
   verifyEdgeOptimizeRouting,
   runEdgeOptimizeDeployStep,
+  planEdgeOptimizeDeploy,
 } from '../../support/edge-optimize.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { cachedOk } from '../../support/cached-response.js';
@@ -3037,6 +3038,130 @@ function LlmoController(ctx) {
     }
   };
 
+  // Read-only "preview" for the wizard's "Review & Deploy" screen. Mirrors the deploy handler (same
+  // validation + gate + role assumption + server-derived EO origin headers), but calls the
+  // NON-mutating planEdgeOptimizeDeploy and returns the per-step plan + canProceed/blocker so the
+  // FE can show exactly what will happen before the customer commits.
+  const planEdgeOptimizeHandler = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+    const originId = String(context.data?.originId || '').trim();
+    const behavior = String(context.data?.behavior || '').trim();
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
+
+    if (accountId.length !== 12) {
+      return badRequest('accountId must be a 12-digit AWS account ID');
+    }
+    if (!hasText(externalId)) {
+      return badRequest('externalId is required');
+    }
+    if (!hasText(distributionId)) {
+      return badRequest('distributionId is required');
+    }
+    if (!hasText(originId)) {
+      return badRequest('originId is required');
+    }
+    if (!hasText(behavior)) {
+      return badRequest('behavior is required');
+    }
+
+    try {
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'preview edge optimize routing');
+      if (error) {
+        return error;
+      }
+
+      // Derive the EO origin headers server-side (same as deploy) so the origin step of the plan
+      // reflects whether the existing origin already carries the right headers.
+      const baseURL = site.getBaseURL();
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+      const apiKey = metaconfig?.apiKeys?.[0];
+      if (!hasText(apiKey)) {
+        return badRequest('Site has no Edge Optimize API key — enable Edge Optimize for this site first');
+      }
+      const forwardedHost = calculateForwardedHost(baseURL, log);
+
+      const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
+        accountId, externalId, roleName,
+      });
+
+      const result = await planEdgeOptimizeDeploy(credentials, {
+        distributionId,
+        originId,
+        behavior,
+        originDomain,
+        originHeaders: { apiKey, forwardedHost },
+        accountId: resolvedAccountId,
+      });
+
+      log.info(`[edge-optimize-plan] site ${siteId}: canProceed=${result.canProceed},`
+        + ` steps=${result.steps.map((s) => `${s.key}:${s.action}`).join(',')}`);
+      return ok(result);
+    } catch (error) {
+      log.error(`[edge-optimize-plan] Failed for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  /**
+   * GET /sites/{siteId}/llmo/edge-optimize/permissions
+   * Powers the wizard's "View Permissions" panel. Returns a curated, human-friendly manifest of the
+   * AWS permissions the connector role grants (read from a static JSON object in the template S3
+   * bucket) plus the Adobe principal ARN that will assume the role. Read-only — gated on site
+   * access + LLMO admin (like getEdgeOptimizeBootstrapUrl). No cross-account calls.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} { adobeAccount, manifest } or a 400 on a config/read failure.
+   */
+  const getEdgeOptimizePermissionsHandler = async (context) => {
+    const {
+      log, dataAccess, env, s3,
+    } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'view edge optimize permissions');
+      if (error) {
+        return error;
+      }
+
+      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET || 'llmo-edgeoptimize-cf-template';
+      if (!hasText(bucket) || !s3?.s3Client || !s3?.GetObjectCommand) {
+        return badRequest('Edge optimize template hosting is not configured for this environment');
+      }
+
+      // TEMPORARY (testing only): default the Adobe principal to the dev signer's Lambda execution
+      // role. TODO: REMOVE before prod — set EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN via env.
+      const adobeAccount = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN
+        || 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic';
+
+      let manifest;
+      try {
+        const response = await s3.s3Client.send(new s3.GetObjectCommand({
+          Bucket: bucket,
+          Key: 'permissions-manifest.json',
+        }));
+        const body = await response.Body.transformToString();
+        manifest = JSON.parse(body);
+      } catch (s3Error) {
+        log.error(`[edge-optimize-permissions] Failed to read permissions manifest for site ${siteId}: ${s3Error.message}`);
+        return badRequest('Edge optimize permissions manifest is not available');
+      }
+
+      log.info(`[edge-optimize-permissions] Returned permissions manifest for site ${siteId}`);
+      return ok({ adobeAccount, manifest });
+    } catch (error) {
+      log.error(`Failed to read edge optimize permissions for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   return {
     getEdgeOptimizeBootstrapUrl,
     getEdgeOptimizeInstallerUrl,
@@ -3053,6 +3178,8 @@ function LlmoController(ctx) {
     applyEdgeOptimizeAssociations: applyEdgeOptimizeAssociationsHandler,
     verifyEdgeOptimizeRouting: verifyEdgeOptimizeRoutingHandler,
     deployEdgeOptimize: deployEdgeOptimizeHandler,
+    planEdgeOptimize: planEdgeOptimizeHandler,
+    getEdgeOptimizePermissions: getEdgeOptimizePermissionsHandler,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,

@@ -144,6 +144,8 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize/apply-associations',
   'POST /sites/:siteId/llmo/edge-optimize/verify',
   'POST /sites/:siteId/llmo/edge-optimize/deploy',
+  'POST /sites/:siteId/llmo/edge-optimize/plan',
+  'GET /sites/:siteId/llmo/edge-optimize/permissions',
   'GET /sites/:siteId/llmo/edge-optimize/installer-url',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 

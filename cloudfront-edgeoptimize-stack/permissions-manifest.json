@@ -1,0 +1,44 @@
+{
+  "appName": "Adobe LLM Optimizer Deployer",
+  "groups": [
+    {
+      "name": "CloudFront",
+      "items": [
+        "Read & update distributions",
+        "Create/update cache policies",
+        "Create/publish & associate functions"
+      ]
+    },
+    {
+      "name": "Lambda@Edge",
+      "items": [
+        "Create & manage edgeoptimize-* functions and versions"
+      ]
+    },
+    {
+      "name": "IAM",
+      "items": [
+        "Create the edgeoptimize-* execution role",
+        "Pass that role only to Lambda/edge"
+      ]
+    },
+    {
+      "name": "S3",
+      "items": [
+        "Create & write the llmo-edgeoptimize-* state and rollback buckets"
+      ]
+    },
+    {
+      "name": "CloudFormation",
+      "items": [
+        "Create/update the adobe-edgeoptimize-* installer stacks"
+      ]
+    },
+    {
+      "name": "Logs",
+      "items": [
+        "Write CloudWatch logs for the installer"
+      ]
+    }
+  ]
+}

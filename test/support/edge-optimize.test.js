@@ -1446,4 +1446,242 @@ describe('edge-optimize support', () => {
       expect(out.verified).to.equal(true);
     });
   });
+
+  describe('planEdgeOptimizeDeploy', () => {
+    const planParams = {
+      distributionId: 'E2EXAMPLE123',
+      originId: 'origin-aem',
+      behavior: 'default',
+      originDomain: 'live.edgeoptimize.net',
+      originHeaders: { apiKey: 'eo-key', forwardedHost: 'www.example.com' },
+      accountId: '120569600543',
+    };
+
+    // Dispatch each client's send() by command name; per-test overrides via the maps.
+    const wire = (cf = {}, lambda = {}, iam = {}) => {
+      cfSendStub.callsFake((cmd) => {
+        const fn = cf[cmd.commandName];
+        if (fn === undefined) {
+          throw new Error(`unexpected cf command: ${cmd.commandName}`);
+        }
+        return Promise.resolve(typeof fn === 'function' ? fn(cmd) : fn);
+      });
+      lambdaSendStub.callsFake((cmd) => {
+        const fn = lambda[cmd.commandName];
+        if (fn === undefined) {
+          throw new Error(`unexpected lambda command: ${cmd.commandName}`);
+        }
+        return Promise.resolve(typeof fn === 'function' ? fn(cmd) : fn);
+      });
+      iamSendStub.callsFake((cmd) => {
+        const fn = iam[cmd.commandName];
+        if (fn === undefined) {
+          throw new Error(`unexpected iam command: ${cmd.commandName}`);
+        }
+        return Promise.resolve(typeof fn === 'function' ? fn(cmd) : fn);
+      });
+    };
+
+    const throwNamed = (name, message) => () => {
+      const e = new Error(message);
+      e.name = name;
+      throw e;
+    };
+
+    const stepOf = (steps, key) => steps.find((s) => s.key === key);
+
+    it('plans an all-create deploy (nothing exists yet, legacy cache)', async () => {
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: { Items: [] },
+              DefaultCacheBehavior: {
+                ForwardedValues: { Headers: { Quantity: 0, Items: [] } },
+                MinTTL: 60,
+              },
+            },
+          },
+          // function gate: not published to LIVE.
+          DescribeFunction: throwNamed('NoSuchFunctionExists', 'no fn'),
+        },
+        {
+          // lambda: does not exist.
+          GetFunctionConfiguration: throwNamed('ResourceNotFoundException', 'nope'),
+        },
+        {
+          GetRole: throwNamed('NoSuchEntityException', 'no role'),
+        },
+      );
+
+      const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
+
+      expect(result.canProceed).to.equal(true);
+      expect(result.blocker).to.equal(null);
+      expect(result.steps.map((s) => s.key)).to.deep.equal(['origin', 'function', 'cache', 'lambda', 'associate']);
+      expect(stepOf(result.steps, 'origin').action).to.equal('create');
+      expect(stepOf(result.steps, 'function').action).to.equal('create');
+      expect(stepOf(result.steps, 'cache').action).to.equal('update');
+      expect(stepOf(result.steps, 'cache').detail).to.include('legacy');
+      expect(stepOf(result.steps, 'lambda').action).to.equal('create');
+      expect(stepOf(result.steps, 'associate').action).to.equal('create');
+      // no `verify` row in the plan
+      expect(result.steps.some((s) => s.key === 'verify')).to.equal(false);
+    });
+
+    it('blocks when the behavior is already associated (canProceed:false + exact blocker)', async () => {
+      const associatedBehavior = {
+        ForwardedValues: { Headers: { Items: [] } },
+        FunctionAssociations: {
+          Items: [{ EventType: 'viewer-request', FunctionARN: 'arn:aws:cloudfront::1:function/edgeoptimize-routing-adobe-E2EXAMPLE123' }],
+        },
+        LambdaFunctionAssociations: {
+          Items: [{ EventType: 'origin-request', LambdaFunctionARN: 'arn:aws:lambda:us-east-1:1:function:edgeoptimize-origin-adobe-E2EXAMPLE123:1' }],
+        },
+      };
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: { Items: [] },
+              DefaultCacheBehavior: associatedBehavior,
+            },
+          },
+          DescribeFunction: throwNamed('NoSuchFunctionExists', 'no fn'),
+        },
+        { GetFunctionConfiguration: throwNamed('ResourceNotFoundException', 'nope') },
+        { GetRole: throwNamed('NoSuchEntityException', 'no role') },
+      );
+
+      const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
+
+      expect(result.canProceed).to.equal(false);
+      expect(result.blocker).to.equal(
+        "This behaviour is already associated with routes, please recheck — can't proceed with this automation.",
+      );
+      expect(stepOf(result.steps, 'associate').action).to.equal('blocked');
+    });
+
+    it('describes a managed-policy clone in the cache step', async () => {
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: { Items: [] },
+              DefaultCacheBehavior: { CachePolicyId: 'managed-1' },
+            },
+          },
+          DescribeFunction: throwNamed('NoSuchFunctionExists', 'no fn'),
+          ListCachePolicies: (cmd) => (cmd.input.Type === 'managed'
+            ? { CachePolicyList: { Items: [{ CachePolicy: { Id: 'managed-1' } }] } }
+            : { CachePolicyList: { Items: [] } }), // no existing clone
+          GetCachePolicy: {
+            CachePolicy: { CachePolicyConfig: { Name: 'Managed-CachingOptimized' } },
+          },
+        },
+        { GetFunctionConfiguration: throwNamed('ResourceNotFoundException', 'nope') },
+        { GetRole: throwNamed('NoSuchEntityException', 'no role') },
+      );
+
+      const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
+
+      expect(stepOf(result.steps, 'cache').action).to.equal('create');
+      expect(stepOf(result.steps, 'cache').detail).to.include('CachingOptimized-adobe-E2EXAMPLE123');
+      expect(result.canProceed).to.equal(true);
+    });
+
+    it('marks the managed cache step "exists" when the per-dist clone already exists', async () => {
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: { Items: [] },
+              DefaultCacheBehavior: { CachePolicyId: 'managed-1' },
+            },
+          },
+          DescribeFunction: throwNamed('NoSuchFunctionExists', 'no fn'),
+          ListCachePolicies: (cmd) => (cmd.input.Type === 'managed'
+            ? { CachePolicyList: { Items: [{ CachePolicy: { Id: 'managed-1' } }] } }
+            : { CachePolicyList: { Items: [{ CachePolicy: { Id: 'eo-clone', CachePolicyConfig: { Name: 'CachingOptimized-adobe-E2EXAMPLE123' } } }] } }),
+          GetCachePolicy: {
+            CachePolicy: { CachePolicyConfig: { Name: 'Managed-CachingOptimized' } },
+          },
+        },
+        { GetFunctionConfiguration: throwNamed('ResourceNotFoundException', 'nope') },
+        { GetRole: throwNamed('NoSuchEntityException', 'no role') },
+      );
+
+      const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
+      expect(stepOf(result.steps, 'cache').action).to.equal('exists');
+      expect(stepOf(result.steps, 'cache').detail).to.include('already cloned');
+    });
+
+    it('marks function + lambda + origin "exists" when already present', async () => {
+      wire(
+        {
+          GetDistributionConfig: {
+            DistributionConfig: {
+              Origins: {
+                Items: [{
+                  Id: 'EdgeOptimize_Origin',
+                  DomainName: 'live.edgeoptimize.net',
+                  CustomHeaders: {
+                    Items: [
+                      { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                      { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                    ],
+                  },
+                }],
+              },
+              DefaultCacheBehavior: {
+                CachePolicyId: 'cp-custom',
+              },
+            },
+          },
+          // function gate: already published to LIVE.
+          DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+          // cache: custom (not managed) → update in place.
+          ListCachePolicies: { CachePolicyList: { Items: [] } },
+        },
+        {
+          // lambda: exists + has a published version → ready.
+          GetFunctionConfiguration: { FunctionArn: 'arn:lambda', State: 'Active', LastUpdateStatus: 'Successful' },
+          ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: 'arn:lambda:3', CodeSha256: 'sha' }] },
+        },
+        {
+          GetRole: { Role: { Arn: 'arn:role' } },
+        },
+      );
+
+      const result = await edgeOptimize.planEdgeOptimizeDeploy({}, planParams);
+
+      expect(stepOf(result.steps, 'origin').action).to.equal('exists');
+      expect(stepOf(result.steps, 'function').action).to.equal('exists');
+      expect(stepOf(result.steps, 'cache').action).to.equal('update');
+      expect(stepOf(result.steps, 'cache').detail).to.include('custom');
+      expect(stepOf(result.steps, 'lambda').action).to.equal('exists');
+      expect(stepOf(result.steps, 'associate').action).to.equal('create');
+      expect(result.canProceed).to.equal(true);
+    });
+
+    it('throws when distributionId is missing', async () => {
+      let error;
+      try {
+        await edgeOptimize.planEdgeOptimizeDeploy({}, { ...planParams, distributionId: '' });
+      } catch (e) {
+        error = e;
+      }
+      expect(error.message).to.include('distributionId');
+    });
+
+    it('throws when behavior is missing', async () => {
+      let error;
+      try {
+        await edgeOptimize.planEdgeOptimizeDeploy({}, { ...planParams, behavior: '' });
+      } catch (e) {
+        error = e;
+      }
+      expect(error.message).to.include('behavior');
+    });
+  });
 });

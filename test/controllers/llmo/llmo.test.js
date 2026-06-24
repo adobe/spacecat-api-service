@@ -97,6 +97,7 @@ describe('LlmoController', () => {
   let applyEdgeOptimizeAssociationsStub;
   let verifyEdgeOptimizeRoutingStub;
   let runEdgeOptimizeDeployStepStub;
+  let planEdgeOptimizeDeployStub;
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
@@ -216,6 +217,7 @@ describe('LlmoController', () => {
     applyEdgeOptimizeAssociationsStub = sinon.stub();
     verifyEdgeOptimizeRoutingStub = sinon.stub();
     runEdgeOptimizeDeployStepStub = sinon.stub();
+    planEdgeOptimizeDeployStub = sinon.stub();
 
     // Initialize mock TokowakaClient
     mockTokowakaClient = {
@@ -298,6 +300,7 @@ describe('LlmoController', () => {
         applyEdgeOptimizeAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
         verifyEdgeOptimizeRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
         runEdgeOptimizeDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
+        planEdgeOptimizeDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
         ImsClient: function MockImsClient() {
@@ -9091,6 +9094,264 @@ describe('LlmoController', () => {
       });
       const result = await LlmoControllerNoAdmin(mockContext)
         .deployEdgeOptimize(deployContext);
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('planEdgeOptimize', () => {
+    let planContext;
+
+    const samplePlan = {
+      canProceed: true,
+      blocker: null,
+      steps: [
+        {
+          key: 'origin', label: 'Edge Optimize origin', action: 'create', detail: 'add origin',
+        },
+        {
+          key: 'function', label: 'Routing function', action: 'create', detail: 'create fn',
+        },
+        {
+          key: 'cache', label: 'Cache policy', action: 'update', detail: 'legacy',
+        },
+        {
+          key: 'lambda', label: 'Lambda@Edge', action: 'create', detail: 'create lambda',
+        },
+        {
+          key: 'associate', label: 'Association', action: 'create', detail: 'will associate',
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      assumeConnectorRoleStub = sinon.stub().resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      planEdgeOptimizeDeployStub = sinon.stub().resolves(samplePlan);
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['eo-key-123'] });
+      planContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {
+          accountId: '120569600543',
+          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
+          distributionId: 'E2EXAMPLE123',
+          originId: 'origin-aem',
+          behavior: 'default',
+        },
+        env: {},
+      };
+    });
+
+    it('runs the planner and returns the per-step plan', async () => {
+      const result = await controller.planEdgeOptimize(planContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal(samplePlan);
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      expect(planEdgeOptimizeDeployStub.calledOnce).to.equal(true);
+      const [, params] = planEdgeOptimizeDeployStub.firstCall.args;
+      expect(params).to.include({
+        distributionId: 'E2EXAMPLE123',
+        originId: 'origin-aem',
+        behavior: 'default',
+        originDomain: 'live.edgeoptimize.net',
+        accountId: '120569600543',
+      });
+      expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
+    });
+
+    it('returns canProceed:false + blocker when the behavior is already associated', async () => {
+      planEdgeOptimizeDeployStub = sinon.stub().resolves({
+        canProceed: false,
+        blocker: "This behaviour is already associated with routes, please recheck — can't proceed with this automation.",
+        steps: samplePlan.steps,
+      });
+
+      const result = await controller.planEdgeOptimize(planContext);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.canProceed).to.equal(false);
+      expect(body.blocker).to.include("can't proceed with this automation");
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, accountId: '123' } });
+      expect(result.status).to.equal(400);
+      expect(planEdgeOptimizeDeployStub.called).to.equal(false);
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, externalId: '' } });
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the distributionId is missing', async () => {
+      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, distributionId: '' } });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('distributionId');
+    });
+
+    it('returns 400 when the originId is missing', async () => {
+      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, originId: '' } });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('originId');
+    });
+
+    it('returns 400 when the behavior is missing', async () => {
+      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, behavior: '' } });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('behavior');
+    });
+
+    it('returns 400 when the site has no Edge Optimize API key', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
+      const result = await controller.planEdgeOptimize(planContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('API key');
+      expect(planEdgeOptimizeDeployStub.called).to.equal(false);
+    });
+
+    it('returns 400 when the planner throws', async () => {
+      planEdgeOptimizeDeployStub = sinon.stub().rejects(new Error('plan failed'));
+      const result = await controller.planEdgeOptimize(planContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('plan failed');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.planEdgeOptimize(planContext);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.planEdgeOptimize(planContext);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerNoAdmin(mockContext)
+        .planEdgeOptimize(planContext);
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('getEdgeOptimizePermissions', () => {
+    let permissionsContext;
+    let s3SendStub;
+
+    const sampleManifest = {
+      appName: 'Adobe LLM Optimizer Deployer',
+      groups: [
+        { name: 'CloudFront', items: ['Read & update distributions'] },
+      ],
+    };
+
+    beforeEach(() => {
+      s3SendStub = sinon.stub().resolves({
+        Body: { transformToString: async () => JSON.stringify(sampleManifest) },
+      });
+      permissionsContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        env: {},
+        s3: {
+          s3Client: { send: s3SendStub },
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            Object.assign(this, params);
+          },
+        },
+      };
+    });
+
+    it('returns the manifest + adobeAccount', async () => {
+      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.manifest).to.deep.equal(sampleManifest);
+      expect(body.adobeAccount).to.equal('arn:aws:iam::682033462621:role/spacecat-role-lambda-generic');
+      expect(s3SendStub.calledOnce).to.equal(true);
+      const [cmd] = s3SendStub.firstCall.args;
+      expect(cmd.Key).to.equal('permissions-manifest.json');
+      expect(cmd.Bucket).to.equal('llmo-edgeoptimize-cf-template');
+    });
+
+    it('uses env-configured bucket + trusted principal when set', async () => {
+      const result = await controller.getEdgeOptimizePermissions({
+        ...permissionsContext,
+        env: {
+          EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'custom-bucket',
+          EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::111111111111:role/prod-signer',
+        },
+      });
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.adobeAccount).to.equal('arn:aws:iam::111111111111:role/prod-signer');
+      const [cmd] = s3SendStub.firstCall.args;
+      expect(cmd.Bucket).to.equal('custom-bucket');
+    });
+
+    it('returns 400 when template hosting is not configured (no S3 client)', async () => {
+      const result = await controller.getEdgeOptimizePermissions({ ...permissionsContext, s3: {} });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('not configured');
+    });
+
+    it('returns 400 when the manifest read fails', async () => {
+      s3SendStub.rejects(new Error('NoSuchKey'));
+      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('not available');
+    });
+
+    it('returns 400 when the manifest is not valid JSON', async () => {
+      s3SendStub.resolves({ Body: { transformToString: async () => 'not-json{' } });
+      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('not available');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.getEdgeOptimizePermissions(permissionsContext);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerNoAdmin(mockContext)
+        .getEdgeOptimizePermissions(permissionsContext);
       expect(result.status).to.equal(403);
     });
   });

@@ -1408,3 +1408,199 @@ export async function runEdgeOptimizeDeployStep(
 
   return { routingDeployed, verified, steps };
 }
+
+/**
+ * Read-only "preview" of what {@link runEdgeOptimizeDeployStep} would do, without mutating
+ * anything. Powers the wizard's "Review & Deploy" screen: it inspects the distribution config,
+ * the attached cache policy, the routing CloudFront Function, and the Lambda@Edge function, and
+ * returns a per-step plan (create | exists | update | blocked) plus an overall canProceed/blocker.
+ *
+ * Only reads are issued (GetDistributionConfig, ListCachePolicies, DescribeFunction,
+ * GetFunctionConfiguration/ListVersions via the existing gates). It is intentionally defensive:
+ * a missing resource is "create", and a read that genuinely errors is surfaced in that step's
+ * detail while still allowing the plan to proceed — the ONLY hard blocker is a behavior that is
+ * already associated with EO routes (that is the one case the automation refuses to touch).
+ *
+ * @param {object} credentials - temporary credentials from {@link assumeConnectorRole}.
+ * @param {object} params
+ * @param {string} params.distributionId - the CloudFront distribution ID.
+ * @param {string} params.originId - the default-behavior target origin id (failover origin).
+ * @param {string} params.behavior - the cache behavior to target (`default` for the default).
+ * @param {string} [params.originDomain] - the Edge Optimize origin domain.
+ * @param {object} [params.originHeaders] - EO origin headers ({ apiKey, forwardedHost }).
+ * @param {string} [params.accountId] - the 12-digit customer AWS account ID.
+ * @param {string} [region] - CloudFront control-plane region.
+ * @returns {Promise<{canProceed: boolean, blocker: string|null,
+ *   steps: Array<{key: string, label: string, action: string, detail: string}>}>}
+ */
+export async function planEdgeOptimizeDeploy(
+  credentials,
+  {
+    distributionId, behavior, originDomain = EDGE_OPTIMIZE_DEFAULT_ORIGIN_DOMAIN, originHeaders,
+  },
+  region = EDGE_OPTIMIZE_REGION,
+) {
+  if (!hasText(distributionId)) {
+    throw new Error('distributionId is required');
+  }
+  if (!hasText(behavior)) {
+    throw new Error('behavior is required');
+  }
+  const client = new CloudFrontClient({ region, credentials });
+
+  // Plan rows mirror EDGE_OPTIMIZE_DEPLOY_STEPS (sans `verify`, which is a post-deploy probe).
+  const labelOf = (key) => EDGE_OPTIMIZE_DEPLOY_STEPS.find((s) => s.key === key)?.label || key;
+  const steps = ['origin', 'function', 'cache', 'lambda', 'associate'].map((key) => ({
+    key, label: labelOf(key), action: 'create', detail: '',
+  }));
+  const byKey = (key) => steps.find((s) => s.key === key);
+
+  let canProceed = true;
+  let blocker = null;
+
+  // Read the distribution config ONCE for the origin + cache inspections.
+  let config = null;
+  try {
+    const distResult = await client.send(new GetDistributionConfigCommand({ Id: distributionId }));
+    config = distResult.DistributionConfig || null;
+  } catch (err) {
+    // A read failure here doesn't block — surface it on the origin/cache rows and keep going.
+    byKey('origin').detail = `could not read distribution config: ${err.message}`;
+    byKey('cache').detail = `could not read distribution config: ${err.message}`;
+  }
+
+  // ── origin ──────────────────────────────────────────────────────────────
+  // 'exists' when the EO origin is already present WITH the required custom headers; otherwise
+  // 'create' (a header-less existing origin still needs the headers patched → treated as create).
+  const desiredHeaderItems = buildEdgeOptimizeOriginHeaders(originHeaders || {});
+  if (config) {
+    const origins = config.Origins?.Items || [];
+    const existing = origins.find(
+      (o) => o.Id === EDGE_OPTIMIZE_ORIGIN_ID || o.DomainName === originDomain,
+    );
+    if (existing) {
+      const toMap = (arr) => (arr || []).reduce((acc, h) => {
+        acc[h.HeaderName.toLowerCase()] = h.HeaderValue;
+        return acc;
+      }, {});
+      const current = toMap(existing.CustomHeaders?.Items);
+      const desired = toMap(desiredHeaderItems);
+      const headersMatch = desiredHeaderItems.length === 0
+        || (Object.keys(desired).length === Object.keys(current).length
+          && Object.entries(desired).every(([k, v]) => current[k] === v));
+      if (headersMatch) {
+        byKey('origin').action = 'exists';
+        byKey('origin').detail = `Edge Optimize origin already present (${existing.DomainName})`;
+      } else {
+        byKey('origin').detail = `patch Edge Optimize origin headers (${existing.DomainName})`;
+      }
+    } else {
+      byKey('origin').detail = `add Edge Optimize origin (${originDomain})`;
+    }
+  } else if (!byKey('origin').detail) {
+    byKey('origin').detail = `add Edge Optimize origin (${originDomain})`;
+  }
+
+  // ── function ────────────────────────────────────────────────────────────
+  // 'exists' when the routing CloudFront Function is already published to LIVE.
+  try {
+    if (await isRoutingFunctionLive(client, distributionId)) {
+      byKey('function').action = 'exists';
+      byKey('function').detail = `routing function ${eoRoutingFunctionName(distributionId)} already published to LIVE`;
+    } else {
+      byKey('function').detail = `create routing function ${eoRoutingFunctionName(distributionId)}`;
+    }
+  } catch (err) {
+    byKey('function').detail = `could not read routing function status: ${err.message}`;
+  }
+
+  // ── cache ───────────────────────────────────────────────────────────────
+  // Detect the scenario the deploy would hit (legacy / custom / managed) and describe it without
+  // mutating. Mirrors applyEdgeOptimizeCacheHeaders' detection logic.
+  try {
+    if (!config) {
+      throw new Error('distribution config unavailable');
+    }
+    const targetBehavior = getBehaviorFromConfig(config, behavior);
+    const policyId = targetBehavior.CachePolicyId;
+    const minTtlNote = ' (MinTTL forced to 0 unless already <= 5s)';
+    if (!policyId) {
+      // Legacy: ForwardedValues. 'exists' when EO headers are already forwarded.
+      const fv = targetBehavior.ForwardedValues || {};
+      const lower = (fv.Headers?.Items || []).map((x) => x.toLowerCase());
+      const allForwarded = lower.includes('*')
+        || EDGE_OPTIMIZE_CACHE_HEADERS.every((h) => lower.includes(h));
+      if (allForwarded) {
+        byKey('cache').action = 'exists';
+        byKey('cache').detail = 'legacy behaviour already forwards the Edge Optimize headers';
+      } else {
+        byKey('cache').action = 'update';
+        byKey('cache').detail = `legacy behaviour: add Edge Optimize headers to ForwardedValues${minTtlNote}`;
+      }
+    } else {
+      const managedList = await client.send(new ListCachePoliciesCommand({ Type: 'managed' }));
+      const managedIds = new Set(
+        (managedList.CachePolicyList?.Items || []).map((i) => i.CachePolicy.Id),
+      );
+      const isManaged = managedIds.has(policyId);
+      if (!isManaged) {
+        byKey('cache').action = 'update';
+        byKey('cache').detail = `update existing custom cache policy in place to add the Edge Optimize headers${minTtlNote}`;
+      } else {
+        // Managed → must clone. 'exists' when the per-dist clone already exists (idempotent).
+        const srcResult = await client.send(new GetCachePolicyCommand({ Id: policyId }));
+        const sourceName = srcResult.CachePolicy?.CachePolicyConfig?.Name || 'cache';
+        const clonedName = buildEoClonedCachePolicyName(sourceName, distributionId);
+        const customList = await client.send(new ListCachePoliciesCommand({ Type: 'custom' }));
+        const cloneExists = (customList.CachePolicyList?.Items || []).some(
+          (i) => i.CachePolicy.CachePolicyConfig.Name === clonedName,
+        );
+        if (cloneExists) {
+          byKey('cache').action = 'exists';
+          byKey('cache').detail = `managed policy already cloned into ${clonedName}`;
+        } else {
+          byKey('cache').action = 'create';
+          byKey('cache').detail = `managed policy '${sourceName}' cannot be edited: clone into ${clonedName}${minTtlNote}`;
+        }
+      }
+    }
+  } catch (err) {
+    // Don't block the plan on a cache read failure — surface it on the row.
+    byKey('cache').action = 'update';
+    byKey('cache').detail = `could not determine cache scenario: ${err.message}`;
+  }
+
+  // ── lambda ──────────────────────────────────────────────────────────────
+  // 'exists' when the Lambda@Edge function exists (ready or still provisioning); else 'create'.
+  try {
+    const ls = await getEdgeOptimizeLambdaStatus(credentials, distributionId, region);
+    if (ls.exists) {
+      byKey('lambda').action = 'exists';
+      byKey('lambda').detail = ls.ready
+        ? `Lambda@Edge ${eoLambdaFunctionName(distributionId)} already published`
+        : `Lambda@Edge ${eoLambdaFunctionName(distributionId)} exists (still provisioning)`;
+    } else {
+      byKey('lambda').detail = `create Lambda@Edge ${eoLambdaFunctionName(distributionId)}`;
+    }
+  } catch (err) {
+    byKey('lambda').detail = `could not read Lambda@Edge status: ${err.message}`;
+  }
+
+  // ── associate ───────────────────────────────────────────────────────────
+  // HARD BLOCK: if the behavior is already associated with EO routes, the automation refuses to
+  // proceed (it would clobber the customer's existing wiring). This is the only blocker.
+  try {
+    if (await isBehaviorAlreadyAssociated(client, distributionId, behavior)) {
+      byKey('associate').action = 'blocked';
+      byKey('associate').detail = 'this behaviour is already associated with Edge Optimize routes';
+      canProceed = false;
+      blocker = "This behaviour is already associated with routes, please recheck — can't proceed with this automation.";
+    } else {
+      byKey('associate').detail = 'will associate routing function + Lambda@Edge to the behavior';
+    }
+  } catch (err) {
+    byKey('associate').detail = `could not read behavior associations: ${err.message}`;
+  }
+
+  return { canProceed, blocker, steps };
+}
