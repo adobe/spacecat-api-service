@@ -10,9 +10,19 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import * as dataAccessModels from '@adobe/spacecat-shared-data-access';
 import { hostnameFromUrlString } from '../url-utils.js';
+
+// `Site` is a runtime value (the model class carrying the DELIVERY_TYPES static
+// map) but the data-access package's .d.ts re-exports its models as types only,
+// so tsc can't see it as a value. Reach it through the namespace and assert the
+// one shape we depend on, rather than hard-coding the 'other' literal.
+const { Site: SiteModel } = /** @type {{ Site: { DELIVERY_TYPES: Record<string, string> } }} */ (
+  /** @type {unknown} */ (dataAccessModels)
+);
 
 /**
  * The brand_sites.type marker for a Site that mirrors a Semrush market (project).
@@ -49,10 +59,10 @@ export const SERENITY_BRAND_SITE_TYPE = 'serenity';
  * swallowed (never thrown) rather than failing a market the user can see is live.
  *
  * @param {object} ctx - request context (ctx.dataAccess.Site + postgrestClient).
- * @param {object} opts
- * @param {string} opts.organizationId - the brand's organization UUID.
- * @param {string} opts.brandId - the brand UUID.
- * @param {string} opts.domain - the market/project domain or primary URL. Tolerates
+ * @param {object} [opts]
+ * @param {string} [opts.organizationId] - the brand's organization UUID.
+ * @param {string} [opts.brandId] - the brand UUID.
+ * @param {string} [opts.domain] - the market/project domain or primary URL. Tolerates
  *   a bare hostname ("example.com") or a full URL ("https://example.com/x"); it is
  *   normalized to the hostname via hostnameFromUrlString (the single source of truth
  *   for brand -> Semrush project domain derivation) so all call sites resolve to the
@@ -71,7 +81,11 @@ export async function ensureMarketSite(ctx, {
   updatedBy = 'serenity-market',
   log,
 } = {}) {
-  if (!hasText(domain) || !hasText(organizationId) || !hasText(brandId)) {
+  if (
+    !domain || !hasText(domain)
+    || !organizationId || !hasText(organizationId)
+    || !brandId || !hasText(brandId)
+  ) {
     return null;
   }
 
@@ -88,7 +102,7 @@ export async function ensureMarketSite(ctx, {
   // global base_url uniqueness constraint on every retry. hostnameFromUrlString
   // keeps this in lockstep with brandDomainFromPayload (the brand-create path).
   const hostname = hostnameFromUrlString(domain);
-  if (!hasText(hostname)) {
+  if (!hostname || !hasText(hostname)) {
     log?.warn?.('ensureMarketSite: domain did not resolve to a hostname; skipping', { brandId, domain });
     return null;
   }
