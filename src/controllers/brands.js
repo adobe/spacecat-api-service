@@ -1407,20 +1407,24 @@ function BrandsController(ctx, log, env) {
       // its presence ALSO signals Semrush mode even when no market was picked —
       // a bare "save and continue later" draft (location/language optional).
       const generatePrompts = brandData.generatePrompts === true;
-      // Semrush-mode detection. A LIVE create must carry a positive Semrush
-      // signal — a picked market, or generatePrompts:true (which itself requires
-      // a market, enforced below). We deliberately do NOT treat the mere
-      // PRESENCE of a `generatePrompts` boolean as the signal on the live path:
-      // a flat (non-Semrush) caller that defensively sends `generatePrompts:false`
-      // must not be pulled into Semrush provisioning (it would 400 for a missing
-      // primary URL, or worse, provision a sub-workspace for a brand never meant
-      // to have one). The boolean-presence signal is kept ONLY for a PENDING
-      // draft, where `generatePrompts:false` with no market is the legitimate
-      // "save a sub-workspace-only Semrush brand and continue later" path (see
+      // The wizard always sends `generatePrompts` as an explicit boolean for a
+      // Semrush-mode create; a flat (non-Semrush) create omits it entirely. So
+      // the mere PRESENCE of the flag (true OR false) is itself a Semrush-mode
+      // signal — but see below: only trusted for a draft.
+      const hasGeneratePromptsFlag = typeof brandData.generatePrompts === 'boolean';
+      // A draft (pending) brand may legitimately be a "sub-workspace-only Semrush
+      // brand, save and continue later": no market, generatePrompts:false. The
+      // flag's presence is what marks it as Semrush mode (see
       // normalizePendingSemrushProvisioning, which stashes a bare no-prompt draft).
-      const isSemrushMode = hasSemrushMarket
-        || generatePrompts
-        || (isPendingBrand && typeof brandData.generatePrompts === 'boolean');
+      const isSubworkspaceOnlyDraft = isPendingBrand && hasGeneratePromptsFlag;
+      // Semrush-mode detection. A LIVE create must carry a POSITIVE signal — a
+      // picked market, or generatePrompts:true (which itself requires a market,
+      // enforced below). We deliberately do NOT treat the mere presence of the
+      // flag as the signal on the live path: a flat caller that defensively sends
+      // `generatePrompts:false` must not be pulled into Semrush provisioning (it
+      // would 400 for a missing primary URL, or worse, provision a sub-workspace
+      // for a brand never meant to have one). Presence is trusted ONLY for a draft.
+      const isSemrushMode = hasSemrushMarket || generatePrompts || isSubworkspaceOnlyDraft;
       if (isSemrushMode) {
         let market;
         let languageCode;
