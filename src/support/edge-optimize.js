@@ -44,6 +44,12 @@ import {
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
+// Edge runtime code (Lambda@Edge handler + CloudFront routing function) lives in its own
+// module for readability; imported for use here and re-exported to keep the public surface.
+import { EDGE_OPTIMIZE_LAMBDA_CODE, buildRoutingFunctionCode } from './edge-optimize-edge-code.js';
+
+export { EDGE_OPTIMIZE_LAMBDA_CODE, buildRoutingFunctionCode };
+
 // CloudFront is a global service; its control plane lives in us-east-1.
 export const EDGE_OPTIMIZE_REGION = 'us-east-1';
 export const EDGE_OPTIMIZE_DEFAULT_ROLE_NAME = 'AdobeLLMOptimizerCloudFrontConnectorRole';
@@ -359,72 +365,6 @@ export async function createEdgeOptimizeOrigin(
 }
 
 /**
- * Build the CloudFront Function (viewer-request) routing code. Ported verbatim from the standalone
- * wizard's `buildFunctionCode` (server.mjs). It detects agentic bots on HTML pages and, for them,
- * creates a request origin group that fails over from the Edge Optimize origin to the default
- * origin.
- *
- * @param {string} defaultOriginId - the distribution's default-behavior target origin id.
- * @param {string[]|null} [targetedPaths] - explicit paths to target, or null for "all HTML pages".
- * @returns {string} the CloudFront Function source code.
- */
-export function buildRoutingFunctionCode(defaultOriginId, targetedPaths = null) {
-  const targetedPathsValue = targetedPaths === null ? 'null' : JSON.stringify(targetedPaths);
-
-  return `import cf from 'cloudfront';
-
-function handler(event) {
-    var request = event.request;
-    var headers = request.headers;
-
-    delete headers['x-edgeoptimize-api-key'];
-    delete headers['x-edgeoptimize-url'];
-    delete headers['x-edgeoptimize-config'];
-
-    var AGENTIC_BOTS = ['AdobeEdgeOptimize-AI', 'ChatGPT-User', 'GPTBot', 'OAI-SearchBot', 'PerplexityBot', 'Perplexity-User', 'ClaudeBot', 'Claude-User', 'Claude-SearchBot'];
-    var TARGETED_PATHS = ${targetedPathsValue};
-
-    var userAgent = headers['user-agent'] ? headers['user-agent'].value.toLowerCase() : '';
-    var isEdgeOptimizeRequest = headers['x-edgeoptimize-request'];
-
-    var path = request.uri;
-    var pattern = /(?:\\/[^./]+|\\.html|\\/)$/;
-    var isHtmlPage = pattern.test(path);
-
-    var isTargetedPath = TARGETED_PATHS === null
-        ? isHtmlPage
-        : isHtmlPage && TARGETED_PATHS.includes(path);
-
-    var isAgenticBot = AGENTIC_BOTS.some(function(bot) {
-        return userAgent.includes(bot.toLowerCase());
-    });
-
-    if (!isEdgeOptimizeRequest && isAgenticBot && isTargetedPath) {
-        request.headers['x-edgeoptimize-url'] = { value: request.uri };
-        request.headers['x-edgeoptimize-config'] = { value: "LLMCLIENT=true" };
-
-        console.log("Adding origin group for userAgent: " + userAgent);
-
-        cf.createRequestOriginGroup({
-            "originIds": [
-                { "originId": "EdgeOptimize_Origin" },
-                { "originId": "${defaultOriginId}" }
-            ],
-            "failoverCriteria": {
-                "statusCodes": [400, 403, 404, 416, 500, 502, 503, 504]
-            }
-        });
-
-        console.log("Routing to Edge Optimize origin for userAgent: " + userAgent);
-        return request;
-    }
-
-    console.log("Routing to Default origin for userAgent: " + userAgent);
-    return request;
-}`;
-}
-
-/**
  * Create or update the `edgeoptimize-routing` CloudFront Function and publish it to LIVE
  * (idempotent). Mirrors the standalone wizard's create-function step.
  *
@@ -663,59 +603,6 @@ export async function applyEdgeOptimizeCacheHeaders(
     scenario: 'managed', policyId: newPolicyId, updated: true, alreadyForwarded: false, reused,
   };
 }
-
-// The Lambda@Edge origin-request/response handler, ported verbatim from the standalone wizard's
-// templates/origin-request-response.js. Kept as an inline JS module string (not a sibling-file
-// read) so the helix-deploy bundle preserves it — see CLAUDE.md "Lambda Bundle Constraints".
-export const EDGE_OPTIMIZE_LAMBDA_CODE = `function hasHeader(map, name) {
-  const h = map?.[name];
-  return Array.isArray(h) && h.length > 0 && (h[0].value || '').trim() !== '';
-}
-
-function setHeader(map, name, value) {
-  if (map) {
-    map[name.toLowerCase()] = [{ key: name, value: String(value) }];
-  }
-}
-
-export const handler = async (event) => {
-  const request = event?.Records?.[0]?.cf?.request;
-  const response = event?.Records?.[0]?.cf?.response;
-  const eventType = event.Records[0].cf.config.eventType;
-  const reqHeaders = request.headers || {};
-
-  if (eventType === 'origin-request') {
-    const originDomain = request.origin?.custom?.domainName;
-    const isEdgeOptimizeConfig = hasHeader(reqHeaders, 'x-edgeoptimize-config');
-    const isEdgeOptimizeRequest = hasHeader(reqHeaders, 'x-edgeoptimize-request');
-
-    if (isEdgeOptimizeConfig && !isEdgeOptimizeRequest) {
-      if (originDomain === 'live.edgeoptimize.net') {
-        console.log("Calling Edge Optimize Origin for agentic requests");
-        setHeader(request.headers, 'host', originDomain);
-      } else {
-        console.log("Calling Default Origin in case of failover for agentic requests");
-        setHeader(request.headers, 'x-edgeoptimize-request', 'fo');
-      }
-    }
-
-    return request;
-
-  } else if (eventType === 'origin-response') {
-    const resHeaders = response.headers || {};
-    const isEdgeOptimizeConfig = hasHeader(reqHeaders, 'x-edgeoptimize-config');
-    const isEdgeOptimizeRequestId = hasHeader(resHeaders, 'x-edgeoptimize-request-id');
-
-    if (isEdgeOptimizeConfig && !isEdgeOptimizeRequestId) {
-      setHeader(response.headers, 'x-edgeoptimize-fo', '1');
-      setHeader(response.headers, 'cache-control', 'no-store');
-      console.log('Failover Triggered for agentic requests');
-    }
-
-    return response;
-  }
-};
-`;
 
 const LAMBDA_TRUST_POLICY = JSON.stringify({
   Version: '2012-10-17',
