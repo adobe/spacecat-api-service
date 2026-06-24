@@ -1,3 +1,10 @@
+## [1.592.1](https://github.com/adobe/spacecat-api-service/compare/v1.592.0...v1.592.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **auth:** restore read-only admin access on by-key + agentic-traffic reads ([#2674](https://github.com/adobe/spacecat-api-service/issues/2674)) ([ff1d4c3](https://github.com/adobe/spacecat-api-service/commit/ff1d4c3e22c51864445fc6b80671b2f7dcc82fe5)), closes [#2640](https://github.com/adobe/spacecat-api-service/issues/2640)
+
 # [1.592.0](https://github.com/adobe/spacecat-api-service/compare/v1.591.0...v1.592.0) (2026-06-23)
 
 
