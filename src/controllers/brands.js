@@ -481,6 +481,7 @@ function BrandsController(ctx, log, env) {
         prompts,
         postgrestClient,
         updatedBy,
+        classifyIntent,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
