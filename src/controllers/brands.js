@@ -57,6 +57,7 @@ import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../supp
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
+import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import {
   buildReservedDomains,
   dropReservedCompetitors,
@@ -1477,12 +1478,17 @@ function BrandsController(ctx, log, env) {
           if (generatePrompts && modelIds.length === 0) {
             return badRequest('semrushModelIds must list at least one AI model to track');
           }
-          // Brand aliases drive branded/non-branded prompt classification. Accept
-          // both shapes the create payload may carry: plain strings or {name}.
+          // Brand aliases drive branded/non-branded prompt classification and the
+          // project brand_names. Normalize to `{ name, regions }` (accepting both
+          // payload shapes: plain strings — region-less — or `{ name, regions }`),
+          // keeping `regions` so the create handler region-clamps each alias to the
+          // initial market.
           const brandAliases = Array.isArray(brandData.brandAliases)
             ? brandData.brandAliases
-              .map((a) => (typeof a === 'string' ? a : a?.name))
-              .filter(hasText)
+              .map((a) => (typeof a === 'string'
+                ? { name: a, regions: [] }
+                : { name: a?.name, regions: a?.regions || [] }))
+              .filter((a) => hasText(a.name))
             : [];
           // Brand URLs (own sites + social + earned) are pushed onto the initial
           // market's project benchmark. The row isn't written yet, so they come
@@ -1652,6 +1658,9 @@ function BrandsController(ctx, log, env) {
       const oldCompetitors = competitorsTouched
         ? await getBrandCompetitors(brandUuid, postgrestClient)
         : [];
+      // Brand aliases (the extra names the brand is known by) re-sync to every
+      // market's project brand_names + own-brand benchmark on edit.
+      const aliasesTouched = updates.brandAliases !== undefined;
 
       // LLMO-5645: a region must not be removed from a brand while prompts still
       // use it — DRS schedules off each prompt's `regions`, so dropping a brand
@@ -1752,7 +1761,11 @@ function BrandsController(ctx, log, env) {
       const urlsTouched = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;
-      if ((urlsTouched || competitorsTouched) && hasText(updated.semrushWorkspaceId)) {
+      // Aliases Semrush silently refused on this re-sync (own-brand or competitor
+      // benchmarks), surfaced on the response so the UI can warn the operator.
+      const rejectedAliases = [];
+      if ((urlsTouched || competitorsTouched || aliasesTouched)
+        && hasText(updated.semrushWorkspaceId)) {
         // Forward only an IMS user token upstream (matches the create path +
         // the rest of /serenity/*): PATCH /brands is organization:write and thus
         // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
@@ -1773,7 +1786,7 @@ function BrandsController(ctx, log, env) {
           }
           if (competitorsTouched) {
             const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
-            await syncCompetitorBenchmarksAcrossMarkets(
+            const competitorResult = await syncCompetitorBenchmarksAcrossMarkets(
               transport,
               updated.competitors,
               removed,
@@ -1784,6 +1797,17 @@ function BrandsController(ctx, log, env) {
               // of the brand's own properties.
               updated.urls,
             );
+            rejectedAliases.push(...(competitorResult?.rejected ?? []));
+          }
+          if (aliasesTouched) {
+            const aliasResult = await syncBrandAliasesAcrossMarkets(
+              transport,
+              updated.brandAliases,
+              updated.name,
+              updated.semrushWorkspaceId,
+              log,
+            );
+            rejectedAliases.push(...(aliasResult?.rejected ?? []));
           }
         } catch (syncError) {
           // The brand row is already committed; re-sync hard-fails (the brand
@@ -1795,10 +1819,23 @@ function BrandsController(ctx, log, env) {
             semrushWorkspaceId: updated.semrushWorkspaceId,
             urlsTouched,
             competitorsTouched,
+            aliasesTouched,
             status: syncError?.status,
           });
           throw syncError;
         }
+      }
+
+      if (rejectedAliases.length > 0) {
+        // Non-fatal: the aliases were written, Semrush just declined some. Warn
+        // (so it is greppable) and hand the set back so the UI can tell the user
+        // which aliases are not being tracked.
+        log.warn('serenity: Semrush rejected some brand/competitor aliases on re-sync', {
+          brandId,
+          semrushWorkspaceId: updated.semrushWorkspaceId,
+          rejected: rejectedAliases,
+        });
+        return ok({ ...updated, semrushRejectedAliases: rejectedAliases });
       }
 
       return ok(updated);

@@ -377,6 +377,24 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * PATCH /v1/workspaces/{ws}/projects/{pid} — partial project update
+     * (projects-patch-project). Body is a `model.ProjectUpdateRequest`; we use it
+     * to re-sync the project's own-brand identity — `brand_name_display` +
+     * `brand_names` (the display name and brand aliases that classify branded
+     * prompts) — when a brand's aliases change. Upstream PATCH confirmed live on
+     * prod 2026-06-24 (OPTIONS .../projects/{pid} → 405 allow: PATCH, DELETE, GET).
+     */
+    async updateProject(semrushWorkspaceId, projectId, body) {
+      return unwrap('PATCH', await projects.PATCH(
+        '/v1/workspaces/{id}/projects/{project_id}',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body,
+        },
+      ));
+    },
+
+    /**
      * POST /v2/workspaces/{ws}/projects/{pid}/ai_models — adds one AI model
      * to a project. `modelId` is the catalog model identifier from
      * `AIModelResponse.id` on the GET listing. Returns the new assignment row.
@@ -641,6 +659,28 @@ export function createSerenityTransport({ env, imsToken }) {
         {
           params: { path: { id: workspaceId, project_id: projectId } },
           body: { ids },
+        },
+      ));
+    },
+
+    /**
+     * PUT /v1/workspaces/{ws}/projects/{pid}/ai_models/benchmarks/{bid} — update a
+     * benchmark in place (ai-update-benchmark). Body is a `model.AIOBenchmarkRequest`
+     * ({ brand_name, brand_aliases, domain, color, favorite }). Used to re-sync a
+     * benchmark's `brand_aliases` (own-brand or a competitor) when the alias set
+     * changes but the domain does not — the create/delete pair cannot express an
+     * in-place alias edit. Upstream PUT confirmed live on prod 2026-06-24
+     * (OPTIONS .../benchmarks/{bid} → 405 allow: PUT). Semrush may silently reject
+     * some aliases; read them back from `listBenchmarks` (`rejected_brand_aliases`).
+     */
+    async updateBenchmark(workspaceId, projectId, benchmarkId, benchmark) {
+      return unwrap('PUT', await projects.PUT(
+        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks/{benchmark_id}',
+        {
+          params: {
+            path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
+          },
+          body: benchmark,
         },
       ));
     },

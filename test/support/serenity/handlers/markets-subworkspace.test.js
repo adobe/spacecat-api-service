@@ -193,6 +193,28 @@ describe('markets-subworkspace handlers', () => {
       expect(projectBody.brand_names).to.deep.equal(['B', 'Bee', 'Acme']);
     });
 
+    it('region-clamps { name, regions } aliases to the market on create (a DE alias is dropped for a US market)', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody, // US market (geoTargetId 2840)
+        log,
+        null,
+        null,
+        {
+          brandAliases: [
+            { name: 'Global', regions: [] }, // region-less → applies
+            { name: 'US Co', regions: ['us'] }, // applies
+            { name: 'DE Marke', regions: ['de'] }, // dropped for US
+          ],
+        },
+      );
+      const projectBody = transport.createProject.firstCall.args[1];
+      expect(projectBody.brand_names).to.deep.equal(['B', 'Global', 'US Co']);
+    });
+
     it('pushes region-filtered brand URLs onto the main benchmark before publishing', async () => {
       const transport = makeTransport();
       const brandUrlSources = {

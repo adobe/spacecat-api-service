@@ -90,6 +90,66 @@ export default function brandsTests(getHttpClient, resetData) {
     });
   });
 
+  describe('Brands v2 aliases (regions) + competitors (aliases) round-trip', () => {
+    before(() => resetData());
+
+    it('persists brand-alias regions and competitor aliases through create, GET, and PATCH', async () => {
+      const http = getHttpClient();
+
+      // Flat-mode brand (no semrushMarket → no sub-workspace), so PATCH exercises
+      // the data layer without triggering the upstream Semrush re-sync.
+      const createRes = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Aliases Roundtrip Brand',
+        region: ['us', 'de'],
+        brandAliases: [
+          { name: 'Acme', regions: [] },
+          { name: 'Acme DE', regions: ['de'] },
+        ],
+        competitors: [
+          {
+            name: 'Rival', url: 'https://rival.com', aliases: ['Rival Inc', 'RVL'], regions: ['us'],
+          },
+        ],
+      });
+      expect(createRes.status).to.equal(201);
+      const { id: brandId } = createRes.body;
+      expect(createRes.body.brandAliases).to.have.deep.members([
+        { name: 'Acme', regions: [] },
+        { name: 'Acme DE', regions: ['de'] },
+      ]);
+      expect(createRes.body.competitors).to.deep.equal([
+        {
+          name: 'Rival', url: 'https://rival.com', aliases: ['Rival Inc', 'RVL'], regions: ['us'],
+        },
+      ]);
+
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`);
+      expect(getRes.status).to.equal(200);
+      expect(getRes.body.competitors[0].aliases).to.deep.equal(['Rival Inc', 'RVL']);
+      const acmeDe = getRes.body.brandAliases.find((a) => a.name === 'Acme DE');
+      expect(acmeDe.regions).to.deep.equal(['de']);
+
+      // PATCH (full-replace) the competitor aliases and an alias's regions.
+      const patchRes = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`, {
+        brandAliases: [{ name: 'Acme', regions: ['us'] }],
+        competitors: [
+          {
+            name: 'Rival', url: 'https://rival.com', aliases: ['Rival Worldwide'], regions: ['us'],
+          },
+        ],
+      });
+      expect(patchRes.status).to.equal(200);
+      expect(patchRes.body.brandAliases).to.deep.equal([{ name: 'Acme', regions: ['us'] }]);
+      expect(patchRes.body.competitors).to.deep.equal([
+        {
+          name: 'Rival', url: 'https://rival.com', aliases: ['Rival Worldwide'], regions: ['us'],
+        },
+      ]);
+      // Flat-mode brand → no Semrush re-sync → no rejected-alias surface.
+      expect(patchRes.body).to.not.have.property('semrushRejectedAliases');
+    });
+  });
+
   describe('Brands v2 Serenity market-mirror linkage', () => {
     before(() => resetData());
 

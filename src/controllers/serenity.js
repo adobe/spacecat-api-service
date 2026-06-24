@@ -59,7 +59,7 @@ import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
-  getBrandAliasNames, getBrandUrlSources, getBrandCompetitors,
+  getBrandAliases, getBrandUrlSources, getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
@@ -508,9 +508,9 @@ function SerenityController(context, log, env) {
       let result;
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
-        // Brand aliases are brand-level: every market/project carries them in
-        // its Semrush brand_names.
-        const brandAliases = await getBrandAliasNames(
+        // Brand aliases are brand-level but region-scoped: the create handler
+        // clamps each to the new market's region before writing brand_names.
+        const brandAliases = await getBrandAliases(
           auth.brandUuid,
           ctx.dataAccess.services.postgrestClient,
         );
@@ -891,9 +891,9 @@ function SerenityController(context, log, env) {
       if (markets.length > MAX_MARKETS) {
         throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
       }
-      // Brand aliases are brand-level: read once and apply to every market's
-      // project (Semrush brand_names) in this batch.
-      const brandAliases = await getBrandAliasNames(
+      // Brand aliases are brand-level but region-scoped: read once; each market's
+      // create clamps them to that market's region before writing brand_names.
+      const brandAliases = await getBrandAliases(
         auth.brandUuid,
         ctx.dataAccess.services.postgrestClient,
       );

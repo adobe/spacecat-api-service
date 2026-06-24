@@ -46,8 +46,8 @@ describe('competitor-benchmarks helpers', () => {
         { url: 'https://named-by-domain.com' }, // region-less, no name → name = domain
       ];
       expect(collectCompetitorBenchmarks(competitors, 'us')).to.deep.equal([
-        { name: 'Bing', domain: 'bing.com' },
-        { name: 'named-by-domain.com', domain: 'named-by-domain.com' },
+        { name: 'Bing', domain: 'bing.com', aliases: [] },
+        { name: 'named-by-domain.com', domain: 'named-by-domain.com', aliases: [] },
       ]);
     });
 
@@ -68,7 +68,7 @@ describe('competitor-benchmarks helpers', () => {
         ['https://shop.brand.io'],
       );
       expect(collectCompetitorBenchmarks(competitors, 'us', reserved)).to.deep.equal([
-        { name: 'Real competitor', domain: 'rival.com' },
+        { name: 'Real competitor', domain: 'rival.com', aliases: [] },
       ]);
     });
   });
@@ -152,6 +152,7 @@ describe('competitor-benchmarks helpers', () => {
       return {
         listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: benchmarks }),
         createBenchmarks: sandbox.stub().resolves({ ids: ['new'], existing_count: 0 }),
+        updateBenchmark: sandbox.stub().resolves(null),
         deleteBenchmarks: sandbox.stub().resolves(null),
       };
     }
@@ -170,7 +171,9 @@ describe('competitor-benchmarks helpers', () => {
         { brand_name: 'Duck', domain: 'duckduckgo.com' },
       ]);
       expect(transport.deleteBenchmarks).to.not.have.been.called;
-      expect(result).to.deep.equal({ created: 1, deleted: 0, changed: true });
+      expect(result).to.deep.equal({
+        created: 1, updated: 0, deleted: 0, changed: true, rejected: [],
+      });
     });
 
     it('deletes the benchmark of a removed competitor (never the main brand)', async () => {
@@ -182,7 +185,9 @@ describe('competitor-benchmarks helpers', () => {
       // gone.com deleted by its id; acme.com is main_brand → never deletable.
       expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['gone-id']);
       expect(transport.createBenchmarks).to.not.have.been.called;
-      expect(result).to.deep.equal({ created: 0, deleted: 1, changed: true });
+      expect(result).to.deep.equal({
+        created: 0, updated: 0, deleted: 1, changed: true, rejected: [],
+      });
     });
 
     it('is a no-op (changed:false) when nothing to add or remove', async () => {
@@ -197,6 +202,90 @@ describe('competitor-benchmarks helpers', () => {
       const transport = makeTransport([]);
       transport.createBenchmarks.rejects(new SerenityTransportError(500, 'boom'));
       await expect(syncCompetitorBenchmarksForProject(transport, WS, PID, [{ name: 'Duck', url: 'https://duckduckgo.com' }], [], 'us', undefined)).to.be.rejectedWith('boom');
+    });
+
+    it('creates a competitor benchmark with its brand_aliases', async () => {
+      const transport = makeTransport([]);
+      const competitors = [
+        {
+          name: 'Duck', url: 'https://duckduckgo.com', aliases: ['DDG', 'Duck Duck Go'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Duck', domain: 'duckduckgo.com', brand_aliases: ['DDG', 'Duck Duck Go'] },
+      ]);
+      expect(result.created).to.equal(1);
+    });
+
+    it('updates an existing competitor benchmark in place when its alias set drifts', async () => {
+      const transport = makeTransport([
+        {
+          id: 'bing', main_brand: false, domain: 'bing.com', brand_aliases: ['MSN'],
+        },
+      ]);
+      // Re-read after the update returns the new alias set (no rejections).
+      transport.listBenchmarks.onSecondCall().resolves({
+        aio_benchmarks: [{
+          id: 'bing', main_brand: false, domain: 'bing.com', brand_aliases: ['Microsoft Bing'],
+        }],
+      });
+      const competitors = [
+        {
+          name: 'Bing', url: 'https://bing.com', aliases: ['Microsoft Bing'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'bing', {
+        brand_name: 'Bing', domain: 'bing.com', brand_aliases: ['Microsoft Bing'],
+      });
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(result).to.deep.equal({
+        created: 0, updated: 1, deleted: 0, changed: true, rejected: [],
+      });
+    });
+
+    it('does NOT update when the alias set is unchanged (order/case-insensitive)', async () => {
+      const transport = makeTransport([
+        {
+          id: 'bing', main_brand: false, domain: 'bing.com', brand_aliases: ['MSN', 'Microsoft Bing'],
+        },
+      ]);
+      const competitors = [
+        {
+          name: 'Bing', url: 'https://bing.com', aliases: ['microsoft bing', 'MSN'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result.changed).to.equal(false);
+    });
+
+    it('captures rejected_brand_aliases Semrush dropped on a competitor benchmark', async () => {
+      const transport = makeTransport([]);
+      // Re-read after the create surfaces the rejected alias. Includes the
+      // main-brand benchmark + a null-domain row so the capture predicate's
+      // main_brand / unparseable-domain branches are exercised and excluded.
+      transport.listBenchmarks.onSecondCall().resolves({
+        aio_benchmarks: [
+          {
+            id: 'own', main_brand: true, domain: 'acme.com', rejected_brand_aliases: ['ignored'],
+          },
+          {
+            id: 'bad', main_brand: false, domain: '', rejected_brand_aliases: ['ignored'],
+          },
+          {
+            id: 'duck', main_brand: false, domain: 'duckduckgo.com', rejected_brand_aliases: ['bogus'],
+          },
+        ],
+      });
+      const competitors = [
+        {
+          name: 'Duck', url: 'https://duckduckgo.com', aliases: ['DDG', 'bogus'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(result.rejected).to.deep.equal([{ domain: 'duckduckgo.com', aliases: ['bogus'] }]);
     });
   });
 
@@ -233,7 +322,9 @@ describe('competitor-benchmarks helpers', () => {
         { brand_name: 'DE rival', domain: 'de-rival.com' },
       ]);
       expect(transport.publishProject).to.have.been.calledTwice;
-      expect(result).to.deep.equal({ markets: 2, created: 2, deleted: 0 });
+      expect(result).to.deep.equal({
+        markets: 2, created: 2, updated: 0, deleted: 0, rejected: [],
+      });
     });
 
     it('drops self-referential competitors (own primary, other market domains, brand URLs)', async () => {
@@ -268,7 +359,9 @@ describe('competitor-benchmarks helpers', () => {
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, 'p-us', [
         { brand_name: 'US rival', domain: 'rival.com' },
       ]);
-      expect(result).to.deep.equal({ markets: 2, created: 1, deleted: 0 });
+      expect(result).to.deep.equal({
+        markets: 2, created: 1, updated: 0, deleted: 0, rejected: [],
+      });
     });
 
     it('logs the failing project/market (status only) and rethrows when a market sync throws mid-fan-out', async () => {
@@ -311,7 +404,9 @@ describe('competitor-benchmarks helpers', () => {
         WS,
         { info, warn: () => {} },
       );
-      expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 0 });
+      expect(result).to.deep.equal({
+        markets: 1, created: 1, updated: 0, deleted: 0, rejected: [],
+      });
       expect(info).to.have.been.calledWithMatch(
         'competitor-benchmarks: re-synced across markets',
         sinon.match({ workspaceId: WS, markets: 1, created: 1 }),
@@ -331,7 +426,9 @@ describe('competitor-benchmarks helpers', () => {
       const result = await syncCompetitorBenchmarksAcrossMarkets(transport, [{ name: 'Rival', url: 'https://rival.com' }], [], WS, undefined);
       expect(transport.createBenchmarks).to.not.have.been.called;
       expect(transport.publishProject).to.not.have.been.called;
-      expect(result).to.deep.equal({ markets: 1, created: 0, deleted: 0 });
+      expect(result).to.deep.equal({
+        markets: 1, created: 0, updated: 0, deleted: 0, rejected: [],
+      });
     });
   });
 
@@ -373,7 +470,9 @@ describe('competitor-benchmarks helpers', () => {
         deleteBenchmarks: sandbox.stub(),
       };
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, [], [], 'us', undefined);
-      expect(result).to.deep.equal({ created: 0, deleted: 0, changed: false });
+      expect(result).to.deep.equal({
+        created: 0, updated: 0, deleted: 0, changed: false, rejected: [],
+      });
       expect(transport.listBenchmarks).to.not.have.been.called;
     });
 
@@ -467,7 +566,9 @@ describe('competitor-benchmarks helpers', () => {
         publishProject: sandbox.stub(),
       };
       const result = await syncCompetitorBenchmarksAcrossMarkets(transport, [], [], WS, undefined);
-      expect(result).to.deep.equal({ markets: 0, created: 0, deleted: 0 });
+      expect(result).to.deep.equal({
+        markets: 0, created: 0, updated: 0, deleted: 0, rejected: [],
+      });
       expect(transport.listBenchmarks).to.not.have.been.called;
     });
 
@@ -492,7 +593,9 @@ describe('competitor-benchmarks helpers', () => {
         WS,
         undefined,
       );
-      expect(result).to.deep.equal({ markets: 0, created: 0, deleted: 0 });
+      expect(result).to.deep.equal({
+        markets: 0, created: 0, updated: 0, deleted: 0, rejected: [],
+      });
       expect(transport.listBenchmarks).to.not.have.been.called;
     });
   });

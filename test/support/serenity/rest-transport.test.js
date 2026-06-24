@@ -482,6 +482,38 @@ describe('Semrush REST transport', () => {
       expect(call.url).to.match(/\/v1\/workspaces\/.*\/projects\/proj-xyz\/ai_models\/benchmarks$/);
       expect(JSON.parse(call.body)).to.deep.equal({ ids: ['b1', 'b2'] });
     });
+
+    it('updateBenchmark PUTs /v1/.../ai_models/benchmarks/{bid} with the benchmark body', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const body = { brand_name: 'Acme', domain: 'acme.com', brand_aliases: ['ACME Inc'] };
+      await transport.updateBenchmark(WORKSPACE_ID, PROJECT_ID, 'bench-7', body);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('PUT');
+      expect(call.url).to.match(
+        /\/v1\/workspaces\/.*\/projects\/proj-xyz\/ai_models\/benchmarks\/bench-7$/,
+      );
+      expect(JSON.parse(call.body)).to.deep.equal(body);
+    });
+  });
+
+  describe('updateProject (brand_names alias sync)', () => {
+    it('PATCHes /v1/workspaces/{ws}/projects/{pid} with the update body', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const body = { brand_name_display: 'Acme', brand_names: ['Acme', 'ACME Inc'] };
+      await transport.updateProject(WORKSPACE_ID, PROJECT_ID, body);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('PATCH');
+      expect(call.url).to.match(
+        new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}$`),
+      );
+      expect(JSON.parse(call.body)).to.deep.equal(body);
+    });
   });
 
   describe('CI competitors', () => {

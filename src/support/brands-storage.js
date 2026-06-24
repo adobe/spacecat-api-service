@@ -23,7 +23,7 @@ const BRAND_SELECT = [
   'brand_aliases(alias, regions)',
   'brand_social_accounts(url, regions)',
   'brand_earned_sources(name, url, regions)',
-  'competitors(name, url, regions)',
+  'competitors(name, url, aliases, regions)',
   'brand_sites(site_id, paths, type, sites(base_url))',
   'brand_urls(url)',
 ].join(', ');
@@ -263,6 +263,7 @@ function mapDbBrandToV2(row) {
     competitors: (row.competitors || []).map((c) => ({
       name: c.name,
       url: c.url || null,
+      aliases: c.aliases || [],
       regions: c.regions || [],
     })),
     siteIds,
@@ -493,6 +494,7 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
     .map((c) => ({
       name: typeof c === 'string' ? c : c?.name,
       url: c?.url || null,
+      aliases: Array.isArray(c?.aliases) ? c.aliases : [],
       regions: c?.regions || [],
     }))
     .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name))
@@ -501,6 +503,7 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
       brand_id: brandId,
       name: c.name,
       url: c.url,
+      aliases: c.aliases,
       regions: c.regions,
       updated_by: updatedBy,
     }));
@@ -573,31 +576,45 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
- * Reads a brand's alias names (the `brand_aliases.alias` values) — the extra
- * names the brand is known by, beyond its display name. Returned as a
- * de-duplicated array of non-empty strings (empty when the brand has none),
- * suitable for a Semrush project's `brand_names`. Brand aliases are brand-level,
- * so the same set applies to every market/project created for the brand.
+ * Reads a brand's aliases (the `brand_aliases` rows) — the extra names the brand
+ * is known by, beyond its display name — each with its `regions`. Returned as
+ * `{ name, regions }[]` (empty when the brand has none), the shape the Semrush
+ * create/sync path region-clamps per market (an alias only lands on the markets
+ * its `regions` list; region-less applies everywhere). Rows with a blank alias
+ * are skipped; de-duplicated by name (case-insensitive, first-seen wins).
  *
  * @param {string} brandId - Brand UUID.
  * @param {object} postgrestClient - PostgREST client.
- * @returns {Promise<string[]>} alias names (empty array when none).
+ * @returns {Promise<{name: string, regions: string[]}[]>} aliases (empty when none).
  */
-export async function getBrandAliasNames(brandId, postgrestClient) {
+export async function getBrandAliases(brandId, postgrestClient) {
   if (!postgrestClient?.from || !hasText(brandId)) {
     return [];
   }
   const { data, error } = await postgrestClient
     .from('brand_aliases')
-    .select('alias')
+    .select('alias, regions')
     .eq('brand_id', brandId);
   if (error) {
     throw new Error(`Failed to get brand aliases: ${error.message}`);
   }
   const seen = new Set();
-  return (data || [])
-    .map((row) => row.alias)
-    .filter((alias) => hasText(alias) && !seen.has(alias) && seen.add(alias));
+  const out = [];
+  for (const row of data || []) {
+    const name = hasText(row?.alias) ? row.alias : null;
+    if (name === null) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    seen.add(key);
+    out.push({ name, regions: row.regions || [] });
+  }
+  return out;
 }
 
 /**
@@ -639,13 +656,15 @@ export async function getBrandUrlSources(brandId, postgrestClient) {
 
 /**
  * Reads a brand's competitors ("other brands to track") for propagation to the
- * brand's Semrush projects' CI competitor lists. Returns `{ url, regions }` per
- * competitor (the only fields the CI sync needs — Semrush competitors are
- * domain-only). Empty array when the brand has none.
+ * brand's Semrush projects as benchmarks. Returns `{ name, url, aliases, regions }`
+ * per competitor: the benchmark is domain-keyed (from `url`) but also carries the
+ * competitor's `brand_name` (from `name`) and `brand_aliases` (from `aliases`), and
+ * `regions` region-filters which markets track it. Empty array when the brand has
+ * none.
  *
  * @param {string} brandId - Brand UUID.
  * @param {object} postgrestClient - PostgREST client.
- * @returns {Promise<{url: string, regions: string[]}[]>}
+ * @returns {Promise<{name: string, url: string, aliases: string[], regions: string[]}[]>}
  */
 export async function getBrandCompetitors(brandId, postgrestClient) {
   if (!postgrestClient?.from || !hasText(brandId)) {
@@ -653,14 +672,19 @@ export async function getBrandCompetitors(brandId, postgrestClient) {
   }
   const { data, error } = await postgrestClient
     .from('competitors')
-    .select('url, regions')
+    .select('name, url, aliases, regions')
     .eq('brand_id', brandId);
   if (error) {
     throw new Error(`Failed to get brand competitors: ${error.message}`);
   }
   return (data || [])
     .filter((c) => hasText(c?.url))
-    .map((c) => ({ url: c.url, regions: c.regions || [] }));
+    .map((c) => ({
+      name: c.name,
+      url: c.url,
+      aliases: c.aliases || [],
+      regions: c.regions || [],
+    }));
 }
 
 /**

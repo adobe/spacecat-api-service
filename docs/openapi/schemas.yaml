@@ -7455,12 +7455,44 @@ V2BrandCompetitor:
         - 'null'
       description: Competitor URL
       example: 'https://www.acme.com'
+    aliases:
+      type: array
+      items:
+        type: string
+      description: >-
+        Alternate names the competitor is known by. Propagated to the competitor's
+        Semrush benchmark `brand_aliases` for sub-workspace brands.
+      example: ['Acme', 'Acme Corporation']
     regions:
       type: array
       items:
         type: string
       description: ISO-3166 country codes
       example: ['US']
+
+V2SemrushRejectedAlias:
+  type: object
+  description: >-
+    A set of aliases Semrush refused on one market/project's benchmark during a
+    brand-edit re-sync (the aliases were written but are not being tracked).
+  properties:
+    projectId:
+      type: string
+      description: Semrush project (market) id the rejection occurred on.
+    market:
+      type: string
+      description: ISO-3166 country code of that market.
+      example: 'us'
+    domain:
+      type: [string, 'null']
+      description: Benchmark domain the aliases were attached to (null when absent).
+      example: 'www.example.com'
+    aliases:
+      type: array
+      items:
+        type: string
+      description: The alias names Semrush rejected.
+      example: ['Bogus Name']
 
 V2PendingSemrushProvisioning:
   type: [object, 'null']
@@ -7635,6 +7667,25 @@ V2Brand:
     siteIds: ['b2c3d4e5-6789-01ab-cdef-2345678901ab']
     updatedAt: '2026-03-15T10:30:00Z'
     updatedBy: 'user@adobe.com'
+
+V2BrandUpdateResponse:
+  description: >-
+    A brand (as returned by GET) plus, when the edit re-synced aliases/competitors
+    to a sub-workspace brand's Semrush markets and Semrush refused some aliases,
+    the `semrushRejectedAliases` set. The field is omitted when nothing was
+    rejected (or the brand is flat-mode).
+  allOf:
+    - $ref: '#/V2Brand'
+    - type: object
+      properties:
+        semrushRejectedAliases:
+          type: array
+          description: >-
+            Per-market alias rejections from the Semrush re-sync (own-brand and
+            competitor benchmarks). Present only when at least one alias was
+            rejected.
+          items:
+            $ref: '#/V2SemrushRejectedAlias'
 
 V2BrandInput:
   type: object

@@ -5024,7 +5024,8 @@ describe('Brands Controller', () => {
       updateBrand,
       syncBrandUrlsAcrossMarkets = sinon.stub().resolves({}),
       createSerenityTransport,
-      syncCompetitorBenchmarksAcrossMarkets = sinon.stub().resolves({}),
+      syncCompetitorBenchmarksAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
+      syncBrandAliasesAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       getBrandCompetitors = sinon.stub().resolves([]),
     }) {
       const Mocked = await esmock('../../src/controllers/brands.js', {
@@ -5034,6 +5035,7 @@ describe('Brands Controller', () => {
         '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
         // removedCompetitorDomains is left REAL so the diff logic is exercised.
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
+        '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
       });
       return Mocked.default(context, loggerStub, mockEnv);
     }
@@ -5073,6 +5075,71 @@ describe('Brands Controller', () => {
         { urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [] },
         'ws-9',
       );
+    });
+
+    it('re-syncs brand aliases across markets when brandAliases changes on a sub-workspace brand', async () => {
+      const updated = {
+        id: BRAND_UUID,
+        name: 'Updated Brand',
+        semrushWorkspaceId: 'ws-9',
+        brandAliases: [{ name: 'Acme', regions: [] }, { name: 'Acme DE', regions: ['de'] }],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const aliasSyncStub = sinon.stub().resolves({ rejected: [] });
+      const transport = { name: 't' };
+      const createTransportStub = sinon.stub().returns(transport);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandAliasesAcrossMarkets: aliasSyncStub,
+        createSerenityTransport: createTransportStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandAliases: [{ name: 'Acme', regions: [] }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(aliasSyncStub).to.have.been.calledOnceWith(
+        transport,
+        updated.brandAliases,
+        'Updated Brand',
+        'ws-9',
+      );
+    });
+
+    it('surfaces semrushRejectedAliases on the response when Semrush refuses some aliases', async () => {
+      const updated = {
+        id: BRAND_UUID,
+        name: 'Updated Brand',
+        semrushWorkspaceId: 'ws-9',
+        brandAliases: [{ name: 'bogus', regions: [] }],
+      };
+      const rejected = [{
+        projectId: 'p-us', market: 'us', domain: 'brand.com', aliases: ['bogus'],
+      }];
+      const controller = await buildUpdateController({
+        updateBrand: sinon.stub().resolves(updated),
+        syncBrandAliasesAcrossMarkets: sinon.stub().resolves({ rejected }),
+        createSerenityTransport: sinon.stub().returns({ name: 't' }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandAliases: [{ name: 'bogus', regions: [] }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.semrushRejectedAliases).to.deep.equal(rejected);
     });
 
     it('does NOT re-sync when the edit touches no URL field', async () => {
@@ -5953,10 +6020,10 @@ describe('Brands Controller — defensive branch coverage', () => {
     expect(body.message).to.match(/primary URL is required/i);
   });
 
-  // Lines 1415-1416: brandAliases map — `typeof a === 'string' ? a : a?.name`.
-  // When the alias array contains object entries ({name}) the a?.name branch fires.
-  // When an entry is neither a string nor has a name, hasText filters it out.
-  it('brandAliases with object entries: extracts name from {name} objects and filters blanks', async () => {
+  // brandAliases normalize: accepts both `{ name, regions }` objects and bare
+  // strings (region-less), keeps `regions`, and filters entries without a name.
+  // The create handler region-clamps them to the initial market downstream.
+  it('brandAliases: normalizes objects + strings to { name, regions } and filters blanks', async () => {
     const provisionStub = stub().resolves({ semrushWorkspaceId: 'ws-1' });
     const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
     const { controller, ctx } = await mountController({
@@ -5973,9 +6040,9 @@ describe('Brands Controller — defensive branch coverage', () => {
         semrushMarket: { market: 'us', languageCode: 'en' },
         semrushModelIds: ['model-a'],
         brandAliases: [
-          { name: 'Brand Alias Co' }, // object entry — a?.name fires (line 1416)
-          'plain string alias', // string entry — the string branch (line 1415)
-          { noName: true }, // object with no name → hasText filters out
+          { name: 'Brand Alias Co', regions: ['us'] }, // object → keeps regions
+          'plain string alias', // string → region-less
+          { noName: true }, // object with no name → filtered out
         ],
       },
       dataAccess: ctx.dataAccess,
@@ -5983,10 +6050,11 @@ describe('Brands Controller — defensive branch coverage', () => {
     });
 
     expect(response.status).to.equal(201);
-    // The provisioning call must have received the extracted aliases (object→name,
-    // string→string, no-name object→filtered).
     const provisionArgs = provisionStub.firstCall.args[1];
-    expect(provisionArgs.brandAliases).to.deep.equal(['Brand Alias Co', 'plain string alias']);
+    expect(provisionArgs.brandAliases).to.deep.equal([
+      { name: 'Brand Alias Co', regions: ['us'] },
+      { name: 'plain string alias', regions: [] },
+    ]);
   });
 
   // Line 91 else: `Array.isArray(brandData?.urls) ? brandData.urls : []` — fires

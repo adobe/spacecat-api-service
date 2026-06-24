@@ -18,7 +18,7 @@ import chaiAsPromised from 'chai-as-promised';
 import {
   listBrands,
   getBrandById,
-  getBrandAliasNames,
+  getBrandAliases,
   getBrandUrlSources,
   getBrandCompetitors,
   getBrandBySite,
@@ -111,7 +111,9 @@ describe('brands-storage', () => {
       expect(result[0].brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
       expect(result[0].socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
       expect(result[0].earnedContent).to.deep.equal([{ name: 'TechCrunch', url: 'https://techcrunch.com', regions: [] }]);
-      expect(result[0].competitors).to.deep.equal([{ name: 'Rival', url: 'https://rival.com', regions: ['US'] }]);
+      expect(result[0].competitors).to.deep.equal([{
+        name: 'Rival', url: 'https://rival.com', aliases: [], regions: ['US'],
+      }]);
       expect(result[0].urls).to.deep.equal([
         { value: 'https://test.com', onboarded: true, siteId: 'site-uuid-1' },
       ]);
@@ -275,7 +277,9 @@ describe('brands-storage', () => {
 
       expect(result).to.include({ id: BRAND_ID, name: 'TestBrand', status: 'active' });
       expect(result.brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
-      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'Rival', url: null, aliases: [], regions: [],
+      }]);
       expect(result.siteIds).to.deep.equal(['site-uuid-1']);
       expect(result.urls).to.deep.equal([
         { value: 'https://example.com', onboarded: true, siteId: 'site-uuid-1' },
@@ -383,7 +387,9 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
-      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'Rival', url: null, aliases: [], regions: [],
+      }]);
     });
 
     it('applies || fallbacks for null origin, null regions on child rows, null base_url and null paths on brand_sites', async () => {
@@ -442,42 +448,45 @@ describe('brands-storage', () => {
     });
   });
 
-  describe('getBrandAliasNames', () => {
+  describe('getBrandAliases', () => {
     it('returns [] when postgrestClient is missing', async () => {
-      expect(await getBrandAliasNames(BRAND_ID, null)).to.deep.equal([]);
+      expect(await getBrandAliases(BRAND_ID, null)).to.deep.equal([]);
     });
 
     it('returns [] when brandId is empty', async () => {
-      expect(await getBrandAliasNames('', { from: () => {} })).to.deep.equal([]);
+      expect(await getBrandAliases('', { from: () => {} })).to.deep.equal([]);
     });
 
-    it('returns de-duplicated, non-empty alias names', async () => {
+    it('returns de-duplicated { name, regions }, dropping blank aliases', async () => {
       const query = createChainableQuery({
         data: [
-          { alias: 'Acme Inc' },
-          { alias: 'ACME' },
-          { alias: 'Acme Inc' }, // exact duplicate dropped
+          { alias: 'Acme Inc', regions: ['us'] },
+          { alias: 'ACME', regions: null }, // null regions → []
+          { alias: 'acme inc', regions: ['de'] }, // case-insensitive dup → dropped
           { alias: '' }, // empty dropped (hasText)
           { alias: null }, // null dropped
         ],
         error: null,
       });
       const postgrestClient = { from: sinon.stub().returns(query) };
-      const result = await getBrandAliasNames(BRAND_ID, postgrestClient);
+      const result = await getBrandAliases(BRAND_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledOnceWith('brand_aliases');
-      expect(result).to.deep.equal(['Acme Inc', 'ACME']);
+      expect(result).to.deep.equal([
+        { name: 'Acme Inc', regions: ['us'] },
+        { name: 'ACME', regions: [] },
+      ]);
     });
 
     it('returns [] when the brand has no aliases (null data)', async () => {
       const query = createChainableQuery({ data: null, error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
-      expect(await getBrandAliasNames(BRAND_ID, postgrestClient)).to.deep.equal([]);
+      expect(await getBrandAliases(BRAND_ID, postgrestClient)).to.deep.equal([]);
     });
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
       const postgrestClient = { from: sinon.stub().returns(query) };
-      await expect(getBrandAliasNames(BRAND_ID, postgrestClient))
+      await expect(getBrandAliases(BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand aliases');
     });
   });
@@ -541,11 +550,15 @@ describe('brands-storage', () => {
       expect(await getBrandCompetitors('', { from: () => {} })).to.deep.equal([]);
     });
 
-    it('returns url + regions, skipping url-less competitors', async () => {
+    it('returns name + url + aliases + regions, skipping url-less competitors', async () => {
       const query = createChainableQuery({
         data: [
-          { url: 'https://a.com', regions: ['us'] },
-          { url: 'https://b.com', regions: null },
+          {
+            name: 'A', url: 'https://a.com', aliases: ['Ay'], regions: ['us'],
+          },
+          {
+            name: 'B', url: 'https://b.com', aliases: null, regions: null,
+          },
           { url: '', regions: [] }, // skipped (no url)
           { name: 'no-url', regions: [] }, // skipped (no url)
         ],
@@ -555,8 +568,12 @@ describe('brands-storage', () => {
       const result = await getBrandCompetitors(BRAND_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledOnceWith('competitors');
       expect(result).to.deep.equal([
-        { url: 'https://a.com', regions: ['us'] },
-        { url: 'https://b.com', regions: [] },
+        {
+          name: 'A', url: 'https://a.com', aliases: ['Ay'], regions: ['us'],
+        },
+        {
+          name: 'B', url: 'https://b.com', aliases: [], regions: [],
+        },
       ]);
     });
 
@@ -1337,7 +1354,9 @@ describe('brands-storage', () => {
         { name: 'TB', regions: ['US'] },
         { name: 'T', regions: [] },
       ]);
-      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'Rival', url: null, aliases: [], regions: [],
+      }]);
     });
 
     it('handles object-only competitors with url and regions', async () => {
@@ -1362,7 +1381,9 @@ describe('brands-storage', () => {
         postgrestClient,
       });
 
-      expect(result.competitors).to.deep.equal([{ name: 'ObjRival', url: 'https://rival.com', regions: ['US'] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'ObjRival', url: 'https://rival.com', aliases: [], regions: ['US'],
+      }]);
     });
 
     it('throws when alias delete fails', async () => {
@@ -2027,7 +2048,9 @@ describe('brands-storage', () => {
         postgrestClient,
       });
 
-      expect(result.competitors).to.deep.equal([{ name: 'StringRival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'StringRival', url: null, aliases: [], regions: [],
+      }]);
     });
 
     it('uses empty paths array when site base_url is not in pathsByBase map', async () => {

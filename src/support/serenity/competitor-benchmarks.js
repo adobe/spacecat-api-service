@@ -20,6 +20,7 @@ import {
   marketOf,
   republishBestEffort,
 } from './brand-urls.js';
+import { dedupeAliases, sameAliasSet, rejectedAliasesFrom } from './aliases.js';
 
 /**
  * A brand's competitors ("other brands to track") propagated onto each
@@ -99,12 +100,13 @@ export function dropReservedCompetitors(competitors, reservedDomains) {
 }
 
 /**
- * Builds the `{ name, domain }[]` competitor benchmarks to track for a market,
- * region-filtered (reuses {@link regionApplies}). The domain is extracted from
- * the competitor `url`; entries without a usable url/domain or name are skipped,
- * as are any whose domain is one of the brand's own `reservedDomains` (its
- * primary, market domains, or own website URLs — a competitor can't be us).
- * De-duped by normalized domain (first-seen name wins).
+ * Builds the `{ name, domain, aliases }[]` competitor benchmarks to track for a
+ * market, region-filtered (reuses {@link regionApplies}). The domain is extracted
+ * from the competitor `url`; entries without a usable url/domain are skipped, as
+ * are any whose domain is one of the brand's own `reservedDomains` (its primary,
+ * market domains, or own website URLs — a competitor can't be us). `aliases` are
+ * the competitor's alternate names, propagated to the benchmark's `brand_aliases`.
+ * De-duped by normalized domain (first-seen name + aliases win).
  */
 export function collectCompetitorBenchmarks(competitors, market, reservedDomains = new Set()) {
   const list = Array.isArray(competitors) ? competitors : [];
@@ -124,7 +126,7 @@ export function collectCompetitorBenchmarks(competitors, market, reservedDomains
     // has no name (real competitors always carry one, this just keeps it robust).
     const name = hasText(c?.name) ? String(c.name).trim() : domain;
     seen.add(domain);
-    out.push({ name, domain });
+    out.push({ name, domain, aliases: dedupeAliases(c?.aliases) });
   }
   return out;
 }
@@ -150,15 +152,33 @@ export function removedCompetitorDomains(oldCompetitors, newCompetitors) {
   return [...removed];
 }
 
+// Builds the `{ brand_name, domain, brand_aliases? }` benchmark create/update
+// body from a collected competitor. `brand_aliases` is omitted when empty so the
+// upstream payload stays minimal (and an alias-less update clears nothing it
+// shouldn't — the PUT replaces the full benchmark, so we always send the
+// computed set, empty meaning "no aliases").
+function benchmarkBody(c) {
+  return {
+    brand_name: c.name,
+    domain: c.domain,
+    ...(c.aliases.length > 0 ? { brand_aliases: c.aliases } : {}),
+  };
+}
+
 /**
- * Syncs a brand's competitors onto ONE project as benchmarks: creates a
- * benchmark for each region-applicable competitor whose domain is not already a
- * benchmark (own-brand or a prior competitor), and deletes the benchmarks of
- * competitors removed from the brand (`removedDomains`). Never deletes the
- * main-brand benchmark. Returns the change counts.
+ * Syncs a brand's competitors onto ONE project as benchmarks:
+ *   - creates a benchmark for each region-applicable competitor whose domain is
+ *     not already a benchmark (with its `brand_aliases`);
+ *   - updates an existing competitor benchmark in place (PUT) when its alias set
+ *     drifted from the brand (domain unchanged, aliases changed);
+ *   - deletes the benchmarks of competitors removed from the brand (`removedDomains`).
+ * Never updates or deletes the main-brand benchmark. After alias-bearing writes
+ * it re-reads the benchmarks to capture any `rejected_brand_aliases` Semrush
+ * silently dropped, so the caller can surface them.
  *
  * @param {string[]} removedDomains - normalized domains removed from the brand.
- * @returns {Promise<{created: number, deleted: number, changed: boolean}>}
+ * @returns {Promise<{created: number, updated: number, deleted: number,
+ *   changed: boolean, rejected: {domain: string, aliases: string[]}[]}>}
  */
 export async function syncCompetitorBenchmarksForProject(
   transport,
@@ -178,14 +198,16 @@ export async function syncCompetitorBenchmarksForProject(
   );
   // Nothing to add or remove — skip the benchmark read entirely.
   if (desired.length === 0 && removedSet.size === 0) {
-    return { created: 0, deleted: 0, changed: false };
+    return {
+      created: 0, updated: 0, deleted: 0, changed: false, rejected: [],
+    };
   }
 
   const resp = await transport.listBenchmarks(workspaceId, projectId);
   const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
 
-  // Domain → benchmark id, for competitor (non-main) benchmarks we could delete.
-  const competitorIdByDomain = new Map();
+  // Domain → competitor (non-main) benchmark { id, aliases }, for update/delete.
+  const competitorByDomain = new Map();
   const presentDomains = new Set();
   for (const b of benchmarks) {
     const domain = normalizeBenchmarkDomain(b?.domain);
@@ -195,46 +217,82 @@ export async function syncCompetitorBenchmarksForProject(
     }
     presentDomains.add(domain);
     if (b?.main_brand !== true && hasText(b?.id)) {
-      competitorIdByDomain.set(domain, String(b.id));
+      competitorByDomain.set(domain, {
+        id: String(b.id),
+        aliases: Array.isArray(b?.brand_aliases) ? b.brand_aliases : [],
+      });
     }
   }
 
-  const toCreate = desired
-    .filter((c) => !presentDomains.has(c.domain))
-    .map((c) => ({ brand_name: c.name, domain: c.domain }));
-
+  const toCreate = desired.filter((c) => !presentDomains.has(c.domain));
+  // Update an existing competitor benchmark only when its alias set drifted.
+  const toUpdate = desired.filter((c) => {
+    const existing = competitorByDomain.get(c.domain);
+    return existing && !sameAliasSet(existing.aliases, c.aliases);
+  });
   const toDelete = [...removedSet]
-    .map((d) => competitorIdByDomain.get(d))
+    .map((d) => competitorByDomain.get(d)?.id)
     .filter((id) => hasText(id));
 
   let created = 0;
+  let updated = 0;
   let deleted = 0;
   if (toCreate.length > 0) {
-    await transport.createBenchmarks(workspaceId, projectId, toCreate);
+    await transport.createBenchmarks(workspaceId, projectId, toCreate.map(benchmarkBody));
     created = toCreate.length;
+  }
+  for (const c of toUpdate) {
+    const { id } = competitorByDomain.get(c.domain);
+    // eslint-disable-next-line no-await-in-loop
+    await transport.updateBenchmark(workspaceId, projectId, id, benchmarkBody(c));
+    updated += 1;
   }
   if (toDelete.length > 0) {
     await transport.deleteBenchmarks(workspaceId, projectId, toDelete);
     deleted = toDelete.length;
   }
-  if (created > 0 || deleted > 0) {
-    log?.info?.('competitor-benchmarks: synced project', {
-      workspaceId, projectId, created, deleted,
+
+  // Capture aliases Semrush rejected on the benchmarks we just wrote with aliases.
+  // Only re-read when an alias-bearing create or any update happened (a plain
+  // create-without-aliases or a delete can't produce rejections).
+  let rejected = [];
+  const wroteAliases = toUpdate.length > 0 || toCreate.some((c) => c.aliases.length > 0);
+  if (wroteAliases) {
+    const desiredAliasDomains = new Set(
+      desired.filter((c) => c.aliases.length > 0).map((c) => c.domain),
+    );
+    const after = await transport.listBenchmarks(workspaceId, projectId);
+    const list = Array.isArray(after?.aio_benchmarks) ? after.aio_benchmarks : [];
+    rejected = rejectedAliasesFrom(list, (b) => {
+      const d = normalizeBenchmarkDomain(b?.domain);
+      return b?.main_brand !== true && d !== null && desiredAliasDomains.has(d);
     });
   }
-  return { created, deleted, changed: created > 0 || deleted > 0 };
+
+  if (created > 0 || updated > 0 || deleted > 0) {
+    log?.info?.('competitor-benchmarks: synced project', {
+      workspaceId, projectId, created, updated, deleted, rejected: rejected.length,
+    });
+  }
+  return {
+    created, updated, deleted, changed: created > 0 || updated > 0 || deleted > 0, rejected,
+  };
 }
 
 /**
  * Re-syncs a brand's competitors as benchmarks across every market/project in
  * its sub-workspace (the brand-edit path): per project, region-filter + create
- * additions + delete removals, then republish (best-effort) when anything
- * changed. Create/delete errors propagate; a quota 405 on republish is tolerated.
+ * additions + update alias drift + delete removals, then republish (best-effort)
+ * when anything changed. Create/update/delete errors propagate; a quota 405 on
+ * republish is tolerated. `rejected` aggregates the per-market competitor aliases
+ * Semrush refused, tagged with their project/market, so the caller can surface them.
  *
  * @param {Array<string|{value:string}>} [brandOwnUrls=[]] - the brand's own
  *   website URLs, reserved (with every project domain) so a competitor can't be
  *   one of the brand's own properties.
- * @returns {Promise<{markets: number, created: number, deleted: number}>}
+ * @returns {Promise<{markets: number, created: number, updated: number,
+ *   deleted: number, rejected: {projectId: string, market: string,
+ *   domain: string|null, aliases: string[]}[]}>}
  */
 export async function syncCompetitorBenchmarksAcrossMarkets(
   transport,
@@ -257,7 +315,9 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
 
   let markets = 0;
   let created = 0;
+  let updated = 0;
   let deleted = 0;
+  const rejected = [];
 
   for (const project of projects) {
     const projectId = hasText(project?.id) ? String(project.id) : null;
@@ -280,7 +340,9 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
         reservedDomains,
       );
       created += result.created;
+      updated += result.updated;
       deleted += result.deleted;
+      rejected.push(...result.rejected.map((r) => ({ projectId, market, ...r })));
       if (result.changed) {
         // eslint-disable-next-line no-await-in-loop
         await republishBestEffort(transport, workspaceId, projectId, log);
@@ -299,7 +361,9 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
   }
 
   log?.info?.('competitor-benchmarks: re-synced across markets', {
-    workspaceId, markets, created, deleted,
+    workspaceId, markets, created, updated, deleted, rejected: rejected.length,
   });
-  return { markets, created, deleted };
+  return {
+    markets, created, updated, deleted, rejected,
+  };
 }

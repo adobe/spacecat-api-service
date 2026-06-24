@@ -128,7 +128,7 @@ describe('SerenityController', () => {
   let resolveBrandWorkspaceStub;
   let createTransportStub;
   let resolveBrandUuidStub;
-  let getBrandAliasNamesStub;
+  let getBrandAliasesStub;
   let getBrandUrlSourcesStub;
   let getBrandCompetitorsStub;
   let accessControlHasAccessStub;
@@ -149,7 +149,7 @@ describe('SerenityController', () => {
     clearBrandWorkspaceCacheStub = sinon.stub();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
     resolveBrandUuidStub = sinon.stub().resolves(BRAND);
-    getBrandAliasNamesStub = sinon.stub().resolves([]);
+    getBrandAliasesStub = sinon.stub().resolves([]);
     getBrandUrlSourcesStub = sinon.stub()
       .resolves({ urls: [], socialAccounts: [], earnedContent: [] });
     getBrandCompetitorsStub = sinon.stub().resolves([]);
@@ -221,7 +221,7 @@ describe('SerenityController', () => {
         resolveBrandUuid: resolveBrandUuidStub,
       },
       '../../src/support/brands-storage.js': {
-        getBrandAliasNames: getBrandAliasNamesStub,
+        getBrandAliases: getBrandAliasesStub,
         getBrandUrlSources: getBrandUrlSourcesStub,
         getBrandCompetitors: getBrandCompetitorsStub,
       },
@@ -897,7 +897,7 @@ describe('SerenityController', () => {
 
     it('createMarket forwards the brand aliases so the project carries them', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
-      getBrandAliasNamesStub.resolves(['Acme Inc', 'ACME']);
+      getBrandAliasesStub.resolves(['Acme Inc', 'ACME']);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createMarket(fakeContext({
         data: {
@@ -905,7 +905,7 @@ describe('SerenityController', () => {
         },
       }));
       expect(response.status).to.equal(201);
-      expect(getBrandAliasNamesStub).to.have.been.calledOnceWith(BRAND);
+      expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // options object is the 8th arg (index 7). generatePrompts was not supplied,
       // so topic generation defaults off (today's behavior is unchanged).
       expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7])
@@ -1397,7 +1397,7 @@ describe('SerenityController', () => {
 
     it('activate reads the brand aliases once and applies them to every market', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      getBrandAliasNamesStub.resolves(['Acme Inc']);
+      getBrandAliasesStub.resolves(['Acme Inc']);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand: makeBrandModel(),
@@ -1405,7 +1405,7 @@ describe('SerenityController', () => {
       }));
       expect(response.status).to.equal(200);
       // Read once for the whole batch, not per market.
-      expect(getBrandAliasNamesStub).to.have.been.calledOnceWith(BRAND);
+      expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // Both market creates receive the same aliases in their options arg (index 7).
       // No modelIds + no generatePrompts → empty units → best-effort publish.
       const expectedOpts = {
