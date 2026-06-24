@@ -10784,11 +10784,11 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify rollbackSuggestions was called with allSuggestions and updatedBy
+      // Covered cleanup is async now; the API passes only selected suggestions and updatedBy.
       expect(tokowakaClientStub.rollbackSuggestions.calledOnce).to.be.true;
       const [, , suggestions, options] = tokowakaClientStub.rollbackSuggestions.firstCall.args;
       expect(suggestions).to.include(domainWideSuggestion);
-      expect(options.allSuggestions).to.include(domainWideSuggestion);
+      expect(options).to.not.have.property('allSuggestions');
       expect(options.updatedBy).to.equal('test@test.com');
     });
 
