@@ -39,7 +39,7 @@ function makeConnection(overrides = {}) {
     getMetadata: () => ({ cloudId: '11111111-2222-3333-4444-555555555555' }),
     getCreatedAt: () => '2025-01-01T00:00:00Z',
     getUpdatedAt: () => '2025-01-01T00:00:00Z',
-    remove: sinon.stub().resolves(),
+    markDisconnected: sinon.stub().resolves(),
     markRequiresReauth: sinon.stub().resolves(),
     ...overrides,
   };
@@ -136,6 +136,7 @@ describe('TaskManagementController', () => {
               ticketId: 'PROJ-42',
               ticketKey: 'PROJ-42',
               ticketUrl: 'https://mysite.atlassian.net/browse/PROJ-42',
+              ticketStatus: 'To Do',
             }),
           }),
         },
@@ -346,11 +347,11 @@ describe('TaskManagementController', () => {
       const { deleteConnection } = TaskManagementController(ctx);
       const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
       expect(res.status).to.equal(204);
-      expect(conn.remove).to.have.been.calledOnce;
+      expect(conn.markDisconnected).to.have.been.calledOnce;
     });
 
-    it('returns 500 when DB remove fails after SM delete', async () => {
-      const conn = makeConnection({ remove: sinon.stub().rejects(new Error('db error')) });
+    it('returns 500 when DB soft-delete fails after SM delete', async () => {
+      const conn = makeConnection({ markDisconnected: sinon.stub().rejects(new Error('db error')) });
       const ctx = makeContext({
         dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
       });
@@ -368,7 +369,7 @@ describe('TaskManagementController', () => {
       const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
       expect(res.status).to.equal(204);
       expect(mockSmSend).to.have.been.calledOnce;
-      expect(conn.remove).to.have.been.calledOnce;
+      expect(conn.markDisconnected).to.have.been.calledOnce;
     });
 
     it('secret path uses no env segment', async () => {
@@ -747,7 +748,7 @@ describe('TaskManagementController', () => {
               capturedConnObj = connObj;
               return {
                 createTicket: sinon.stub().resolves({
-                  ticketId: 'PROJ-1', ticketKey: 'PROJ-1', ticketUrl: 'https://x.atlassian.net/browse/PROJ-1',
+                  ticketId: 'PROJ-1', ticketKey: 'PROJ-1', ticketUrl: 'https://x.atlassian.net/browse/PROJ-1', ticketStatus: 'To Do',
                 }),
               };
             },
@@ -819,7 +820,9 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
             create: sinon.stub().returns({
-              createTicket: sinon.stub().resolves({ ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1' }),
+              createTicket: sinon.stub().resolves({
+                ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1', ticketStatus: 'To Do',
+              }),
             }),
           },
         },
@@ -858,7 +861,9 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
             create: sinon.stub().returns({
-              createTicket: sinon.stub().resolves({ ticketId: 'PROJ-42', ticketKey: 'PROJ-42', ticketUrl: 'https://x.net/PROJ-42' }),
+              createTicket: sinon.stub().resolves({
+                ticketId: 'PROJ-42', ticketKey: 'PROJ-42', ticketUrl: 'https://x.net/PROJ-42', ticketStatus: 'To Do',
+              }),
             }),
           },
         },
@@ -902,7 +907,9 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
             create: sinon.stub().returns({
-              createTicket: sinon.stub().resolves({ ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1' }),
+              createTicket: sinon.stub().resolves({
+                ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1', ticketStatus: 'To Do',
+              }),
             }),
           },
         },
@@ -940,7 +947,9 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
             create: sinon.stub().returns({
-              createTicket: sinon.stub().resolves({ ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1' }),
+              createTicket: sinon.stub().resolves({
+                ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1', ticketStatus: 'To Do',
+              }),
             }),
           },
         },

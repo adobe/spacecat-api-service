@@ -294,11 +294,12 @@ function TaskManagementController(context) {
     }
 
     try {
-      await connection.remove();
+      // Soft-delete per v1 design (PR #1702): preserve audit history, GC job cleans up later.
+      await connection.markDisconnected();
     } catch (err) {
-      log.error({ organizationId, connectionId, err }, 'OAuth secret deleted but DB record removal failed');
+      log.error({ organizationId, connectionId, err }, 'OAuth secret deleted but DB record soft-delete failed');
       return createResponse(
-        { message: 'Connection secret deleted but DB record could not be removed' },
+        { message: 'Connection secret deleted but DB record could not be updated' },
         STATUS_INTERNAL_SERVER_ERROR,
       );
     }
@@ -613,6 +614,7 @@ function TaskManagementController(context) {
         ticketId: ticketResult.ticketId,
         ticketKey: ticketResult.ticketKey,
         ticketUrl: ticketResult.ticketUrl,
+        ticketStatus: ticketResult.ticketStatus,
       });
     } catch (err) {
       log.error(
