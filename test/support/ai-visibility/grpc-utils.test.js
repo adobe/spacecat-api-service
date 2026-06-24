@@ -58,11 +58,13 @@ import {
   coerceProtoCommonGapKind,
   aggregateGapPromptsTotalFromTotals,
   resolveTopicIdsDimensionFilter,
+  resolveTopicIds,
   MAX_TOPIC_IDS_DIMENSION_FILTER,
   TOPIC_INTENT_SLUG,
   mergeTopBrandsByDomainResponsesByMax,
   settledValueOrElse,
   settledFulfilledMap,
+  buildTextFilterQl,
 } from '../../../src/support/ai-visibility/grpc-utils.js';
 
 function sp(query) {
@@ -70,6 +72,25 @@ function sp(query) {
 }
 
 describe('grpc-utils', () => {
+  describe('buildTextFilterQl', () => {
+    it('builds a CONTAINS clause for the given column', () => {
+      expect(buildTextFilterQl('pdf', 'prompt')).to.equal('prompt CONTAINS "pdf"');
+      expect(buildTextFilterQl('adobe', 'name')).to.equal('name CONTAINS "adobe"');
+    });
+    it('trims the filter text', () => {
+      expect(buildTextFilterQl('  coffee  ', 'topic')).to.equal('topic CONTAINS "coffee"');
+    });
+    it('escapes embedded quotes and backslashes', () => {
+      expect(buildTextFilterQl('a"b\\c', 'domain')).to.equal('domain CONTAINS "a\\"b\\\\c"');
+    });
+    it('returns empty string for empty / whitespace / nullish input', () => {
+      expect(buildTextFilterQl('', 'prompt')).to.equal('');
+      expect(buildTextFilterQl('   ', 'prompt')).to.equal('');
+      expect(buildTextFilterQl(undefined, 'prompt')).to.equal('');
+      expect(buildTextFilterQl(null, 'prompt')).to.equal('');
+    });
+  });
+
   describe('settledValueOrElse / settledFulfilledMap', () => {
     it('settledValueOrElse returns value when fulfilled', () => {
       expect(settledValueOrElse({ status: 'fulfilled', value: 42 }, 0)).to.equal(42);
@@ -173,6 +194,42 @@ describe('grpc-utils', () => {
         params.append('topicIds', String(i));
       }
       const r = resolveTopicIdsDimensionFilter(params);
+      expect(r.ok).to.be.false;
+      expect(r.body.error).to.equal('topic_ids_limit_exceeded');
+    });
+  });
+
+  describe('resolveTopicIds', () => {
+    it('returns empty topicIds when no param', () => {
+      const r = resolveTopicIds(sp('searchQuery=q'));
+      expect(r.ok).to.be.true;
+      expect(r.topicIds).to.deep.equal([]);
+    });
+
+    it('reads the singular topicId as a one-element bigint array', () => {
+      const r = resolveTopicIds(sp('topicId=42'));
+      expect(r.ok).to.be.true;
+      expect(r.topicIds).to.deep.equal([42n]);
+    });
+
+    it('reads repeated topicIds (and merges a singular topicId)', () => {
+      const r = resolveTopicIds(sp('topicIds=1&topicIds=2&topicId=3'));
+      expect(r.ok).to.be.true;
+      expect(r.topicIds).to.deep.equal([1n, 2n, 3n]);
+    });
+
+    it('rejects non-numeric topic ids', () => {
+      const r = resolveTopicIds(sp('topicId=1%20OR%201'));
+      expect(r.ok).to.be.false;
+      expect(r.body.error).to.equal('invalid_topic_ids');
+    });
+
+    it('rejects too many topic ids', () => {
+      const params = new URLSearchParams();
+      for (let i = 0; i <= MAX_TOPIC_IDS_DIMENSION_FILTER; i += 1) {
+        params.append('topicIds', String(i));
+      }
+      const r = resolveTopicIds(params);
       expect(r.ok).to.be.false;
       expect(r.body.error).to.equal('topic_ids_limit_exceeded');
     });

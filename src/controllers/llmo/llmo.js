@@ -12,7 +12,7 @@
 
 import { gunzipSync } from 'zlib';
 import {
-  ok, badRequest, forbidden, createResponse, notFound, internalServerError,
+  ok, created, badRequest, forbidden, createResponse, notFound, internalServerError,
   unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
 import {
@@ -28,8 +28,9 @@ import {
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
-import { getDomain } from 'tldts';
+import { getDomain, parse as parseDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -1053,6 +1054,154 @@ function LlmoController(ctx) {
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  /**
+   * Paid-gated self-serve, site-only onboarding (LLMO-5606, Piece 1 of LLMO-3749).
+   *
+   * Stands up the site entity, entitlement/enrollment, base LLMO config, and
+   * site-analysis audits — "nothing DRS": no brand entity, no prompt generation,
+   * no brand-presence schedule, no llmo-customer-analysis. Reuses the canonical
+   * `performLlmoOnboarding` via the `siteOnly` flag. Activating a brand +
+   * generating prompts is Piece 2 (LLMO-5605).
+   *
+   * Org-scoped (`/v2/orgs/:spaceCatId/...`). Gated on org membership + an explicit
+   * PAID LLMO entitlement (no admin claim — this is customer self-serve, mirroring
+   * the v2 brand-management routes). Customers never see
+   * the internal failure reason — both failures and successes are posted to ops in
+   * SLACK_LLMO_ALERTS_CHANNEL_ID. Runs synchronously; `status: 'processing'` is
+   * honest because the triggered audits run asynchronously.
+   *
+   * @param {object} context - The request context.
+   * @param {string} context.params.spaceCatId - SpaceCat organization ID (UUID).
+   * @param {string} context.data.domain - Domain to onboard (normalized via composeBaseURL).
+   * @param {string} context.data.brandName - Brand label (siteConfig LLMO brand, not an entity).
+   * @param {string} [context.data.deliveryType] - Optional delivery type for site creation.
+   * @returns {Promise<Response>} 201 with site details, or 400/403/404 on failure.
+   */
+  const onboardSiteOnly = async (context) => {
+    const { log, env, dataAccess } = context;
+    const { Organization } = dataAccess;
+    const { spaceCatId } = context.params;
+    const { data } = context;
+
+    // Customers never see the internal reason — only a generic failure.
+    const GENERIC_ONBOARD_ERROR = "We couldn't onboard this domain — please contact support.";
+
+    try {
+      // --- Resolve org (404 if missing) ---
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      // --- Auth gate: org membership + explicit PAID entitlement ---
+      // Mirrors the v2 brand-management routes (brands.js), which gate on
+      // hasAccess(organization) alone. This is a paid-customer self-serve
+      // endpoint, so it deliberately does NOT require a platform-admin /
+      // LLMO-admin claim: those are never set on a real customer IMS token
+      // (the IMS handler grants the admin scope only for @adobe.com platform
+      // admins), so requiring them would 403 every paying customer. The
+      // explicit PAID check below is the additional, stricter gate.
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only members of the organization can onboard a site');
+      }
+
+      // Explicit PAID check. PAID is stricter than the platform's any-tier
+      // "LLMO-enabled" bar, so a FREE_TRIAL org 403s here. There is no status
+      // column on entitlements (getStatus() is an unbacked stub; revocation =
+      // row delete), so a PAID row existing is the "currently paying" signal.
+      const tierClient = TierClient.createForOrg(
+        context,
+        organization,
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+      const { entitlement } = await tierClient.checkValidEntitlement();
+      if (!entitlement || entitlement.getTier() !== EntitlementModel.TIERS.PAID) {
+        return forbidden('A paid LLMO entitlement is required to onboard a site');
+      }
+
+      // --- Validate request body ---
+      if (!data || typeof data !== 'object') {
+        return badRequest('Onboarding data is required');
+      }
+      const { domain, brandName, deliveryType } = data;
+      if (!hasText(domain) || !hasText(brandName)) {
+        return badRequest('domain and brandName are required and must be non-empty strings');
+      }
+      // Customer-facing endpoint — bound the inputs. RFC 1035 caps a hostname at
+      // 253 chars; brandName is a label, so cap it defensively too.
+      if (domain.trim().length > 253) {
+        return badRequest('domain is too long');
+      }
+      if (brandName.trim().length > 256) {
+        return badRequest('brandName is too long');
+      }
+
+      const baseURL = composeBaseURL(domain.trim());
+      if (!isValidUrl(baseURL)) {
+        return badRequest('domain is invalid');
+      }
+
+      // SSRF guard: onboarding triggers outbound probes against this host (CDN
+      // detection, Ahrefs), so reject anything that isn't a public registrable
+      // domain — IP literals (including the 169.254.169.254 metadata address),
+      // localhost, and single-label/internal hosts all fail here. (Resolve-time
+      // private-IP-range checks are a deeper, cross-cutting follow-up.)
+      const { isIp, domain: registrableDomain } = parseDomain(new URL(baseURL).hostname);
+      if (isIp || !registrableDomain) {
+        log.warn(`Site-only onboarding rejected non-public host for org ${spaceCatId}, domain ${domain}`);
+        return badRequest('domain is invalid');
+      }
+
+      const dataFolder = generateDataFolder(baseURL, env.ENV);
+      const imsOrgId = organization.getImsOrgId();
+
+      log.info(`Starting site-only LLMO onboarding for org ${spaceCatId} (IMS ${imsOrgId}), domain ${domain}`);
+
+      // validateSiteNotOnboarded returns { isValid, error } (never throws) and
+      // already ops-alerts the conflict cases. Surface only a generic 400.
+      const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+      if (!validation.isValid) {
+        log.warn(`Site-only onboarding rejected for org ${spaceCatId}, domain ${domain}: ${validation.error}`);
+        return badRequest(GENERIC_ONBOARD_ERROR);
+      }
+
+      // --- Orchestrate (siteOnly: true; no `say` → zero customer Slack) ---
+      const result = await performLlmoOnboarding(
+        {
+          domain,
+          brandName,
+          imsOrgId,
+          deliveryType,
+          siteOnly: true,
+        },
+        context,
+      );
+
+      await postLlmoAlert(
+        `:white_check_mark: Site-only onboarding succeeded for ${result.baseURL} `
+        + `(org ${result.organizationId}, site ${result.siteId})`,
+        context,
+      );
+
+      log.info(`Site-only LLMO onboarding completed for org ${spaceCatId}, site ${result.siteId}`);
+
+      return created({
+        siteId: result.siteId,
+        organizationId: result.organizationId,
+        baseURL: result.baseURL,
+        dataFolder: result.dataFolder,
+        status: 'processing',
+      });
+    } catch (error) {
+      log.error(`Error during site-only LLMO onboarding for org ${spaceCatId}: ${error.message}`);
+      await postLlmoAlert(
+        `:x: Site-only onboarding failed for org ${spaceCatId}: ${error.message}`,
+        context,
+      );
+      return internalServerError(GENERIC_ONBOARD_ERROR);
     }
   };
 
@@ -2081,6 +2230,7 @@ function LlmoController(ctx) {
     patchLlmoCdnBucketConfig,
     updateLlmoConfig,
     onboardCustomer,
+    onboardSiteOnly,
     offboardCustomer,
     queryFiles,
     patchLlmoDataRow,

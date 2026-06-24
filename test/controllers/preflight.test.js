@@ -150,11 +150,6 @@ describe('Preflight Controller', () => {
       {
         dataAccess: mockDataAccess,
         sqs: mockSqs,
-        // Sentinel — only `createPreflight` actually calls the IMS client;
-        // legacy `createPreflightJob` / `getPreflight*` tests never reach it.
-        // The `createPreflight` describe block injects a real stub via its
-        // own beforeEach.
-        imsClient: { unused: true },
         attributes: { authInfo: mockAuthInfo },
         pathInfo: { headers: {} },
       },
@@ -194,12 +189,8 @@ describe('Preflight Controller', () => {
     expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: null }, loggerStub, { test: 'env' })).to.throw('SQS client required');
   });
 
-  it('throws an error if imsClient is not an object', () => {
-    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: { test: 'property' }, imsClient: null }, loggerStub, { test: 'env' })).to.throw('IMS client required');
-  });
-
   it('throws an error if env is not object', () => {
-    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: { test: 'property' }, imsClient: { test: 'property' } }, loggerStub, null)).to.throw('Environment object required');
+    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: { test: 'property' } }, loggerStub, null)).to.throw('Environment object required');
   });
 
   describe('createPreflightJob', () => {
@@ -270,7 +261,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
           traceId,
@@ -408,7 +398,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -648,7 +637,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -703,7 +691,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -748,7 +735,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -798,7 +784,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -849,7 +834,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -899,7 +883,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -949,7 +932,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1006,7 +988,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1050,7 +1031,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1105,7 +1085,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1137,6 +1116,7 @@ describe('Preflight Controller', () => {
     let CreatePreflightController;
     let hasAccessStub;
     let mockImsClient;
+    let createFromStub;
 
     beforeEach(async () => {
       if (!global.fetch) {
@@ -1153,23 +1133,35 @@ describe('Preflight Controller', () => {
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
       hasAccessStub = sandbox.stub().resolves(true);
 
-      // SITES-43236: createPreflight mints a spacecat IMS v3 service token
-      // via context.imsClient and attaches it on the x-ims-authorization
-      // header of the Mysticat call. Tests in this block control mint
-      // behavior by overriding getServiceAccessTokenV3 on the stub.
+      // SITES-43236 / SITES-46699: createPreflight constructs a custom-env
+      // ImsClient with the dedicated PREFLIGHT_IMS_* credentials at the mint
+      // call site (see preflight.js for rationale). Tests esmock
+      // `ImsClient.createFrom` to return the shared mockImsClient stub; tests
+      // control mint behavior by overriding getServiceAccessToken on that
+      // stub per case (v2 authorization_code service-token mint).
       mockImsClient = {
-        getServiceAccessTokenV3: sandbox.stub().resolves({
+        getServiceAccessToken: sandbox.stub().resolves({
           access_token: 'test-ims-service-token',
           token_type: 'bearer',
           expires_in: 3600,
         }),
       };
+      // Stub-ify ImsClient.createFrom so tests can assert that the source
+      // passes the dedicated PREFLIGHT_IMS_* credentials through to the
+      // factory (the load-bearing contract of SITES-46699; if a future
+      // refactor accidentally swaps the wrong env keys, this stub's call
+      // args won't match and assertions fail).
+      createFromStub = sandbox.stub().returns(mockImsClient);
 
       // SITES-46202: createPreflight no longer consults Configuration / TierClient
       // for eligibility — Mysticat owns that decision. The controller is mocked
-      // here only against AccessControlUtil (tenancy boundary) and the standard
-      // dataAccess stubs.
+      // here only against AccessControlUtil (tenancy boundary), the IMS client
+      // factory (for the custom-env mint), and the standard dataAccess stubs.
       CreatePreflightController = await esmock('../../src/controllers/preflight.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: createFromStub },
+          retrievePageAuthentication: sandbox.stub().resolves('default-page-token'),
+        },
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
@@ -1178,7 +1170,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1187,6 +1178,11 @@ describe('Preflight Controller', () => {
           AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
           MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
           AWS_ENV: 'prod',
+          // SITES-46699: dedicated IMS client credentials used by callMysticatAnalyze.
+          PREFLIGHT_IMS_CLIENT_ID: 'test-preflight-client-id',
+          PREFLIGHT_IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+          PREFLIGHT_IMS_CLIENT_CODE: 'test-preflight-client-code',
+          PREFLIGHT_IMS_SCOPE: 'test-preflight-scope',
         },
       );
     });
@@ -1223,7 +1219,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1247,7 +1242,6 @@ describe('Preflight Controller', () => {
       {
         dataAccess: mockDataAccess,
         sqs: mockSqs,
-        imsClient: mockImsClient,
         attributes: { authInfo: mockAuthInfo },
         pathInfo: { headers: {} },
       },
@@ -1336,7 +1330,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1369,7 +1362,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1562,7 +1554,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1598,41 +1589,60 @@ describe('Preflight Controller', () => {
       expect(body.audits).to.be.undefined;
     });
 
-    it('does not include Authorization header when HEAD returns 200 (no auth needed)', async () => {
+    it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
       });
       const [, calledOptions] = fetchStub.secondCall.args;
-      expect(calledOptions.headers.Authorization).to.be.undefined;
+      // SITES-46967: page-auth header moved off Authorization onto x-page-auth.
+      // Authorization is now reserved for the IMS service token (always set).
+      expect(calledOptions.headers['x-page-auth']).to.be.undefined;
     });
 
-    // -- IMS service token on x-ims-authorization (SITES-43236) --
+    // -- IMS service token on Authorization, customer page-auth on x-page-auth (SITES-46967) --
 
-    it('attaches the IMS service token on x-ims-authorization (Bearer prefix)', async () => {
+    it('attaches the IMS service token on Authorization (Bearer prefix)', async () => {
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
         attributes: { authInfo: mockAuthInfo },
       });
       expect(response.status).to.equal(202);
-      expect(mockImsClient.getServiceAccessTokenV3).to.have.been.calledOnce;
+      // Load-bearing contracts (SITES-46699):
+      //   1. Custom-env ImsClient construction passes the dedicated
+      //      PREFLIGHT_IMS_* credentials through to ImsClient.createFrom.
+      //   2. Mint uses getServiceAccessToken (v2 authorization_code against
+      //      the IMSS-provisioned permanent code — no org_id, no SP binding).
+      // If a future refactor swaps to v3 client_credentials or wires the
+      // wrong env keys, one of these assertions fails.
+      expect(createFromStub).to.have.been.calledWith(
+        sinon.match({
+          env: sinon.match({
+            IMS_CLIENT_ID: 'test-preflight-client-id',
+            IMS_CLIENT_SECRET: 'test-preflight-client-secret',
+            IMS_CLIENT_CODE: 'test-preflight-client-code',
+            IMS_SCOPE: 'test-preflight-scope',
+          }),
+        }),
+      );
+      expect(mockImsClient.getServiceAccessToken).to.have.been.calledOnce;
       const [, calledOptions] = fetchStub.secondCall.args;
-      // Bearer prefix mirrors the v3-token convention; verified against the
-      // mystique-deploy CGW-Flex validator (Authorization on /v1/apply uses
-      // the same shape).
-      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+      // SITES-46967: IMS service token rides Authorization (default CGW slot)
+      // so the Ethos CGW-Flex edge emits X-Gw-Ims-Client-Id downstream — the
+      // header mystique's require_preflight_service_client dep reads.
+      expect(calledOptions.headers.Authorization).to.equal(
         'Bearer test-ims-service-token',
       );
-      // The customer-site page-auth header lives on a different key and
-      // must not be clobbered or duplicated by the IMS attachment.
-      expect(calledOptions.headers.Authorization).to.be.undefined;
+      // No customer-page-auth header when the page is un-authenticated.
+      expect(calledOptions.headers['x-page-auth']).to.be.undefined;
     });
 
-    it('keeps Authorization (page-auth) and x-ims-authorization (IMS) on separate headers when both are present', async () => {
+    it('keeps Authorization (IMS) and x-page-auth (page-auth) on separate headers when both are present', async () => {
       // HEAD returns 401 → enableAuthentication=true → retrievePageAuthentication
-      // resolves a customer-site token onto Authorization. The IMS token still
-      // rides x-ims-authorization independently.
+      // resolves a customer-site token. SITES-46967: page-auth rides
+      // x-page-auth (was Authorization); IMS service token rides Authorization
+      // (was x-ims-authorization).
       fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
       const aemCsSite = {
         ...mockSite,
@@ -1647,6 +1657,7 @@ describe('Preflight Controller', () => {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
         },
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: pageAuthStub,
         },
       });
@@ -1654,7 +1665,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1673,14 +1683,14 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       const [, calledOptions] = fetchStub.secondCall.args;
-      expect(calledOptions.headers.Authorization).to.equal('token customer-site-token');
-      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+      expect(calledOptions.headers.Authorization).to.equal(
         'Bearer test-ims-service-token',
       );
+      expect(calledOptions.headers['x-page-auth']).to.equal('token customer-site-token');
     });
 
     it('returns 500 PREFLIGHT_INTERNAL_ERROR when IMS service-token mint fails', async () => {
-      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1695,7 +1705,7 @@ describe('Preflight Controller', () => {
     it('does not create AsyncJob or Preflight records when IMS mint fails', async () => {
       // Mint happens before DB writes — a transient IMS failure must not
       // leave orphaned IN_PROGRESS records that the caller can't reconcile.
-      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1706,7 +1716,7 @@ describe('Preflight Controller', () => {
     });
 
     it('does not call Mysticat when IMS mint fails', async () => {
-      mockImsClient.getServiceAccessTokenV3.rejects(new Error('IMS down'));
+      mockImsClient.getServiceAccessToken.rejects(new Error('IMS down'));
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1725,7 +1735,7 @@ describe('Preflight Controller', () => {
       // SDK shape drift guard (e.g. `{ accessToken: ... }` after a version bump
       // or `{}` on partial responses) — must surface as an explicit 500, not
       // silently drop the header.
-      mockImsClient.getServiceAccessTokenV3.resolves({});
+      mockImsClient.getServiceAccessToken.resolves({});
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1781,7 +1791,7 @@ describe('Preflight Controller', () => {
 
     // -- enableAuthentication=true path (HEAD returns 401) --
 
-    it('forwards Authorization header to Mysticat for auth-required URL with x-promise-token header', async () => {
+    it('forwards page-auth on x-page-auth to Mysticat for auth-required URL with x-promise-token header', async () => {
       // First fetch (HEAD): 401 → enableAuthentication=true.
       // Use CS_CW so resolvePromiseToken consults the x-promise-token header
       // (PROMISE_BASED_AUTHORING_TYPES = [CS, CS_CW, AMS]).
@@ -1800,6 +1810,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().resolves('page-access-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {
@@ -1810,7 +1821,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: { 'x-promise-token': 'header-token' } },
         },
@@ -1830,8 +1840,11 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       const [, mystiOpts] = fetchStub.secondCall.args;
-      // CS_CW + promiseToken → isBearer false (DeliveryType !== AEM_CS) → 'token <t>'
-      expect(mystiOpts.headers.Authorization).to.equal('token page-access-token');
+      // CS_CW + promiseToken → isBearer false (DeliveryType !== AEM_CS) → 'token <t>'.
+      // SITES-46967: page-auth rides x-page-auth (Authorization now carries
+      // the IMS service token, validated at the CGW-Flex edge).
+      expect(mystiOpts.headers['x-page-auth']).to.equal('token page-access-token');
+      expect(mystiOpts.headers.Authorization).to.equal('Bearer test-ims-service-token');
       expect(mockRetrievePageAuth).to.have.been.calledOnce;
     });
 
@@ -1855,7 +1868,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1899,7 +1911,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -1935,6 +1946,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().rejects(new Error('IMS down'));
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {
@@ -1945,7 +1957,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: { 'x-promise-token': 'header-token' } },
         },
@@ -2001,6 +2012,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().resolves('sp-page-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {
@@ -2011,7 +2023,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -2032,8 +2043,9 @@ describe('Preflight Controller', () => {
       expect(authOptsArg).to.deep.equal({});
     });
 
-    it('uses Bearer prefix for AEM_CS site with x-promise-token header', async () => {
+    it('uses Bearer prefix on x-page-auth for AEM_CS site with x-promise-token header', async () => {
       // Covers the `isBearer` branch where DeliveryType === AEM_CS && promiseTokenObj truthy.
+      // SITES-46967: page-auth header moved to x-page-auth; Bearer prefix logic unchanged.
       fetchStub.resetBehavior();
       fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
       fetchStub.onSecondCall().resolves({ ok: true });
@@ -2048,6 +2060,7 @@ describe('Preflight Controller', () => {
       const mockRetrievePageAuth = sandbox.stub().resolves('cs-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
+          ImsClient: { createFrom: () => mockImsClient },
           retrievePageAuthentication: mockRetrievePageAuth,
         },
         '../../src/support/access-control-util.js': {
@@ -2058,7 +2071,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: mockImsClient,
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: { 'x-promise-token': 'header-token' } },
         },
@@ -2077,7 +2089,8 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       const [, mystiOpts] = fetchStub.secondCall.args;
-      expect(mystiOpts.headers.Authorization).to.equal('Bearer cs-token');
+      expect(mystiOpts.headers['x-page-auth']).to.equal('Bearer cs-token');
+      expect(mystiOpts.headers.Authorization).to.equal('Bearer test-ims-service-token');
     });
 
     it('falls back to profile.name and profile.email when first_name/last_name are absent', async () => {
@@ -2127,10 +2140,11 @@ describe('Preflight Controller', () => {
       // We proceeded past the HEAD failure (defaulting to auth-not-required)
       // and Mysticat accepted the call — so 202, not 500.
       expect(response.status).to.equal(202);
-      // The Mysticat call was made without an Authorization header (auth
-      // was skipped because the HEAD probe threw).
+      // The Mysticat call was made without an x-page-auth header (page-auth
+      // was skipped because the HEAD probe threw). Authorization is still
+      // set — SITES-46967 moved the IMS service token onto Authorization.
       const [, mystiOpts] = fetchStub.secondCall.args;
-      expect(mystiOpts.headers.Authorization).to.be.undefined;
+      expect(mystiOpts.headers['x-page-auth']).to.be.undefined;
     });
 
     it('returns 500 and rolls back the AsyncJob when Preflight.create throws', async () => {
@@ -2257,7 +2271,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },
@@ -2369,7 +2382,6 @@ describe('Preflight Controller', () => {
         {
           dataAccess: mockDataAccess,
           sqs: mockSqs,
-          imsClient: { unused: true },
           attributes: { authInfo: mockAuthInfo },
           pathInfo: { headers: {} },
         },

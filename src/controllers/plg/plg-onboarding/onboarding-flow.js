@@ -379,6 +379,7 @@ async function handlePreonboardedFastPath({
     const { entitlement } = await ensureAsoEntitlement(site, organization, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
     await updateLaunchDarklyFlags(site, organization, context);
+    await enrollPlgConfigHandlers(site, context);
 
     const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
     if (needsOrgReassignment) {

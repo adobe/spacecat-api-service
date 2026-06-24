@@ -32,6 +32,7 @@ import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } fr
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
+import { isValidLocale } from '../utils/validations.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -255,7 +256,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -301,6 +302,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const viewParam = context.data?.view;
     const statusParam = context.data?.status;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -357,7 +363,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok(suggestions);
   };
@@ -376,6 +382,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -418,7 +429,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
 
     return ok({
@@ -441,6 +452,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -476,7 +492,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok(suggestions);
   };
@@ -493,6 +509,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -537,7 +558,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok({
       suggestions,
@@ -559,6 +580,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -598,7 +624,7 @@ function SuggestionsController(ctx, sqs, env) {
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
-    return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
+    return ok(SuggestionDto.toJSON(suggestion, view, opportunity, locale));
   };
 
   /**
@@ -1193,10 +1219,11 @@ function SuggestionsController(ctx, sqs, env) {
       if (invalidEntry !== undefined) {
         return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
-      const configuration = await Configuration.findLatest();
-      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-      }
+      // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+      // intentionally. Auto-fix deploys are user-initiated one-off actions; gating them
+      // on the scheduled-audit enabled-list blocked legitimate ad-hoc deploys for sites
+      // that simply weren't on that list. Access control (`auto_fix` permission) above
+      // still rejects unauthorized callers.
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
       // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
       await sqs.sendMessage(queueUrl, {
@@ -1227,10 +1254,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const configuration = await Configuration.findLatest();
-    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-    }
+    // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+    // intentionally — see the matching note in the assess-urls branch above.
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );

@@ -84,9 +84,19 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
 | GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice | `listSerenityTags` |
-| GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice | `listSerenityModels` |
+| GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
+| PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
+| POST | `/serenity/activate` | Activate the brand into sub-workspace mode (ensure sub-workspace + publish supplied markets) | `activateSerenityBrand` |
+| POST | `/serenity/deactivate` | Deactivate: decommission the sub-workspace + disconnect the brand back to flat mode | `deactivateSerenityBrand` |
 
-All paths are prefixed with `/v2/orgs/:spaceCatId/brands/:brandId`.
+The above are prefixed with `/v2/orgs/:spaceCatId/brands/:brandId`.
+
+Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/orgs/:spaceCatId`, no `:brandId`) and are used to populate UI selectors before any brand/market exists:
+
+| Method | Path | Purpose | OperationId |
+|---|---|---|---|
+| GET | `/serenity/models` | Global AI-model catalog (`GET /v1/ai_models`) | `listSerenityOrgModels` |
+| GET | `/serenity/languages` | Supported Semrush language catalog (`GET /v1/languages`) | `listSerenityOrgLanguages` |
 
 ## The onboarding flow
 
@@ -126,6 +136,42 @@ Ordering (mirrors the create flow in reverse):
 ```
 
 The DELETE is **not soft**. The UI must confirm with the user before invoking — the linked upstream project (and all its prompts) is permanently destroyed.
+
+## Activate / deactivate (sub-workspace dual-mode)
+
+A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_id`:
+- **flat** (pointer NULL): markets resolve through the shared org parent workspace via the `BrandSemrushProject` mapping.
+- **subworkspace** (pointer set): the brand has its own Semrush sub-workspace; markets resolve live from it via `listProjects`.
+
+`POST /serenity/activate` moves a brand into sub-workspace mode:
+
+```
+1. ensure the sub-workspace ONCE for the whole batch (create + settle, or re-grant)
+2. for each supplied market: create-or-resume a draft project, attach models +
+   generated topic prompts + brand URLs + competitor benchmarks, then publish
+3. set brands.status = 'active' once >= 1 market is live
+```
+
+- Body: `{ brandDomain?, brandNames, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. `markets` is **capped at 50** (400 above that) — each market is a sequential upstream create+publish.
+- **Deferred-provisioning fallback (pending/draft brands).** `markets` and `brandDomain` are optional in the body: a brand saved via the wizard's "Save as pending" path carries its intended market(s) and primary URL in `brands.pending_semrush_provisioning`. When the body omits them, activate falls back to the stash — `markets` come from `pendingSemrushProvisioning.markets`, and `brandDomain` is derived from `pendingSemrushProvisioning.primaryUrl` (hostname only, via the shared `hostnameFromUrlString`). The body always wins when both are present. After resolution `markets` must be non-empty (else 400) and `brandDomain` must resolve (else 400) — a draft saved without a primary URL must supply `brandDomain` in the body.
+- **Stash lifecycle.** Each market that provisions (201, or 409 `sliceExists`) is removed from the stash; the column is set back to `null` once none remain. Markets that fail stay in the stash (with the primaryUrl) for a later retry, and the brand still flips to `active` if at least one market went live. The stash trim is saved atomically with the status flip.
+- Response: 200 when every market is live; **207 Multi-Status** when at least one market failed (per-market outcomes in `markets[]`); status `active`/`pending`.
+- Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live brand is a 200.
+
+`POST /serenity/deactivate` moves a brand back to flat mode:
+
+```
+1. decommission the sub-workspace: delete EVERY project + release the allocation
+   back to the parent pool
+2. clear brands.semrush_workspace_id (disconnect → flat mode)
+3. set brands.status = 'pending'
+```
+
+**Caveats operators must know:**
+- **Deactivate is destructive, not a pause.** It deletes every project in the sub-workspace (all markets, prompts, benchmarks, competitors). There is **no stored market memory**: a later activate must re-supply the markets and rebuilds everything from scratch. Reactivation does NOT restore the prior data.
+- **The sub-workspace shell is never deleted** (deletion is fail-closed behind `SERENITY_ALLOW_WORKSPACE_DELETE`, unset in every deployed env). Deactivate empties it and releases its allocation; the empty shell remains in the parent family and is reclaimed only by Semrush CS. A future activate allocates a fresh sub-workspace.
+- **`status = 'pending'` is overloaded.** A deactivated brand and a never-finished onboarding both read `pending`; downstream consumers cannot distinguish "off by choice" from "incomplete" on status alone.
+- **IMS-user only.** activate/deactivate (and all `/serenity/*`) require an IMS user token; a non-IMS S2S consumer is refused (401). There is no backend/automation path to activate a Semrush brand today.
 
 ## Prompt id semantics
 

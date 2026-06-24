@@ -1221,6 +1221,71 @@ llmo-onboard:
         $ref: './responses.yaml#/500'
     security: []
 
+llmo-onboard-site:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+  post:
+    tags:
+      - llmo
+    summary: Paid self-serve, site-only onboarding (LLMO-5606)
+    description: |
+      Paid-gated, self-serve onboarding that stands up the **site entity only** —
+      "nothing DRS": no brand entity, no prompt generation, no brand-presence
+      schedule, and no `llmo-customer-analysis`. Activating a brand and generating
+      prompts is a separate step (LLMO-5605).
+
+      Synchronously creates the organization/site, a `SiteEnrollment` under the
+      org's existing PAID LLMO entitlement, the base LLMO config (brand label +
+      data folder), SharePoint folder, `helix-query.yaml`, CDN/override detection,
+      and enables + triggers the site-analysis audits and top-pages import. The
+      response `status` is always `processing` because the triggered audits run
+      asynchronously — the UI reflects completion by polling site/audit readiness.
+
+      Access requires organization membership and an explicit **PAID** LLMO
+      entitlement (a FREE_TRIAL org is rejected) — mirroring the v2 brand-management
+      routes; no platform-admin claim is required. Customer-facing failures are
+      generic; the internal reason is logged and posted to the ops alerts channel.
+
+      **Note — domain ownership is not yet verified.** This endpoint does not prove
+      the caller controls the submitted domain (a brand-new domain is accepted; only
+      a domain already claimed by a different org is rejected). DNS/file-based
+      ownership verification (planned via Google Search Console) is a future,
+      cross-repo item and out of scope for Piece 1.
+    operationId: onboardSiteOnly
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoOnboardSiteRequest'
+    responses:
+      '201':
+        description: |
+          Site onboarded. The site, entitlement/enrollment, and base config exist;
+          site-analysis audits run asynchronously (`status: processing`).
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoOnboardSiteResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: []
+      - api_key: []
+
 llmo-offboard:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -2862,6 +2927,102 @@ llmo-agentic-traffic-by-url:
           application/json:
             schema:
               $ref: './schemas.yaml#/AgenticTrafficByUrl'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-hits-by-urls:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Per-URL agentic hits (total + weekly trend) for a known URL set
+    description: |
+      Queries `rpc_agentic_hits_for_urls` (LLMO-5586). A bounded, keyed lookup
+      that returns only `totalHits` + weekly `hitsTrend` for a caller-supplied
+      set of canonical URLs (the URLs already on screen). Unlike
+      `/agentic-traffic/by-url`, it does not rank, sort, search or paginate the
+      whole site, so it avoids the full-site scan that makes by-url the heaviest
+      query on the Aurora reader. Values match `by-url` for the same URLs and
+      filters.
+
+      At most 2000 URLs per request; a larger set returns `400`. Entries missing
+      a host or path are ignored. The same date-range guardrail as the other
+      agentic endpoints applies (start/end together, span <= 62 days).
+    operationId: getAgenticTrafficHitsByUrls
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [urls]
+            properties:
+              urls:
+                type: array
+                maxItems: 2000
+                items:
+                  # host + urlPath are both expected, but the endpoint is
+                  # lenient: entries missing either are silently ignored rather
+                  # than rejected, so they are not declared `required`.
+                  type: object
+                  properties:
+                    host: { type: string }
+                    urlPath: { type: string }
+              startDate: { type: string, format: date }
+              endDate: { type: string, format: date }
+              platform: { type: string }
+              agentType: { type: string }
+              agentTypes:
+                type: array
+                items: { type: string }
+              userAgent: { type: string }
+          example:
+            urls:
+              - { host: 'www.example.com', urlPath: '/products/widget' }
+              - { host: 'www.example.com', urlPath: '/about' }
+            startDate: '2026-05-01'
+            endDate: '2026-05-28'
+            agentTypes: [Chatbots, Research]
+    responses:
+      '200':
+        description: Per-URL agentic hits + weekly trend for the requested URLs
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      host: { type: string }
+                      urlPath: { type: string }
+                      totalHits: { type: integer }
+                      hitsTrend:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            weekStart: { type: string, format: date }
+                            value: { type: integer }
+            example:
+              rows:
+                - host: 'www.example.com'
+                  urlPath: '/products/widget'
+                  totalHits: 1234
+                  hitsTrend:
+                    - { weekStart: '2026-05-04', value: 321 }
+                    - { weekStart: '2026-05-11', value: 410 }
       '400': { $ref: './responses.yaml#/400' }
       '401': { $ref: './responses.yaml#/401' }
       '403': { $ref: './responses.yaml#/403' }
