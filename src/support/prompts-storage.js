@@ -633,6 +633,7 @@ export async function upsertPrompts({
   postgrestClient,
   updatedBy = 'system',
   classifyIntent,
+  classifyIntentBatchTimeoutMs = 8000,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -785,7 +786,7 @@ export async function upsertPrompts({
       const intentByText = await classifyIntents(
         classifyIntent,
         rowsNeedingIntent.map((r) => r.text),
-        { timeoutMs: 8000 },
+        { timeoutMs: classifyIntentBatchTimeoutMs },
       );
       const apply = (r) => {
         const classified = intentByText.get(r.text);
@@ -853,7 +854,7 @@ export async function upsertPrompts({
       Array.from({ length: Math.min(UPDATE_CONCURRENCY, toUpdate.length) }, () => worker()),
     );
     if (errors.length > 0) {
-      throw new Error(`Failed to update prompt: ${errors[0].message}`);
+      throw new Error(`Failed to update ${errors.length} prompt(s): ${errors.map((e) => e.message).join('; ')}`);
     }
   }
 

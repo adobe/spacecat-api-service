@@ -1390,7 +1390,7 @@ describe('prompts-storage', () => {
           prompts: [{ id: 'p1', prompt: 'Updated', regions: [] }],
           postgrestClient: client,
         }),
-      ).to.be.rejectedWith('Failed to update prompt');
+      ).to.be.rejectedWith('Failed to update 1 prompt(s): Update failed');
     });
 
     it('uses toInsert.length when insert returns no data', async () => {
