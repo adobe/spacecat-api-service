@@ -8314,7 +8314,7 @@ describe('LlmoController', () => {
       expect(createEdgeOptimizeOriginStub.calledOnceWith(
         sinon.match.any,
         'E2EXAMPLE123',
-        'dev.edgeoptimize.net',
+        'live.edgeoptimize.net',
         sinon.match({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' }),
       )).to.equal(true);
     });
@@ -8871,15 +8871,15 @@ describe('LlmoController', () => {
       };
     });
 
-    it('resolves the domain from the distribution and verifies routing', async () => {
+    it('resolves the domain from the site and verifies routing (no distribution lookup)', async () => {
       const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.passed).to.equal(true);
       expect(body.requestId).to.equal('req-123');
-      expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://d111111abcdef8.cloudfront.net/')).to.equal(true);
-      expect(listCloudFrontDistributionsStub.calledOnce).to.equal(true);
+      expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
+      expect(listCloudFrontDistributionsStub.called).to.equal(false);
     });
 
     it('uses an explicit domain when provided (no distribution lookup)', async () => {
@@ -8888,7 +8888,16 @@ describe('LlmoController', () => {
       expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
     });
 
-    it('returns 400 when the distribution domain cannot be resolved', async () => {
+    it('falls back to the distribution domain when the site host is unavailable', async () => {
+      mockSite.getBaseURL.returns('');
+      const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
+      expect(result.status).to.equal(200);
+      expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://d111111abcdef8.cloudfront.net/')).to.equal(true);
+      expect(listCloudFrontDistributionsStub.calledOnce).to.equal(true);
+    });
+
+    it('returns 400 when no domain can be resolved (no site host, no distribution)', async () => {
+      mockSite.getBaseURL.returns('');
       listCloudFrontDistributionsStub = sinon.stub().resolves([]);
       const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
       expect(result.status).to.equal(400);
@@ -8998,7 +9007,7 @@ describe('LlmoController', () => {
         distributionId: 'E2EXAMPLE123',
         originId: 'origin-aem',
         behavior: 'default',
-        originDomain: 'dev.edgeoptimize.net',
+        originDomain: 'live.edgeoptimize.net',
         accountId: '120569600543',
       });
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });

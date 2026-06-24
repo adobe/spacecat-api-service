@@ -2485,7 +2485,7 @@ function LlmoController(ctx) {
     const externalId = String(context.data?.externalId || '').trim();
     const distributionId = String(context.data?.distributionId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
-    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'dev.edgeoptimize.net';
+    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
     if (accountId.length !== 12) {
       return badRequest('accountId must be a 12-digit AWS account ID');
@@ -2761,21 +2761,23 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'verify edge optimize routing');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'verify edge optimize routing');
       if (error) {
         return error;
       }
 
-      // Determine the URL to probe: prefer an explicit domain, else resolve from the distribution.
-      //
-      // TODO(prod): probe the customer's REAL onboarded domain, not the *.cloudfront.net domain.
-      // In prod, bot traffic hits the customer's own domain (their CNAME / distribution alias), so
-      // that is the true end-to-end test. We have it server-side via the site
-      // (calculateForwardedHost(site.getBaseURL())) and/or the distribution Aliases. We default to
-      // the distribution cloudfront.net DomainName today only because the dev test distribution has
-      // no custom domain. Switch the default to the site/alias domain before prod (keep the
-      // explicit `domain` override + cloudfront.net fallback for distributions with no alias).
+      // Probe the customer's REAL onboarded domain (the site's own host) — that is where bot
+      // traffic actually lands, so it is the true end-to-end test of the routing. An explicit
+      // `domain` override still wins; the distribution's *.cloudfront.net DomainName is only a
+      // last-resort fallback for distributions with no resolvable site host.
       let domain = String(context.data?.domain || '').trim();
+      if (!hasText(domain)) {
+        try {
+          domain = String(calculateForwardedHost(site.getBaseURL(), log) || '').trim();
+        } catch (e) {
+          log.warn(`[edge-optimize-verify] could not derive host from site baseURL: ${e.message}`);
+        }
+      }
       if (!hasText(domain)) {
         const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
         const distributions = await listCloudFrontDistributions(credentials);
@@ -2783,7 +2785,7 @@ function LlmoController(ctx) {
         domain = match?.domainName || '';
       }
       if (!hasText(domain)) {
-        return badRequest('Could not determine the distribution domain to verify');
+        return badRequest('Could not determine the domain to verify');
       }
 
       const url = /^https?:\/\//.test(domain) ? domain : `https://${domain}/`;
@@ -2812,7 +2814,7 @@ function LlmoController(ctx) {
     const originId = String(context.data?.originId || '').trim();
     const behavior = String(context.data?.behavior || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
-    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'dev.edgeoptimize.net';
+    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
     if (accountId.length !== 12) {
       return badRequest('accountId must be a 12-digit AWS account ID');

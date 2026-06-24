@@ -53,7 +53,7 @@ const SESSION_DURATION_SECONDS = 900;
 // The connector role only permits writes to these exact resource names — keep them in sync
 // with the standalone connect-aws-wizard (server.mjs) and the customer-bootstrap-role policy.
 export const EDGE_OPTIMIZE_ORIGIN_ID = 'EdgeOptimize_Origin';
-export const EDGE_OPTIMIZE_DEFAULT_ORIGIN_DOMAIN = 'dev.edgeoptimize.net';
+export const EDGE_OPTIMIZE_DEFAULT_ORIGIN_DOMAIN = 'live.edgeoptimize.net';
 export const EDGE_OPTIMIZE_FUNCTION_NAME = 'edgeoptimize-routing';
 export const EDGE_OPTIMIZE_LAMBDA_FUNCTION_NAME = 'edgeoptimize-origin';
 export const EDGE_OPTIMIZE_LAMBDA_ROLE_NAME = 'edgeoptimize-origin-role';
@@ -653,7 +653,7 @@ export const handler = async (event) => {
     const isEdgeOptimizeRequest = hasHeader(reqHeaders, 'x-edgeoptimize-request');
 
     if (isEdgeOptimizeConfig && !isEdgeOptimizeRequest) {
-      if (originDomain === 'dev.edgeoptimize.net') {
+      if (originDomain === 'live.edgeoptimize.net') {
         console.log("Calling Edge Optimize Origin for agentic requests");
         setHeader(request.headers, 'host', originDomain);
       } else {
@@ -1320,12 +1320,18 @@ export async function runEdgeOptimizeDeployStep(
 
   // ── 6. verify — BEST-EFFORT: in_progress (not error) until CloudFront propagation lets pass. ──
   try {
-    const distributions = await listCloudFrontDistributions(credentials, region);
-    const match = distributions.find((d) => d.id === distributionId);
-    const domain = match?.domainName;
+    // Probe the customer's own onboarded host (from x-forwarded-host) — that is where bot traffic
+    // actually lands, so it is the true end-to-end test. Fall back to the distribution's
+    // *.cloudfront.net domain only when no site host is known.
+    let domain = String(originHeaders?.forwardedHost || '').trim();
+    if (!hasText(domain)) {
+      const distributions = await listCloudFrontDistributions(credentials, region);
+      const match = distributions.find((d) => d.id === distributionId);
+      domain = match?.domainName || '';
+    }
     if (!hasText(domain)) {
       byKey('verify').status = 'in_progress';
-      byKey('verify').detail = 'waiting for distribution domain';
+      byKey('verify').detail = 'waiting for domain';
       return { routingDeployed, verified, steps };
     }
     const result = await verifyEdgeOptimizeRouting(`https://${domain}/`);
