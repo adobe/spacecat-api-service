@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { randomUUID } from 'crypto';
+
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
 import {
   badRequest,
