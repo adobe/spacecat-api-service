@@ -50,7 +50,10 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
-import { PATTERN_COVERED_MARKING_TYPE } from '../support/edge-routing-utils.js';
+import {
+  PATTERN_COVERED_CLEANUP_TYPE,
+  PATTERN_COVERED_MARKING_TYPE,
+} from '../support/edge-routing-utils.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
@@ -2584,7 +2587,57 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`);
+        context.log.info(
+          `[edge-rollback] Successfully rolled back ${succeededSuggestions.length} `
+          + `suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`,
+        );
+
+        // Enqueue async covered cleanup for rolled-back domain-wide suggestions.
+        // The import worker removes coveredByDomainWide from affected URL suggestions
+        // outside the API request path to avoid large synchronous save fanout.
+        const succeededDomainWideIds = validPatterns
+          .filter((suggestion) => suggestion.getData()?.isDomainWide === true)
+          .map((suggestion) => suggestion.getId())
+          .filter((id) => succeededSuggestions.some((s) => s.getId() === id));
+
+        const { IMPORT_WORKER_QUEUE_URL } = env;
+        if (succeededDomainWideIds.length > 0 && IMPORT_WORKER_QUEUE_URL) {
+          try {
+            const coveredCleanupPayload = {
+              type: PATTERN_COVERED_CLEANUP_TYPE,
+              siteId,
+              opportunityId,
+              patternBasedSuggestionIds: succeededDomainWideIds,
+            };
+            const coveredCleanupPayloadSizeBytes = Buffer.byteLength(
+              JSON.stringify(coveredCleanupPayload),
+              'utf8',
+            );
+            context.log.info(
+              '[edge-rollback] Queueing pattern-based covered cleanup '
+              + `for ${succeededDomainWideIds.length} suggestion(s); `
+              + `payloadSizeBytes=${coveredCleanupPayloadSizeBytes}`,
+            );
+
+            await sqs.sendMessage(
+              IMPORT_WORKER_QUEUE_URL,
+              coveredCleanupPayload,
+            );
+            context.log.info(
+              '[edge-rollback] Queued domain-wide covered cleanup for '
+              + `${succeededDomainWideIds.length} domain-wide suggestion(s)`,
+            );
+          } catch (sqsError) {
+            context.log.warn(
+              `[edge-rollback] Failed to queue domain-wide covered cleanup: ${sqsError.message}`,
+            );
+          }
+        } else if (succeededDomainWideIds.length > 0) {
+          context.log.warn(
+            '[edge-rollback] IMPORT_WORKER_QUEUE_URL not configured; '
+            + 'skipping covered-cleanup enqueue',
+          );
+        }
       } catch (error) {
         context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during rollback: ${error.message}`, error);
         validSuggestions.forEach((suggestion) => {

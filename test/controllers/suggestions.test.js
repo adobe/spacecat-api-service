@@ -10776,6 +10776,54 @@ describe('Suggestions Controller', () => {
       expect(options.updatedBy).to.equal('test@test.com');
     });
 
+    it('enqueues pattern-based-covered-cleanup job after successful domain-wide rollback', async () => {
+      const suggestionsControllerWithImportWorkerQueue = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker',
+      });
+
+      const response = await suggestionsControllerWithImportWorkerQueue.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/import-worker');
+      expect(payload.type).to.equal('pattern-based-covered-cleanup');
+      expect(payload.siteId).to.equal(SITE_ID);
+      expect(payload.opportunityId).to.equal(OPPORTUNITY_ID);
+      expect(payload.patternBasedSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
+    });
+
+    it('logs warning and skips cleanup enqueue when IMPORT_WORKER_QUEUE_URL is missing', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+      expect(context.log.warn.calledWithMatch('IMPORT_WORKER_QUEUE_URL not configured')).to.equal(true);
+    });
+
     it('passes undefined updatedBy when profile email is missing (shared client applies fallbacks)', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,

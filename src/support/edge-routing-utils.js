@@ -46,6 +46,11 @@ export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-m
 // so the import worker marks all matching URL-level suggestions as covered.
 export const PATTERN_COVERED_MARKING_TYPE = 'pattern-based-covered-marking';
 
+// Import worker job type for async pattern-based covered cleanup.
+// Enqueued after domain-wide rollback so the import worker removes coveredByDomainWide
+// from all affected URL-level suggestions outside the API request path.
+export const PATTERN_COVERED_CLEANUP_TYPE = 'pattern-based-covered-cleanup';
+
 // Delay (seconds) before triggering the edge-optimize enabled marking job after CDN routing update.
 // Gives the CDN API time to propagate before Tokowaka detects the change.
 export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
