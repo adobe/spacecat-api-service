@@ -135,6 +135,10 @@ const routeFacsCapabilities = {
    * Inline comment after each entry records the gate so the rationale is greppable.
    */
   INTERNAL_ROUTES: [
+    // ASO redirect overlay — authenticated by X-ASO-API-Key, not a FACS user.
+    'GET /config/:service/redirects.txt',
+    // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
+    'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
@@ -289,9 +293,6 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/meta/meta': 'llmo/can_view',
       'GET /llmo/ai-visibility/competitors/metrics': 'llmo/can_view',
-      'GET /llmo/ai-visibility/competitors/gap-topics': 'llmo/can_view',
-      'GET /llmo/ai-visibility/competitors/gap-source-domains': 'llmo/can_view',
-      'GET /llmo/ai-visibility/competitors/gap-prompts': 'llmo/can_view',
       'GET /llmo/ai-visibility/meta': 'llmo/can_view',
       'GET /llmo/ai-visibility/prompts/responses/latest': 'llmo/can_view',
       'GET /llmo/ai-visibility/prompts/responses': 'llmo/can_view',
@@ -312,6 +313,14 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt-research/topics-export': 'llmo/can_view',
 
       // Brand presence — org-scoped, includes "all" and per-brand variants.
       // Org-wide "all" reads are admitted via an org-scoped state-layer row
@@ -386,6 +395,8 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/agentic-traffic/weeks': 'llmo/can_view',
       'GET /sites/:siteId/agentic-traffic/movers': 'llmo/can_view',
       'GET /sites/:siteId/agentic-traffic/has-data': 'llmo/can_view',
+      // Batch read of hits for a set of URLs; read-only access semantics.
+      'POST /sites/:siteId/agentic-traffic/hits-by-urls': 'llmo/can_view',
       // Export — kicks off a data export job; read-only access semantics.
       'POST /sites/:siteId/agentic-traffic/urls/export': 'llmo/can_view',
       'GET /sites/:siteId/agentic-traffic/urls/export/:exportId': 'llmo/can_view',
@@ -539,6 +550,8 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
       // Prompt suitability check — body-based mutation against the brand
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': 'llmo/can_configure',
       // LLMO sheet-data row patches
@@ -739,6 +752,9 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
+      // Org-level Serenity catalog reads (no brandId).
+      'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)
       'GET /sites/:siteId/preflights': 'llmo/can_view',
@@ -1122,6 +1138,9 @@ const routeFacsCapabilities = {
     // External / shared identifiers:
     'accessId', 'batchId', 'clientId', 'consumerId', 'contactSalesLeadId',
     'externalUserId', 'imsOrgId', 'grantId', 'userId',
+    // ASO dispatcher-overlay service name (GET /config/:service/redirects.txt) —
+    // an X-ASO-API-Key-authenticated internal route, not a FACS resource.
+    'service',
     // Serenity proxy params — identifiers from the upstream API (geo
     // target / language / semrush prompt id), not SpaceCat resources. The
     // enclosing :brandId is the FACS resource for these routes.

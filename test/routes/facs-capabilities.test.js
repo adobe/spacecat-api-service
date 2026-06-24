@@ -75,15 +75,7 @@ function loadAllDeclaredRoutes() {
  * multiple products simultaneously; we do NOT enforce pairwise-disjoint
  * product maps. The invariant applies once for the union, not per product.
  */
-// SUSPENDED until facsWrapper is attached in api-service. This suite asserts the
-// route-coverage invariant ((∪ PRODUCTS_ROUTES[*]) ⊎ INTERNAL_ROUTES = all declared
-// routes), i.e. every route is classified into a product or internal bucket. That
-// invariant only becomes meaningful (and enforceable) once `facsWrapper` actually
-// fronts the routes — which this PR intentionally defers. Until then, new routes
-// landing on main would break the invariant without any real authorization gap.
-// Switch `describe.skip` back to `describe` in the facsWrapper-attachment PR and
-// reconcile the route map against main there.
-describe.skip('routeFacsCapabilities', () => {
+describe('routeFacsCapabilities', () => {
   const METHOD_PATH_RE = /^(GET|POST|PATCH|PUT|DELETE) \/.+$/;
   const CAPABILITY_RE = /^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/;
 
