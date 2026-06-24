@@ -1456,7 +1456,7 @@ function LlmoController(ctx) {
       // Enabling it for a subpath site would intercept all traffic on the host,
       // not just the intended subpath. Reject until path-scoped routing lands (LLMO-4579).
       if (baseUrlHasPathname(baseURL)) {
-        log.warn(`Site scoped to pathname cannot use host-level auto-routing: ${baseURL}`);
+        log.info(`Site scoped to pathname cannot use host-level auto-routing: ${baseURL}`);
         return ok({
           message: 'Automated CDN routing is not supported for pathname scoped sites. Please contact domain-level site owner or contact support for assistance.',
           ...metaconfig,
