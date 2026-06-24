@@ -1,6 +1,7 @@
 site-opportunities:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunities
     summary: |
@@ -71,6 +72,7 @@ site-opportunities-by-status:
       required: true
       schema:
         type: string
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitiesByStatus
     summary: |
@@ -103,6 +105,7 @@ site-opportunity:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunity
     summary: |
@@ -197,6 +200,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionView'
     - $ref: './parameters.yaml#/suggestionStatus'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestions
     summary: |
@@ -278,6 +282,7 @@ site-opportunity-suggestions-by-status:
       schema:
         type: string
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatus
     summary: |
@@ -314,6 +319,7 @@ site-opportunity-suggestions-paged:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPaged
     summary: |
@@ -353,6 +359,7 @@ site-opportunity-suggestions-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPagedWithCursor
     summary: |
@@ -396,6 +403,7 @@ site-opportunity-suggestions-by-status-paged:
         type: string
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPaged
     summary: |
@@ -439,6 +447,7 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPagedWithCursor
     summary: |
@@ -1082,6 +1091,7 @@ site-opportunity-suggestion:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionId'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestion
     summary: |
