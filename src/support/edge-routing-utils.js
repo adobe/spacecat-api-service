@@ -79,8 +79,11 @@ export function getHostnameWithoutWww(url, log) {
  * @returns {boolean} True if the URL has a subpath, false otherwise (including unparseable URLs).
  */
 export function baseUrlHasPathname(baseURL) {
+  if (!isValidUrl(baseURL)) {
+    return false;
+  }
   try {
-    const { pathname } = new URL(isValidUrl(baseURL) ? baseURL : `https://${baseURL}`);
+    const { pathname } = new URL(baseURL);
     return pathname !== '/';
   } catch {
     return false;

@@ -400,8 +400,8 @@ describe('edge-routing-utils', () => {
       expect(baseUrlHasPathname('https://example.com/docs')).to.be.true;
     });
 
-    it('returns true for a URL without protocol but with a subpath', () => {
-      expect(baseUrlHasPathname('example.com/docs')).to.be.true;
+    it('returns false for a URL without protocol', () => {
+      expect(baseUrlHasPathname('example.com/docs')).to.be.false;
     });
 
     it('returns false for a root URL', () => {
