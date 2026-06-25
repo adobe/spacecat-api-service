@@ -46,19 +46,31 @@ const CF_MAX_SCRIPT_NAME_LEN = 63; // Cloudflare worker script name max length
 const deriveWorkerName = (baseURL) => {
   const host = new URL(baseURL).hostname.replace(/^www\./i, '');
   const slug = host.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!slug) {
+    return null;
+  }
   return `${WORKER_NAME_PREFIX}-${slug}`.slice(0, CF_MAX_SCRIPT_NAME_LEN).replace(/-+$/g, '');
 };
 
 /**
- * Whether `targetHost` belongs to the onboarded site's domain: it must equal the site's
- * canonical host (base URL host minus leading "www.") or be a subdomain of it. Prevents
- * deploying a worker that forwards traffic to a host unrelated to the site being onboarded.
+ * Whether `host` belongs to the onboarded site's domain: it must equal the site's canonical
+ * host (base URL host minus leading "www.") or be a subdomain of it. Prevents pointing the
+ * worker / a route at a host unrelated to the site being onboarded.
  */
-const targetHostMatchesSite = (targetHost, baseURL) => {
+const hostInSiteDomain = (host, baseURL) => {
   const siteHost = new URL(baseURL).hostname.replace(/^www\./i, '').toLowerCase();
-  const host = targetHost.toLowerCase();
-  return host === siteHost || host.endsWith(`.${siteHost}`);
+  const h = host.toLowerCase();
+  return h === siteHost || h.endsWith(`.${siteHost}`);
 };
+
+/**
+ * Extracts the host from a Cloudflare route pattern (e.g. "*.example.com/path*" -> "example.com",
+ * "https://www.example.com/*" -> "www.example.com"), stripping any scheme and leading wildcard.
+ */
+const routePatternHost = (pattern) => pattern
+  .replace(/^https?:\/\//i, '')
+  .split('/')[0]
+  .replace(/^\*\.?/, '');
 
 function LlmoCloudflareController(ctx) {
   const { log, env } = ctx;
@@ -211,6 +223,13 @@ function LlmoCloudflareController(ctx) {
       return badRequest(CF_TOKEN_MISSING);
     }
 
+    // The worker name is owned by the service and derived from the site, not client-supplied.
+    const scriptName = deriveWorkerName(site.getBaseURL());
+    if (!scriptName) {
+      log.error(`Unable to derive a worker name from site base URL ${site.getBaseURL()}`);
+      return badRequest('Unable to derive a worker name from the site base URL');
+    }
+
     const { accountId, targetHost } = context.data || {};
 
     if (!hasText(accountId)) {
@@ -225,14 +244,17 @@ function LlmoCloudflareController(ctx) {
     if (!HOSTNAME_RE.test(targetHost)) {
       return badRequest('targetHost must be a valid hostname');
     }
-    if (!targetHostMatchesSite(targetHost, site.getBaseURL())) {
+    if (!hostInSiteDomain(targetHost, site.getBaseURL())) {
       return badRequest('targetHost must belong to the site\'s domain');
     }
 
-    // The worker name is owned by the service and derived from the site, not client-supplied.
-    const scriptName = deriveWorkerName(site.getBaseURL());
-
-    const llmoApiKey = await getLlmoApiKey(site, context);
+    let llmoApiKey;
+    try {
+      llmoApiKey = await getLlmoApiKey(site, context);
+    } catch (e) {
+      log.error(`Failed to fetch LLMO metaconfig for site ${site.getId()}: ${e.message}`);
+      return createResponse({ message: 'Failed to fetch site metaconfig' }, 502);
+    }
     if (!hasText(llmoApiKey)) {
       log.error(`No LLMO API key found for site ${site.getId()}`);
       return internalServerError('LLMO API key not configured for this site');
@@ -289,9 +311,10 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes
-   * Body: { pattern, scriptName }
-   * Verifies server-side that the pattern does not collide with an existing route in the zone
-   * before creating it, so a deploy cannot silently override a route the customer already has.
+   * Body: { pattern }
+   * Verifies server-side that the pattern targets the site's own domain and does not collide
+   * with an existing route in the zone before creating it, so a deploy cannot silently override
+   * a route the customer already has.
    */
   const addRoute = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -303,6 +326,13 @@ function LlmoCloudflareController(ctx) {
     const cfToken = getCfToken(context);
     if (!cfToken) {
       return badRequest(CF_TOKEN_MISSING);
+    }
+
+    // The route targets the service-owned worker derived from the site, not a client value.
+    const scriptName = deriveWorkerName(site.getBaseURL());
+    if (!scriptName) {
+      log.error(`Unable to derive a worker name from site base URL ${site.getBaseURL()}`);
+      return badRequest('Unable to derive a worker name from the site base URL');
     }
 
     const { zoneId } = context.params;
@@ -318,9 +348,9 @@ function LlmoCloudflareController(ctx) {
     if (!hasText(pattern)) {
       return badRequest('Missing pattern in request body');
     }
-
-    // The route targets the service-owned worker derived from the site, not a client value.
-    const scriptName = deriveWorkerName(site.getBaseURL());
+    if (!hostInSiteDomain(routePatternHost(pattern), site.getBaseURL())) {
+      return badRequest('route pattern must target the site\'s domain');
+    }
 
     const cfClient = new CloudflareClient({ token: cfToken }, log);
 

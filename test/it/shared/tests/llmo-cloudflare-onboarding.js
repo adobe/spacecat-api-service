@@ -168,6 +168,16 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
         );
         expect(res.status).to.equal(400);
       });
+
+      it('returns 400 when targetHost is outside the site domain', async () => {
+        const http = getHttpClient();
+        const res = await http.llmoAdmin.post(
+          deployPath,
+          { accountId: VALID_ACCOUNT_ID, targetHost: 'evil.com' },
+          CF_TOKEN_HEADERS,
+        );
+        expect(res.status).to.equal(400);
+      });
     });
 
     // ── POST route create — token, zoneId and body validation precede external calls ─
@@ -198,6 +208,16 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
         const res = await http.llmoAdmin.post(
           routesPath(VALID_ZONE_ID),
           {},
+          CF_TOKEN_HEADERS,
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 when the pattern targets a domain outside the site', async () => {
+        const http = getHttpClient();
+        const res = await http.llmoAdmin.post(
+          routesPath(VALID_ZONE_ID),
+          { pattern: 'evil.com/*' },
           CF_TOKEN_HEADERS,
         );
         expect(res.status).to.equal(400);

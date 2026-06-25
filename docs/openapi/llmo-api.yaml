@@ -4643,7 +4643,10 @@ site-llmo-cloudflare-zone-routes:
             properties:
               pattern:
                 type: string
-                description: Cloudflare route pattern
+                description: >-
+                  Cloudflare route pattern. Its host must belong to the site's domain — the
+                  host portion (after stripping any leading wildcard) has to equal the site's
+                  canonical host (base URL host minus a leading `www.`) or be a subdomain of it.
                 example: 'www.example.com/*'
     responses:
       '200':

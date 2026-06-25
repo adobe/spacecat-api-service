@@ -375,6 +375,20 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(500);
     });
 
+    it('returns 502 when fetching the LLMO metaconfig fails', async () => {
+      mockTokowakaClient.fetchMetaconfig.rejects(new Error('tokowaka unavailable'));
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('returns 400 when a worker name cannot be derived from the site base URL', async () => {
+      mockSite.getBaseURL = () => 'https://-';
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
     it('returns 502 when worker script fetch fails', async () => {
       mockFetch.resolves({ ok: false, status: 404, statusText: 'Not Found' });
       const res = await controller.deployWorker(mockContext);
@@ -453,6 +467,29 @@ describe('LlmoCloudflareController', () => {
       mockContext.data = {};
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the pattern does not target the site domain', async () => {
+      mockContext.data = { pattern: 'evil.com/*' };
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.listRoutes).to.not.have.been.called;
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('accepts a wildcard subdomain pattern within the site domain', async () => {
+      mockContext.data = { pattern: '*.example.com/*' };
+      const route = { id: ROUTE_ID, pattern: '*.example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.addRoute.resolves(route);
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 400 when a worker name cannot be derived from the site base URL', async () => {
+      mockSite.getBaseURL = () => 'https://-';
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
     });
 
     it('returns 404 when site is not found', async () => {
