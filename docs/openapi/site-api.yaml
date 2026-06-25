@@ -67,6 +67,11 @@ site:
       records, so re-parenting must go through controlled flows (e.g.
       `PATCH /projects/{projectId}`) to keep a site and its project in the same
       organization.
+
+      Changing a site's `baseURL` is also rejected with 403 when the site backs a
+      Semrush-managed brand: that brand's tracked domain lives on its Semrush
+      projects/markets, which have no domain-update path, so the site URL is held
+      immutable to keep the two in sync.
     operationId: patchSite
     security:
       - admin_key: [ ]
@@ -86,7 +91,8 @@ site:
       '403':
         description: >-
           Attempted to change a field that is not allowed via this endpoint
-          (organizationId or projectId).
+          (organizationId or projectId), or to change the baseURL of a site
+          attached to a Semrush-managed brand.
         content:
           application/json:
             schema:
@@ -94,7 +100,7 @@ site:
               properties:
                 message:
                   type: string
-                  example: "Updating project ID is not allowed"
+                  example: "Updating the URL of a site attached to a Semrush-managed brand is not allowed"
       '400':
         $ref: './responses.yaml#/400-no-site-id-request-body-no-updates'
       '401':

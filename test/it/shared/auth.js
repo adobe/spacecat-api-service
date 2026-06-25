@@ -18,6 +18,7 @@ import {
   CONSUMER_1_IMS_ORG_ID,
   CONSUMER_2_CLIENT_ID,
   CONSUMER_2_IMS_ORG_ID,
+  BRAND_MANAGER_SUBJECT,
 } from './seed-ids.js';
 
 const ISSUER = 'https://spacecat.experiencecloud.live';
@@ -95,6 +96,27 @@ export async function createLlmoAdminToken() {
     email: 'test-llmo-admin@example.com',
     is_admin: false,
     is_llmo_administrator: true,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * Resource-scoped state-layer manager (hybrid-model §8.3). Member of ORG_1 with
+ * an EMPTY JWT facs_permissions set — its `can_manage_users` authority comes
+ * solely from a seeded state-layer binding on MANAGED_BRAND_ID. `sub` must match
+ * the seeded binding's `subject_id` (BRAND_MANAGER_SUBJECT).
+ */
+export async function createBrandManagerToken() {
+  return signToken({
+    sub: BRAND_MANAGER_SUBJECT,
+    email: BRAND_MANAGER_SUBJECT,
+    is_admin: false,
+    is_llmo_administrator: false,
+    facs_permissions: [],
     tenants: [{
       id: IMS_ORG_IDENT,
       subServices: [],
@@ -261,7 +283,7 @@ export async function createAllTokens() {
   const [
     admin, user, trialUser, llmoAdmin,
     delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
-    readOnlyAdmin,
+    readOnlyAdmin, brandManager,
     s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
@@ -272,6 +294,7 @@ export async function createAllTokens() {
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
     createReadOnlyAdminToken(),
+    createBrandManagerToken(),
     createS2SConsumerReadOnlyToken(),
     createS2SConsumerReadAllToken(),
     createS2SConsumerUnknownToken(),
@@ -285,6 +308,7 @@ export async function createAllTokens() {
     delegatedUserTruncated,
     delegatedUserNoSource,
     readOnlyAdmin,
+    brandManager,
     s2sConsumerReadOnly,
     s2sConsumerReadAll,
     s2sConsumerUnknown,

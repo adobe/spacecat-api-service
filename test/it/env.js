@@ -27,6 +27,10 @@ export function buildEnv(publicKeyB64) {
     // AWS_SESSION_TOKEN is cleared so that the CI configure-aws-credentials step's real
     // STS token does not leak into MinIO requests (MinIO validates or rejects STS tokens).
     AWS_REGION: 'us-east-1',
+    // Deployment env. The state-access-mapping endpoints are dev-only until
+    // facsWrapper fronts them (they 404 elsewhere), so the IT server must boot
+    // as 'dev' for that suite to exercise the real handlers.
+    AWS_ENV: 'dev',
     AWS_ACCESS_KEY_ID: 'minioadmin',
     AWS_SECRET_ACCESS_KEY: 'minioadmin',
     AWS_SESSION_TOKEN: '',

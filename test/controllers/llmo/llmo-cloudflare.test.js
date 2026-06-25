@@ -207,6 +207,12 @@ describe('LlmoCloudflareController', () => {
       const res = await controller.listAccounts(mockContext);
       expect(res.status).to.equal(502);
     });
+
+    it('returns 502 when the rejection is not an Error instance', async () => {
+      mockCfClient.listAccounts.rejects({ noMessage: true });
+      const res = await controller.listAccounts(mockContext);
+      expect(res.status).to.equal(502);
+    });
   });
 
   // ── listZones ────────────────────────────────────────────────────────────
@@ -226,6 +232,12 @@ describe('LlmoCloudflareController', () => {
       mockContext.pathInfo.headers = {};
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when site is not found', async () => {
+      mockContext.dataAccess.Site.findById.resolves(null);
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(404);
     });
 
     it('returns 403 when Cloudflare authorization fails', async () => {
@@ -281,6 +293,29 @@ describe('LlmoCloudflareController', () => {
       expect(opts).to.have.property('signal');
     });
 
+    it('returns 404 when site is not found', async () => {
+      mockContext.dataAccess.Site.findById.resolves(null);
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(404);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('fetches the worker script from EDGE_OPTIMIZE_WORKER_SCRIPT_URL when set', async () => {
+      mockContext.env.EDGE_OPTIMIZE_WORKER_SCRIPT_URL = 'https://example.test/custom-worker.js';
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockFetch.firstCall.args[0]).to.equal('https://example.test/custom-worker.js');
+    });
+
+    it('returns 400 when the request body is missing', async () => {
+      mockContext.data = undefined;
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
     it('returns 400 when accountId is missing', async () => {
       mockContext.data = { targetHost: TARGET_HOST };
       const res = await controller.deployWorker(mockContext);
@@ -303,6 +338,29 @@ describe('LlmoCloudflareController', () => {
       mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'not a host' };
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when targetHost does not belong to the site domain', async () => {
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'evil.com' };
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('accepts the canonical site host as targetHost', async () => {
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'example.com' };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+    });
+
+    it('accepts a subdomain of the site domain as targetHost', async () => {
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'cdn.example.com' };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
     });
 
     it('returns 400 when CF token is missing', async () => {
@@ -365,13 +423,30 @@ describe('LlmoCloudflareController', () => {
 
     it('returns 409 and does not add when the pattern already exists', async () => {
       const existing = { id: ROUTE_ID, pattern: 'example.com/*', script: 'other-worker' };
-      mockCfClient.listRoutes.resolves([existing]);
+      // Include a null entry to exercise the route?.pattern guard.
+      mockCfClient.listRoutes.resolves([null, existing]);
 
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(409);
       const body = await res.json();
       expect(body.existingRoute).to.deep.equal(existing);
       expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('treats a null route list as empty and creates the route', async () => {
+      mockCfClient.listRoutes.resolves(null);
+      const route = { id: ROUTE_ID, pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.addRoute.resolves(route);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.called;
+    });
+
+    it('returns 400 when the request body is missing', async () => {
+      mockContext.data = undefined;
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(400);
     });
 
     it('returns 400 when pattern is missing', async () => {

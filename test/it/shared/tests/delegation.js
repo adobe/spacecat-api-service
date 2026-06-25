@@ -83,10 +83,11 @@ export default function delegationTests(getHttpClient, resetData) {
         expect(res.body.message).to.include('Only users belonging to the organization');
       });
 
-      it('user (ORG_1): SITE_1 default x-product (ASO) → 403 unauthorized request (product mismatch)', async () => {
+      it('user (ORG_1): SITE_1 x-product=ASO → 403 unauthorized request (product mismatch)', async () => {
         const http = getHttpClient();
-        // Default header is x-product: ASO; hasAccess called with productCode='LLMO'
-        const res = await http.user.get(`/sites/${SITE_1_ID}/llmo/config`);
+        // Forcing x-product: ASO; hasAccess called with productCode='LLMO'
+        // (extraHeaders override the http-client's URL-derived default).
+        const res = await http.user.get(`/sites/${SITE_1_ID}/llmo/config`, { 'x-product': 'ASO' });
         expect(res.status).to.equal(403);
         expect(res.body.message).to.include('[Error] Unauthorized request');
       });
@@ -120,9 +121,13 @@ export default function delegationTests(getHttpClient, resetData) {
 
       it('delegatedUser: SITE_1 with wrong x-product (ASO) → 403 unauthorized request (product mismatch)', async () => {
         const http = getHttpClient();
-        // Default header x-product: ASO → hasAccess receives productCode='LLMO',
-        // xProductHeader='ASO' → mismatch
-        const res = await http.delegatedUser.get(`/sites/${SITE_1_ID}/llmo/config`);
+        // Forcing x-product: ASO → hasAccess receives productCode='LLMO',
+        // xProductHeader='ASO' → mismatch (extraHeaders override the
+        // http-client's URL-derived default).
+        const res = await http.delegatedUser.get(
+          `/sites/${SITE_1_ID}/llmo/config`,
+          { 'x-product': 'ASO' },
+        );
         expect(res.status).to.equal(403);
         expect(res.body.message).to.include('[Error] Unauthorized request');
       });
@@ -185,7 +190,12 @@ export default function delegationTests(getHttpClient, resetData) {
 
       it('delegatedUserTruncated: wrong x-product (ASO) → 403 unauthorized request', async () => {
         const http = getHttpClient();
-        const res = await http.delegatedUserTruncated.get(`/sites/${SITE_1_ID}/llmo/config`);
+        // Forcing x-product: ASO via extraHeaders (the http-client's
+        // URL-derived default would otherwise pick LLMO).
+        const res = await http.delegatedUserTruncated.get(
+          `/sites/${SITE_1_ID}/llmo/config`,
+          { 'x-product': 'ASO' },
+        );
         expect(res.status).to.equal(403);
         expect(res.body.message).to.include('[Error] Unauthorized request');
       });

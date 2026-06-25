@@ -4549,7 +4549,10 @@ site-llmo-cloudflare-deploy:
                 example: '0123456789abcdef0123456789abcdef'
               targetHost:
                 type: string
-                description: Origin host the worker forwards optimized traffic to
+                description: >-
+                  Origin host the worker forwards optimized traffic to. Must belong to the
+                  site's domain — it has to equal the site's canonical host (base URL host
+                  minus a leading `www.`) or be a subdomain of it.
                 example: 'www.example.com'
     responses:
       '200':

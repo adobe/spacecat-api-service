@@ -49,6 +49,17 @@ const deriveWorkerName = (baseURL) => {
   return `${WORKER_NAME_PREFIX}-${slug}`.slice(0, CF_MAX_SCRIPT_NAME_LEN).replace(/-+$/g, '');
 };
 
+/**
+ * Whether `targetHost` belongs to the onboarded site's domain: it must equal the site's
+ * canonical host (base URL host minus leading "www.") or be a subdomain of it. Prevents
+ * deploying a worker that forwards traffic to a host unrelated to the site being onboarded.
+ */
+const targetHostMatchesSite = (targetHost, baseURL) => {
+  const siteHost = new URL(baseURL).hostname.replace(/^www\./i, '').toLowerCase();
+  const host = targetHost.toLowerCase();
+  return host === siteHost || host.endsWith(`.${siteHost}`);
+};
+
 function LlmoCloudflareController(ctx) {
   const { log, env } = ctx;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -183,9 +194,10 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/onboarding/cloudflare/deploy
-   * Body: { accountId, scriptName, targetHost }
-   * Fetches the Edge Optimize worker script from GitHub, deploys it, then sets the
-   * LLMO API key as the EDGE_OPTIMIZE_API_KEY secret on the worker.
+   * Body: { accountId, targetHost }
+   * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
+   * from the site (see deriveWorkerName), then sets the LLMO API key as the
+   * EDGE_OPTIMIZE_API_KEY secret on the worker.
    */
   const deployWorker = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -212,6 +224,9 @@ function LlmoCloudflareController(ctx) {
     }
     if (!HOSTNAME_RE.test(targetHost)) {
       return badRequest('targetHost must be a valid hostname');
+    }
+    if (!targetHostMatchesSite(targetHost, site.getBaseURL())) {
+      return badRequest('targetHost must belong to the site\'s domain');
     }
 
     // The worker name is owned by the service and derived from the site, not client-supplied.

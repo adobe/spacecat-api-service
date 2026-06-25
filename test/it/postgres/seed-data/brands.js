@@ -13,7 +13,11 @@
 /**
  * Baseline brands for IT tests.
  *
- * BRAND_1 belongs to ORG_1 (accessible org).
+ * BRAND_1 belongs to ORG_1 (accessible org) and is Semrush-managed
+ * (`semrush_workspace_id` set), with its primary site SITE_1. This anchors the
+ * PATCH /sites URL-immutability guard IT: changing SITE_1's baseURL must 403
+ * because the site backs a Semrush-managed brand whose tracked domain lives on
+ * its Semrush projects (no upstream domain-update path).
  *
  * Format: snake_case (PostgreSQL / PostgREST)
  */
@@ -23,6 +27,7 @@ export const brands = [
     organization_id: '11111111-1111-4111-b111-111111111111',
     name: 'Test Brand',
     site_id: '33333333-3333-4333-b333-333333333333',
+    semrush_workspace_id: 'it-semrush-ws-1',
     status: 'active',
     origin: 'human',
     regions: ['us'],
