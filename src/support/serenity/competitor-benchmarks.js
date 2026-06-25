@@ -21,6 +21,7 @@ import {
   republishBestEffort,
 } from './brand-urls.js';
 import { dedupeAliases, sameAliasSet, rejectedAliasesFrom } from './aliases.js';
+import { resolveProjects } from './resolve-projects.js';
 
 /**
  * A brand's competitors ("other brands to track") propagated onto each
@@ -287,9 +288,20 @@ export async function syncCompetitorBenchmarksForProject(
  * republish is tolerated. `rejected` aggregates the per-market competitor aliases
  * Semrush refused, tagged with their project/market, so the caller can surface them.
  *
+ * @param {object} transport - Semrush transport.
+ * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}
+ *   competitors - the brand's competitors to track as benchmarks (region-filtered per
+ *   market by {@link collectCompetitorBenchmarks}).
+ * @param {string[]} removedDomains - normalized competitor domains removed from the brand
+ *   (their benchmarks are deleted per market).
+ * @param {string} workspaceId - the brand's sub-workspace id.
+ * @param {object} [log]
  * @param {Array<string|{value:string}>} [brandOwnUrls=[]] - the brand's own
  *   website URLs, reserved (with every project domain) so a competitor can't be
  *   one of the brand's own properties.
+ * @param {Array<object>|null} [prefetchedProjects=null] - a pre-fetched project listing
+ *   to reuse (the brand-edit path lists once and shares it across the URL/competitor/alias
+ *   syncs); null/undefined lists here. An explicit `[]` reuses the prefetch (no re-list).
  * @returns {Promise<{markets: number, created: number, updated: number,
  *   deleted: number, rejected: {projectId: string, market: string,
  *   domain: string|null, aliases: string[]}[]}>}
@@ -305,13 +317,7 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
 ) {
   // Reuse a pre-fetched project listing when supplied (the brand-edit path lists
   // once and shares it across the URL/competitor/alias syncs), else list here.
-  let projects;
-  if (Array.isArray(prefetchedProjects)) {
-    projects = prefetchedProjects;
-  } else {
-    const listing = await transport.listProjects(workspaceId);
-    projects = Array.isArray(listing?.items) ? listing.items : [];
-  }
+  const projects = await resolveProjects(transport, workspaceId, prefetchedProjects);
 
   // The brand's own domains across all its markets — every project's domain (the
   // primary is one of them) plus the brand's own website URLs. A competitor whose

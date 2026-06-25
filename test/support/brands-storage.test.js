@@ -1820,6 +1820,29 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Failed to sync brand_sites: cannot read protected rows: select error');
     });
 
+    it('throws (fails closed) when the sites lookup fails during syncBrandSites', async () => {
+      // A swallowed sites-read error would null out `sites`, making the
+      // `if (!sites || ...) return;` silently no-op the entire brand_sites sync
+      // (URLs never linked). Fail closed instead (consistent with the
+      // protected-rows SELECT / delete / upsert error handling).
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        // protected-rows SELECT succeeds, delete succeeds (both on brand_sites),
+        // then the sites lookup fails.
+        brand_sites: [
+          { data: [], error: null },
+          { data: null, error: null },
+        ],
+        sites: { data: null, error: { message: 'sites read error' } },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_sites: cannot read sites: sites read error');
+    });
+
     it('falls back to base URL when URL string is invalid in syncBrandSites', async () => {
       const fullBrandRow = makeBrandRow({
         brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'not-a-valid-url' } }],

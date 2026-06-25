@@ -1822,13 +1822,15 @@ function BrandsController(ctx, log, env) {
         // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
         const imsToken = getImsUserTokenStrict(context);
         const transport = createSerenityTransport({ env: context.env, imsToken });
-        // List the sub-workspace's projects ONCE and share the result across the
-        // URL/competitor/alias syncs below — the listing is stable across the
-        // brand-row write above, so this collapses up to three redundant
-        // listProjects round-trips into one on a single edit.
-        const sharedListing = await transport.listProjects(updated.semrushWorkspaceId);
-        const sharedProjects = Array.isArray(sharedListing?.items) ? sharedListing.items : [];
         try {
+          // List the sub-workspace's projects ONCE and share the result across the
+          // URL/competitor/alias syncs below — the listing is stable across the
+          // brand-row write above, so this collapses up to three redundant
+          // listProjects round-trips into one on a single edit. Kept inside the try
+          // so a listProjects failure still emits the workspace-scoped re-sync
+          // breadcrumb below rather than escaping to the generic outer catch.
+          const sharedListing = await transport.listProjects(updated.semrushWorkspaceId);
+          const sharedProjects = Array.isArray(sharedListing?.items) ? sharedListing.items : [];
           if (urlsTouched) {
             await syncBrandUrlsAcrossMarkets(
               transport,

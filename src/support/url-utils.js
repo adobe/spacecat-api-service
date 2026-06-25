@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -27,7 +29,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  * @returns {string|null} the hostname, or null when absent/unparseable
  */
 export function hostnameFromUrlString(value) {
-  if (!hasText(value)) {
+  if (!value || !hasText(value)) {
     return null;
   }
   try {
@@ -50,11 +52,16 @@ export function hostnameFromUrlString(value) {
  * Conservative by design: it rejects only clearly-non-public hosts and never a
  * legitimate registrable domain (e.g. `example.com`, `www.acme.co.uk`).
  *
+ * Assumes a WHATWG-`URL`-normalized hostname as input (pass the output of
+ * `hostnameFromUrlString`): IP-literal evasions (decimal/hex/octal-encoded
+ * addresses) are neutralized only by that upstream `new URL()` normalization,
+ * not by this function in isolation.
+ *
  * @param {string} hostname - a bare hostname (as returned by hostnameFromUrlString)
  * @returns {boolean} true when the host is a public domain name
  */
 export function isPublicHostname(hostname) {
-  if (!hasText(hostname)) {
+  if (!hostname || !hasText(hostname)) {
     return false;
   }
   const host = hostname.toLowerCase().trim().replace(/\.$/, '');

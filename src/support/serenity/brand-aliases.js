@@ -21,6 +21,7 @@ import {
   republishBestEffort,
 } from './brand-urls.js';
 import { dedupeAliases, sameAliasSet, rejectedAliasesFrom } from './aliases.js';
+import { resolveProjects } from './resolve-projects.js';
 
 /**
  * A brand's aliases (the extra names it is known by) propagated to its Semrush
@@ -72,6 +73,9 @@ export function collectAliasNames(aliases, market) {
  *   + first `brand_names` entry).
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {object} [log]
+ * @param {Array<object>|null} [prefetchedProjects=null] - a pre-fetched project listing
+ *   to reuse (the brand-edit path lists once and shares it across the URL/competitor/alias
+ *   syncs); null/undefined lists here. An explicit `[]` reuses the prefetch (no re-list).
  * @returns {Promise<{markets: number, projectsUpdated: number,
  *   benchmarksUpdated: number, rejected: {projectId: string, market: string,
  *   domain: string|null, aliases: string[]}[]}>}
@@ -86,13 +90,7 @@ export async function syncBrandAliasesAcrossMarkets(
 ) {
   // Reuse a pre-fetched project listing when supplied (the brand-edit path lists
   // once and shares it across the URL/competitor/alias syncs), else list here.
-  let projects;
-  if (Array.isArray(prefetchedProjects)) {
-    projects = prefetchedProjects;
-  } else {
-    const listing = await transport.listProjects(workspaceId);
-    projects = Array.isArray(listing?.items) ? listing.items : [];
-  }
+  const projects = await resolveProjects(transport, workspaceId, prefetchedProjects);
 
   let markets = 0;
   let projectsUpdated = 0;

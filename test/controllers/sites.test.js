@@ -172,6 +172,14 @@ describe('Sites Controller', () => {
   beforeEach(() => {
     sites = buildSites();
 
+    // Reset the brand-attachment stubs to their permissive defaults here (rather than
+    // at the END of individual tests) so an aborted test can never leak contaminated
+    // stub state into the next one.
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    isSemrushMarketMirrorSiteStub.reset();
+    isSemrushMarketMirrorSiteStub.resolves(false);
+
     mockDataAccess = {
       Audit: {
         findBySiteIdAndAuditTypeAndAuditedAt: sandbox.stub().resolves({
@@ -830,8 +838,6 @@ describe('Sites Controller', () => {
       'message',
       'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
     );
-    isSemrushMarketMirrorSiteStub.reset();
-    isSemrushMarketMirrorSiteStub.resolves(false);
   });
 
   it('returns 500 (not an opaque throw) when the brand-attachment lookup fails', async () => {
@@ -855,8 +861,6 @@ describe('Sites Controller', () => {
       'message',
       'Could not verify whether this site URL is editable; please retry',
     );
-    getBrandBySiteStub.reset();
-    getBrandBySiteStub.resolves(null);
   });
 
   it('returns bad request when updating a site if id not provided', async () => {

@@ -71,6 +71,9 @@ describe('url-utils: isPublicHostname', () => {
     expect(isPublicHostname('host.local')).to.equal(false);
     expect(isPublicHostname('foo.test')).to.equal(false);
     expect(isPublicHostname('svc.corp')).to.equal(false);
+    expect(isPublicHostname('host.home')).to.equal(false);
+    expect(isPublicHostname('dev.lan')).to.equal(false);
+    expect(isPublicHostname('foo.example')).to.equal(false);
   });
 
   it('returns false for empty/whitespace input', () => {

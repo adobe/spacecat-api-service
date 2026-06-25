@@ -373,11 +373,14 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     return;
   }
 
-  const { data: sites } = await postgrestClient
+  const { data: sites, error: sitesError } = await postgrestClient
     .from('sites')
     .select('id, base_url')
     .eq('organization_id', organizationId)
     .in('base_url', [...pathsByBase.keys()]);
+  if (sitesError) {
+    throw new Error(`Failed to sync brand_sites: cannot read sites: ${sitesError.message}`);
+  }
 
   if (!sites || sites.length === 0) {
     return;

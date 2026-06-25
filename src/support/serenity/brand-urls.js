@@ -15,6 +15,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { SerenityTransportError } from './rest-transport.js';
+import { resolveProjects } from './resolve-projects.js';
 
 /**
  * Brand-level URLs (the brand's own sites, social accounts, and earned-content
@@ -265,6 +266,14 @@ export function marketOf(project) {
  * Create/delete errors propagate so the edit hard-fails; a quota 405 on the
  * republish alone is tolerated.
  *
+ * @param {object} transport - Semrush transport.
+ * @param {object} sources - the brand's URL sources ({ urls?, socialAccounts?,
+ *   earnedContent? }), region-filtered per market by {@link collectBrandUrlEntries}.
+ * @param {string} workspaceId - the brand's sub-workspace id.
+ * @param {object} [log]
+ * @param {Array<object>|null} [prefetchedProjects=null] - a pre-fetched project listing
+ *   to reuse (the brand-edit path lists once and shares it across the URL/competitor/alias
+ *   syncs); null/undefined lists here. An explicit `[]` reuses the prefetch (no re-list).
  * @returns {Promise<{markets: number, created: number, deleted: number}>}
  */
 export async function syncBrandUrlsAcrossMarkets(
@@ -277,13 +286,7 @@ export async function syncBrandUrlsAcrossMarkets(
   // Reuse a pre-fetched project listing when the caller already has one (the
   // brand-edit path lists once and shares it across the URL/competitor/alias
   // syncs), else list here. The listing is stable across a brand-row write.
-  let projects;
-  if (Array.isArray(prefetchedProjects)) {
-    projects = prefetchedProjects;
-  } else {
-    const listing = await transport.listProjects(workspaceId);
-    projects = Array.isArray(listing?.items) ? listing.items : [];
-  }
+  const projects = await resolveProjects(transport, workspaceId, prefetchedProjects);
 
   let created = 0;
   let deleted = 0;
