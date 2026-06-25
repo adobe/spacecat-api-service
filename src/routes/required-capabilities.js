@@ -47,6 +47,9 @@ export const INTERNAL_ROUTES = [
   // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
   'POST /webhooks/github',
 
+  // ASO redirect overlay - authenticated by X-ASO-API-Key (AsoOverlayKeyHandler), not S2S JWT
+  'GET /config/:service/redirects.txt',
+
   // Suggestion edge ops (edge-deploy, etc.): not yet required by S2S
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
@@ -90,7 +93,6 @@ export const INTERNAL_ROUTES = [
   // Agentic traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
   'GET /sites/:siteId/agentic-traffic/url-brand-presence',
   'GET /sites/:siteId/agentic-traffic/kpis',
-  'GET /sites/:siteId/agentic-traffic/kpis-trend',
   'GET /sites/:siteId/agentic-traffic/by-region',
   'GET /sites/:siteId/agentic-traffic/by-category',
   'GET /sites/:siteId/agentic-traffic/by-page-type',
@@ -123,6 +125,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
+  'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
   'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
@@ -197,6 +200,21 @@ export const INTERNAL_ROUTES = [
   // bucket like `monitoring:read` that would re-create the same problem for the next
   // monitoring endpoint.
   'GET /monitoring/drs-bp-pg-audit',
+
+  // Hybrid permission model — state-layer management + capability
+  // introspection. Customer-org admins manage their own ReBAC bindings here,
+  // self-gated in the controller by `<product>/can_manage_users` (CRUD) and
+  // `<product>/can_view` (catalog/effective-capabilities). Never S2S —
+  // automated consumers must never be able to grant themselves access to
+  // customer resources. (Until facsWrapper is attached in api-service, the
+  // controller also restricts these to AWS_ENV === 'dev'.)
+  'GET /state/access-mappings',
+  'GET /state/access-mappings/history',
+  'POST /state/access-mappings',
+  'PATCH /state/access-mappings/:id',
+  'GET /organizations/:organizationId/permission/audit-logs',
+  'GET /product/capabilities',
+  'GET /user/capabilities/:resourceId',
 ];
 
 /**
@@ -380,6 +398,9 @@ const routeRequiredCapabilities = {
 
   // Agentic traffic
   'GET /sites/:siteId/agentic-traffic/has-data': 'site:read',
+  // UI-facing read; mapped to site:read so read-only admins hit the read fast-path
+  // (RO-admin wrapper) instead of the ownership gate. SITES — RO-admin 403 regression.
+  'GET /sites/:siteId/agentic-traffic/kpis-trend': 'site:read',
 
   // Agentic URL classification rules
   'GET /sites/:siteId/agentic-categories': 'site:read',
@@ -602,9 +623,6 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/brands/source-opportunities': 'report:read',
   'GET /llmo/ai-visibility/brands/competitors': 'report:read',
   'GET /llmo/ai-visibility/competitors/metrics': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-topics': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-source-domains': 'report:read',
-  'GET /llmo/ai-visibility/competitors/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/meta': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses/latest': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses': 'report:read',
@@ -624,7 +642,11 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'report:read',

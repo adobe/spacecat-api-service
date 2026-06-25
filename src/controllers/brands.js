@@ -11,7 +11,7 @@
  */
 import { randomUUID } from 'crypto';
 
-import BrandClient from '@adobe/spacecat-shared-brand-client';
+import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
 import {
   badRequest,
   notFound,
@@ -55,9 +55,14 @@ import {
   getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
+import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
+import { resolveProjects } from '../support/serenity/resolve-projects.js';
 import {
+  buildReservedDomains,
+  dropReservedCompetitors,
   removedCompetitorDomains,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../support/serenity/competitor-benchmarks.js';
@@ -65,7 +70,7 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
-import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
+import { createIntentClassifier } from '../support/intent-classifier.js';
 import {
   listCategories,
   createCategory,
@@ -125,10 +130,6 @@ function BrandsController(ctx, log, env) {
   // configured, in which case intent is simply left null. Built once per
   // controller instance and passed into the prompt storage layer.
   const classifyIntent = createIntentClassifier({ env, log });
-  // Total wall-clock ceiling for the bulk-create classification batch, so a slow
-  // Azure can't stall the write past the Lambda timeout (per-call timeout only
-  // bounds a single call). On expiry, completed classifications are kept.
-  const classifyIntentBatchTimeoutMs = resolveBatchTimeoutMs(env);
 
   /**
    * Fetches an organization by ID and returns a 404 error if not found.
@@ -270,6 +271,26 @@ function BrandsController(ctx, log, env) {
   }
 
   /**
+   * Gets IMS config for the Brand Governance Agent from the environment.
+   * Returns null if Brand Governance is not configured in this environment.
+   * @returns {object|null} Brand Governance IMS config or null.
+   */
+  function getImsConfigForBrandGovernance() {
+    const {
+      IMS_HOST: host,
+      BRAND_GOV_IMS_CLIENT_ID: clientId,
+      BRAND_GOV_IMS_CLIENT_CODE: clientCode,
+      BRAND_GOV_IMS_CLIENT_SECRET: clientSecret,
+    } = env;
+    if (!hasText(host) || !hasText(clientId) || !hasText(clientCode) || !hasText(clientSecret)) {
+      return null;
+    }
+    return {
+      host, clientId, clientCode, clientSecret,
+    };
+  }
+
+  /**
    * Gets Brand Guidelines for a site.
    *
    * @param {object} context - Context of the request.
@@ -290,22 +311,41 @@ function BrandsController(ctx, log, env) {
         return forbidden('Only users belonging to the organization of the site can view its brand guidelines');
       }
 
+      const organizationId = site.getOrganizationId();
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound(`Organization not found for site: ${siteId}`);
+      }
+      const imsOrgId = organization.getImsOrgId();
+
+      // Try Brand Governance Agent first (URL-based lookup, no brandId required)
+      const govConfig = getImsConfigForBrandGovernance();
+      if (govConfig) {
+        try {
+          const brandGovClient = BrandGovernanceClient.createFrom(context);
+          const brandGovGuidelines = await brandGovClient.getBrandGuidelinesForUrl(
+            site.getBaseURL(),
+            imsOrgId,
+            govConfig,
+          );
+          if (brandGovGuidelines) {
+            return ok(brandGovGuidelines);
+          }
+        } catch (govError) {
+          log.warn(`Brand Governance Agent failed for site ${siteId}, falling back to Brand Publish: ${govError.message}`);
+        }
+      }
+
+      // Fall back to Adobe Brand Publish (requires brandId + userId in site config)
       const brandId = site.getConfig()?.getBrandConfig()?.brandId;
       const userId = site.getConfig()?.getBrandConfig()?.userId;
-      const brandConfig = {
-        brandId,
-        userId,
-      };
       if (!hasText(brandId) || !hasText(userId)) {
         return notFound(`Brand config is missing, brandId or userId for site ID: ${siteId}`);
       }
-      const organizationId = site.getOrganizationId();
-      const organization = await Organization.findById(organizationId);
-      const imsOrgId = organization?.getImsOrgId();
       const imsConfig = getImsConfig();
       const brandClient = BrandClient.createFrom(context);
       const brandGuidelines = await brandClient.getBrandGuidelines(
-        brandConfig,
+        { brandId, userId },
         imsOrgId,
         imsConfig,
       );
@@ -487,7 +527,6 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
         updatedBy,
         classifyIntent,
-        classifyIntentBatchTimeoutMs,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
@@ -1388,16 +1427,50 @@ function BrandsController(ctx, log, env) {
       // brand never exists without a valid Semrush side. The pre-generated id is
       // the sub-workspace title key and is forced onto the row.
       let provisionedBrandId = null;
+      // The initial market's domain, resolved once during provisioning and reused
+      // by the site-mirror hook below (avoids re-deriving from the payload).
+      let provisionedBrandDomain = null;
       // A pending (draft) brand defers ALL Semrush provisioning: no
       // sub-workspace, no project, and crucially no primary URL required. The
       // wizard's "Save as pending" path lands here so a user can stash a brand
       // before picking its primary URL.
       const isPendingBrand = brandData.status === 'pending';
       const { semrushMarket } = brandData;
-      if (isNonEmptyObject(semrushMarket)) {
-        const { market, languageCode } = semrushMarket;
-        if (!hasText(market) || !hasText(languageCode)) {
-          return badRequest('semrushMarket requires market and languageCode');
+      const hasSemrushMarket = isNonEmptyObject(semrushMarket);
+      // generatePrompts (default false) gates topic/prompt generation ONLY. The
+      // wizard sends it as an explicit boolean for every Semrush-mode create, so
+      // its presence ALSO signals Semrush mode even when no market was picked —
+      // a bare "save and continue later" draft (location/language optional).
+      const generatePrompts = brandData.generatePrompts === true;
+      // The wizard always sends `generatePrompts` as an explicit boolean for a
+      // Semrush-mode create; a flat (non-Semrush) create omits it entirely. So
+      // the mere PRESENCE of the flag (true OR false) is itself a Semrush-mode
+      // signal — but see below: only trusted for a draft.
+      const hasGeneratePromptsFlag = typeof brandData.generatePrompts === 'boolean';
+      // A draft (pending) brand may legitimately be a "sub-workspace-only Semrush
+      // brand, save and continue later": no market, generatePrompts:false. The
+      // flag's presence is what marks it as Semrush mode (see
+      // normalizePendingSemrushProvisioning, which stashes a bare no-prompt draft).
+      const isSubworkspaceOnlyDraft = isPendingBrand && hasGeneratePromptsFlag;
+      // Semrush-mode detection. A LIVE create must carry a POSITIVE signal — a
+      // picked market, or generatePrompts:true (which itself requires a market,
+      // enforced below). We deliberately do NOT treat the mere presence of the
+      // flag as the signal on the live path: a flat caller that defensively sends
+      // `generatePrompts:false` must not be pulled into Semrush provisioning (it
+      // would 400 for a missing primary URL, or worse, provision a sub-workspace
+      // for a brand never meant to have one). Presence is trusted ONLY for a draft.
+      const isSemrushMode = hasSemrushMarket || generatePrompts || isSubworkspaceOnlyDraft;
+      if (isSemrushMode) {
+        let market;
+        let languageCode;
+        if (hasSemrushMarket) {
+          ({ market, languageCode } = semrushMarket);
+          if (!hasText(market) || !hasText(languageCode)) {
+            return badRequest('semrushMarket requires market and languageCode');
+          }
+        } else if (generatePrompts) {
+          // Generating prompts needs a project, which needs a (market, language).
+          return badRequest('market and languageCode are required when generatePrompts is true');
         }
         if (isPendingBrand) {
           // Defer provisioning: persist the chosen (market, languageCode) AND
@@ -1407,37 +1480,67 @@ function BrandsController(ctx, log, env) {
           // URL otherwise lives only on the Semrush side, so a site-less draft
           // would have nowhere to keep it. The row lands as 'pending' because it
           // has no anchor (no site_id, no semrush_workspace_id) — see
-          // upsertBrand's anchor check. Models are collected at activation.
+          // upsertBrand's anchor check.
           const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
             .map((u) => (typeof u === 'string' ? u : u?.value))
             .find(hasText) || null;
-          // TODO: the wizard creates a draft with a single market today, so we
-          // stash exactly one (market, languageCode). The activate flow already
-          // handles N stashed markets — if multi-market draft creation is ever
-          // added, build this `markets` array from all selected markets here.
+          // AI models (LLMs) the wizard collected. Unlike the direct-provision
+          // path they are NOT required here — a draft can be saved before the
+          // user picks any, and they can be edited per-market later from the
+          // Markets tab. Seed the initial market's modelIds with them when
+          // present so activation applies them; omit the key entirely when none
+          // were chosen (mirrors normalizePendingSemrushProvisioning).
+          const seedModelIds = Array.isArray(brandData.semrushModelIds)
+            ? brandData.semrushModelIds.filter(hasText)
+            : [];
+          // A no-prompt draft may carry NO market at all (location/language are
+          // optional then) — stash only the market actually picked. The activate
+          // flow already handles 0..N stashed markets: an empty list + a primary
+          // URL provisions a single US/EN fallback project, and an empty list +
+          // no URL provisions a sub-workspace-only brand.
+          // TODO: the wizard creates at most one market today; if multi-market
+          // draft creation is added, build this array from all selected markets.
+          const markets = [];
+          if (hasSemrushMarket) {
+            const initialMarket = { market, languageCode };
+            if (seedModelIds.length > 0) {
+              initialMarket.modelIds = seedModelIds;
+            }
+            markets.push(initialMarket);
+          }
           brandData.pendingSemrushProvisioning = {
             primaryUrl,
-            markets: [{ market, languageCode }],
+            markets,
+            generatePrompts,
           };
         } else {
           const brandDomain = brandDomainFromPayload(brandData);
           if (!hasText(brandDomain)) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
-          // The project needs at least one AI model (LLM) to track. The wizard
-          // collects them; reject a Semrush create that omits them.
+          provisionedBrandDomain = brandDomain;
+          // A prompt-generating project needs at least one AI model (LLM) to
+          // track. The wizard collects them; reject a prompt-generating Semrush
+          // create that omits them. With generatePrompts=false the project is
+          // created empty, so models are optional (it tracks nothing until the
+          // user adds them later).
           const modelIds = Array.isArray(brandData.semrushModelIds)
             ? brandData.semrushModelIds.filter(hasText)
             : [];
-          if (modelIds.length === 0) {
+          if (generatePrompts && modelIds.length === 0) {
             return badRequest('semrushModelIds must list at least one AI model to track');
           }
-          // Brand aliases drive branded/non-branded prompt classification. Accept
-          // both shapes the create payload may carry: plain strings or {name}.
+          // Brand aliases drive branded/non-branded prompt classification and the
+          // project brand_names. Normalize to `{ name, regions }` (accepting both
+          // payload shapes: plain strings — region-less — or `{ name, regions }`),
+          // keeping `regions` so the create handler region-clamps each alias to the
+          // initial market.
           const brandAliases = Array.isArray(brandData.brandAliases)
             ? brandData.brandAliases
-              .map((a) => (typeof a === 'string' ? a : a?.name))
-              .filter(hasText)
+              .map((a) => (typeof a === 'string'
+                ? { name: a, regions: [] }
+                : { name: a?.name, regions: a?.regions || [] }))
+              .filter((a) => hasText(a.name))
             : [];
           // Brand URLs (own sites + social + earned) are pushed onto the initial
           // market's project benchmark. The row isn't written yet, so they come
@@ -1452,10 +1555,13 @@ function BrandsController(ctx, log, env) {
             spaceCatId,
             brandId: provisionedBrandId,
             brandName: brandData.name,
+            // market/languageCode may be undefined when generatePrompts=false and
+            // no market was picked — provisionBrandSubworkspace falls back to US/EN.
             market,
             languageCode,
             brandDomain,
             modelIds,
+            generateTopics: generatePrompts,
             brandAliases,
             brandUrlSources,
             // Competitors ("other brands to track") are merged into the initial
@@ -1464,6 +1570,25 @@ function BrandsController(ctx, log, env) {
             competitors: brandData.competitors,
           }, log);
           provisionedWorkspaceId = provisioned.semrushWorkspaceId;
+        }
+      }
+
+      // Never store a competitor that is one of the brand's own properties (its
+      // primary or own website URLs — at create the only market is the primary).
+      // The benchmark sync already drops these, but they must not land in the
+      // stored competitor list either. Social/earned domains are not reserved.
+      if (Array.isArray(brandData.competitors) && brandData.competitors.length > 0) {
+        const primaryDomain = brandDomainFromPayload(brandData);
+        const reservedDomains = buildReservedDomains(
+          primaryDomain ? [primaryDomain] : [],
+          brandData.urls,
+        );
+        const { kept, dropped } = dropReservedCompetitors(brandData.competitors, reservedDomains);
+        if (dropped.length > 0) {
+          log.info('brands: dropped self-referential competitor(s) on create', {
+            dropped: dropped.map((c) => c?.url).filter(Boolean),
+          });
+          brandData.competitors = kept;
         }
       }
 
@@ -1476,6 +1601,24 @@ function BrandsController(ctx, log, env) {
         forceBrandId: provisionedBrandId,
         semrushWorkspaceId: provisionedWorkspaceId,
       });
+
+      // When a Semrush sub-workspace + initial market were provisioned, mirror that
+      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
+      // market's domain, so the Semrush project has a resolvable site entity.
+      // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch
+      // whose catch releases the just-provisioned workspace; a throw here would
+      // tear down a live brand's workspace. ensureMarketSite is best-effort by
+      // contract (its own catch-all swallows + logs), so this holds.
+      if (hasText(provisionedWorkspaceId)) {
+        await ensureMarketSite(context, {
+          organizationId: spaceCatId,
+          brandId: provisionedBrandId,
+          // The initial market's domain, resolved during provisioning above.
+          domain: provisionedBrandDomain,
+          updatedBy,
+          log,
+        });
+      }
 
       return createResponse(created, 201);
     } catch (error) {
@@ -1537,13 +1680,28 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
-      // pendingSemrushProvisioning is system-controlled: written only when a
-      // brand is saved as 'pending' (createBrandForOrg) and consumed/cleared by
-      // the activate flow. It is marked readOnly in the OpenAPI schema, but that
-      // is a doc hint with no runtime teeth — strip it here so a PATCH caller
-      // cannot inject a primaryUrl/markets that activation would later trust for
-      // Semrush provisioning.
-      delete updates.pendingSemrushProvisioning;
+      // pendingSemrushProvisioning is the deferred-provisioning staging blob for
+      // a *pending* (draft) brand. The draft UI mutates it via PATCH — the
+      // Markets tab appends a market / edits a market's LLMs before activation.
+      // Permit that ONLY while the brand is (and stays) pending: an active brand
+      // keeps its markets on the Semrush side, so a PATCH must never inject a
+      // primaryUrl/markets onto a live brand that activation would later trust.
+      // When the target isn't pending (or the same PATCH is flipping it to
+      // active — activation is the serenity endpoint's job, not PATCH's), strip
+      // it. Only pay for the status read when the field is actually present.
+      if (updates.pendingSemrushProvisioning !== undefined) {
+        const { data: currentBrand } = await postgrestClient
+          .from('brands')
+          .select('status')
+          .eq('organization_id', spaceCatId)
+          .eq('id', brandUuid)
+          .maybeSingle();
+        const isPending = currentBrand?.status === 'pending'
+          && (updates.status === undefined || updates.status === 'pending');
+        if (!isPending) {
+          delete updates.pendingSemrushProvisioning;
+        }
+      }
 
       // Capture the competitor list BEFORE the update so the Semrush re-sync can
       // compute which competitors were removed (old − new) — the only ones it
@@ -1552,6 +1710,9 @@ function BrandsController(ctx, log, env) {
       const oldCompetitors = competitorsTouched
         ? await getBrandCompetitors(brandUuid, postgrestClient)
         : [];
+      // Brand aliases (the extra names the brand is known by) re-sync to every
+      // market's project brand_names + own-brand benchmark on edit.
+      const aliasesTouched = updates.brandAliases !== undefined;
 
       // LLMO-5645: a region must not be removed from a brand while prompts still
       // use it — DRS schedules off each prompt's `regions`, so dropping a brand
@@ -1586,6 +1747,53 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // A competitor ("other brand to track") must never be one of the brand's
+      // OWN properties — its primary, any of its market/project domains, or its
+      // own website URLs. Such a self-reference can't be tracked as a competitor
+      // (it would benchmark the brand against itself), so strip it BEFORE the row
+      // is written — it must not be stored at all, not just skipped at sync time.
+      // Social/earned domains are NOT reserved (third-party platforms). Runs only
+      // when competitors are actually edited.
+      const competitorsToGuard = competitorsTouched
+        && Array.isArray(updates.competitors) && updates.competitors.length > 0;
+      // When the competitor guard below lists a Semrush brand's projects pre-write,
+      // it stashes the listing here so the post-commit re-sync can reuse it instead
+      // of listing the same workspace a second time — the project set is stable
+      // across the brand-row write (which never re-points semrush_workspace_id), so
+      // a single competitor edit lists projects ONCE across both the guard and sync.
+      let prefetchedProjects = null;
+      if (competitorsToGuard) {
+        const brandState = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        // Use the incoming URLs when this same PATCH changes them, else the stored ones.
+        const websiteUrls = updates.urls !== undefined ? updates.urls : (brandState?.urls || []);
+        const brandOwnUrls = [brandState?.baseUrl, ...websiteUrls];
+
+        let reservedDomains;
+        if (hasText(brandState?.semrushWorkspaceId)) {
+          // Semrush brand: market/project domains come from the project listing.
+          // List once and stash for the post-commit re-sync (see prefetchedProjects).
+          const imsToken = getImsUserTokenStrict(context);
+          const transport = createSerenityTransport({ env: context.env, imsToken });
+          prefetchedProjects = await resolveProjects(transport, brandState.semrushWorkspaceId);
+          reservedDomains = buildReservedDomains(
+            prefetchedProjects.map((p) => p?.domain),
+            brandOwnUrls,
+          );
+        } else {
+          // Flat-mode brand: no projects — reserve the primary + own website URLs.
+          reservedDomains = buildReservedDomains([], brandOwnUrls);
+        }
+
+        const { kept, dropped } = dropReservedCompetitors(updates.competitors, reservedDomains);
+        if (dropped.length > 0) {
+          log.info('brands: dropped self-referential competitor(s) on update', {
+            brandId,
+            dropped: dropped.map((c) => c?.url).filter(Boolean),
+          });
+          updates.competitors = kept;
+        }
+      }
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -1612,13 +1820,32 @@ function BrandsController(ctx, log, env) {
       const urlsTouched = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;
-      if ((urlsTouched || competitorsTouched) && hasText(updated.semrushWorkspaceId)) {
+      // Aliases Semrush silently refused on this re-sync (own-brand or competitor
+      // benchmarks), surfaced on the response so the UI can warn the operator.
+      const rejectedAliases = [];
+      if ((urlsTouched || competitorsTouched || aliasesTouched)
+        && hasText(updated.semrushWorkspaceId)) {
         // Forward only an IMS user token upstream (matches the create path +
         // the rest of /serenity/*): PATCH /brands is organization:write and thus
         // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
         const imsToken = getImsUserTokenStrict(context);
         const transport = createSerenityTransport({ env: context.env, imsToken });
         try {
+          // List the sub-workspace's projects ONCE and share the result across the
+          // URL/competitor/alias syncs below — the listing is stable across the
+          // brand-row write above, so this collapses up to three redundant
+          // listProjects round-trips into one on a single edit. Threading the pre-
+          // write competitor-guard listing (when it ran — same immutable workspace)
+          // through resolveProjects' prefetch param reuses it; a null prefetch lists
+          // fresh. So a competitor edit lists projects once across BOTH the guard and
+          // the sync, while a urls/aliases-only edit lists once here. Kept inside the
+          // try so a listProjects failure still emits the workspace-scoped re-sync
+          // breadcrumb below rather than escaping to the generic outer catch.
+          const sharedProjects = await resolveProjects(
+            transport,
+            updated.semrushWorkspaceId,
+            prefetchedProjects,
+          );
           if (urlsTouched) {
             await syncBrandUrlsAcrossMarkets(
               transport,
@@ -1629,17 +1856,35 @@ function BrandsController(ctx, log, env) {
               },
               updated.semrushWorkspaceId,
               log,
+              sharedProjects,
             );
           }
           if (competitorsTouched) {
             const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
-            await syncCompetitorBenchmarksAcrossMarkets(
+            const competitorResult = await syncCompetitorBenchmarksAcrossMarkets(
               transport,
               updated.competitors,
               removed,
               updated.semrushWorkspaceId,
               log,
+              // Reserve the brand's own website URLs (every market/project domain
+              // is reserved from the project listing) so a competitor can't be one
+              // of the brand's own properties.
+              updated.urls,
+              sharedProjects,
             );
+            rejectedAliases.push(...(competitorResult?.rejected ?? []));
+          }
+          if (aliasesTouched) {
+            const aliasResult = await syncBrandAliasesAcrossMarkets(
+              transport,
+              updated.brandAliases,
+              updated.name,
+              updated.semrushWorkspaceId,
+              log,
+              sharedProjects,
+            );
+            rejectedAliases.push(...(aliasResult?.rejected ?? []));
           }
         } catch (syncError) {
           // The brand row is already committed; re-sync hard-fails (the brand
@@ -1651,10 +1896,23 @@ function BrandsController(ctx, log, env) {
             semrushWorkspaceId: updated.semrushWorkspaceId,
             urlsTouched,
             competitorsTouched,
+            aliasesTouched,
             status: syncError?.status,
           });
           throw syncError;
         }
+      }
+
+      if (rejectedAliases.length > 0) {
+        // Non-fatal: the aliases were written, Semrush just declined some. Warn
+        // (so it is greppable) and hand the set back so the UI can tell the user
+        // which aliases are not being tracked.
+        log.warn('serenity: Semrush rejected some brand/competitor aliases on re-sync', {
+          brandId,
+          semrushWorkspaceId: updated.semrushWorkspaceId,
+          rejected: rejectedAliases,
+        });
+        return ok({ ...updated, semrushRejectedAliases: rejectedAliases });
       }
 
       return ok(updated);

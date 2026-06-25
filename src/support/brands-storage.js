@@ -12,6 +12,8 @@
 
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
+import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+
 /**
  * PostgREST select string — joins all normalized child tables.
  */
@@ -21,7 +23,7 @@ const BRAND_SELECT = [
   'brand_aliases(alias, regions)',
   'brand_social_accounts(url, regions)',
   'brand_earned_sources(name, url, regions)',
-  'competitors(name, url, regions)',
+  'competitors(name, url, aliases, regions)',
   'brand_sites(site_id, paths, type, sites(base_url))',
   'brand_urls(url)',
 ].join(', ');
@@ -47,10 +49,13 @@ function normalizeNullableText(value, fieldName) {
 /**
  * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
  * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
- * `{ primaryUrl?, markets: [{ market, languageCode }] }`). These are the primary
- * URL + initial market the add-brand wizard collected before a
- * sub-workspace/project exist; activation reads them back to provision the real
- * Semrush projects, then clears the column.
+ * `{ primaryUrl?, markets: [{ market, languageCode, modelIds? }], generatePrompts? }`).
+ * These are the primary URL + initial markets (each with its chosen AI models/LLMs)
+ * plus whether activation should generate topics/prompts — all collected by the
+ * add-brand wizard before a sub-workspace/project exist; activation reads them
+ * back to provision the real Semrush projects, then clears the column.
+ * The canonical shape is the `PendingSemrushProvisioning` type exported by
+ * `@adobe/spacecat-shared-data-access` (shared with project-elmo-ui).
  *
  * Returns `undefined` when the caller did not supply the field (leave the column
  * untouched), `null` when explicitly cleared or nothing useful remains, or the
@@ -58,7 +63,7 @@ function normalizeNullableText(value, fieldName) {
  *
  * @param {unknown} value - `{ primaryUrl?, markets }`, null, or undefined.
  * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
- *   languageCode: string}>}|null|undefined}
+ *   languageCode: string, modelIds?: string[]}>}|null|undefined}
  */
 function normalizePendingSemrushProvisioning(value) {
   if (value === undefined) {
@@ -73,19 +78,42 @@ function normalizePendingSemrushProvisioning(value) {
     throw error;
   }
   const markets = (Array.isArray(value.markets) ? value.markets : [])
-    .map((m) => ({
-      market: typeof m?.market === 'string' ? m.market.trim() : '',
-      languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
-    }))
+    .map((m) => {
+      const market = {
+        market: typeof m?.market === 'string' ? m.market.trim() : '',
+        languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
+      };
+      // Per-market AI models (LLMs) chosen for this market; applied to the
+      // project at activation. Keep only non-empty strings; omit the key
+      // entirely when none remain so a cleared selection doesn't persist `[]`.
+      const modelIds = (Array.isArray(m?.modelIds) ? m.modelIds : [])
+        .map((id) => (typeof id === 'string' ? id.trim() : ''))
+        .filter(hasText);
+      if (modelIds.length > 0) {
+        market.modelIds = modelIds;
+      }
+      return market;
+    })
     .filter((m) => hasText(m.market) && hasText(m.languageCode));
   const primaryUrl = typeof value.primaryUrl === 'string' && hasText(value.primaryUrl)
     ? value.primaryUrl.trim()
     : null;
-  // Nothing worth persisting → treat as cleared.
-  if (markets.length === 0 && !hasText(primaryUrl)) {
+  // Whether activation should generate topics/prompts for the provisioned
+  // project(s). Only meaningful as an explicit boolean; absent means "legacy
+  // stash, leave generation off" and is omitted so the column stays minimal.
+  const hasGeneratePrompts = typeof value.generatePrompts === 'boolean';
+  // Nothing worth persisting → treat as cleared. An explicit generatePrompts
+  // flag IS worth persisting on its own: a bare no-prompt draft (no URL, no
+  // market) still needs the stash so activation knows to provision a
+  // sub-workspace-only brand rather than treating it as a non-Semrush brand.
+  if (markets.length === 0 && !hasText(primaryUrl) && !hasGeneratePrompts) {
     return null;
   }
-  return { primaryUrl, markets };
+  const result = { primaryUrl, markets };
+  if (hasGeneratePrompts) {
+    result.generatePrompts = value.generatePrompts;
+  }
+  return result;
 }
 
 /**
@@ -115,13 +143,35 @@ function parseUrlParts(urlString) {
  * `brand_sites` expansion, where every entry is by definition onboarded.
  */
 function mapDbBrandToV2(row) {
-  const siteIds = (row.brand_sites || []).map((bs) => bs.site_id).filter(hasText);
+  // The set of base URLs the brand explicitly lists as its own (brand_urls).
+  const brandUrlBases = new Set(
+    (row.brand_urls || [])
+      .map((bu) => composeBaseURL(parseUrlParts(bu.url).base))
+      .filter(hasText),
+  );
+
+  // Exclude Semrush market-site rows from the brand response: a market's domain
+  // is NOT a brand URL (the brand is a shell with no domain of its own), so these
+  // rows must not surface in urls[] or siteIds. They are a pure backend linkage —
+  // integrations resolve them via the sites / brand_sites tables directly.
+  //
+  // Exception: when the brand ALSO lists that exact domain as a brand URL, it IS a
+  // brand URL (not just a hidden market mirror) and must keep its onboarded/siteId
+  // status in the response. syncBrandSites collapses such an overlap into a single
+  // serenity-typed row (one row per (brand, site)); surfacing it here is what keeps
+  // a brand URL from silently flipping to onboarded:false the moment a market is
+  // created for the same domain.
+  const ownBrandSites = (row.brand_sites || [])
+    .filter((bs) => bs.type !== SERENITY_BRAND_SITE_TYPE
+      || (hasText(bs.sites?.base_url) && brandUrlBases.has(composeBaseURL(bs.sites.base_url))));
+
+  const siteIds = ownBrandSites.map((bs) => bs.site_id).filter(hasText);
 
   // Index brand_sites by normalized base URL so brand_urls entries can be
   // tagged onboarded/siteId by matching their base. brand_sites.site_id is
   // NOT NULL in the schema, so no defensive filter on it here.
   const siteByBase = new Map();
-  (row.brand_sites || []).forEach((bs) => {
+  ownBrandSites.forEach((bs) => {
     const base = bs.sites?.base_url;
     if (!hasText(base)) {
       return;
@@ -135,7 +185,7 @@ function mapDbBrandToV2(row) {
   // Legacy fallback: expand brand_sites paths into URL entries (one per path,
   // or one for the base URL when no paths are set). Used when brand_urls is
   // empty — i.e. the brand predates the brand_urls child table.
-  const brandSitesUrls = (row.brand_sites || []).flatMap((bs) => {
+  const brandSitesUrls = ownBrandSites.flatMap((bs) => {
     const base = bs.sites?.base_url;
     if (!hasText(base)) {
       return [];
@@ -213,6 +263,7 @@ function mapDbBrandToV2(row) {
     competitors: (row.competitors || []).map((c) => ({
       name: c.name,
       url: c.url || null,
+      aliases: c.aliases || [],
       regions: c.regions || [],
     })),
     siteIds,
@@ -251,10 +302,43 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
  * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
  */
 async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
+  // Serenity market-site rows (type='serenity') are owned by the serenity market
+  // lifecycle, NOT by the brand's URL list. A market's domain is generally not in
+  // brand.urls, so the delete-all-then-reinsert below would wipe these links on
+  // every brand edit. Preserve them: collect the protected site ids first, exclude
+  // them from the delete, and keep their type from being downgraded on re-upsert
+  // (when a brand URL happens to resolve to the same site as a market).
+  //
+  // The delete is type-based (IS DISTINCT FROM 'serenity'), so a serenity row
+  // inserted concurrently by ensureMarketSite is never deleted here. The only
+  // residual race is a downgrade: if a concurrent ensureMarketSite inserts a
+  // serenity row for a site that is ALSO a brand URL, between this SELECT and the
+  // upsert below, the upsert may re-tag it to the URL's type. That requires a
+  // simultaneous brand edit + market write whose domains collide — by design
+  // unusual — and self-heals on the next market write (ensureMarketSite re-upserts
+  // type='serenity'). Not worth a cross-request lock PostgREST can't cheaply give.
+  const { data: protectedRows, error: protectedError } = await postgrestClient
+    .from('brand_sites')
+    .select('site_id')
+    .eq('brand_id', brandId)
+    .eq('type', SERENITY_BRAND_SITE_TYPE);
+  // Fail closed (consistent with the delete/upsert error handling below): a
+  // swallowed SELECT error would leave protectedSiteIds empty, and the re-upsert
+  // would then downgrade a serenity row to the brand URL's type — silently
+  // unprotecting a market-mirror link. A failed brand edit is recoverable; a
+  // corrupted serenity marker surfaces later as a vanished market site.
+  if (protectedError) {
+    throw new Error(`Failed to sync brand_sites: cannot read protected rows: ${protectedError.message}`);
+  }
+  const protectedSiteIds = new Set((protectedRows || []).map((r) => r.site_id));
+
   const { error: deleteError } = await postgrestClient
     .from('brand_sites')
     .delete()
-    .eq('brand_id', brandId);
+    .eq('brand_id', brandId)
+    // Delete every non-semrush row (including NULL-type rows; a bare .neq would
+    // skip NULLs). type IS DISTINCT FROM 'serenity'.
+    .or(`type.is.null,type.neq.${SERENITY_BRAND_SITE_TYPE}`);
   if (deleteError) {
     throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
   }
@@ -289,11 +373,14 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     return;
   }
 
-  const { data: sites } = await postgrestClient
+  const { data: sites, error: sitesError } = await postgrestClient
     .from('sites')
     .select('id, base_url')
     .eq('organization_id', organizationId)
     .in('base_url', [...pathsByBase.keys()]);
+  if (sitesError) {
+    throw new Error(`Failed to sync brand_sites: cannot read sites: ${sitesError.message}`);
+  }
 
   if (!sites || sites.length === 0) {
     return;
@@ -304,7 +391,11 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     brand_id: brandId,
     site_id: s.id,
     paths: pathsByBase.get(s.base_url) || [],
-    type: typeByBase.get(s.base_url) || null,
+    // A brand URL may resolve to the same site as a preserved market row. Keep
+    // that row tagged 'serenity' rather than downgrading it to the URL's type.
+    type: protectedSiteIds.has(s.id)
+      ? SERENITY_BRAND_SITE_TYPE
+      : (typeByBase.get(s.base_url) || null),
     updated_by: updatedBy,
   }));
 
@@ -406,6 +497,7 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
     .map((c) => ({
       name: typeof c === 'string' ? c : c?.name,
       url: c?.url || null,
+      aliases: Array.isArray(c?.aliases) ? c.aliases : [],
       regions: c?.regions || [],
     }))
     .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name))
@@ -414,6 +506,7 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
       brand_id: brandId,
       name: c.name,
       url: c.url,
+      aliases: c.aliases,
       regions: c.regions,
       updated_by: updatedBy,
     }));
@@ -486,31 +579,45 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
- * Reads a brand's alias names (the `brand_aliases.alias` values) — the extra
- * names the brand is known by, beyond its display name. Returned as a
- * de-duplicated array of non-empty strings (empty when the brand has none),
- * suitable for a Semrush project's `brand_names`. Brand aliases are brand-level,
- * so the same set applies to every market/project created for the brand.
+ * Reads a brand's aliases (the `brand_aliases` rows) — the extra names the brand
+ * is known by, beyond its display name — each with its `regions`. Returned as
+ * `{ name, regions }[]` (empty when the brand has none), the shape the Semrush
+ * create/sync path region-clamps per market (an alias only lands on the markets
+ * its `regions` list; region-less applies everywhere). Rows with a blank alias
+ * are skipped; de-duplicated by name (case-insensitive, first-seen wins).
  *
  * @param {string} brandId - Brand UUID.
  * @param {object} postgrestClient - PostgREST client.
- * @returns {Promise<string[]>} alias names (empty array when none).
+ * @returns {Promise<{name: string, regions: string[]}[]>} aliases (empty when none).
  */
-export async function getBrandAliasNames(brandId, postgrestClient) {
+export async function getBrandAliases(brandId, postgrestClient) {
   if (!postgrestClient?.from || !hasText(brandId)) {
     return [];
   }
   const { data, error } = await postgrestClient
     .from('brand_aliases')
-    .select('alias')
+    .select('alias, regions')
     .eq('brand_id', brandId);
   if (error) {
     throw new Error(`Failed to get brand aliases: ${error.message}`);
   }
   const seen = new Set();
-  return (data || [])
-    .map((row) => row.alias)
-    .filter((alias) => hasText(alias) && !seen.has(alias) && seen.add(alias));
+  const out = [];
+  for (const row of data || []) {
+    const name = hasText(row?.alias) ? row.alias : null;
+    if (name === null) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    seen.add(key);
+    out.push({ name, regions: row.regions || [] });
+  }
+  return out;
 }
 
 /**
@@ -552,13 +659,15 @@ export async function getBrandUrlSources(brandId, postgrestClient) {
 
 /**
  * Reads a brand's competitors ("other brands to track") for propagation to the
- * brand's Semrush projects' CI competitor lists. Returns `{ url, regions }` per
- * competitor (the only fields the CI sync needs — Semrush competitors are
- * domain-only). Empty array when the brand has none.
+ * brand's Semrush projects as benchmarks. Returns `{ name, url, aliases, regions }`
+ * per competitor: the benchmark is domain-keyed (from `url`) but also carries the
+ * competitor's `brand_name` (from `name`) and `brand_aliases` (from `aliases`), and
+ * `regions` region-filters which markets track it. Empty array when the brand has
+ * none.
  *
  * @param {string} brandId - Brand UUID.
  * @param {object} postgrestClient - PostgREST client.
- * @returns {Promise<{url: string, regions: string[]}[]>}
+ * @returns {Promise<{name: string, url: string, aliases: string[], regions: string[]}[]>}
  */
 export async function getBrandCompetitors(brandId, postgrestClient) {
   if (!postgrestClient?.from || !hasText(brandId)) {
@@ -566,14 +675,19 @@ export async function getBrandCompetitors(brandId, postgrestClient) {
   }
   const { data, error } = await postgrestClient
     .from('competitors')
-    .select('url, regions')
+    .select('name, url, aliases, regions')
     .eq('brand_id', brandId);
   if (error) {
     throw new Error(`Failed to get brand competitors: ${error.message}`);
   }
   return (data || [])
     .filter((c) => hasText(c?.url))
-    .map((c) => ({ url: c.url, regions: c.regions || [] }));
+    .map((c) => ({
+      name: c.name,
+      url: c.url,
+      aliases: c.aliases || [],
+      regions: c.regions || [],
+    }));
 }
 
 /**
@@ -629,6 +743,43 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
     );
   }
   return mapDbBrandToV2(data[0]);
+}
+
+/**
+ * True when the site is a Semrush market mirror — i.e. it is linked to a brand
+ * via a `brand_sites` row tagged `type='serenity'`. These rows are written ONLY
+ * for Semrush-managed brands (see `ensureMarketSite`), so a hit means the site's
+ * base_url is pinned to a Semrush project domain and must be treated as immutable.
+ *
+ * This is the second linkage path the URL-immutability guard must check:
+ * `getBrandBySite` resolves a brand only via `brands.site_id` (the brand's OWN
+ * primary site), but a serenity brand shell has no `site_id` — its market sites
+ * are reachable only through `brand_sites`. Checking only `getBrandBySite` would
+ * leave every market mirror's URL editable and free to desync from Semrush.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {string} siteId - Site UUID
+ * @param {object} postgrestClient - PostgREST client
+ * @returns {Promise<boolean>} true when a serenity-typed brand_sites row exists
+ */
+export async function isSemrushMarketMirrorSite(organizationId, siteId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(organizationId) || !hasText(siteId)) {
+    return false;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brand_sites')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('site_id', siteId)
+    .eq('type', SERENITY_BRAND_SITE_TYPE)
+    .limit(1);
+
+  if (error) {
+    throw new Error(`Failed to resolve market-mirror link for site: ${error.message}`);
+  }
+
+  return Array.isArray(data) && data.length > 0;
 }
 
 /**
@@ -857,11 +1008,18 @@ export async function updateBrand({
   // baseSiteId is immutable once set — only allow setting from NULL.
   // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
   if (hasText(updates.baseSiteId)) {
-    const { data: current } = await postgrestClient
+    const { data: current, error: currentError } = await postgrestClient
       .from('brands')
       .select('site_id')
       .eq('id', brandId)
       .maybeSingle();
+    // Fail closed: a swallowed read error leaves `current` null, so the guard
+    // below would treat the brand as having no site_id and re-point the
+    // immutable site_id on a transient failure (the LLMO-5556 regression this
+    // block guards against). Throw instead of silently corrupting the link.
+    if (currentError) {
+      throw new Error(`Failed to read current baseSiteId for brand: ${currentError.message}`);
+    }
 
     if (!current?.site_id) {
       patch.site_id = updates.baseSiteId;

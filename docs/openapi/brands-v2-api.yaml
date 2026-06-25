@@ -155,11 +155,14 @@ v2-brand-for-org:
             $ref: './schemas.yaml#/V2BrandUpdateInput'
     responses:
       '200':
-        description: Brand updated successfully
+        description: |
+          Brand updated successfully. For a sub-workspace brand whose edit changed
+          aliases/competitors, the body may include `semrushRejectedAliases` listing
+          per-market aliases Semrush refused during the re-sync.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/V2Brand'
+              $ref: './schemas.yaml#/V2BrandUpdateResponse'
       '400':
         $ref: './responses.yaml#/400'
       '403':

@@ -100,10 +100,12 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} stateAccessMappingsController - State-layer access mappings + caps.
  * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -161,15 +163,18 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  stateAccessMappingsController,
   agenticCategoriesController,
   agenticPageTypesController,
   serenityController,
   proxyController,
+  redirectsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
+    'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
@@ -410,6 +415,23 @@ export default function getRouteHandlers(
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
+
+    // Hybrid permission model — state-layer management + capability
+    // introspection endpoints. Self-gated at the controller level
+    // (`<product>/can_manage_users` for CRUD, `<product>/can_view` for
+    // capability introspection). Until `facsWrapper` is attached in
+    // api-service, the controller additionally restricts these endpoints to
+    // the dev environment (AWS_ENV === 'dev'); they 404 elsewhere. See:
+    //   - platform/decisions/mac-state-layer.md §"State Layer Management Endpoints"
+    //   - platform/decisions/rebac-hybrid-permission-model.md
+    'GET /state/access-mappings': stateAccessMappingsController.listMappings,
+    'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
+    'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
+    'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
+    'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
+
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'DELETE /tools/import/jobs/:jobId': importController.deleteImportJob,
@@ -476,6 +498,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,
+    'POST /v2/orgs/:spaceCatId/llmo/onboard-site': llmoController.onboardSiteOnly,
     'POST /llmo/onboard/update-query-index': llmoController.updateQueryIndex,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
@@ -686,9 +709,6 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/brands/source-opportunities': aiVisibilityController.getBrandsSourceOpportunities,
     'GET /llmo/ai-visibility/brands/competitors': aiVisibilityController.getBrandsCompetitors,
     'GET /llmo/ai-visibility/competitors/metrics': aiVisibilityController.getCompetitorsMetrics,
-    'GET /llmo/ai-visibility/competitors/gap-topics': aiVisibilityController.getCompetitorsGapTopics,
-    'GET /llmo/ai-visibility/competitors/gap-source-domains': aiVisibilityController.getCompetitorsGapSourceDomains,
-    'GET /llmo/ai-visibility/competitors/gap-prompts': aiVisibilityController.getCompetitorsGapPrompts,
     'GET /llmo/ai-visibility/meta': aiVisibilityController.getMeta,
     'GET /llmo/ai-visibility/prompts/responses/latest': aiVisibilityController.getPromptsResponsesLatest,
     'GET /llmo/ai-visibility/prompts/responses': aiVisibilityController.getPromptsResponses,
@@ -708,7 +728,11 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': aiVisibilityController.getV1PromptGapPromptsTotals,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains': aiVisibilityController.getV1SourceGapSourceDomains,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': aiVisibilityController.getV1SourceGapSourceDomainsExport,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': aiVisibilityController.getV1SourceGapSourceDomainsTotals,
     'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
     'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
     'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,

@@ -73,6 +73,7 @@ import SiteDetectionController from './controllers/site-detection.js';
 import DemoController from './controllers/demo.js';
 import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
+import RedirectsController from './controllers/redirects.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
@@ -103,11 +104,13 @@ import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
 import AiVisibilityController from './controllers/ai-visibility.js';
+import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
 import SerenityController from './controllers/serenity.js';
 import ProxyController from './controllers/proxy.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
+import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
 
@@ -246,6 +249,7 @@ async function run(request, context) {
     const demoController = DemoController(context);
     const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
+    const redirectsController = RedirectsController(context);
     const scrapeJobController = ScrapeJobController(context);
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
@@ -276,6 +280,7 @@ async function run(request, context) {
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
+    const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
     const serenityController = SerenityController(context, log, context.env);
@@ -336,10 +341,12 @@ async function run(request, context) {
       webhooksController,
       aiVisibilityController,
       fanoutReportController,
+      stateAccessMappingsController,
       agenticCategoriesController,
       agenticPageTypesController,
       serenityController,
       proxyController,
+      redirectsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -405,6 +412,10 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //    for any other path, so non-webhook requests fall through cheaply. Must run
 //    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
 //    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
+//  - AsoOverlayKeyHandler: path-scoped to GET /config/.../redirects.txt; validates
+//    the inbound X-ASO-API-Key (the ASO dispatcher-overlay read path). Returns null
+//    for any other route. Same early-bail rationale as the webhook handler. Interim
+//    static-key bridge — deletable once the dispatcher presents S2S (see ADR).
 //  - JwtHandler: tried first for token-bearing requests (JWT path is the target
 //    end-state for all consumers). S2S consumers use s2sAuthWrapper; all new
 //    service integrations must onboard via S2S (SITES-34224).
@@ -428,6 +439,7 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 const AUTH_HANDLERS = [
   SkipAuthHandler,
   GitHubWebhookHmacHandler,
+  AsoOverlayKeyHandler,
   JwtHandler,
   ApiKeyImsHandler,
   AdobeImsHandler,

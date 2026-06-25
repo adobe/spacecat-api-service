@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserTokenStrict } from '../utils.js';
@@ -65,8 +67,13 @@ export function initialMarketProjectName(market, languageCode) {
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
  * @param {string} params.brandDomain - brand domain for the upstream project.
  * @param {string[]} params.modelIds - AI models (LLMs) to attach to the project.
- * @param {string[]} [params.brandAliases] - brand aliases; with the brand name
- *   they classify each generated prompt as `type:branded` / `type:non-branded`.
+ * @param {boolean} [params.generateTopics] - when true (default), generate +
+ *   attach topics/prompts (top N by volume) at create; when false, create the
+ *   project empty (models still attached when supplied).
+ * @param {Array<string|{name: string, regions?: string[]}>} [params.brandAliases]
+ *   - brand aliases; region-clamped to the initial market by the create handler.
+ *   With the brand name they classify each generated prompt as `type:branded` /
+ *   `type:non-branded` and populate the project's `brand_names`.
  * @param {object} [params.brandUrlSources] - the brand's URL sources
  *   ({ urls, socialAccounts, earnedContent }) pushed onto the initial market's
  *   own-brand benchmark (own sites + social + earned). Best-effort: a failed
@@ -86,6 +93,7 @@ export function initialMarketProjectName(market, languageCode) {
 export async function provisionBrandSubworkspace(context, {
   spaceCatId, brandId, brandName, market, languageCode, brandDomain,
   modelIds = [], brandAliases = [], brandUrlSources = null, competitors = [],
+  generateTopics = true,
 }, log = console) {
   if (!hasText(brandName)) {
     throw new ErrorWithStatusCode('brandName is required for Semrush provisioning', 400);
@@ -93,15 +101,19 @@ export async function provisionBrandSubworkspace(context, {
   if (!hasText(brandId)) {
     throw new ErrorWithStatusCode('brandId is required for Semrush provisioning', 400);
   }
-  if (!hasText(market) || !hasText(languageCode)) {
-    throw new ErrorWithStatusCode('market and languageCode are required for Semrush provisioning', 400);
-  }
   if (!hasText(brandDomain)) {
     throw new ErrorWithStatusCode('brandDomain is required for Semrush provisioning', 400);
   }
+  // market/languageCode are OPTIONAL: a brand created WITHOUT prompt generation
+  // (generateTopics=false) may omit them. Fall back to the US/EN default slice so
+  // the project still has a valid (geo, language) to provision against. When
+  // generateTopics=true the caller (brands.js) still requires both, so a fallback
+  // never silently mislabels a prompt-generating project.
+  const resolvedMarket = hasText(market) ? market : 'US';
+  const resolvedLanguageCode = hasText(languageCode) ? languageCode : 'en';
 
   const parentWorkspaceId = await resolveWorkspaceId(context, spaceCatId);
-  if (!hasText(parentWorkspaceId)) {
+  if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
     throw new ErrorWithStatusCode('Organization has no Semrush workspace configured', 400);
   }
 
@@ -112,6 +124,7 @@ export async function provisionBrandSubworkspace(context, {
   const imsToken = getImsUserTokenStrict(context);
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
+  /** @type {string|null} */
   let capturedWorkspaceId = null;
   const brandStub = {
     getId: () => brandId,
@@ -129,7 +142,7 @@ export async function provisionBrandSubworkspace(context, {
   // compensation can't fire), and repeated failed creates would drain the pool.
   // Best-effort; never masks the original error.
   const releaseCapturedOnFailure = async () => {
-    if (!hasText(capturedWorkspaceId)) {
+    if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
       return;
     }
     try {
@@ -152,31 +165,38 @@ export async function provisionBrandSubworkspace(context, {
       brandStub,
       parentWorkspaceId,
       {
-        market,
-        languageCode,
+        market: resolvedMarket,
+        languageCode: resolvedLanguageCode,
         brandDomain,
         brandNames: [brandName],
         brandDisplayName: brandName,
-        name: initialMarketProjectName(market, languageCode),
+        name: initialMarketProjectName(resolvedMarket, resolvedLanguageCode),
       },
       log,
       // preResolvedWorkspaceId / reloadPointer: defaults (single-create path).
       null,
       null,
-      // Brand-create attaches the chosen LLMs, generates+attaches topics/prompts
-      // (top N by volume, tagged `topic:<NAME>` + standard tags), then publishes.
-      // The child is carved a real allocation (CREATE_ALLOCATION) so prompts and
-      // publish have quota; a 405 here is a true over-quota and surfaces below.
+      // Brand-create attaches the chosen LLMs and, WHEN generateTopics is set,
+      // generates+attaches topics/prompts (top N by volume, tagged `topic:<NAME>`
+      // + standard tags) before publishing. With generateTopics=false the project
+      // is created empty (no prompts); models are still attached when supplied.
       {
         modelIds,
-        generateTopics: true,
-        topicCap: MAX_TOPICS_ON_CREATE,
-        standardTags: STANDARD_PROMPT_TAGS,
+        generateTopics,
+        topicCap: generateTopics ? MAX_TOPICS_ON_CREATE : 0,
+        standardTags: [...STANDARD_PROMPT_TAGS],
         brandAliases,
-        projectTags: PROJECT_STANDARD_TAGS,
+        projectTags: [...PROJECT_STANDARD_TAGS],
         brandUrlSources,
         competitors,
-        publishMode: 'require',
+        // A project with neither models nor generated prompts would publish
+        // "empty units", which Semrush rejects with a disguised quota 405
+        // (workspace doc §5). Tolerate that by leaving it a draft (best-effort)
+        // instead of failing the whole create; a project that has models OR
+        // prompts has real units and must publish (require).
+        publishMode: (Array.isArray(modelIds) && modelIds.length > 0) || generateTopics
+          ? 'require'
+          : 'best-effort',
       },
     );
   } catch (e) {
@@ -197,10 +217,13 @@ export async function provisionBrandSubworkspace(context, {
       result.status,
     );
   }
-  if (!hasText(capturedWorkspaceId)) {
+  if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
     throw new ErrorWithStatusCode('Semrush provisioning returned no sub-workspace id', 502);
   }
-  return { semrushWorkspaceId: capturedWorkspaceId, published: Boolean(result.body?.published) };
+  return {
+    semrushWorkspaceId: capturedWorkspaceId,
+    published: Boolean(/** @type {{ published?: boolean }} */ (result.body || {}).published),
+  };
 }
 
 /**

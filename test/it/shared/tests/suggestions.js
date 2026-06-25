@@ -79,6 +79,20 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
+
+      it('returns 400 for malformed locale parameter', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=INVALID`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array');
+        res.body.forEach((s) => expectSuggestionDto(s));
+      });
     });
 
     describe('GET .../suggestions/paged/:limit', () => {

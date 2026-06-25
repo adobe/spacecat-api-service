@@ -568,13 +568,22 @@ export async function findDeliveryType(url) {
 }
 
 /**
- * Error class with a status code property.
+ * Error class with a status code property. An optional machine-readable `code`
+ * may be assigned by callers after construction (e.g. serenity handlers tag
+ * errors with `ERROR_CODES.*` for downstream branching).
  * @extends Error
  */
 export class ErrorWithStatusCode extends Error {
+  /**
+   * @param {string} message human-readable error message
+   * @param {number} status HTTP status code to surface
+   */
   constructor(message, status) {
     super(message);
+    /** @type {number} */
     this.status = status;
+    /** @type {string|undefined} */
+    this.code = undefined;
   }
 }
 
@@ -677,7 +686,11 @@ export function getImsUserToken(context) {
  */
 export function getImsUserTokenStrict(context) {
   const authInfo = context?.attributes?.authInfo;
-  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+  // Fail closed: forward the bearer upstream ONLY for a caller we can positively
+  // confirm authenticated via IMS. A missing/non-standard authInfo (no getType)
+  // is treated as "not IMS" and refused, rather than falling through to proxy an
+  // unverified bearer to the Semrush gateway.
+  if (typeof authInfo?.getType !== 'function' || authInfo.getType() !== 'ims') {
     throw new ErrorWithStatusCode('IMS authentication required', STATUS_UNAUTHORIZED);
   }
   return getImsUserToken(context);
