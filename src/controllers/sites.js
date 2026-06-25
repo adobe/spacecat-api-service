@@ -56,6 +56,7 @@ import {
   logSiteOrphanedAfterCreate,
   resolveProductCode,
 } from '../support/tier-provisioning.js';
+import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -785,21 +786,8 @@ function SitesController(ctx, log, env) {
       return notFound('Site not found');
     }
 
-    // Cross-tenant resolution: admins and S2S consumers holding `site:readAll` may look up
-    // any site by URL (platform enumeration). Everyone else must belong to the site's org.
-    // hasS2SCapability returns `not-s2s` without a DB call for non-S2S callers, so the extra
-    // fetch only happens for actual S2S consumers. See READALL_CAPABILITY_DESIGN.md.
-    const requestId = context?.invocation?.id || 'unknown';
-    const isAdmin = accessControlUtil.hasAdminReadAccess();
-    const s2sResult = isAdmin
-      ? { allowed: false, reason: 'admin-bypass' }
-      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
-    if (!isAdmin && !s2sResult.allowed && !(await accessControlUtil.hasAccess(site))) {
-      log.info(`[acl] Denied GET /sites/by-base-url - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view its sites');
-    }
-    if (s2sResult.allowed) {
-      log.info(`[s2s-readall] GET /sites/by-base-url granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} requestId=${requestId}`);
     }
 
     return ok(SiteDto.toJSON(site));
@@ -837,6 +825,56 @@ function SitesController(ctx, log, env) {
     const requestBody = context.data;
     if (!isObject(requestBody)) {
       return badRequest('Request body required');
+    }
+
+    // A site's URL is immutable once it backs a Semrush-managed brand. That brand's
+    // tracked domain lives on its Semrush projects/markets, which have no
+    // domain-update path (the domain is set only at project-create time), so
+    // letting the SpaceCat site URL drift would desync the site from its Semrush
+    // projects. Only the URL is gated here — every other site field stays editable.
+    // The brand lookup runs only when a URL change is actually requested, so the
+    // common patch path (no baseURL) pays no extra query.
+    //
+    // TODO (~2026-07-07): Semrush is expected to support changing a project's
+    // primary URL — which is its main (own-brand, `main_brand: true`) benchmark
+    // domain, see ensureOwnBrandBenchmark in support/serenity/brand-urls.js — in
+    // ~2 weeks (heads-up received 2026-06-23). Once available, relax this guard to
+    // propagate the new URL to each market's main benchmark (and republish) instead
+    // of blocking the edit.
+    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+      const postgrestClient = context.dataAccess?.services?.postgrestClient;
+      if (postgrestClient?.from) {
+        // Two ways a site can back a Semrush-managed brand, both immutable:
+        //  - the brand's OWN primary site (brands.site_id) — getBrandBySite, or
+        //  - a Semrush market mirror linked via brand_sites (type='serenity'),
+        //    which a serenity brand shell (no brands.site_id) reaches ONLY here.
+        // The lookups can throw on a transient PostgREST error; map that to a 5xx
+        // rather than letting it escape this catch-less handler as an opaque 500.
+        let attachedToSemrushBrand = false;
+        try {
+          const attachedBrand = await getBrandBySite(
+            site.getOrganizationId(),
+            site.getId(),
+            postgrestClient,
+            log,
+          );
+          attachedToSemrushBrand = hasText(attachedBrand?.semrushWorkspaceId)
+            || await isSemrushMarketMirrorSite(
+              site.getOrganizationId(),
+              site.getId(),
+              postgrestClient,
+            );
+        } catch (lookupError) {
+          log.error('updateSite: failed to resolve Semrush-brand attachment for URL-immutability guard', {
+            siteId: site.getId(),
+            error: lookupError?.message,
+          });
+          return internalServerError('Could not verify whether this site URL is editable; please retry');
+        }
+        if (attachedToSemrushBrand) {
+          return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
+        }
+      }
     }
 
     let updates = false;

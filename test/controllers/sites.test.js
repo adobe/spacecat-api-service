@@ -150,19 +150,35 @@ describe('Sites Controller', () => {
   let sitesController;
   let context;
   let updateRumConfigStub;
+  let getBrandBySiteStub;
+  let isSemrushMarketMirrorSiteStub;
   let SitesControllerMocked;
 
   before(async () => {
     updateRumConfigStub = sandbox.stub().resolves(true);
+    getBrandBySiteStub = sandbox.stub().resolves(null);
+    isSemrushMarketMirrorSiteStub = sandbox.stub().resolves(false);
     SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
       '../../src/support/rum-config-service.js': {
         updateRumConfig: updateRumConfigStub,
+      },
+      '../../src/support/brands-storage.js': {
+        getBrandBySite: getBrandBySiteStub,
+        isSemrushMarketMirrorSite: isSemrushMarketMirrorSiteStub,
       },
     })).default;
   });
 
   beforeEach(() => {
     sites = buildSites();
+
+    // Reset the brand-attachment stubs to their permissive defaults here (rather than
+    // at the END of individual tests) so an aborted test can never leak contaminated
+    // stub state into the next one.
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    isSemrushMarketMirrorSiteStub.reset();
+    isSemrushMarketMirrorSiteStub.resolves(false);
 
     mockDataAccess = {
       Audit: {
@@ -734,6 +750,119 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Updating organization ID is not allowed');
   });
 
+  it('returns forbidden when changing the URL of a site attached to a Semrush-managed brand', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves({ semrushWorkspaceId: 'sub-ws-123' });
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property(
+      'message',
+      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
+    );
+  });
+
+  it('allows changing the URL of a site not attached to a Semrush-managed brand', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('does not check brand attachment when the URL is unchanged', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      // baseURL equals the site's current URL, so the URL-immutability guard is skipped.
+      data: { baseURL: 'https://site1.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('returns forbidden when changing the URL of a Semrush market-mirror site (linked via brand_sites)', async () => {
+    // A serenity brand shell has no brands.site_id, so getBrandBySite finds
+    // nothing; the market mirror is reachable only via the brand_sites lookup.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    isSemrushMarketMirrorSiteStub.reset();
+    isSemrushMarketMirrorSiteStub.resolves(true);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(isSemrushMarketMirrorSiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property(
+      'message',
+      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
+    );
+  });
+
+  it('returns 500 (not an opaque throw) when the brand-attachment lookup fails', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.rejects(new Error('postgrest down'));
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(500);
+    expect(error).to.have.property(
+      'message',
+      'Could not verify whether this site URL is editable; please retry',
+    );
+  });
+
   it('returns bad request when updating a site if id not provided', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
@@ -1117,6 +1246,24 @@ describe('Sites Controller', () => {
       expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-paginated-1/,
+      );
+    });
+
+    it('logs clientId=unknown-s2s on the legacy path when a granted consumer has no clientId', async () => {
+      // Granted S2S consumer (non-admin) reaching the legacy flat-array path with a
+      // falsy clientId: the log marker falls back to `unknown-s2s` (not `admin-bypass`).
+      context.s2sConsumer = makeS2SConsumer({ clientId: '' });
+      context.invocation = { id: 'req-unknown-s2s-1' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+
+      const result = await sitesController.getAll(context);
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-unknown-s2s-1 clientId=unknown-s2s/,
       );
     });
 
@@ -1504,6 +1651,24 @@ describe('Sites Controller', () => {
         /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
       );
     });
+
+    it('denies a non-admin caller with no s2sConsumer and logs clientId/consumerId as n/a', async () => {
+      // No s2sConsumer set: hasS2SCapability short-circuits with reason=not-s2s and
+      // undefined clientId/consumerId, so the deny log falls back to `n/a`.
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=not-s2s clientId=n\/a consumerId=n\/a/,
+      );
+    });
   });
 
   it('gets a site by base URL', async () => {
@@ -1518,8 +1683,6 @@ describe('Sites Controller', () => {
   });
 
   it('gets a site by base URL for non belonging to the organization', async () => {
-    // Non-admin, non-S2S user who does not belong to the site's org -> 403.
-    context.attributes.authInfo.withProfile({ is_admin: false });
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
     const result = await sitesController.getByBaseURL({ params: { baseURL: 'aHR0cHM6Ly9zaXRlMS5jb20K' } });
@@ -1528,92 +1691,6 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
-  });
-
-  describe('GET /sites/by-base-url - S2S readAll capability', () => {
-    const BASE_URL_PARAM = 'aHR0cHM6Ly9zaXRlMS5jb20K'; // base64 of https://site1.com
-
-    function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
-      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
-    }
-    function makeFreshConsumer({
-      id = 'consumer-id-1', capabilities = ['site:readAll'], status = 'ACTIVE', revoked = false,
-    } = {}) {
-      return {
-        getId: () => id,
-        getCapabilities: () => capabilities,
-        getStatus: () => status,
-        isRevoked: () => revoked,
-      };
-    }
-
-    beforeEach(() => {
-      context.attributes.authInfo.withProfile({ is_admin: false });
-      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
-    });
-
-    it('grants a cross-tenant S2S consumer holding site:readAll (bypasses org check)', async () => {
-      // hasAccess would deny (different org), but site:readAll grants cross-tenant lookup.
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      context.s2sConsumer = makeS2SConsumer();
-      mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
-
-      const result = await sitesController.getByBaseURL({
-        params: { baseURL: BASE_URL_PARAM }, invocation: { id: 'req-bbu-1' },
-      });
-      const site = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(site).to.have.property('id', SITE_IDS[0]);
-      expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[s2s-readall\] GET \/sites\/by-base-url granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll requestId=req-bbu-1/,
-      );
-    });
-
-    it('still allows a tenant-scoped S2S consumer with only site:read for its own org', async () => {
-      // No readAll, but hasAccess passes (same org) -> tenant-scoped lookup preserved.
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
-      context.s2sConsumer = makeS2SConsumer();
-      mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ capabilities: ['site:read'] }));
-
-      const result = await sitesController.getByBaseURL({ params: { baseURL: BASE_URL_PARAM } });
-      const site = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(site).to.have.property('id', SITE_IDS[0]);
-    });
-
-    it('denies a cross-tenant S2S consumer without readAll', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      context.s2sConsumer = makeS2SConsumer();
-      context.invocation = { id: 'req-bbu-deny' };
-      mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ capabilities: ['site:read'] }));
-
-      const result = await sitesController.getByBaseURL({
-        params: { baseURL: BASE_URL_PARAM }, invocation: { id: 'req-bbu-deny' },
-      });
-      const error = await result.json();
-
-      expect(result.status).to.equal(403);
-      expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
-      expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[acl\] Denied GET \/sites\/by-base-url - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1 requestId=req-bbu-deny/,
-      );
-    });
-
-    it('grants an admin without consulting the S2S capability check (no DB fetch)', async () => {
-      context.attributes.authInfo.withProfile({ is_admin: true });
-
-      const result = await sitesController.getByBaseURL({ params: { baseURL: BASE_URL_PARAM } });
-      const site = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(site).to.have.property('id', SITE_IDS[0]);
-      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
-    });
   });
 
   it('gets the latest site metrics', async () => {
@@ -5520,6 +5597,41 @@ describe('Sites Controller', () => {
         data: { scraperConfig },
         ...defaultAuthAttributes,
       })).to.be.rejectedWith('DDB throttle');
+    });
+
+    it('returns bad request when context.data is missing entirely', async () => {
+      // No `data` property on the context at all: `context.data || {}` defaults to
+      // `{}`, so `scraperConfig` is undefined and the request fails the object guard.
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('logs an empty header list when an unexpected error fires for a headerless config', async () => {
+      // Re-throw path (non-validation error) for a scraperConfig with no `headers`:
+      // `scraperConfig.headers || {}` falls back to `{}` so the error log lists no headers.
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub(), writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().rejects(new Error('DDB throttle'));
+
+      await expect(sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: { someOtherKey: 'value' } },
+        ...defaultAuthAttributes,
+      })).to.be.rejectedWith('DDB throttle');
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(
+        /Error updating scraper config for site .* \(headers=\):/,
+      );
     });
   });
 

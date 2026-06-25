@@ -24,6 +24,8 @@ import {
   SITE_4_BASE_URL,
   SITE_LEGACY_LLMO_ID,
   SITE_NEW_LLMO_ID,
+  MARKET_SITE_1_ID,
+  MARKET_SITE_1_BASE_URL,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
   PROJECT_2_ID,
@@ -375,9 +377,20 @@ export default function siteTests(getHttpClient, resetData) {
         });
       });
 
-      it('admin: returns empty array for unmatched delivery type', async () => {
+      it('admin: returns the Serenity market-mirror site for delivery type other', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/other');
+        expect(res.status).to.equal(200);
+        // MARKET_SITE_1 (Semrush market mirror) is the only delivery_type=other site.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(MARKET_SITE_1_ID);
+        expect(res.body[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expect(res.body[0].deliveryType).to.equal('other');
+      });
+
+      it('admin: returns empty array for unmatched delivery type', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/aem_ams');
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
@@ -573,6 +586,25 @@ export default function siteTests(getHttpClient, resetData) {
           projectId: PROJECT_2_ID,
         });
         expect(res.status).to.equal(403);
+      });
+
+      it('returns 403 when changing the baseURL of a site attached to a Semrush-managed brand', async () => {
+        // SITE_1 is the primary site of BRAND_1, which is Semrush-managed
+        // (semrush_workspace_id set in the seed). The brand's tracked domain
+        // lives on its Semrush projects, which have no domain-update path, so the
+        // SpaceCat site URL is immutable while that brand is attached. Admin is
+        // used so the only thing that can 403 is the URL-immutability guard
+        // itself (not access control). Other site fields stay editable.
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
+          baseURL: 'https://semrush-managed-rename.example.com',
+        });
+        expect(res.status).to.equal(403);
+
+        // The URL is unchanged (the guard blocked the write before persist).
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(SITE_1_BASE_URL);
       });
     });
 
