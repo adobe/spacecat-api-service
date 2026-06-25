@@ -474,10 +474,26 @@ v2-serenity-activate:
       it on first call and persisting `brands.semrush_workspace_id`, which flips
       the brand into sub-workspace mode), then per supplied market creates-or-resumes a
       draft and publishes it once. Markets are caller-supplied (reactivation
-      re-supplies them — there is no stored market memory). Idempotent on the
-      workspace; per-market it is 409-safe (an already-live slice is reported,
-      not duplicated). Returns 200 when ≥1 market went live (brand set `active`),
-      or 207 when none did (brand stays `pending`).
+      re-supplies them — there is no stored market memory); a pending (draft)
+      brand falls back to its stashed `pending_semrush_provisioning`. Idempotent on
+      the workspace; per-market it is 409-safe (an already-live slice is reported,
+      not duplicated).
+
+      Project creation is gated on a primary URL/domain, NOT on prompt
+      generation: with no domain the brand is activated sub-workspace-only (no
+      project, HTTP 200, empty `markets`), anchored solely by its sub-workspace —
+      the bare "save & continue later" draft. With a domain but no market, a
+      single US/EN fallback project is provisioned. `generatePrompts` (body, else
+      stash, else false) decides whether topics/prompts are generated for the
+      provisioned project(s); it requires a domain, so true with no domain is a 400.
+
+      ALL-OR-NOTHING: the brand flips to `active` (HTTP 200) only when the FULL
+      chain succeeds — sub-workspace ensured, EVERY market's project live, the
+      brand linked to its sub-workspace, AND every project mirrored as a Site
+      (`brand_sites` type=`serenity`). If ANY step fails, a pending brand STAYS
+      pending and the response is HTTP 502 (its stash + workspace pointer are kept
+      intact; retry converges idempotently). An already-active brand re-supplying
+      markets is never downgraded (a partial failure is reported as 207).
     operationId: activateSerenityBrand
     security:
       - ims_key: []
@@ -488,12 +504,14 @@ v2-serenity-activate:
           schema: { $ref: './schemas.yaml#/SerenityActivateRequest' }
     responses:
       '200':
-        description: At least one market is live; brand set active.
+        description: Full chain succeeded; brand set `active`. Body lists per-market outcomes.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
       '207':
-        description: No market went live; brand left pending. Body lists per-market outcomes.
+        description: >-
+          An already-active brand re-supplied markets and at least one failed; the
+          brand is NOT downgraded (stays `active`). Body lists per-market outcomes.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
@@ -508,10 +526,15 @@ v2-serenity-activate:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
-        description: Upstream returned a non-2xx response.
+        description: >-
+          Incomplete activation — a pending (draft) brand's provisioning chain did
+          not fully complete (a market failed, or markets are live but could not be
+          linked as Sites). The brand STAYS `pending`; the body carries
+          `error`/`message` and the per-market outcomes so the caller can retry.
+          Also returned when an upstream call returns a non-2xx response.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-serenity-deactivate:

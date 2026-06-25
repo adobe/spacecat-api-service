@@ -125,6 +125,9 @@ v2-prompts-by-brand:
     summary: Create or upsert prompts (bulk)
     description: |
       Upserts prompts. Match by id or by (text, regions). If match found, update; else insert.
+      If a matched prompt has status `deleted`, it is reactivated to `active` and counted as
+      updated. Prompts with status `pending` or other non-active statuses are left unchanged
+      (counted as skipped, not returned in the response).
     operationId: createPromptsByBrand
     security:
       - ims_key: [ ]

@@ -207,6 +207,21 @@ describe('intent-classifier', () => {
       expect(result.has('slow')).to.be.false;
     });
 
+    it('does not start new classify calls after the batch times out', async () => {
+      // Simulates the real failure mode: classify resolves slowly (after the cap)
+      // so without cursor drain each worker loops and starts the next item.
+      let callCount = 0;
+      const classify = () => new Promise((resolve) => {
+        callCount += 1;
+        setTimeout(() => resolve(null), 30); // slower than the cap
+      });
+      // 1 worker, 3 texts, cap fires at 10ms — worker is mid-call on text[0].
+      // Without cursor drain: worker finishes text[0] at ~30ms, loops, picks text[1], text[2].
+      // With cursor drain: worker finishes text[0] then exits — callCount must stay 1.
+      await classifyIntents(classify, ['a', 'b', 'c'], { maxConcurrency: 1, timeoutMs: 10 });
+      expect(callCount).to.equal(1);
+    });
+
     it('waits for all classifications when the batch timeout is disabled (0)', async () => {
       const classify = sinon.stub().resolves('informational');
       const result = await classifyIntents(classify, ['a', 'b'], { timeoutMs: 0 });

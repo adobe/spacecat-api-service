@@ -518,6 +518,16 @@ describe('getRouteHandlers', () => {
     getFanoutReport: sinon.stub(),
   };
 
+  const mockStateAccessMappingsController = {
+    listMappings: sinon.stub(),
+    listHistory: sinon.stub(),
+    createMapping: sinon.stub(),
+    patchMapping: sinon.stub(),
+    getProductCapabilities: sinon.stub(),
+    getUserCapabilities: sinon.stub(),
+    getAuditLogs: sinon.stub(),
+  };
+
   const mockSerenityController = {
     listPrompts: sinon.stub(),
     createPrompts: sinon.stub(),
@@ -608,6 +618,7 @@ describe('getRouteHandlers', () => {
       mockWebhooksController,
       mockAiVisibilityController,
       mockFanoutReportController,
+      mockStateAccessMappingsController,
       mockAgenticCategoriesController,
       mockAgenticPageTypesController,
       mockSerenityController,
@@ -644,6 +655,10 @@ describe('getRouteHandlers', () => {
       'GET /tools/api-keys',
       'GET /tools/proxy',
       'GET /monitoring/drs-bp-pg-audit',
+      'GET /state/access-mappings',
+      'GET /state/access-mappings/history',
+      'POST /state/access-mappings',
+      'GET /product/capabilities',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
@@ -775,6 +790,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
     const expectedDynamicRouteKeys = [
+      'PATCH /state/access-mappings/:id',
+      'GET /user/capabilities/:resourceId',
+      'GET /organizations/:organizationId/permission/audit-logs',
       'GET /audits/latest/:auditType',
       'POST /configurations/:version/restore',
       'GET /configurations/:version',

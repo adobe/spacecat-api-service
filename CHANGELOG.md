@@ -1,3 +1,45 @@
+# [1.597.0](https://github.com/adobe/spacecat-api-service/compare/v1.596.0...v1.597.0) (2026-06-25)
+
+
+### Features
+
+* **state-mappings:** add state-layer access-mapping endpoints (dev-gated) ([#2676](https://github.com/adobe/spacecat-api-service/issues/2676)) ([98ae0fb](https://github.com/adobe/spacecat-api-service/commit/98ae0fb2ec2f95f77a1c890c2cd9d1c3b84f6f87))
+
+# [1.596.0](https://github.com/adobe/spacecat-api-service/compare/v1.595.0...v1.596.0) (2026-06-25)
+
+
+### Features
+
+* **serenity:** mirror each Semrush market as a SpaceCat Site ([#2643](https://github.com/adobe/spacecat-api-service/issues/2643)) ([0d851c8](https://github.com/adobe/spacecat-api-service/commit/0d851c89e943723b43b64f5b313a81ccc34a94c2)), closes [Hi#level](https://github.com/Hi/issues/level) [throu#API](https://github.com/throu/issues/API)
+
+# [1.595.0](https://github.com/adobe/spacecat-api-service/compare/v1.594.0...v1.595.0) (2026-06-24)
+
+
+### Features
+
+*  (SITES-46688) log PF run summary with per-audit issue counts ([#2653](https://github.com/adobe/spacecat-api-service/issues/2653)) ([c6607c1](https://github.com/adobe/spacecat-api-service/commit/c6607c150578b5fa1fabbb5e9d811e140c4740ce))
+
+# [1.594.0](https://github.com/adobe/spacecat-api-service/compare/v1.593.3...v1.594.0) (2026-06-24)
+
+
+### Features
+
+* **brands:** integrate Brand Governance Agent as primary source in /brand-guidelines (LLMO-4918) ([#2419](https://github.com/adobe/spacecat-api-service/issues/2419)) ([42d2af0](https://github.com/adobe/spacecat-api-service/commit/42d2af0702eb4183af1e0fb20fd21ef0b510e3b1))
+
+## [1.593.3](https://github.com/adobe/spacecat-api-service/compare/v1.593.2...v1.593.3) (2026-06-24)
+
+
+### Bug Fixes
+
+* reactivate soft-deleted prompts on bulk re-upload | LLMO-5669 ([#2672](https://github.com/adobe/spacecat-api-service/issues/2672)) ([aa7b8f7](https://github.com/adobe/spacecat-api-service/commit/aa7b8f74cf99e374e052e259da3d2c05e7455b07))
+
+## [1.593.2](https://github.com/adobe/spacecat-api-service/compare/v1.593.1...v1.593.2) (2026-06-24)
+
+
+### Bug Fixes
+
+* timebox overrideBaseURL detection so onboarding beats the CDN timeout | LLMO-5606 ([#2675](https://github.com/adobe/spacecat-api-service/issues/2675)) ([580b98a](https://github.com/adobe/spacecat-api-service/commit/580b98a66c6f3169b32693e40f02778a13c58e8e))
+
 ## [1.593.1](https://github.com/adobe/spacecat-api-service/compare/v1.593.0...v1.593.1) (2026-06-24)
 
 
