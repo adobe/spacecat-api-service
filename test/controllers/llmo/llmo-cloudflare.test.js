@@ -75,9 +75,6 @@ describe('LlmoCloudflareController', () => {
           fromContext: () => mockAccessControlUtil,
         },
       },
-      '../../../src/support/errors.js': {
-        UnauthorizedProductError: class UnauthorizedProductError extends Error {},
-      },
     });
 
     LlmoCloudflareController = mod.default;
@@ -91,6 +88,7 @@ describe('LlmoCloudflareController', () => {
 
     mockAccessControlUtil = {
       hasAccess: sandbox.stub().resolves(true),
+      isLLMOAdministrator: sandbox.stub().returns(true),
     };
 
     mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [LLMO_API_KEY] });
@@ -150,8 +148,14 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(404);
     });
 
-    it('returns 403 when access is denied', async () => {
+    it('returns 403 when user does not have site access', async () => {
       mockAccessControlUtil.hasAccess.resolves(false);
+      const res = await controller.getCloudflareConfig(mockContext);
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 403 when user is not an LLMO administrator', async () => {
+      mockAccessControlUtil.isLLMOAdministrator.returns(false);
       const res = await controller.getCloudflareConfig(mockContext);
       expect(res.status).to.equal(403);
     });

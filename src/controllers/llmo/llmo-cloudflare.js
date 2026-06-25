@@ -14,11 +14,9 @@ import {
   ok, badRequest, notFound, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
-import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { UnauthorizedProductError } from '../../support/errors.js';
 
 const CF_TOKEN_HEADER = 'x-cloudflare-token';
 const CF_TOKEN_MISSING = 'Missing x-cloudflare-token header';
@@ -40,22 +38,14 @@ function LlmoCloudflareController(ctx) {
       return notFound(`Site not found: ${siteId}`);
     }
 
-    let hasAccess;
-    try {
-      hasAccess = await accessControlUtil.hasAccess(
-        site,
-        '',
-        EntitlementModel.PRODUCT_CODES.LLMO,
-      );
-    } catch (e) {
-      if (e instanceof UnauthorizedProductError) {
-        return forbidden(e.message);
-      }
-      throw e;
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
     }
-    if (!hasAccess) {
-      return forbidden('Only users belonging to the organization can view its sites');
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can access Cloudflare onboarding endpoints');
     }
+
     return { site };
   };
 
