@@ -353,6 +353,28 @@ describe('brand-urls helpers', () => {
       expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 1 });
     });
 
+    it('reuses a pre-fetched project listing instead of calling listProjects', async () => {
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [] }), // would be empty if called
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://acme.com'] },
+        WS,
+        undefined,
+        [projectWith('p-us', 'us')],
+      );
+
+      expect(transport.listProjects).to.not.have.been.called;
+      expect(result.markets).to.equal(1);
+    });
+
     it('logs the failing project/market (status only) and rethrows when a market sync throws mid-fan-out', async () => {
       const error = sandbox.stub();
       // The upstream error text carries the gateway URL — it must NOT be logged;

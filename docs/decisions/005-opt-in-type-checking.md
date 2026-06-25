@@ -57,9 +57,13 @@ opted-in scope is every file under `src/support/serenity/**`. Enforced in CI
     "resolveJsonModule": true,
     "types": ["node"]                  // resolve `node:*` builtins
   },
-  "include": ["src/support/serenity/**/*.js"]
+  "include": ["src/support/serenity/**/*.js", "src/support/url-utils.js"]
 }
 ```
+
+The scope has since been expanded to include `src/support/url-utils.js` — the
+first non-serenity file to opt in (per ratchet step 1 below), since the serenity
+controller paths depend on its hostname/SSRF guards.
 
 **`checkJs: false`, not `true` (the opt-in seam).** This is the crux and it is
 the opposite of what a first reading suggests. With `checkJs: true`, TypeScript

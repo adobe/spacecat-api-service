@@ -35,7 +35,10 @@ function safeEqual(a, b) {
 /**
  * Authenticates the ASO dispatcher-overlay read path
  * (`GET /config/:service/redirects.txt`) via the inbound `X-ASO-API-Key`,
- * validated against `ASO_OVERLAY_API_KEY`.
+ * validated against `ASO_OVERLAY_API_KEY` (current) and optionally
+ * `ASO_OVERLAY_API_KEY_PREVIOUS` (rotation overlap). During a key rotation both
+ * values are populated; in steady state the previous key is empty and only the
+ * current key is checked. See ADR I13 for the rotation playbook.
  *
  * This must live in the auth-handler chain (not the controller): `authWrapper`
  * runs `authenticate()` before any controller, so a route that is neither in
@@ -76,7 +79,9 @@ class AsoOverlayKeyHandler extends AbstractHandler {
       return null;
     }
 
-    if (!safeEqual(providedKey, expectedKey)) {
+    const previousKey = context.env?.ASO_OVERLAY_API_KEY_PREVIOUS;
+    if (!safeEqual(providedKey, expectedKey)
+        && !(previousKey && safeEqual(providedKey, previousKey))) {
       this.log('invalid X-ASO-API-Key', 'warn');
       return null;
     }
