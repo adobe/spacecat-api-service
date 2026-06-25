@@ -477,8 +477,10 @@ function SitesController(ctx, log, env) {
       const escaped = q.replace(/([\\%_])/g, '\\$1');
 
       // Fetch one extra row to detect whether more results exist beyond the limit.
+      // The data-access `where` builder passes (attrs, op): `attrs` maps model
+      // fields to DB columns, `op` carries the operators. (NOT `s => s.ilike(...)`.)
       const rows = await Site.all({}, {
-        where: (s) => s.ilike('baseURL', `%${escaped}%`),
+        where: (attr, op) => op.ilike(attr.baseURL, `%${escaped}%`),
         limit: effectiveLimit + 1,
         order: 'asc',
       });

@@ -1206,10 +1206,12 @@ describe('Sites Controller', () => {
       expect(opts.order).to.equal('asc');
       expect(opts.limit).to.equal(11); // effectiveLimit (10) + 1
 
-      // Invoke the captured `where` builder to assert it builds an ilike on baseURL.
-      const builder = { ilike: sinon.stub().returnsThis() };
-      opts.where(builder);
-      expect(builder.ilike).to.have.been.calledOnceWithExactly('baseURL', '%site%');
+      // Invoke the captured `where` builder with the real (attrs, op) signature:
+      // attrs maps model fields to DB columns (baseURL -> base_url), op carries operators.
+      const attrs = { baseURL: 'base_url' };
+      const op = { ilike: sinon.stub().returnsThis() };
+      opts.where(attrs, op);
+      expect(op.ilike).to.have.been.calledOnceWithExactly('base_url', '%site%');
     });
 
     it('uses default limit of 50 when no limit param is provided', async () => {
@@ -1242,9 +1244,10 @@ describe('Sites Controller', () => {
       await sitesController.getAll({ ...context, data: { baseUrlLike: 'a%b_c\\d' } });
 
       const [, opts] = mockDataAccess.Site.all.firstCall.args;
-      const builder = { ilike: sinon.stub().returnsThis() };
-      opts.where(builder);
-      expect(builder.ilike).to.have.been.calledOnceWithExactly('baseURL', '%a\\%b\\_c\\\\d%');
+      const attrs = { baseURL: 'base_url' };
+      const op = { ilike: sinon.stub().returnsThis() };
+      opts.where(attrs, op);
+      expect(op.ilike).to.have.been.calledOnceWithExactly('base_url', '%a\\%b\\_c\\\\d%');
     });
 
     it('returns the slim DTO shape for matched sites', async () => {
@@ -1290,9 +1293,10 @@ describe('Sites Controller', () => {
       // The echo is the trimmed query, not the raw padded input.
       expect(body.pagination.baseUrlLike).to.equal('Adobe');
       const [, opts] = mockDataAccess.Site.all.firstCall.args;
-      const builder = { ilike: sinon.stub().returnsThis() };
-      opts.where(builder);
-      expect(builder.ilike).to.have.been.calledOnceWithExactly('baseURL', '%Adobe%');
+      const attrs = { baseURL: 'base_url' };
+      const op = { ilike: sinon.stub().returnsThis() };
+      opts.where(attrs, op);
+      expect(op.ilike).to.have.been.calledOnceWithExactly('base_url', '%Adobe%');
     });
 
     it('accepts an exactly-3-char query (inclusive lower boundary) and calls Site.all', async () => {
