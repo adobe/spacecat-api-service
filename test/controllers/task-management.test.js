@@ -87,7 +87,8 @@ function makePostgrestClient({
   insertError = null,
 } = {}) {
   const limitStub = sinon.stub().resolves({ data: lookupData, error: lookupError });
-  const eq2Stub = sinon.stub().returns({ limit: limitStub });
+  const gteStub = sinon.stub().returns({ limit: limitStub });
+  const eq2Stub = sinon.stub().returns({ gte: gteStub });
   const eq1Stub = sinon.stub().returns({ eq: eq2Stub });
   const selectStub = sinon.stub().returns({ eq: eq1Stub });
 
@@ -864,6 +865,54 @@ describe('TaskManagementController', () => {
       expect(capturedConnObj.instanceUrl).to.equal('https://mysiteurl.atlassian.net');
     });
 
+    it('passes priority, dueDate, components, and parent through to ticketClient.createTicket', async () => {
+      const conn = makeConnection();
+      const createTicketStub = sinon.stub().resolves({
+        ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1', ticketStatus: 'To Do',
+      });
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          Ticket: { create: sinon.stub().resolves(makeTicket()) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+        },
+      });
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix bug',
+          projectKey: 'ASO',
+          suggestionIds: [SUGGESTION_ID],
+          priority: 'High',
+          dueDate: '2026-12-31',
+          components: ['Frontend', 'API'],
+          parent: 'ASO-42',
+        },
+      }));
+      expect(res.status).to.equal(201);
+      const callArgs = createTicketStub.firstCall.args[0];
+      expect(callArgs.priority).to.equal('High');
+      expect(callArgs.dueDate).to.equal('2026-12-31');
+      expect(callArgs.components).to.deep.equal(['Frontend', 'API']);
+      expect(callArgs.parent).to.equal('ASO-42');
+    });
+
     it('returns 500 on generic ticket client error', async () => {
       const conn = makeConnection();
       const err = new Error('timeout');
@@ -1188,7 +1237,30 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('returns 500 when idempotency key insert fails', async () => {
+    it('returns 409 when idempotency key insert hits unique constraint race', async () => {
+      const conn = makeConnection();
+      const uniqueError = new Error('duplicate key value violates unique constraint');
+      uniqueError.code = '23505';
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          services: {
+            postgrestClient: makePostgrestClient({
+              insertError: uniqueError,
+            }),
+          },
+        },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx());
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.message).to.include('already in flight');
+    });
+
+    it('returns 500 when idempotency key insert fails with non-constraint error', async () => {
       const conn = makeConnection();
       const ctx = makeContext({
         dataAccess: {
@@ -1197,7 +1269,7 @@ describe('TaskManagementController', () => {
           },
           services: {
             postgrestClient: makePostgrestClient({
-              insertError: new Error('unique constraint'),
+              insertError: new Error('connection reset'),
             }),
           },
         },
@@ -1399,6 +1471,139 @@ describe('TaskManagementController', () => {
       const body = await res.json();
       expect(body).to.have.property('attachmentWarning');
       expect(body.attachmentWarning).to.include('attachment upload failed');
+    });
+
+    // ── Grouped mode happy path ─────────────────────────────────────────────
+
+    it('grouped mode creates one ticket linked to all suggestionIds, returns 201', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection();
+      const ticket = makeTicket();
+      const bridgeCreate = sinon.stub().resolves();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Ticket: { create: sinon.stub().resolves(ticket) },
+          TicketSuggestion: { create: bridgeCreate },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const createTicketStub = sinon.stub().resolves({
+        ticketId: 'PROJ-42', ticketKey: 'PROJ-42', ticketUrl: 'https://x.net/PROJ-42', ticketStatus: 'To Do',
+      });
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ createTicket: createTicketStub }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped fix',
+          projectKey: 'PROJ',
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body.id).to.equal(TICKET_ID);
+      expect(body.suggestionIds).to.deep.equal([SUGGESTION_ID, sid2]);
+      expect(body).to.not.have.property('linkWarnings');
+      expect(createTicketStub).to.have.been.calledOnce;
+      expect(bridgeCreate).to.have.been.calledTwice;
+    });
+
+    // ── Individual batch happy path (N>1 → 207 Multi-Status) ────────────────
+
+    it('individual batch mode creates N tickets, returns 207 with per-suggestion results', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection();
+      const ticket1 = makeTicket();
+      const ticket2 = makeTicket({
+        getId: () => 'ffffffff-aaaa-bbbb-cccc-dddddddddddd',
+        getTicketKey: () => 'PROJ-43',
+        getTicketUrl: () => 'https://mysite.atlassian.net/browse/PROJ-43',
+      });
+
+      const ticketCreate = sinon.stub();
+      ticketCreate.onFirstCall().resolves(ticket1);
+      ticketCreate.onSecondCall().resolves(ticket2);
+
+      const bridgeCreate = sinon.stub().resolves();
+      const suggestionFindById = sinon.stub();
+      suggestionFindById.withArgs(SUGGESTION_ID).resolves(makeSuggestion());
+      suggestionFindById.withArgs(sid2).resolves(makeSuggestion({ getId: () => sid2 }));
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Ticket: { create: ticketCreate },
+          TicketSuggestion: { create: bridgeCreate },
+          Suggestion: { findById: suggestionFindById },
+        },
+      });
+
+      const jiraCreateTicket = sinon.stub();
+      jiraCreateTicket.onFirstCall().resolves({
+        ticketId: 'PROJ-42', ticketKey: 'PROJ-42', ticketUrl: 'https://x.net/PROJ-42', ticketStatus: 'To Do',
+      });
+      jiraCreateTicket.onSecondCall().resolves({
+        ticketId: 'PROJ-43', ticketKey: 'PROJ-43', ticketUrl: 'https://x.net/PROJ-43', ticketStatus: 'To Do',
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ createTicket: jiraCreateTicket }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix both',
+          projectKey: 'PROJ',
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      expect(body.results).to.have.lengthOf(2);
+      expect(body.results[0].status).to.equal(201);
+      expect(body.results[0].suggestionId).to.equal(SUGGESTION_ID);
+      expect(body.results[0].ticket).to.have.property('ticketKey');
+      expect(body.results[1].status).to.equal(201);
+      expect(body.results[1].suggestionId).to.equal(sid2);
+      expect(jiraCreateTicket).to.have.been.calledTwice;
+      expect(bridgeCreate).to.have.been.calledTwice;
     });
   });
 

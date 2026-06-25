@@ -650,6 +650,7 @@ function TaskManagementController(context) {
       .select('id,status,response')
       .eq('key', idempotencyKey)
       .eq('organization_id', organizationId)
+      .gte('expires_at', new Date().toISOString())
       .limit(1);
 
     if (lookupError) {
@@ -756,6 +757,12 @@ function TaskManagementController(context) {
       .single();
 
     if (insertError) {
+      const isUniqueViolation = insertError.code === '23505'
+        || insertError.message?.includes('unique')
+        || insertError.message?.includes('duplicate');
+      if (isUniqueViolation) {
+        return createResponse({ message: 'Request already in flight' }, STATUS_CONFLICT);
+      }
       log.error({ organizationId, insertError }, 'Failed to insert idempotency key');
       return createResponse({ message: 'Service unavailable' }, STATUS_INTERNAL_SERVER_ERROR);
     }
@@ -825,6 +832,10 @@ function TaskManagementController(context) {
               description: data.description ?? '',
               labels: data.labels ?? [],
               issueType: data.issueType ?? 'Task',
+              priority: data.priority,
+              dueDate: data.dueDate,
+              components: data.components,
+              parent: data.parent,
             });
           } catch (err) {
             batchTicketErr = err;
@@ -924,6 +935,10 @@ function TaskManagementController(context) {
           description: data.description ?? '',
           labels: data.labels ?? [],
           issueType: data.issueType ?? 'Task',
+          priority: data.priority,
+          dueDate: data.dueDate,
+          components: data.components,
+          parent: data.parent,
         });
       } catch (err) {
         const isReauthNeeded = err.status === 401 || err.message?.includes('requires re-authorization');
@@ -1036,6 +1051,10 @@ function TaskManagementController(context) {
         description: data.description ?? '',
         labels: data.labels ?? [],
         issueType: data.issueType ?? 'Task',
+        priority: data.priority,
+        dueDate: data.dueDate,
+        components: data.components,
+        parent: data.parent,
       });
     } catch (err) {
       // Detect both direct Jira API 401 (err.status) and OAuthCredentialManager's
