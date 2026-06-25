@@ -6208,37 +6208,6 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.include('not available in stage');
       });
 
-      it('skips CDN routing and returns metaconfig when site baseURL has a non-root path (subpath site)', async () => {
-        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
-        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.equal(200);
-        expect(mockLog.info).to.have.been.calledWith(
-          sinon.match(/Skipping CDN routing for subpath-scoped site/),
-        );
-        expect(callCdnRoutingApiStub).to.not.have.been.called;
-      });
-
-      it('skips CDN routing when baseURL has a subpath, even with a root-level overrideBaseURL', async () => {
-        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
-        mockConfig.getFetchConfig = sinon.stub().returns({
-          overrideBaseURL: 'https://override.example.com',
-        });
-        mockSite.getConfig = sinon.stub().returns(mockConfig);
-        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.equal(200);
-        expect(mockLog.info).to.have.been.calledWith(
-          sinon.match(/Skipping CDN routing for subpath-scoped site/),
-        );
-        expect(callCdnRoutingApiStub).to.not.have.been.called;
-      });
-
-      it('does not reject when site baseURL has a trailing slash only', async () => {
-        mockSite.getBaseURL = sinon.stub().returns('https://example.com/');
-        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.not.equal(400);
-        expect(callCdnRoutingApiStub).to.have.been.called;
-      });
-
       it('returns 500 when EDGE_OPTIMIZE_ROUTING_CONFIG is invalid JSON', async () => {
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ env: { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: 'not-json' } }),
