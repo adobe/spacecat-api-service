@@ -33,9 +33,11 @@ import {
   updateFacsAccessMappingCapabilities,
 } from '../support/state-access-mapping-utils.js';
 
-// TODO(deps): replace with `normalizeImsOrgId` imported from
-// `@adobe/spacecat-shared-http-utils` once the published package includes
-// the new export. Inlined here mirroring the legacy controller's helper.
+// Inlined deliberately: the shared `normalizeImsOrgId` ships in
+// `@adobe/spacecat-shared-http-utils` (spacecat-shared#1717) but is not yet in
+// the version this repo depends on. Swap to the import in the same follow-up
+// PR that bumps http-utils and attaches `facsWrapper` (see the dev-only-blocker
+// note at the bottom of this file) — both depend on that published version.
 function normalizeImsOrgId(orgIdent, authSrc = 'AdobeOrg') {
   if (!orgIdent || typeof orgIdent !== 'string') {
     return orgIdent;
@@ -47,6 +49,14 @@ const X_PRODUCT_HEADER = 'x-product';
 const ALLOWED_SUBJECT_TYPES = new Set(['user', 'org']);
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
+// Hard bound on how many pages resolveManageAuthority walks when building a
+// state-layer manager's managed-resource set. 50 × 200 = 10k bindings — far
+// beyond any realistic per-manager grant count. If a caller somehow exceeds
+// this we log a warning (never silently truncate) so the cap is observable.
+const MAX_AUTHORITY_PAGES = 50;
+// Cursor offsets above this are rejected as malformed — guards against a
+// crafted cursor producing a misleading empty page far past the data.
+const MAX_CURSOR_OFFSET = 1_000_000;
 
 /**
  * Returns the catalog of capability strings declared for a given product
@@ -88,7 +98,10 @@ function decodeCursor(cursor) {
   }
   try {
     const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (typeof decoded?.offset === 'number' && Number.isInteger(decoded.offset) && decoded.offset >= 0) {
+    if (typeof decoded?.offset === 'number'
+      && Number.isInteger(decoded.offset)
+      && decoded.offset >= 0
+      && decoded.offset <= MAX_CURSOR_OFFSET) {
       return { offset: decoded.offset };
     }
     return null;
@@ -349,14 +362,40 @@ function StateAccessMappingsController(context) {
     const manageCap = `${product.toLowerCase()}/can_manage_users`;
     const userIdent = resolveCallerUserIdent(ctx);
     const { postgrestClient } = ctx.dataAccess.services;
+
+    // Exhaustively page the caller's bindings so a manager holding
+    // can_manage_users on >MAX_PAGE_SIZE resources is never silently truncated
+    // (which would surface as a false 403). Bounded by MAX_AUTHORITY_PAGES.
+    const listAllBindings = async (baseFilters) => {
+      const all = [];
+      let offset = 0;
+      /* eslint-disable no-await-in-loop */
+      for (let page = 0; page < MAX_AUTHORITY_PAGES; page += 1) {
+        const rows = await listFacsAccessMappings(postgrestClient, {
+          ...baseFilters, limit: MAX_PAGE_SIZE, offset,
+        });
+        all.push(...rows);
+        if (rows.length < MAX_PAGE_SIZE) {
+          return all;
+        }
+        offset += MAX_PAGE_SIZE;
+      }
+      /* eslint-enable no-await-in-loop */
+      log.warn(
+        { tag: 'state-access-mappings', imsOrgId, product },
+        `resolveManageAuthority hit the ${MAX_AUTHORITY_PAGES}-page cap; managed-resource set may be incomplete`,
+      );
+      return all;
+    };
+
     const queries = [
-      listFacsAccessMappings(postgrestClient, {
-        imsOrgId, product, subjectType: 'org', subjectId: imsOrgId, limit: MAX_PAGE_SIZE,
+      listAllBindings({
+        imsOrgId, product, subjectType: 'org', subjectId: imsOrgId,
       }),
     ];
     if (userIdent) {
-      queries.push(listFacsAccessMappings(postgrestClient, {
-        imsOrgId, product, subjectType: 'user', subjectId: userIdent, limit: MAX_PAGE_SIZE,
+      queries.push(listAllBindings({
+        imsOrgId, product, subjectType: 'user', subjectId: userIdent,
       }));
     }
     const results = await Promise.all(queries);
@@ -511,18 +550,19 @@ function StateAccessMappingsController(context) {
     const queryParams = getQueryParams(ctx);
     const decoded = decodeCursor(queryParams.cursor);
     const limit = clampLimit(filters.limit);
-    // Helper applies a single page-size limit; for cursor pagination we
-    // over-fetch one row to detect whether a next page exists.
-    filters.limit = limit + 1 + (decoded?.offset ?? 0);
+    const offset = decoded?.offset ?? 0;
+    // Push the offset to the DB layer (PostgREST .range); over-fetch one row
+    // to detect whether a next page exists.
+    filters.limit = limit + 1;
+    filters.offset = offset;
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
-      const allRows = await listFacsAccessMappings(postgrestClient, filters);
-      const offset = decoded?.offset ?? 0;
-      const slice = allRows.slice(offset, offset + limit);
-      const hasMore = allRows.length > offset + limit;
+      const rows = await listFacsAccessMappings(postgrestClient, filters);
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
       return ok({
-        items: slice.map(toMappingDto),
+        items: page.map(toMappingDto),
         cursor: hasMore ? encodeCursor(offset + limit) : null,
       });
     } catch (error) {
@@ -564,16 +604,17 @@ function StateAccessMappingsController(context) {
     const queryParams = getQueryParams(ctx);
     const decoded = decodeCursor(queryParams.cursor);
     const limit = clampLimit(filters.limit);
-    filters.limit = limit + 1 + (decoded?.offset ?? 0);
+    const offset = decoded?.offset ?? 0;
+    filters.limit = limit + 1;
+    filters.offset = offset;
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
-      const allRows = await listFacsAccessMappingHistory(postgrestClient, filters);
-      const offset = decoded?.offset ?? 0;
-      const slice = allRows.slice(offset, offset + limit);
-      const hasMore = allRows.length > offset + limit;
+      const rows = await listFacsAccessMappingHistory(postgrestClient, filters);
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
       return ok({
-        items: slice.map(toMappingDto),
+        items: page.map(toMappingDto),
         cursor: hasMore ? encodeCursor(offset + limit) : null,
       });
     } catch (error) {
@@ -648,6 +689,9 @@ function StateAccessMappingsController(context) {
     if (grantGuard) {
       return grantGuard;
     }
+    // De-duplicate so a payload like ['llmo/can_view', 'llmo/can_view'] is not
+    // stored verbatim.
+    const dedupedCapabilities = [...new Set(grantedCapabilities)];
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
@@ -656,7 +700,7 @@ function StateAccessMappingsController(context) {
         product,
         resourceType,
         resourceId,
-        grantedCapabilities,
+        grantedCapabilities: dedupedCapabilities,
         subjects: [{ type: subjectType, id: subjectId }],
         createdBy,
       });
@@ -742,6 +786,7 @@ function StateAccessMappingsController(context) {
     if (grantGuard) {
       return grantGuard;
     }
+    const dedupedCapabilities = [...new Set(grantedCapabilities)];
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
@@ -766,7 +811,7 @@ function StateAccessMappingsController(context) {
         id,
         imsOrgId,
         product,
-        grantedCapabilities,
+        grantedCapabilities: dedupedCapabilities,
         updatedBy: resolveCallerUserIdent(ctx),
       });
       if (!updated) {
@@ -808,6 +853,10 @@ function StateAccessMappingsController(context) {
    *     other capability but cannot grant management authority.
    */
   async function getProductCapabilities(ctx) {
+    // Intentionally skips the PostgREST/IMS-org preamble used by the data
+    // endpoints: this handler only reads the in-memory capability catalog
+    // (PRODUCTS_CAPABILITIES) shaped by the caller's FACS authority — it never
+    // touches the database or the caller's org, so there is nothing to guard.
     const product = resolveProduct(ctx);
     if (!product) {
       return badRequest('x-product header is required and must reference a known product');
@@ -1005,9 +1054,10 @@ function StateAccessMappingsController(context) {
     const queryParams = getQueryParams(ctx);
     const decoded = decodeCursor(queryParams.cursor);
     const limit = clampLimit(queryParams.limit);
+    const offset = decoded?.offset ?? 0;
     try {
       const { postgrestClient } = ctx.dataAccess.services;
-      const allRows = await listFacsAccessMappingAuditEvents(postgrestClient, {
+      const rows = await listFacsAccessMappingAuditEvents(postgrestClient, {
         imsOrgId: orgImsOrgId,
         product,
         operation: queryParams.operation,
@@ -1018,13 +1068,13 @@ function StateAccessMappingsController(context) {
         mappingId: queryParams.mappingId,
         since: queryParams.since,
         until: queryParams.until,
-        limit: limit + 1 + (decoded?.offset ?? 0),
+        limit: limit + 1,
+        offset,
       });
-      const offset = decoded?.offset ?? 0;
-      const slice = allRows.slice(offset, offset + limit);
-      const hasMore = allRows.length > offset + limit;
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
       return ok({
-        items: slice.map(toAuditEventDto),
+        items: page.map(toAuditEventDto),
         cursor: hasMore ? encodeCursor(offset + limit) : null,
       });
     } catch (error) {

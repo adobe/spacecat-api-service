@@ -231,6 +231,8 @@ if (denied) {
 
 Capability constants live in `src/routes/capability-constants.js`. Both the route map (`required-capabilities.js`) and the controller must reference the **same constant** — the `capability-constants drift coverage` test enforces this. See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the full two-layer design.
 
+**FACS-native authorization (state-layer endpoints — exception to the above):** The `/state/access-mappings`, `/product/capabilities`, `/user/capabilities`, and `/organizations/:id/permission/audit-logs` endpoints (`src/controllers/state-access-mappings.js`) do **not** use `AccessControlUtil`. They implement the hybrid MAC/FACS permission model directly: authorization is evaluated from the JWT's `facs_permissions` (read via `authInfo.getFacsPermissions()`) **unioned** with state-layer `granted_capabilities` rows in `facs_access_mappings`. A caller is an org-wide FACS manager if the JWT carries `<product>/can_manage_users`; otherwise they are a resource-scoped state-layer manager whose authority is the set of resources where they hold a state `can_manage_users` binding (`resolveManageAuthority`). This is deliberate — these endpoints govern the ReBAC bindings themselves, so they predate/sit beneath the entitlement model `AccessControlUtil` checks. When `facsWrapper` (from `@adobe/spacecat-shared-http-utils`) is later attached in `src/index.js`, it fronts these routes using the `routeFacsCapabilities` map in `src/routes/facs-capabilities.js`; until then the controller self-gates and is restricted to `AWS_ENV === 'dev'`.
+
 **Authentication precedence** (checked in order):
 1. JWT with scopes
 2. Adobe IMS

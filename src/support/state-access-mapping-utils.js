@@ -62,6 +62,17 @@ function clampLimit(limit) {
   return Math.min(Math.floor(n), MAX_LIST_LIMIT);
 }
 
+// Offset is forwarded to PostgREST's `.range(offset, offset + limit - 1)` so
+// pagination happens DB-side (no client-side over-fetch + slice). Any
+// non-finite / negative input collapses to 0 (first page).
+function clampOffset(offset) {
+  const n = Number(offset);
+  if (!Number.isFinite(n) || n <= 0) {
+    return 0;
+  }
+  return Math.floor(n);
+}
+
 function applySubjectFilter(query, { subjectType, subjectId }) {
   let q = query;
   if (subjectType) {
@@ -112,6 +123,7 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
   if (!product) {
     throw new Error('listFacsAccessMappings: product is required');
   }
+  const off = clampOffset(filters.offset);
   let query = postgrestClient
     .from('facs_access_mappings')
     .select('*')
@@ -119,7 +131,7 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
     .eq('product', product)
     .is('revoked_at', null)
     .order('created_at', { ascending: false })
-    .limit(clampLimit(limit));
+    .range(off, off + clampLimit(limit) - 1);
   query = applySubjectFilter(query, filters);
   query = applyResourceFilter(query, filters);
   const { data, error } = await query;
@@ -196,13 +208,14 @@ export async function listFacsAccessMappingHistory(postgrestClient, filters = {}
   if (!product) {
     throw new Error('listFacsAccessMappingHistory: product is required');
   }
+  const off = clampOffset(filters.offset);
   let query = postgrestClient
     .from('facs_access_mappings')
     .select('*')
     .eq('ims_org_id', imsOrgId)
     .eq('product', product)
     .order('created_at', { ascending: false })
-    .limit(clampLimit(limit));
+    .range(off, off + clampLimit(limit) - 1);
   query = applySubjectFilter(query, filters);
   query = applyResourceFilter(query, filters);
   if (since) {
@@ -247,13 +260,14 @@ export async function listFacsAccessMappingAuditEvents(postgrestClient, filters 
   if (!product) {
     throw new Error('listFacsAccessMappingAuditEvents: product is required');
   }
+  const off = clampOffset(filters.offset);
   let query = postgrestClient
     .from('facs_access_mapping_audit_events')
     .select('*')
     .eq('ims_org_id', imsOrgId)
     .eq('product', product)
     .order('created_at', { ascending: false })
-    .limit(clampLimit(limit));
+    .range(off, off + clampLimit(limit) - 1);
   const eqFilters = {
     operation,
     outcome,

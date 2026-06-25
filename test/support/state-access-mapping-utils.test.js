@@ -39,6 +39,7 @@ function fakeQueryBuilder(result) {
     lte: sinon.stub().returnsThis(),
     order: sinon.stub().returnsThis(),
     limit: sinon.stub().returnsThis(),
+    range: sinon.stub().returnsThis(),
     upsert: sinon.stub().returnsThis(),
     then(onFulfilled, onRejected) {
       return Promise.resolve(result).then(onFulfilled, onRejected);
@@ -68,6 +69,7 @@ function fakePostgrestClient({ readResult, insertResults, rpcResult } = {}) {
         lte: readBuilder.lte,
         order: readBuilder.order,
         limit: readBuilder.limit,
+        range: readBuilder.range,
         insert: (row) => {
           insertArgs.push(row);
           const result = insertQueue.shift() ?? { data: [], error: null };
@@ -133,21 +135,37 @@ describe('state-access-mapping-utils helpers', () => {
       expect(eqCalls).to.deep.include(['resource_id', 'brand-x']);
     });
 
-    it('orders by created_at DESC and caps the limit at 500 (default 50)', async () => {
+    it('orders by created_at DESC and ranges with the clamped limit (default 50, cap 500)', async () => {
+      // limit→.range(offset, offset + clampLimit - 1); offset defaults to 0.
       const client = fakePostgrestClient();
       await listFacsAccessMappings(client, { imsOrgId: 'org-1', product: 'LLMO' });
       expect(client.readBuilder.order.firstCall.args).to.deep.equal([
         'created_at', { ascending: false },
       ]);
-      expect(client.readBuilder.limit.firstCall.args[0]).to.equal(50);
+      expect(client.readBuilder.range.firstCall.args).to.deep.equal([0, 49]);
 
       const client2 = fakePostgrestClient();
       await listFacsAccessMappings(client2, { imsOrgId: 'org-1', product: 'LLMO', limit: 99999 });
-      expect(client2.readBuilder.limit.firstCall.args[0]).to.equal(500);
+      expect(client2.readBuilder.range.firstCall.args).to.deep.equal([0, 499]);
 
       const client3 = fakePostgrestClient();
       await listFacsAccessMappings(client3, { imsOrgId: 'org-1', product: 'LLMO', limit: -3 });
-      expect(client3.readBuilder.limit.firstCall.args[0]).to.equal(50);
+      expect(client3.readBuilder.range.firstCall.args).to.deep.equal([0, 49]);
+    });
+
+    it('forwards a non-zero offset to .range (DB-side pagination)', async () => {
+      const client = fakePostgrestClient();
+      await listFacsAccessMappings(client, {
+        imsOrgId: 'org-1', product: 'LLMO', limit: 10, offset: 30,
+      });
+      expect(client.readBuilder.range.firstCall.args).to.deep.equal([30, 39]);
+
+      // A negative / non-finite offset collapses to 0.
+      const client2 = fakePostgrestClient();
+      await listFacsAccessMappings(client2, {
+        imsOrgId: 'org-1', product: 'LLMO', limit: 10, offset: -5,
+      });
+      expect(client2.readBuilder.range.firstCall.args).to.deep.equal([0, 9]);
     });
 
     it('throws with a meaningful message when PostgREST returns an error', async () => {

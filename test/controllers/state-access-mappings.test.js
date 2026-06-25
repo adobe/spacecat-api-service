@@ -165,6 +165,42 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(503);
     });
 
+    it('patchMapping returns 503 when postgrest is unavailable', async () => {
+      const { Controller } = await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(503);
+    });
+
+    it('getAuditLogs returns 503 when postgrest is unavailable', async () => {
+      const { Controller } = await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      });
+      const ctx = makeContext({ pathParams: { organizationId: VALID_UUID_RES } });
+      const res = await Controller(ctx).getAuditLogs(ctx);
+      expect(res.status).to.equal(503);
+    });
+
+    it('listHistory returns 503 when postgrest is unavailable', async () => {
+      const { Controller } = await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      });
+      const ctx = makeContext();
+      const res = await Controller(ctx).listHistory(ctx);
+      expect(res.status).to.equal(503);
+    });
+
+    it('createMapping returns 503 when postgrest is unavailable', async () => {
+      const { Controller } = await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      });
+      const ctx = makeContext({ body: {} });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(503);
+    });
+
     it('listMappings returns 400 when x-product is missing', async () => {
       const { Controller } = await loadController();
       const ctx = makeContext({ product: null });
@@ -239,11 +275,16 @@ describe('StateAccessMappingsController', () => {
       expect(body.cursor).to.be.a('string');
     });
 
-    it('accepts a cursor and offsets correctly', async () => {
+    it('forwards the cursor offset to the DB layer and pages correctly', async () => {
       const rows = Array.from({ length: 30 }, (_, i) => makeRow({ id: `id-${i}` }));
-      const { Controller } = await loadController({
-        listFacsAccessMappings: sinon.stub().resolves(rows),
+      // Offset + limit are applied DB-side now; the stub mimics PostgREST
+      // .range(offset, offset + limit - 1) so the controller no longer slices
+      // by offset client-side.
+      const listStub = sinon.stub().callsFake((_client, filters) => {
+        const start = filters.offset ?? 0;
+        return Promise.resolve(rows.slice(start, start + filters.limit));
       });
+      const { Controller } = await loadController({ listFacsAccessMappings: listStub });
       const cursor = Buffer.from(JSON.stringify({ offset: 20 }), 'utf8').toString('base64url');
       const ctx = makeContext({
         queryParams: {
@@ -252,8 +293,13 @@ describe('StateAccessMappingsController', () => {
       });
       const res = await Controller(ctx).listMappings(ctx);
       const body = await res.json();
+      // Controller asked the DB for offset=20, limit=6 (page size + 1 for hasMore).
+      expect(listStub.firstCall.args[1]).to.include({ offset: 20, limit: 6 });
       expect(body.items[0].id).to.equal('id-20');
       expect(body.items).to.have.lengthOf(5);
+      // 6 rows came back (>5) → there is a next page at offset 25.
+      const next = JSON.parse(Buffer.from(body.cursor, 'base64url').toString('utf8'));
+      expect(next.offset).to.equal(25);
     });
 
     it('ignores a malformed cursor (treats as offset=0)', async () => {
@@ -277,6 +323,21 @@ describe('StateAccessMappingsController', () => {
         listFacsAccessMappings: sinon.stub().resolves(rows),
       });
       const cursor = Buffer.from(JSON.stringify({ offset: -5 }), 'utf8').toString('base64url');
+      const ctx = makeContext({
+        queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES, cursor },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('ignores a cursor whose offset exceeds the max (treats as offset=0)', async () => {
+      const listStub = sinon.stub().callsFake((_client, f) => {
+        // A rejected cursor means offset 0 reaches the DB.
+        expect(f.offset).to.equal(0);
+        return Promise.resolve([makeRow()]);
+      });
+      const { Controller } = await loadController({ listFacsAccessMappings: listStub });
+      const cursor = Buffer.from(JSON.stringify({ offset: 5_000_000 }), 'utf8').toString('base64url');
       const ctx = makeContext({
         queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES, cursor },
       });
@@ -795,6 +856,63 @@ describe('StateAccessMappingsController', () => {
         queryParams: { resourceType: 'brand', resourceId: 'cccccccc-cccc-4ccc-9ccc-cccccccccccc' },
       });
       const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('flow 8.3: builds the managed set across multiple pages (no silent truncation)', async () => {
+      // The manager's can_manage_users binding for VALID_UUID_RES sits on the
+      // SECOND page of their bindings (row 201). resolveManageAuthority must
+      // page past the first MAX_PAGE_SIZE rows to find it — otherwise a false
+      // 403. The list query itself returns [] (different filters).
+      const filler = Array.from({ length: 200 }, (_, i) => makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: `f${i}`,
+        granted_capabilities: ['llmo/can_view'],
+      }));
+      const managerRow = makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: VALID_UUID_RES,
+        granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const userBindings = [...filler, managerRow]; // 201 rows → two pages
+      const listStub = sinon.stub().callsFake((_client, f) => {
+        if (f.subjectType === 'user' && f.subjectId === CALLER_USER) {
+          const start = f.offset ?? 0;
+          return Promise.resolve(userBindings.slice(start, start + f.limit));
+        }
+        return Promise.resolve([]);
+      });
+      const { Controller } = await loadController({ listFacsAccessMappings: listStub });
+      const ctx = denyCtx({
+        queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('flow 8.3: warns (never silently truncates) when the authority page cap is hit', async () => {
+      // A pathological manager whose bindings never end before MAX_AUTHORITY_PAGES.
+      // The loop is bounded and logs a warning instead of looping forever.
+      const fullPage = Array.from({ length: 200 }, (_, i) => makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: `p${i}`,
+        granted_capabilities: ['llmo/can_view'],
+      }));
+      const listStub = sinon.stub().callsFake((_client, f) => (
+        f.subjectType === 'user' && f.subjectId === CALLER_USER
+          ? Promise.resolve(fullPage)
+          : Promise.resolve([])
+      ));
+      const { Controller } = await loadController({ listFacsAccessMappings: listStub });
+      const ctx = denyCtx({
+        queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(ctx.log.warn.called).to.be.true;
+      // VALID_UUID_RES is not in the (p0..p199) set → deterministic 403, no hang.
       expect(res.status).to.equal(403);
     });
   });
