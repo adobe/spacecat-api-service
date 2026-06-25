@@ -1189,6 +1189,64 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
 }
 
 /**
+ * Explicitly sets a brand's lifecycle status (the intentful status-transition path,
+ * e.g. approve -> active, move-to-pending -> pending).
+ *
+ * This is deliberately kept separate from updateBrand and minimal (status + updated_by
+ * only, no child-table sync). The generic updateBrand path carries the active->pending
+ * demotion guard (LLMO-5587); legitimate, intended transitions route through here so they
+ * are not blocked by that guard.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandId - Brand UUID
+ * @param {string} params.status - Target status ('active' | 'pending')
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {string} [params.updatedBy] - User performing the operation
+ * @returns {Promise<object|null>} Updated brand in V2 shape, or null if not found
+ */
+export async function setBrandStatus({
+  organizationId,
+  brandId,
+  status,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ status, updated_by: updatedBy })
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    // Do not resurrect a soft-deleted brand via a status transition — a deleted
+    // brand matches no row here, so the caller gets a 404 (use a dedicated
+    // undelete flow if reactivation is ever needed).
+    .neq('status', 'deleted')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    // Lifted from Igor Grubic's PR #2504 (LLMO-5183): the data layer enforces
+    // chk_active_brand_has_site_id (an active brand must have a base site_id). Map the
+    // CheckViolation to a typed 400 rather than surfacing a generic 500.
+    if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
+      const err = new Error('Cannot activate a brand without a base site URL');
+      err.status = 400;
+      throw err;
+    }
+    throw new Error(`Failed to set brand status: ${error.message}`);
+  }
+
+  if (!data) {
+    return null;
+  }
+  return getBrandById(organizationId, brandId, postgrestClient);
+}
+
+/**
  * Lists all regions (available markets) from the regions reference table.
  *
  * @param {object} postgrestClient - PostgREST client
