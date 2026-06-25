@@ -63,7 +63,6 @@ import {
   buildReservedDomains,
   dropReservedCompetitors,
   removedCompetitorDomains,
-  resolveReservedDomains,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../support/serenity/competitor-benchmarks.js';
 import {
@@ -1756,6 +1755,12 @@ function BrandsController(ctx, log, env) {
       // when competitors are actually edited.
       const competitorsToGuard = competitorsTouched
         && Array.isArray(updates.competitors) && updates.competitors.length > 0;
+      // When the competitor guard below lists a Semrush brand's projects pre-write,
+      // it stashes the listing here so the post-commit re-sync can reuse it instead
+      // of listing the same workspace a second time — the project set is stable
+      // across the brand-row write (which never re-points semrush_workspace_id), so
+      // a single competitor edit lists projects ONCE across both the guard and sync.
+      let prefetchedProjects = null;
       if (competitorsToGuard) {
         const brandState = await getBrandById(spaceCatId, brandUuid, postgrestClient);
         // Use the incoming URLs when this same PATCH changes them, else the stored ones.
@@ -1765,11 +1770,12 @@ function BrandsController(ctx, log, env) {
         let reservedDomains;
         if (hasText(brandState?.semrushWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
+          // List once and stash for the post-commit re-sync (see prefetchedProjects).
           const imsToken = getImsUserTokenStrict(context);
           const transport = createSerenityTransport({ env: context.env, imsToken });
-          reservedDomains = await resolveReservedDomains(
-            transport,
-            brandState.semrushWorkspaceId,
+          prefetchedProjects = await resolveProjects(transport, brandState.semrushWorkspaceId);
+          reservedDomains = buildReservedDomains(
+            prefetchedProjects.map((p) => p?.domain),
             brandOwnUrls,
           );
         } else {
@@ -1827,10 +1833,15 @@ function BrandsController(ctx, log, env) {
           // List the sub-workspace's projects ONCE and share the result across the
           // URL/competitor/alias syncs below — the listing is stable across the
           // brand-row write above, so this collapses up to three redundant
-          // listProjects round-trips into one on a single edit. Kept inside the try
-          // so a listProjects failure still emits the workspace-scoped re-sync
-          // breadcrumb below rather than escaping to the generic outer catch.
-          const sharedProjects = await resolveProjects(transport, updated.semrushWorkspaceId);
+          // listProjects round-trips into one on a single edit. Reuse the pre-write
+          // competitor-guard listing when it ran (same immutable workspace), so a
+          // competitor edit lists projects once across BOTH the guard and the sync;
+          // re-list only when the guard didn't run (e.g. a urls/aliases-only edit).
+          // Kept inside the try so a listProjects failure still emits the workspace-
+          // scoped re-sync breadcrumb below rather than escaping to the outer catch.
+          const sharedProjects = prefetchedProjects !== null
+            ? prefetchedProjects
+            : await resolveProjects(transport, updated.semrushWorkspaceId);
           if (urlsTouched) {
             await syncBrandUrlsAcrossMarkets(
               transport,

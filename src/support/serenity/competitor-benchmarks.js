@@ -65,20 +65,6 @@ export function buildReservedDomains(domains = [], urls = []) {
 }
 
 /**
- * Resolves the brand's reserved domains for the persist-time guard: lists the
- * brand's projects (every market domain, incl. the primary) and folds in the
- * brand's own website URLs. Used to strip self-referential competitors BEFORE
- * they are stored, so `brand.competitors` never holds the brand's own property.
- *
- * @returns {Promise<Set<string>>} normalized reserved domains.
- */
-export async function resolveReservedDomains(transport, workspaceId, brandOwnUrls = []) {
-  const listing = await transport.listProjects(workspaceId);
-  const projects = Array.isArray(listing?.items) ? listing.items : [];
-  return buildReservedDomains(projects.map((p) => p?.domain), brandOwnUrls);
-}
-
-/**
  * Partitions competitors into the ones to keep and the self-referential ones to
  * drop (their domain is one of the brand's `reservedDomains`). Pure — the caller
  * persists `kept` and logs `dropped`.

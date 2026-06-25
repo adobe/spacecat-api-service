@@ -56,7 +56,12 @@ describe('url-utils: isPublicHostname', () => {
     expect(isPublicHostname('8.8.8.8')).to.equal(false);
   });
 
-  it('rejects IPv6 literals (hostname contains a colon)', () => {
+  it('rejects IPv6 literals (bracketed host has a colon; bare forms fail closed)', () => {
+    // A URL-form IPv6 literal canonicalizes to a bracketed hostname ('[::1]'),
+    // which the colon guard rejects.
+    expect(isPublicHostname('https://[::1]/')).to.equal(false);
+    expect(isPublicHostname('[fe80::1]')).to.equal(false);
+    // A bare, unbracketed IPv6 string is unparseable as a URL → fails closed.
     expect(isPublicHostname('::1')).to.equal(false);
     expect(isPublicHostname('fe80::1')).to.equal(false);
   });
@@ -80,5 +85,24 @@ describe('url-utils: isPublicHostname', () => {
     expect(isPublicHostname('')).to.equal(false);
     expect(isPublicHostname('   ')).to.equal(false);
     expect(isPublicHostname(undefined)).to.equal(false);
+  });
+
+  it('self-defends against un-normalized IP-literal evasions (decimal/hex/octal)', () => {
+    // Decimal, hex, and octal encodings of 127.0.0.1 — WHATWG URL normalization
+    // (applied internally) collapses them to the dotted loopback, which the IPv4
+    // guard then rejects. This holds even though the caller did NOT pre-normalize
+    // via hostnameFromUrlString.
+    expect(isPublicHostname('2130706433')).to.equal(false);
+    expect(isPublicHostname('0x7f.0.0.1')).to.equal(false);
+    expect(isPublicHostname('0177.0.0.1')).to.equal(false);
+  });
+
+  it('accepts a full URL (canonicalized internally), not just a bare host', () => {
+    expect(isPublicHostname('https://acme.com/path?q=1')).to.equal(true);
+    expect(isPublicHostname('http://127.0.0.1:8080/x')).to.equal(false);
+  });
+
+  it('returns false for an unparseable input (fails closed)', () => {
+    expect(isPublicHostname('https://[')).to.equal(false);
   });
 });

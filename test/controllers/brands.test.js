@@ -6107,10 +6107,10 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(200);
-        // listProjects is read twice on a competitor edit: once by the pre-commit
-        // self-reference guard (resolveReservedDomains) and once by the post-commit
-        // shared sync pre-fetch; both target the brand's workspace.
-        expect(listProjectsStub).to.have.been.calledWith('ws-7');
+        // listProjects is read ONCE on a competitor edit: the pre-commit self-
+        // reference guard lists the workspace and stashes the result, which the
+        // post-commit shared sync reuses (same workspace id) instead of re-listing.
+        expect(listProjectsStub).to.have.been.calledOnceWith('ws-7');
         const { updates } = updateBrandStub.firstCall.firstArg;
         expect(updates.competitors.map((c) => c.url)).to.deep.equal(['https://rival.com']);
         expect(loggerStub.info).to.have.been.calledWithMatch(

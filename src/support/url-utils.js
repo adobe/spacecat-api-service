@@ -52,24 +52,33 @@ export function hostnameFromUrlString(value) {
  * Conservative by design: it rejects only clearly-non-public hosts and never a
  * legitimate registrable domain (e.g. `example.com`, `www.acme.co.uk`).
  *
- * Assumes a WHATWG-`URL`-normalized hostname as input (pass the output of
- * `hostnameFromUrlString`): IP-literal evasions (decimal/hex/octal-encoded
- * addresses) are neutralized only by that upstream `new URL()` normalization,
- * not by this function in isolation.
+ * Self-defending: the input is canonicalized through the same WHATWG-`URL`
+ * normalization as `hostnameFromUrlString` (which it calls internally), so
+ * IP-literal evasions (decimal/hex/octal-encoded addresses — e.g. `2130706433`
+ * or `0x7f.1` collapsing to a `127.x` loopback) are folded to their dotted form
+ * here even when a caller forgets to pre-normalize. Callers may still pass the
+ * output of `hostnameFromUrlString` (re-normalization is idempotent). Fails
+ * closed: an unparseable input yields null → treated as non-public.
  *
  * SYNTACTIC guard only — it inspects the hostname string, never resolves DNS.
  * Wildcard-DNS services (e.g. `nip.io`, `sslip.io`) that embed a private IP in a
  * public-looking hostname pass this check; blocking resolution-time SSRF is the
  * downstream fetcher's responsibility and relies on network egress controls.
  *
- * @param {string} hostname - a bare hostname (as returned by hostnameFromUrlString)
+ * @param {string} hostname - a URL or bare hostname (canonicalized internally)
  * @returns {boolean} true when the host is a public domain name
  */
 export function isPublicHostname(hostname) {
   if (!hostname || !hasText(hostname)) {
     return false;
   }
-  const host = hostname.toLowerCase().trim().replace(/\.$/, '');
+  // Canonicalize through WHATWG `URL` so the function is self-defending rather
+  // than relying on every caller having passed `hostnameFromUrlString` output.
+  const normalized = hostnameFromUrlString(hostname);
+  if (normalized === null) {
+    return false;
+  }
+  const host = normalized.toLowerCase().trim().replace(/\.$/, '');
   // localhost (and any *.localhost) is never public.
   if (host === 'localhost' || host.endsWith('.localhost')) {
     return false;

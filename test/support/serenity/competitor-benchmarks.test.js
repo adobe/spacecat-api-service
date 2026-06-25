@@ -20,7 +20,6 @@ import {
   collectCompetitorBenchmarks,
   dropReservedCompetitors,
   removedCompetitorDomains,
-  resolveReservedDomains,
   syncCompetitorBenchmarksForProject,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../../../src/support/serenity/competitor-benchmarks.js';
@@ -115,25 +114,6 @@ describe('competitor-benchmarks helpers', () => {
         kept: competitors, dropped: [],
       });
       expect(dropReservedCompetitors(null, new Set())).to.deep.equal({ kept: [], dropped: [] });
-    });
-  });
-
-  describe('resolveReservedDomains', () => {
-    it('lists projects and folds project domains + brand URLs into the set', async () => {
-      const transport = {
-        listProjects: sandbox.stub().resolves({
-          items: [{ domain: 'brand.com' }, { domain: 'brand.de' }],
-        }),
-      };
-      const reserved = await resolveReservedDomains(transport, WS, ['https://shop.brand.io']);
-      expect([...reserved].sort()).to.deep.equal(['brand.com', 'brand.de', 'shop.brand.io']);
-      expect(transport.listProjects).to.have.been.calledOnceWith(WS);
-    });
-
-    it('treats a non-array listProjects response as no project domains', async () => {
-      const transport = { listProjects: sandbox.stub().resolves({}) };
-      const reserved = await resolveReservedDomains(transport, WS, ['https://brand.com']);
-      expect([...reserved]).to.deep.equal(['brand.com']);
     });
   });
 
