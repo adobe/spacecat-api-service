@@ -34,6 +34,7 @@ import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
 import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
 import { brands } from './seed-data/brands.js';
+import { brandSites } from './seed-data/brand-sites.js';
 import { projectionAudits } from './seed-data/projection-audits.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
@@ -135,12 +136,13 @@ async function seed() {
     insertRows('sentiment_topics', sentimentTopics),
   ]);
 
-  // Level 3: depend on opportunities, audits, topics
+  // Level 3: depend on opportunities, audits, topics, brands + sites
   await Promise.all([
     insertRows('suggestions', suggestions),
     insertRows('fix_entities', fixes),
     insertRows('audit_urls', auditUrls),
     insertRows('sentiment_guidelines', sentimentGuidelines),
+    insertRows('brand_sites', brandSites),
   ]);
 
   // Level 4: depend on fix_entities + suggestions
