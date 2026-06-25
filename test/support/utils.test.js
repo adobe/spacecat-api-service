@@ -32,6 +32,7 @@ import {
   validateSiteForRedirects,
   sendAutofixMessage,
   isViewAsTrialRequest,
+  getImsUserTokenStrict,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -1510,6 +1511,47 @@ describe('utils', () => {
       expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
       expect(payload).to.have.property('customData');
       expect(payload.customData).to.deep.equal({ key: 'value' });
+    });
+  });
+
+  describe('getImsUserTokenStrict', () => {
+    function buildContext(authInfo) {
+      return {
+        attributes: { authInfo },
+        pathInfo: { headers: { authorization: 'Bearer ims-user-token' } },
+      };
+    }
+
+    it('returns the bearer token when the caller authenticated via IMS', () => {
+      const context = buildContext({ getType: () => 'ims' });
+      expect(getImsUserTokenStrict(context)).to.equal('ims-user-token');
+    });
+
+    it('fails closed with 401 when authInfo has no getType', () => {
+      const context = buildContext({});
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('fails closed with 401 when authInfo is null', () => {
+      const context = buildContext(null);
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('fails closed with 401 when authInfo is absent (no attributes)', () => {
+      expect(() => getImsUserTokenStrict({ pathInfo: { headers: {} } }))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('fails closed with 401 when the caller authenticated via a non-IMS type', () => {
+      const context = buildContext({ getType: () => 'jwt' });
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
     });
   });
 });

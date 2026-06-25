@@ -12,7 +12,12 @@
 
 import { expect } from 'chai';
 
-import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../../src/dto/suggestion.js';
+import {
+  SuggestionDto,
+  SUGGESTION_VIEWS,
+  SUGGESTION_SKIP_REASONS,
+  ALLOWED_I18N_FIELDS,
+} from '../../src/dto/suggestion.js';
 
 describe('Suggestion DTO', () => {
   const createMockSuggestion = (dataOverrides = {}, suggestionOverrides = {}) => ({
@@ -33,6 +38,21 @@ describe('Suggestion DTO', () => {
   describe('SUGGESTION_VIEWS', () => {
     it('exports valid view options', () => {
       expect(SUGGESTION_VIEWS).to.deep.equal(['minimal', 'summary', 'full']);
+    });
+  });
+
+  describe('ALLOWED_I18N_FIELDS', () => {
+    it('exports the supported localizable suggestion fields', () => {
+      expect(ALLOWED_I18N_FIELDS).to.deep.equal([
+        'title',
+        'description',
+        'rationale',
+        'aiRationale',
+        'aiSuggestion',
+        'expectedOutcome',
+        'actionItems',
+        'persona',
+      ]);
     });
   });
 
@@ -617,6 +637,104 @@ describe('Suggestion DTO', () => {
             expect(json.data).to.not.have.property('issues'); // Issues not in projection
           }
         });
+      });
+    });
+
+    describe('locale projection', () => {
+      it('returns original English data when no locale is provided', () => {
+        const suggestion = createMockSuggestion({
+          title: 'English title',
+          i18n: { fr_fr: { title: 'Titre français' } },
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'full', null, null);
+
+        expect(json.data).to.have.property('title', 'English title');
+        expect(json.data).to.not.have.property('i18n');
+      });
+
+      it('promotes locale-specific fields when locale matches', () => {
+        const suggestion = createMockSuggestion({
+          title: 'English title',
+          description: 'English description',
+          rationale: 'English rationale',
+          expectedOutcome: 'English outcome',
+          i18n: {
+            fr_fr: {
+              title: 'Titre français',
+              description: 'Description française',
+              rationale: 'Justification française',
+              expectedOutcome: 'Résultat attendu français',
+            },
+          },
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'full', null, 'fr_fr');
+
+        expect(json.data).to.have.property('title', 'Titre français');
+        expect(json.data).to.have.property('description', 'Description française');
+        expect(json.data).to.have.property('rationale', 'Justification française');
+        expect(json.data).to.have.property('expectedOutcome', 'Résultat attendu français');
+        expect(json.data).to.not.have.property('i18n');
+      });
+
+      it('falls back to English when locale has no stored translation', () => {
+        const suggestion = createMockSuggestion({
+          title: 'English title',
+          i18n: { fr_fr: { title: 'Titre français' } },
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'full', null, 'ja_jp');
+
+        expect(json.data).to.have.property('title', 'English title');
+        expect(json.data).to.not.have.property('i18n');
+      });
+
+      it('strips i18n key even when locale is not provided', () => {
+        const suggestion = createMockSuggestion({
+          title: 'English title',
+          i18n: { fr_fr: { title: 'Titre français' } },
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'full');
+
+        expect(json.data).to.not.have.property('i18n');
+      });
+
+      it('preserves non-translated fields alongside translated ones', () => {
+        const suggestion = createMockSuggestion({
+          url: 'https://example.com/page',
+          title: 'English title',
+          i18n: { fr_fr: { title: 'Titre français' } },
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'full', null, 'fr_fr');
+
+        expect(json.data).to.have.property('url', 'https://example.com/page');
+        expect(json.data).to.have.property('title', 'Titre français');
+      });
+
+      it('ignores disallowed fields in the locale translation', () => {
+        const suggestion = createMockSuggestion({
+          title: 'English title',
+          i18n: { fr_fr: { title: 'Titre français', secretField: 'injected' } },
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'full', null, 'fr_fr');
+
+        expect(json.data).to.have.property('title', 'Titre français');
+        expect(json.data).to.not.have.property('secretField');
+      });
+
+      it('preserves null getData() without converting to empty object', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => null,
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json).to.not.have.property('data');
       });
     });
   });

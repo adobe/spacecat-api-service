@@ -16,6 +16,7 @@ import {
 import AccessControlUtil from '../../../support/access-control-util.js';
 import { OpportunityDto } from '../../../dto/opportunity.js';
 import { getBrandById } from '../../../support/brands-storage.js';
+import { isValidLocale } from '../../../utils/validations.js';
 
 const MAX_CONCURRENT_SITES = 5;
 const MAX_SITES_FOR_COUNT = 40;
@@ -167,6 +168,11 @@ function LlmoOpportunitiesController(ctx) {
     const { Site, Opportunity } = dataAccess;
     const brandId = context.params.brandId || 'all';
     const filterSiteId = context.data?.siteId || context.data?.site_id;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     let organization;
     try {
@@ -212,7 +218,7 @@ function LlmoOpportunitiesController(ctx) {
             return opportunities
               .filter((opp) => isLlmoOpportunity(opp) && VALID_STATUSES.has(opp.getStatus()))
               .map((opp) => ({
-                ...OpportunityDto.toJSON(opp),
+                ...OpportunityDto.toJSON(opp, locale),
                 siteBaseURL: site.getBaseURL(),
               }));
           } catch (siteError) {
@@ -294,7 +300,7 @@ function LlmoOpportunitiesController(ctx) {
       // would allow row-level claims to override the endpoint's asserted scope and re-open
       // the cross-brand contamination this controller exists to prevent.
       const opportunities = filteredOpps.map((opp) => ({
-        ...OpportunityDto.toJSON(opp),
+        ...OpportunityDto.toJSON(opp, locale),
         scopeType: 'brand',
         scopeId: brandId,
         siteBaseURL: siteMap.get(opp.getSiteId())?.getBaseURL() ?? null,
