@@ -21,7 +21,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import esmock from 'esmock';
 
 import * as utils from '../../src/support/utils.js';
-import PreflightController from '../../src/controllers/preflight.js';
+import PreflightController, { countIssuesForAudit } from '../../src/controllers/preflight.js';
 
 // Make fetch available globally
 global.fetch = fetch;
@@ -1589,18 +1589,20 @@ describe('Preflight Controller', () => {
       expect(body.audits).to.be.undefined;
     });
 
-    it('does not include Authorization header when HEAD returns 200 (no auth needed)', async () => {
+    it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
       });
       const [, calledOptions] = fetchStub.secondCall.args;
-      expect(calledOptions.headers.Authorization).to.be.undefined;
+      // SITES-46967: page-auth header moved off Authorization onto x-page-auth.
+      // Authorization is now reserved for the IMS service token (always set).
+      expect(calledOptions.headers['x-page-auth']).to.be.undefined;
     });
 
-    // -- IMS service token on x-ims-authorization (SITES-43236) --
+    // -- IMS service token on Authorization, customer page-auth on x-page-auth (SITES-46967) --
 
-    it('attaches the IMS service token on x-ims-authorization (Bearer prefix)', async () => {
+    it('attaches the IMS service token on Authorization (Bearer prefix)', async () => {
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
@@ -1626,21 +1628,21 @@ describe('Preflight Controller', () => {
       );
       expect(mockImsClient.getServiceAccessToken).to.have.been.calledOnce;
       const [, calledOptions] = fetchStub.secondCall.args;
-      // Bearer prefix mirrors the v3-token convention; verified against the
-      // mystique-deploy CGW-Flex validator (Authorization on /v1/apply uses
-      // the same shape).
-      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+      // SITES-46967: IMS service token rides Authorization (default CGW slot)
+      // so the Ethos CGW-Flex edge emits X-Gw-Ims-Client-Id downstream — the
+      // header mystique's require_preflight_service_client dep reads.
+      expect(calledOptions.headers.Authorization).to.equal(
         'Bearer test-ims-service-token',
       );
-      // The customer-site page-auth header lives on a different key and
-      // must not be clobbered or duplicated by the IMS attachment.
-      expect(calledOptions.headers.Authorization).to.be.undefined;
+      // No customer-page-auth header when the page is un-authenticated.
+      expect(calledOptions.headers['x-page-auth']).to.be.undefined;
     });
 
-    it('keeps Authorization (page-auth) and x-ims-authorization (IMS) on separate headers when both are present', async () => {
+    it('keeps Authorization (IMS) and x-page-auth (page-auth) on separate headers when both are present', async () => {
       // HEAD returns 401 → enableAuthentication=true → retrievePageAuthentication
-      // resolves a customer-site token onto Authorization. The IMS token still
-      // rides x-ims-authorization independently.
+      // resolves a customer-site token. SITES-46967: page-auth rides
+      // x-page-auth (was Authorization); IMS service token rides Authorization
+      // (was x-ims-authorization).
       fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
       const aemCsSite = {
         ...mockSite,
@@ -1681,10 +1683,10 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       const [, calledOptions] = fetchStub.secondCall.args;
-      expect(calledOptions.headers.Authorization).to.equal('token customer-site-token');
-      expect(calledOptions.headers['x-ims-authorization']).to.equal(
+      expect(calledOptions.headers.Authorization).to.equal(
         'Bearer test-ims-service-token',
       );
+      expect(calledOptions.headers['x-page-auth']).to.equal('token customer-site-token');
     });
 
     it('returns 500 PREFLIGHT_INTERNAL_ERROR when IMS service-token mint fails', async () => {
@@ -1789,7 +1791,7 @@ describe('Preflight Controller', () => {
 
     // -- enableAuthentication=true path (HEAD returns 401) --
 
-    it('forwards Authorization header to Mysticat for auth-required URL with x-promise-token header', async () => {
+    it('forwards page-auth on x-page-auth to Mysticat for auth-required URL with x-promise-token header', async () => {
       // First fetch (HEAD): 401 → enableAuthentication=true.
       // Use CS_CW so resolvePromiseToken consults the x-promise-token header
       // (PROMISE_BASED_AUTHORING_TYPES = [CS, CS_CW, AMS]).
@@ -1838,8 +1840,11 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       const [, mystiOpts] = fetchStub.secondCall.args;
-      // CS_CW + promiseToken → isBearer false (DeliveryType !== AEM_CS) → 'token <t>'
-      expect(mystiOpts.headers.Authorization).to.equal('token page-access-token');
+      // CS_CW + promiseToken → isBearer false (DeliveryType !== AEM_CS) → 'token <t>'.
+      // SITES-46967: page-auth rides x-page-auth (Authorization now carries
+      // the IMS service token, validated at the CGW-Flex edge).
+      expect(mystiOpts.headers['x-page-auth']).to.equal('token page-access-token');
+      expect(mystiOpts.headers.Authorization).to.equal('Bearer test-ims-service-token');
       expect(mockRetrievePageAuth).to.have.been.calledOnce;
     });
 
@@ -2038,8 +2043,9 @@ describe('Preflight Controller', () => {
       expect(authOptsArg).to.deep.equal({});
     });
 
-    it('uses Bearer prefix for AEM_CS site with x-promise-token header', async () => {
+    it('uses Bearer prefix on x-page-auth for AEM_CS site with x-promise-token header', async () => {
       // Covers the `isBearer` branch where DeliveryType === AEM_CS && promiseTokenObj truthy.
+      // SITES-46967: page-auth header moved to x-page-auth; Bearer prefix logic unchanged.
       fetchStub.resetBehavior();
       fetchStub.onFirstCall().resolves({ ok: false, status: 401 });
       fetchStub.onSecondCall().resolves({ ok: true });
@@ -2083,7 +2089,8 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
       const [, mystiOpts] = fetchStub.secondCall.args;
-      expect(mystiOpts.headers.Authorization).to.equal('Bearer cs-token');
+      expect(mystiOpts.headers['x-page-auth']).to.equal('Bearer cs-token');
+      expect(mystiOpts.headers.Authorization).to.equal('Bearer test-ims-service-token');
     });
 
     it('falls back to profile.name and profile.email when first_name/last_name are absent', async () => {
@@ -2133,10 +2140,11 @@ describe('Preflight Controller', () => {
       // We proceeded past the HEAD failure (defaulting to auth-not-required)
       // and Mysticat accepted the call — so 202, not 500.
       expect(response.status).to.equal(202);
-      // The Mysticat call was made without an Authorization header (auth
-      // was skipped because the HEAD probe threw).
+      // The Mysticat call was made without an x-page-auth header (page-auth
+      // was skipped because the HEAD probe threw). Authorization is still
+      // set — SITES-46967 moved the IMS service token onto Authorization.
       const [, mystiOpts] = fetchStub.secondCall.args;
-      expect(mystiOpts.headers.Authorization).to.be.undefined;
+      expect(mystiOpts.headers['x-page-auth']).to.be.undefined;
     });
 
     it('returns 500 and rolls back the AsyncJob when Preflight.create throws', async () => {
@@ -2191,6 +2199,145 @@ describe('Preflight Controller', () => {
           tags: ['preflight'],
         },
       });
+    });
+
+    it('logs a compact summary with issue counts (all three counting modes)', async () => {
+      loggerStub.info.resetHistory();
+      const resultJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'suggest',
+            audits: [
+              // empty audit -> 0
+              { name: 'body-size', type: 'seo', opportunities: [] },
+              // single-issue-per-opportunity -> 2
+              {
+                name: 'metatags',
+                type: 'seo',
+                opportunities: [{ issue: 'Title too short' }, { issue: 'Description too short' }],
+              },
+              // issue-is-an-array (links) -> 3 + 1 = 4
+              {
+                name: 'links',
+                type: 'seo',
+                opportunities: [
+                  { check: 'broken-internal-links', issue: [{}, {}, {}] },
+                  { check: 'broken-external-links', issue: [{}] },
+                ],
+              },
+              // accessibility -> sum of occurrences = 5 + 40 = 45
+              {
+                name: 'accessibility',
+                type: 'a11y',
+                opportunities: [
+                  { type: 'aria-allowed-attr', occurrences: 5 },
+                  { type: 'color-contrast', occurrences: 40 },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(resultJob);
+
+      const context = { params: { jobId } };
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
+      expect(logged).to.deep.equal([
+        {
+          pageUrl: 'https://main--example-site.aem.page/test.html',
+          step: 'suggest',
+          audits: [
+            {
+              name: 'body-size', type: 'seo', opportunities: 0, issues: 0,
+            },
+            {
+              name: 'metatags', type: 'seo', opportunities: 2, issues: 2,
+            },
+            {
+              name: 'links', type: 'seo', opportunities: 2, issues: 4,
+            },
+            {
+              name: 'accessibility', type: 'a11y', opportunities: 2, issues: 45,
+            },
+          ],
+        },
+      ]);
+    });
+
+    it('handles malformed result entries (non-array audits / opportunities)', async () => {
+      loggerStub.info.resetHistory();
+      const resultJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          // audits is not an array -> falls back to []
+          { pageUrl: 'https://main--example-site.aem.page/a.html', step: 'identify', audits: undefined },
+          // audit present but opportunities is not an array -> opportunities count falls back to 0
+          {
+            pageUrl: 'https://main--example-site.aem.page/b.html',
+            step: 'identify',
+            audits: [{ name: 'metatags', type: 'seo', opportunities: undefined }],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(resultJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
+      expect(logged).to.deep.equal([
+        { pageUrl: 'https://main--example-site.aem.page/a.html', step: 'identify', audits: [] },
+        {
+          pageUrl: 'https://main--example-site.aem.page/b.html',
+          step: 'identify',
+          audits: [{
+            name: 'metatags', type: 'seo', opportunities: 0, issues: 0,
+          }],
+        },
+      ]);
+    });
+
+    it('does not log results while the job is still IN_PROGRESS', async () => {
+      loggerStub.info.resetHistory();
+      const inProgressJob = {
+        ...mockJob,
+        getStatus: () => 'IN_PROGRESS',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'identify',
+            audits: [{ name: 'Meta Tags', type: 'meta-tags', opportunities: [{}] }],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(inProgressJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`));
+      expect(infoCall, 'expected no [Preflight] jobId info log while IN_PROGRESS').to.be.undefined;
     });
 
     it('returns 400 Bad Request for invalid job ID', async () => {
@@ -2459,5 +2606,57 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
     });
+  });
+});
+
+describe('countIssuesForAudit', () => {
+  it('returns 0 for an audit with no opportunities', () => {
+    expect(countIssuesForAudit({ name: 'body-size', opportunities: [] })).to.equal(0);
+  });
+
+  it('returns 0 when opportunities is missing or not an array', () => {
+    expect(countIssuesForAudit({ name: 'h1-count' })).to.equal(0);
+    expect(countIssuesForAudit({ name: 'h1-count', opportunities: null })).to.equal(0);
+    expect(countIssuesForAudit(undefined)).to.equal(0);
+  });
+
+  it('counts one issue per opportunity with a scalar issue (metatags/headings)', () => {
+    const audit = {
+      name: 'metatags',
+      opportunities: [{ issue: 'Title too short' }, { issue: 'Description too short' }],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(2);
+  });
+
+  it('ignores opportunities without an issue in the default mode', () => {
+    const audit = {
+      name: 'headings',
+      opportunities: [{ issue: 'Empty Heading' }, { check: 'no-issue-field' }],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(1);
+  });
+
+  it('sums issue-array lengths for links audits', () => {
+    const audit = {
+      name: 'links',
+      opportunities: [
+        { check: 'broken-internal-links', issue: [{}, {}, {}] },
+        { check: 'broken-external-links', issue: [{}] },
+        { check: 'bad-links', issue: [{}] },
+      ],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(5);
+  });
+
+  it('sums occurrences for accessibility audits (not htmlWithIssues length)', () => {
+    const audit = {
+      name: 'accessibility',
+      opportunities: [
+        { type: 'aria-allowed-attr', occurrences: 5, htmlWithIssues: [{}, {}] },
+        { type: 'color-contrast', occurrences: 40 },
+        { type: 'missing-occurrences' },
+      ],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(45);
   });
 });

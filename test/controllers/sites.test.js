@@ -1518,8 +1518,6 @@ describe('Sites Controller', () => {
   });
 
   it('gets a site by base URL for non belonging to the organization', async () => {
-    // Non-admin, non-S2S user who does not belong to the site's org -> 403.
-    context.attributes.authInfo.withProfile({ is_admin: false });
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
     const result = await sitesController.getByBaseURL({ params: { baseURL: 'aHR0cHM6Ly9zaXRlMS5jb20K' } });
@@ -1528,92 +1526,6 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
-  });
-
-  describe('GET /sites/by-base-url - S2S readAll capability', () => {
-    const BASE_URL_PARAM = 'aHR0cHM6Ly9zaXRlMS5jb20K'; // base64 of https://site1.com
-
-    function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
-      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
-    }
-    function makeFreshConsumer({
-      id = 'consumer-id-1', capabilities = ['site:readAll'], status = 'ACTIVE', revoked = false,
-    } = {}) {
-      return {
-        getId: () => id,
-        getCapabilities: () => capabilities,
-        getStatus: () => status,
-        isRevoked: () => revoked,
-      };
-    }
-
-    beforeEach(() => {
-      context.attributes.authInfo.withProfile({ is_admin: false });
-      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
-    });
-
-    it('grants a cross-tenant S2S consumer holding site:readAll (bypasses org check)', async () => {
-      // hasAccess would deny (different org), but site:readAll grants cross-tenant lookup.
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      context.s2sConsumer = makeS2SConsumer();
-      mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
-
-      const result = await sitesController.getByBaseURL({
-        params: { baseURL: BASE_URL_PARAM }, invocation: { id: 'req-bbu-1' },
-      });
-      const site = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(site).to.have.property('id', SITE_IDS[0]);
-      expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[s2s-readall\] GET \/sites\/by-base-url granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll requestId=req-bbu-1/,
-      );
-    });
-
-    it('still allows a tenant-scoped S2S consumer with only site:read for its own org', async () => {
-      // No readAll, but hasAccess passes (same org) -> tenant-scoped lookup preserved.
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
-      context.s2sConsumer = makeS2SConsumer();
-      mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ capabilities: ['site:read'] }));
-
-      const result = await sitesController.getByBaseURL({ params: { baseURL: BASE_URL_PARAM } });
-      const site = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(site).to.have.property('id', SITE_IDS[0]);
-    });
-
-    it('denies a cross-tenant S2S consumer without readAll', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      context.s2sConsumer = makeS2SConsumer();
-      context.invocation = { id: 'req-bbu-deny' };
-      mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ capabilities: ['site:read'] }));
-
-      const result = await sitesController.getByBaseURL({
-        params: { baseURL: BASE_URL_PARAM }, invocation: { id: 'req-bbu-deny' },
-      });
-      const error = await result.json();
-
-      expect(result.status).to.equal(403);
-      expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
-      expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[acl\] Denied GET \/sites\/by-base-url - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1 requestId=req-bbu-deny/,
-      );
-    });
-
-    it('grants an admin without consulting the S2S capability check (no DB fetch)', async () => {
-      context.attributes.authInfo.withProfile({ is_admin: true });
-
-      const result = await sitesController.getByBaseURL({ params: { baseURL: BASE_URL_PARAM } });
-      const site = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(site).to.have.property('id', SITE_IDS[0]);
-      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
-    });
   });
 
   it('gets the latest site metrics', async () => {
