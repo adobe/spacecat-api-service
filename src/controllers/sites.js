@@ -57,6 +57,7 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -345,7 +346,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, Organization, Site,
+    Audit, Organization, PlgOnboarding, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -1631,6 +1632,21 @@ function SitesController(ctx, log, env) {
       { 'x-error': message },
     );
 
+    const isOrgWaitingForIpAllowlisting = async (org) => {
+      const imsOrgId = org.getImsOrgId();
+      if (!hasText(imsOrgId) || !PlgOnboarding) {
+        return false;
+      }
+      try {
+        const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
+        const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
+        return records?.some((r) => r.getStatus() === waitingStatus) ?? false;
+      } catch (e) {
+        log.warn('[resolveSite] PlgOnboarding lookup failed, treating as not waiting', e);
+        return false;
+      }
+    };
+
     // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
     // independent of which org's data is being requested via organizationId/imsOrg.
     // We translate it to a Spacecat UUID once, up front, so the per-path remap can
@@ -1666,6 +1682,9 @@ function SitesController(ctx, log, env) {
 
       if (!entitlement) {
         if (callerIsInternal) {
+          if (await isOrgWaitingForIpAllowlisting(org)) {
+            return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+          }
           return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
         }
         return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
@@ -1716,6 +1735,10 @@ function SitesController(ctx, log, env) {
               // Customer callers are completely unaffected by this block.
               if (!entitlement) {
                 if (callerIsInternal) {
+                  if (await isOrgWaitingForIpAllowlisting(organization)) {
+                    log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for siteId=${siteId}`);
+                    return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+                  }
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
                   return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
                 }

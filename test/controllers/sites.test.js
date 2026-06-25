@@ -217,6 +217,9 @@ describe('Sites Controller', () => {
         findById: sandbox.stub().resolves(null),
         findByImsOrgId: sandbox.stub().resolves(null),
       },
+      PlgOnboarding: {
+        allByImsOrgId: sandbox.stub().resolves([]),
+      },
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
         allBySiteId: sandbox.stub().resolves([]),
@@ -6970,6 +6973,49 @@ describe('Sites Controller', () => {
         expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
+      it('internal caller, no entitlement + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product (PLG wizard preserved)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
+      });
+
+      it('internal caller, no entitlement + other PlgOnboarding records (not WAITING) → 404 site_not_enrolled (remap preserved)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'ONBOARDED' },
+          { getStatus: () => 'INACTIVE' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
       it('internal caller, visible tier but no enrollment → 404 site_not_enrolled (unchanged)', async () => {
         context.data = {
           siteId: SITE_IDS[0],
@@ -7150,6 +7196,26 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, organizationId path: no entitlement + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product', async () => {
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
       });
 
       it('internal caller, imsOrg path (no siteId): no entitlement → 404 site_not_enrolled', async () => {
