@@ -100,6 +100,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} stateAccessMappingsController - State-layer access mappings + caps.
  * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
@@ -162,6 +163,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  stateAccessMappingsController,
   agenticCategoriesController,
   agenticPageTypesController,
   serenityController,
@@ -412,6 +414,23 @@ export default function getRouteHandlers(
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
+
+    // Hybrid permission model — state-layer management + capability
+    // introspection endpoints. Self-gated at the controller level
+    // (`<product>/can_manage_users` for CRUD, `<product>/can_view` for
+    // capability introspection). Until `facsWrapper` is attached in
+    // api-service, the controller additionally restricts these endpoints to
+    // the dev environment (AWS_ENV === 'dev'); they 404 elsewhere. See:
+    //   - platform/decisions/mac-state-layer.md §"State Layer Management Endpoints"
+    //   - platform/decisions/rebac-hybrid-permission-model.md
+    'GET /state/access-mappings': stateAccessMappingsController.listMappings,
+    'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
+    'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
+    'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
+    'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
+
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'DELETE /tools/import/jobs/:jobId': importController.deleteImportJob,
