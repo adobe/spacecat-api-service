@@ -377,9 +377,9 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     it('should generate unique folder names for subpath sites on the same domain', () => {
-      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal('nba-com--kings');
-      expect(generateDataFolder('https://nba.com/lakers', 'prod')).to.equal('nba-com--lakers');
-      expect(generateDataFolder('https://nba.com/kings', 'dev')).to.equal('dev/nba-com--kings');
+      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal('nba-comzskings');
+      expect(generateDataFolder('https://nba.com/lakers', 'prod')).to.equal('nba-comzslakers');
+      expect(generateDataFolder('https://nba.com/kings', 'dev')).to.equal('dev/nba-comzskings');
     });
 
     it('should produce the same folder name for root domain with or without trailing slash', () => {
@@ -393,22 +393,71 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     it('should generate correct folder name for nested subpaths', () => {
-      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-com--us--kings');
-      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-com--us--kings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-comzsuszskings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-comzsuszskings');
     });
 
-    it('should generate distinct folder names for paths that differ only by separator type', () => {
+    it('should keep the path boundary distinguishable from a sanitized dash (LLMO-5859)', () => {
+      // The `zs` boundary marker is distinct from the `-` that punctuation
+      // sanitizes to, so a real path split is not confused with an in-segment dash:
+      // `/us/kings` (two segments) differs from `/us-kings` (one segment).
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-comzsuszskings');
+      expect(generateDataFolder('https://nba.com/us-kings', 'prod')).to.equal('nba-comzsus-kings');
       expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
         .to.not.equal(generateDataFolder('https://nba.com/us-kings', 'prod'));
-      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
-        .to.not.equal(generateDataFolder('https://nba.com/us..kings', 'prod'));
-      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
-        .to.not.equal(generateDataFolder('https://nba.com/us--kings', 'prod'));
     });
 
-    it('should not collide hostname with consecutive non-alnum chars and a subpath', () => {
+    it('should still collapse separator variants within a single segment (lossy sanitize)', () => {
+      // Sanitization remains lossy inside one segment, so punctuation-only variants
+      // of the same segment collapse -- an inherent limit unchanged from before.
+      const expected = 'nba-comzsus-kings';
+      expect(generateDataFolder('https://nba.com/us-kings', 'prod')).to.equal(expected);
+      expect(generateDataFolder('https://nba.com/us..kings', 'prod')).to.equal(expected);
+      expect(generateDataFolder('https://nba.com/us--kings', 'prod')).to.equal(expected);
+    });
+
+    it('should still separate same-host sites with genuinely different paths', () => {
+      // The real LLMO-4186 case: different path content -> different folders.
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/lakers', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/eu/kings', 'prod'));
+    });
+
+    it('should distinguish a hostname with consecutive non-alnum chars from a host/subpath split', () => {
+      // `nba--com` (host; `--` collapses to `-`) -> `nba-com`, whereas `nba` + `/com`
+      // -> `nbazscom`. The `zs` boundary keeps these distinct (single-dash could not).
+      expect(generateDataFolder('https://nba--com/', 'prod')).to.equal('nba-com');
+      expect(generateDataFolder('https://nba/com', 'prod')).to.equal('nbazscom');
       expect(generateDataFolder('https://nba--com/', 'prod'))
         .to.not.equal(generateDataFolder('https://nba/com', 'prod'));
+    });
+
+    it('should self-escape the marker letter `z` in hosts and segments (LLMO-5859)', () => {
+      // A literal `z` is doubled so it can never be read as a boundary token.
+      expect(generateDataFolder('https://amazon.com', 'prod')).to.equal('amazzon-com');
+      expect(generateDataFolder('https://nba.com/zone', 'prod')).to.equal('nba-comzszzone');
+      // A segment that literally spells the boundary token stays unambiguous.
+      expect(generateDataFolder('https://nba.com/zs', 'prod')).to.equal('nba-comzszzs');
+      expect(generateDataFolder('https://nba.com/zs', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/z/s', 'prod'));
+    });
+
+    it('should never emit the Helix-reserved `--` in a folder name (LLMO-5859)', () => {
+      // Helix 400s any resource path containing `--`, so the derivation must never
+      // produce it -- including for hosts or paths that themselves contain `--`.
+      const urls = [
+        'https://nba.com',
+        'https://nba.com/kings',
+        'https://nba.com/us/kings',
+        'https://nba--com/double/dash/host',
+        'https://nba.com/us--kings',
+        'https://nba.com/a/b/c/d',
+      ];
+      urls.forEach((url) => {
+        expect(generateDataFolder(url, 'prod')).to.not.include('--');
+        expect(generateDataFolder(url, 'dev')).to.not.include('--');
+      });
     });
 
     it('should handle malformed percent-encoded path segments without throwing', () => {
@@ -419,7 +468,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
         .to.equal(generateDataFolder('https://nba.com/könig', 'prod'));
       expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
-        .to.match(/^nba-com--/);
+        .to.match(/^nba-comzs/);
     });
 
     it('should case-fold path segments so /Kings and /kings resolve to the same folder', () => {
@@ -434,9 +483,9 @@ describe('LLMO Onboarding Functions', () => {
 
     it('should ignore query strings and URL fragments', () => {
       expect(generateDataFolder('https://nba.com/kings?utm=foo', 'prod'))
-        .to.equal('nba-com--kings');
+        .to.equal('nba-comzskings');
       expect(generateDataFolder('https://nba.com/kings#section', 'prod'))
-        .to.equal('nba-com--kings');
+        .to.equal('nba-comzskings');
     });
 
     it('should drop degenerate path segments that sanitize to empty', () => {
