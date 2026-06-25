@@ -54,10 +54,14 @@ try {
 
 const STATUS_CONFLICT = 409;
 
-// Ticket creation modes per spec. 'grouped' is v2-only — return 400 in v1.
+// Ticket creation modes.
+// 'individual': one ticket per suggestion (N→N). N>1 returns 207 Multi-Status.
+// 'grouped': all suggestions into a single ticket (M→1). Returns 201.
 const TICKET_MODE_INDIVIDUAL = 'individual';
 const TICKET_MODE_GROUPED = 'grouped';
-const SUGGESTION_IDS_MAX = 10;
+// individual: one ticket per suggestion (N→N), grouped: all suggestions into one ticket (M→1)
+const SUGGESTION_IDS_MAX_INDIVIDUAL = 10;
+const SUGGESTION_IDS_MAX_GROUPED = 400;
 const ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024; // 3 MB per spec §30
 
 // Secret path mirrors TicketClientFactory.buildSecretPath — both IDs UUID-validated
@@ -543,33 +547,38 @@ function TaskManagementController(context) {
       return createResponse({ message: 'projectKey is required' }, STATUS_BAD_REQUEST);
     }
 
-    // mode — 'grouped' is v2-only; return 400 in v1 so clients are explicitly informed.
-    const mode = data.mode ?? TICKET_MODE_INDIVIDUAL;
-    if (mode === TICKET_MODE_GROUPED) {
-      return createResponse(
-        { message: "mode 'grouped' is not supported in v1. Use 'individual' (default)." },
-        STATUS_BAD_REQUEST,
-      );
-    }
-    if (mode !== TICKET_MODE_INDIVIDUAL) {
-      return createResponse(
-        { message: `Invalid mode '${mode}'. Supported values: 'individual'.` },
-        STATUS_BAD_REQUEST,
-      );
-    }
-
     // suggestionIds — accept both array (spec) and singular form (compat).
     const suggestionIdsRaw = data.suggestionIds ?? (data.suggestionId ? [data.suggestionId] : []);
     const suggestionIds = Array.isArray(suggestionIdsRaw) ? suggestionIdsRaw : [];
 
-    if (suggestionIds.length > SUGGESTION_IDS_MAX) {
+    const primarySuggestionId = suggestionIds[0];
+
+    // mode — 'individual' (default, one ticket per suggestion) or 'grouped' (all suggestions
+    // into one ticket). grouped requires at least one suggestionId.
+    const mode = data.mode ?? TICKET_MODE_INDIVIDUAL;
+    if (mode !== TICKET_MODE_INDIVIDUAL && mode !== TICKET_MODE_GROUPED) {
       return createResponse(
-        { message: `suggestionIds must contain at most ${SUGGESTION_IDS_MAX} items` },
+        { message: `Invalid mode '${mode}'. Supported values: 'individual', 'grouped'.` },
+        STATUS_BAD_REQUEST,
+      );
+    }
+    if (mode === TICKET_MODE_GROUPED && suggestionIds.length === 0) {
+      return createResponse(
+        { message: "mode 'grouped' requires at least one suggestionId" },
         STATUS_BAD_REQUEST,
       );
     }
 
-    const primarySuggestionId = suggestionIds[0];
+    // Cap per mode: individual ≤10 (N tickets), grouped ≤400 (1 ticket).
+    const suggestionIdsMax = mode === TICKET_MODE_GROUPED
+      ? SUGGESTION_IDS_MAX_GROUPED
+      : SUGGESTION_IDS_MAX_INDIVIDUAL;
+    if (suggestionIds.length > suggestionIdsMax) {
+      return createResponse(
+        { message: `suggestionIds must contain at most ${suggestionIdsMax} items for mode '${mode}'` },
+        STATUS_BAD_REQUEST,
+      );
+    }
 
     // --- Optional attachment validation (spec §30) ----------------------------
     // attachment: { content: base64 string, mimeType: string, filename: string }
@@ -602,6 +611,15 @@ function TaskManagementController(context) {
         );
       }
       attachmentBuffer = decoded;
+    }
+
+    // Attachment in individual batch mode (N>1 suggestions) is not supported — each ticket
+    // would need its own attachment. Upload per-ticket via the attachment endpoint instead.
+    if (attachmentBuffer && mode === TICKET_MODE_INDIVIDUAL && suggestionIds.length > 1) {
+      return createResponse(
+        { message: 'Attachments are not supported when creating multiple tickets (individual batch mode). Upload attachments per-ticket via the attachment endpoint.' },
+        STATUS_BAD_REQUEST,
+      );
     }
 
     // --- Idempotency-Key enforcement (spec §Idempotent Ticket Creation) --------
@@ -676,9 +694,26 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    // --- Validate suggestion exists (spec §7 step 2) --------------------------
+    // --- Validate suggestion(s) exist (spec §7 step 2) -------------------------
+    // grouped: validate ALL suggestions upfront — fail fast if any is missing.
+    // individual: validate only primarySuggestionId pre-flight; batch loop validates
+    //   remaining suggestions as it goes (best-effort per item).
 
-    if (primarySuggestionId) {
+    if (mode === TICKET_MODE_GROUPED) {
+      for (const suggId of suggestionIds) {
+        let sugg;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          sugg = await Suggestion.findById(suggId);
+        } catch (err) {
+          log.error({ suggId, err }, 'Failed to look up suggestion');
+          return createResponse({ message: 'Failed to validate suggestion' }, STATUS_INTERNAL_SERVER_ERROR);
+        }
+        if (!sugg) {
+          return createResponse({ message: `Suggestion ${suggId} not found` }, STATUS_NOT_FOUND);
+        }
+      }
+    } else if (primarySuggestionId) {
       let suggestion;
       try {
         suggestion = await Suggestion.findById(primarySuggestionId);
@@ -745,6 +780,243 @@ function TaskManagementController(context) {
       metadata: connection.getMetadata(),
     };
     const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
+
+    // ─── Individual batch path: N suggestionIds → N Jira tickets ─────────────
+    if (mode === TICKET_MODE_INDIVIDUAL && suggestionIds.length > 1) {
+      const results = [];
+
+      for (const suggId of suggestionIds) {
+        // Validate suggestion (best-effort per item; first was already validated pre-flight)
+        let batchSuggestionOk = true;
+        if (suggId !== primarySuggestionId) {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const sugg = await Suggestion.findById(suggId);
+            if (!sugg) {
+              results.push({ suggestionId: suggId, status: STATUS_NOT_FOUND, error: `Suggestion ${suggId} not found` });
+              batchSuggestionOk = false;
+            }
+          } catch (err) {
+            log.error({ suggId, err }, 'Failed to look up suggestion in batch');
+            results.push({ suggestionId: suggId, status: STATUS_INTERNAL_SERVER_ERROR, error: 'Failed to validate suggestion' });
+            batchSuggestionOk = false;
+          }
+        }
+
+        if (batchSuggestionOk) {
+          // Create Jira ticket for this suggestion
+          let batchTicketResult;
+          let batchTicketErr;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            batchTicketResult = await ticketClient.createTicket({
+              projectKey: data.projectKey,
+              summary: data.summary,
+              description: data.description ?? '',
+              labels: data.labels ?? [],
+              issueType: data.issueType ?? 'Task',
+            });
+          } catch (err) {
+            batchTicketErr = err;
+          }
+
+          if (batchTicketErr) {
+            const isReauthNeeded = batchTicketErr.status === 401
+              || batchTicketErr.message?.includes('requires re-authorization');
+            if (isReauthNeeded) {
+              // eslint-disable-next-line no-await-in-loop
+              await connection.markRequiresReauth().catch((updateErr) => {
+                log.warn({ updateErr }, 'Failed to mark connection as requires_reauth in batch');
+              });
+              results.push({ suggestionId: suggId, status: STATUS_CONFLICT, error: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' });
+            } else {
+              log.error({ suggId, err: batchTicketErr }, 'Failed to create ticket in batch');
+              results.push({ suggestionId: suggId, status: STATUS_INTERNAL_SERVER_ERROR, error: 'Failed to create ticket' });
+            }
+          } else {
+            // Persist Ticket entity
+            let batchTicket;
+            let persistErr;
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              batchTicket = await Ticket.create({
+                organizationId,
+                taskManagementConnectionId: connection.getId(),
+                ticketProvider: provider,
+                createdBy,
+                opportunityId: data.opportunityId,
+                ticketId: batchTicketResult.ticketId,
+                ticketKey: batchTicketResult.ticketKey,
+                ticketUrl: batchTicketResult.ticketUrl,
+                ticketStatus: batchTicketResult.ticketStatus,
+              });
+            } catch (err) {
+              persistErr = err;
+            }
+
+            if (persistErr) {
+              log.error({ suggId, ticketKey: batchTicketResult.ticketKey, err: persistErr }, 'Ticket created in Jira but persistence failed in batch');
+              results.push({ suggestionId: suggId, status: STATUS_INTERNAL_SERVER_ERROR, error: 'Ticket created but could not be saved' });
+            } else {
+              log.info('Ticket created successfully (batch)', {
+                eventType: 'ticket.created',
+                orgId: organizationId,
+                connectionId: connection.getId(),
+                provider,
+                ticketKey: batchTicketResult.ticketKey,
+                suggestionId: suggId,
+                opportunityId: data.opportunityId,
+                imsActor: createdBy,
+                projectKey: data.projectKey,
+                issueType: data.issueType ?? 'Task',
+              });
+
+              // Create TicketSuggestion bridge
+              try {
+                // eslint-disable-next-line no-await-in-loop
+                await TicketSuggestion.create({
+                  ticketId: batchTicket.getId(),
+                  suggestionId: suggId,
+                  opportunityId: data.opportunityId,
+                  createdBy,
+                });
+                results.push({
+                  suggestionId: suggId,
+                  status: STATUS_CREATED,
+                  ticket: serializeTicket(batchTicket),
+                });
+              } catch (err) {
+                const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
+                if (isDuplicate) {
+                  results.push({ suggestionId: suggId, status: STATUS_CONFLICT, error: `Suggestion ${suggId} has already been ticketed` });
+                } else {
+                  log.error({ ticketId: batchTicket.getId(), suggId, err }, 'Failed to create TicketSuggestion bridge record in batch');
+                  results.push({ suggestionId: suggId, status: STATUS_INTERNAL_SERVER_ERROR, error: 'Ticket created but suggestion link could not be saved' });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const batchResponseBody = { results };
+      await markIdempotencyDone(207, batchResponseBody);
+      return createResponse(batchResponseBody, 207);
+    }
+
+    // ─── Grouped path: M suggestionIds → 1 Jira ticket ───────────────────────
+    if (mode === TICKET_MODE_GROUPED) {
+      let groupedTicketResult;
+      try {
+        groupedTicketResult = await ticketClient.createTicket({
+          projectKey: data.projectKey,
+          summary: data.summary,
+          description: data.description ?? '',
+          labels: data.labels ?? [],
+          issueType: data.issueType ?? 'Task',
+        });
+      } catch (err) {
+        const isReauthNeeded = err.status === 401 || err.message?.includes('requires re-authorization');
+        if (isReauthNeeded) {
+          await connection.markRequiresReauth().catch((updateErr) => {
+            log.warn({ updateErr }, 'Failed to mark connection as requires_reauth');
+          });
+          const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
+          await markIdempotencyFailed(STATUS_CONFLICT, body);
+          return createResponse(body, STATUS_CONFLICT);
+        }
+        log.error({ organizationId, provider, err }, 'Failed to create grouped ticket');
+        const body = { message: 'Failed to create ticket' };
+        await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+        return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
+      }
+
+      let groupedTicket;
+      try {
+        groupedTicket = await Ticket.create({
+          organizationId,
+          taskManagementConnectionId: connection.getId(),
+          ticketProvider: provider,
+          createdBy,
+          opportunityId: data.opportunityId,
+          ticketId: groupedTicketResult.ticketId,
+          ticketKey: groupedTicketResult.ticketKey,
+          ticketUrl: groupedTicketResult.ticketUrl,
+          ticketStatus: groupedTicketResult.ticketStatus,
+        });
+      } catch (err) {
+        log.error(
+          {
+            organizationId, provider, ticketKey: groupedTicketResult.ticketKey, err,
+          },
+          'Grouped ticket created in Jira but persistence failed',
+        );
+        const body = { message: 'Ticket created but could not be saved' };
+        await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+        return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
+      }
+
+      log.info('Grouped ticket created successfully', {
+        eventType: 'ticket.created',
+        orgId: organizationId,
+        connectionId: connection.getId(),
+        provider,
+        ticketKey: groupedTicketResult.ticketKey,
+        suggestionIds,
+        opportunityId: data.opportunityId,
+        imsActor: createdBy,
+        projectKey: data.projectKey,
+        issueType: data.issueType ?? 'Task',
+      });
+
+      // Link all suggestions to the single ticket — non-fatal on individual bridge failure.
+      const linkWarnings = [];
+      for (const suggId of suggestionIds) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await TicketSuggestion.create({
+            ticketId: groupedTicket.getId(),
+            suggestionId: suggId,
+            opportunityId: data.opportunityId,
+            createdBy,
+          });
+        } catch (err) {
+          const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
+          if (isDuplicate) {
+            linkWarnings.push(`Suggestion ${suggId} has already been linked to another ticket`);
+          } else {
+            log.error({ ticketId: groupedTicket.getId(), suggId, err }, 'Failed to create TicketSuggestion bridge record in grouped mode');
+            linkWarnings.push(`Failed to link suggestion ${suggId} to ticket`);
+          }
+        }
+      }
+
+      // Upload attachment if provided — one attachment on the single grouped ticket.
+      let groupedAttachmentWarning;
+      if (attachmentBuffer) {
+        try {
+          await ticketClient.uploadAttachment(groupedTicketResult.ticketKey, {
+            content: attachmentBuffer,
+            mimeType: data.attachment.mimeType,
+            filename: data.attachment.filename,
+          });
+        } catch (err) {
+          log.warn({ ticketKey: groupedTicketResult.ticketKey, err }, 'Grouped ticket created but attachment upload failed');
+          groupedAttachmentWarning = 'Ticket created but attachment upload failed. Retry via the attachment endpoint.';
+        }
+      }
+
+      const groupedResponseBody = {
+        ...serializeTicket(groupedTicket),
+        suggestionIds,
+        ...(linkWarnings.length > 0 ? { linkWarnings } : {}),
+        ...(groupedAttachmentWarning ? { attachmentWarning: groupedAttachmentWarning } : {}),
+      };
+      await markIdempotencyDone(STATUS_CREATED, groupedResponseBody);
+      return createResponse(groupedResponseBody, STATUS_CREATED);
+    }
+
+    // ─── Single ticket path (individual, ≤1 suggestion) ──────────────────────
 
     let ticketResult;
     try {

@@ -688,23 +688,66 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(400);
     });
 
-    it('returns 400 for grouped mode', async () => {
+    it('returns 400 for grouped mode with no suggestionIds', async () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'P', mode: 'grouped' } }));
       expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('requires at least one suggestionId');
     });
 
-    it('returns 400 for unknown mode', async () => {
+    it('returns 400 for unknown mode (message lists supported modes)', async () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'P', mode: 'batch' } }));
       expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('individual');
+      expect(body.message).to.include('grouped');
     });
 
-    it('returns 400 when suggestionIds exceeds max', async () => {
+    it('returns 400 when attachment provided in individual batch mode (N>1 suggestions)', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const content = Buffer.from('hello').toString('base64');
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix',
+          projectKey: 'P',
+          suggestionIds: [SUGGESTION_ID, sid2],
+          attachment: { content, mimeType: 'text/plain', filename: 'note.txt' },
+        },
+      }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('individual batch mode');
+    });
+
+    it('returns 400 when suggestionIds exceeds max for individual mode (>10)', async () => {
       const { createTicket } = TaskManagementController(makeContext());
       const suggestionIds = Array.from({ length: 11 }, (_, i) => `id-${i}`);
-      const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'P', suggestionIds } }));
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix', projectKey: 'P', mode: 'individual', suggestionIds,
+        },
+      }));
       expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('at most 10');
+      expect(body.message).to.include("'individual'");
+    });
+
+    it('returns 400 when suggestionIds exceeds max for grouped mode (>400)', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const suggestionIds = Array.from({ length: 401 }, (_, i) => `aaaaaaaa-bbbb-cccc-dddd-${String(i).padStart(12, '0')}`);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix', projectKey: 'P', mode: 'grouped', suggestionIds,
+        },
+      }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('at most 400');
+      expect(body.message).to.include("'grouped'");
     });
 
     it('returns 404 when no active connection found', async () => {
