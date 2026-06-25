@@ -1,3 +1,10 @@
+# [1.597.0](https://github.com/adobe/spacecat-api-service/compare/v1.596.0...v1.597.0) (2026-06-25)
+
+
+### Features
+
+* **state-mappings:** add state-layer access-mapping endpoints (dev-gated) ([#2676](https://github.com/adobe/spacecat-api-service/issues/2676)) ([98ae0fb](https://github.com/adobe/spacecat-api-service/commit/98ae0fb2ec2f95f77a1c890c2cd9d1c3b84f6f87))
+
 # [1.596.0](https://github.com/adobe/spacecat-api-service/compare/v1.595.0...v1.596.0) (2026-06-25)
 
 
