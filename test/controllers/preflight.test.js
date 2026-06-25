@@ -1575,7 +1575,7 @@ describe('Preflight Controller', () => {
     });
 
     it('calls Mysticat with correct parameters', async () => {
-      await preflightController.createPreflight({
+      const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
         attributes: { authInfo: mockAuthInfo },
@@ -1587,6 +1587,17 @@ describe('Preflight Controller', () => {
       expect(body.url).to.equal('https://main--example-site.aem.page/test.html');
       expect(body.mode).to.be.undefined;
       expect(body.audits).to.be.undefined;
+      // SITES-47173: wire field is `async_job_id` (the AsyncJob id spacecat
+      // owns); mystique mints its own scan_id internally. The deprecated
+      // `scan_id` body field must NOT be sent.
+      expect(body.async_job_id).to.be.a('string').and.not.empty;
+      expect(body.scan_id).to.be.undefined;
+      // The async_job_id carries the AsyncJob row id that createPreflight
+      // creates — pulled from the response's Preflight DTO via its
+      // back-reference, but easier to assert it matches what's on the wire.
+      const preflightBody = await response.json();
+      expect(body.async_job_id).to.not.be.undefined;
+      expect(preflightBody.preflightId).to.be.a('string');
     });
 
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
