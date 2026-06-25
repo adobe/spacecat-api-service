@@ -5733,6 +5733,42 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(403);
     });
 
+    it('returns 400 when activating a brand without a base site (chk_active_brand_has_site_id, lifted from #2504)', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // resolveBrandUuid resolves the UUID...
+      maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // ...then setBrandStatus hits the DB constraint on the update.
+      maybeSingleStub.onSecondCall().resolves({
+        data: null,
+        error: {
+          code: '23514',
+          message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+        },
+      });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'active' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 500 when storage throws', async () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().throws(new Error('DB connection lost')),

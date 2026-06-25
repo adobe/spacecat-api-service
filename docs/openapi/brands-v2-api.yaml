@@ -220,8 +220,9 @@ v2-brand-status-for-org:
     description: |
       Explicitly transitions a brand's lifecycle status (approve -> `active`,
       move-to-pending -> `pending`). This is the sanctioned path for an
-      active -> pending demotion; the generic
-      `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}` refuses that transition (LLMO-5587).
+      active -> pending demotion. Once the companion demotion guard ships
+      (LLMO-5587 PR3), the generic
+      `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}` will refuse that transition.
     operationId: transitionBrandStatusForOrgV2
     security:
       - ims_key: []
