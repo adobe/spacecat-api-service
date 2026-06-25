@@ -7679,6 +7679,39 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
     });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
+        ...getCommonMocks(),
+      });
+      const result = await LlmoControllerNoAdmin(mockContext)
+        .getEdgeOptimizeBootstrapUrl(bootstrapContext);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 400 when the trusted principal is not configured', async () => {
+      const result = await controller.getEdgeOptimizeBootstrapUrl({
+        ...bootstrapContext,
+        env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage' },
+      });
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('missing trusted principal');
+    });
+
+    it('returns 400 when presigning the template fails', async () => {
+      getSignedUrlStub.rejects(new Error('presign boom'));
+
+      const result = await controller.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('presign boom');
+    });
   });
 
   describe('connectEdgeOptimize', () => {
@@ -8270,6 +8303,18 @@ describe('LlmoController', () => {
       expect(createEdgeOptimizeOriginStub.called).to.equal(false);
     });
 
+    it("returns 400 when environment is neither 'production' nor 'stage'", async () => {
+      const result = await controller.createEdgeOptimizeOrigin({
+        ...originContext,
+        data: { ...originContext.data, environment: 'staging' },
+      });
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include("'production' or 'stage'");
+      expect(createEdgeOptimizeOriginStub.called).to.equal(false);
+    });
+
     it('is idempotent when the origin already exists', async () => {
       createEdgeOptimizeOriginStub = sinon.stub().resolves({
         created: false, alreadyExisted: true, updated: false, originId: 'EdgeOptimize_Origin',
@@ -8571,6 +8616,16 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('returns 400 when the distribution id is missing', async () => {
+      const result = await controller.createEdgeOptimizeLambda({
+        ...lambdaContext,
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('distributionId is required');
+    });
+
     it('returns 400 when the AWS call fails', async () => {
       createEdgeOptimizeLambdaStub = sinon.stub().rejects(new Error('CreateRole failed'));
       const result = await controller.createEdgeOptimizeLambda(lambdaContext);
@@ -8651,6 +8706,16 @@ describe('LlmoController', () => {
     it('returns 400 when the external id is missing', async () => {
       const result = await controller.getEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
+    });
+
+    it('returns 400 when the distribution id is missing', async () => {
+      const result = await controller.getEdgeOptimizeLambdaStatus({
+        ...statusContext,
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('distributionId is required');
     });
 
     it('returns 400 when the AWS call fails', async () => {
@@ -9424,6 +9489,24 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('not configured');
+    });
+
+    it('returns 400 when the trusted principal is not configured', async () => {
+      const result = await controller.getEdgeOptimizePermissions({
+        ...permissionsContext,
+        env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template' },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('missing trusted principal');
+    });
+
+    it('returns 400 when an unexpected error is thrown', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('db down'));
+      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('db down');
     });
 
     it('returns 400 when the manifest read fails', async () => {
