@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, notFound, forbidden, internalServerError,
+  ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
@@ -22,7 +22,32 @@ const CF_TOKEN_HEADER = 'x-cloudflare-token';
 const CF_TOKEN_MISSING = 'Missing x-cloudflare-token header';
 const EDGE_OPTIMIZE_API_KEY_SECRET = 'EDGE_OPTIMIZE_API_KEY';
 const EDGE_OPTIMIZE_TARGET_HOST_BINDING = 'EDGE_OPTIMIZE_TARGET_HOST';
-const WORKER_SCRIPT_URL = 'https://raw.githubusercontent.com/adobe/llmo-code-samples/main/optimize-at-edge/cloudflare/automation/src/worker.js';
+
+// Pin the worker script to an immutable commit SHA rather than a mutable branch HEAD so a
+// push to llmo-code-samples can never silently change what is deployed to customer accounts.
+// Overridable via env for forward-compat, but the default is always a pinned SHA.
+const WORKER_SCRIPT_REF = 'd28ba321916a2bb2b62e65d265df9c76e24d0786';
+const DEFAULT_WORKER_SCRIPT_URL = `https://raw.githubusercontent.com/adobe/llmo-code-samples/${WORKER_SCRIPT_REF}/optimize-at-edge/cloudflare/automation/src/worker.js`;
+const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
+
+// Boundary input validation (defense-in-depth, independent of CloudflareClient behaviour).
+const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
+const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+const WORKER_NAME_PREFIX = 'edge-optimize-router';
+const CF_MAX_SCRIPT_NAME_LEN = 63; // Cloudflare worker script name max length
+
+/**
+ * Derives the Edge Optimize worker name from a site's base URL: the canonical host (leading
+ * "www." removed) with every run of non-alphanumeric characters collapsed to a single hyphen,
+ * prefixed and length-capped, e.g. https://www.example.com -> edge-optimize-router-example-com.
+ * Cloudflare worker names must match ^[a-z0-9][a-z0-9-]{0,62}$ (no dots), which this guarantees.
+ */
+const deriveWorkerName = (baseURL) => {
+  const host = new URL(baseURL).hostname.replace(/^www\./i, '');
+  const slug = host.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `${WORKER_NAME_PREFIX}-${slug}`.slice(0, CF_MAX_SCRIPT_NAME_LEN).replace(/-+$/g, '');
+};
 
 function LlmoCloudflareController(ctx) {
   const { log, env } = ctx;
@@ -54,6 +79,27 @@ function LlmoCloudflareController(ctx) {
     return hasText(token) ? token : null;
   };
 
+  /**
+   * Maps an error thrown by CloudflareClient (or the worker-script fetch) to an appropriate
+   * HTTP response. These are external network calls, so failures are routine: we log the cause
+   * and surface a sanitized, status-appropriate response instead of an unstructured 500.
+   */
+  const cfErrorResponse = (error, action) => {
+    const message = error?.message || String(error);
+    log.error(`Cloudflare ${action} failed: ${message}`);
+    if (/returned 401\b/.test(message)) {
+      return unauthorized('Cloudflare authentication failed');
+    }
+    if (/returned 403\b/.test(message)) {
+      return forbidden('Cloudflare authorization failed');
+    }
+    if (/returned 429\b/.test(message)) {
+      return createResponse({ message: 'Cloudflare rate limit exceeded' }, 429);
+    }
+    // Upstream/network failure or any other Cloudflare error -> bad gateway.
+    return createResponse({ message: `Cloudflare ${action} failed` }, 502);
+  };
+
   const getLlmoApiKey = async (site, context) => {
     const tokowaka = TokowakaClient.createFrom(context);
     const metaconfig = await tokowaka.fetchMetaconfig(site.getBaseURL());
@@ -61,7 +107,10 @@ function LlmoCloudflareController(ctx) {
   };
 
   const fetchWorkerScript = async () => {
-    const res = await fetch(WORKER_SCRIPT_URL);
+    const url = hasText(env.EDGE_OPTIMIZE_WORKER_SCRIPT_URL)
+      ? env.EDGE_OPTIMIZE_WORKER_SCRIPT_URL
+      : DEFAULT_WORKER_SCRIPT_URL;
+    const res = await fetch(url, { signal: AbortSignal.timeout(WORKER_SCRIPT_FETCH_TIMEOUT_MS) });
     if (!res.ok) {
       throw new Error(`Failed to fetch worker script: ${res.status} ${res.statusText}`);
     }
@@ -101,8 +150,12 @@ function LlmoCloudflareController(ctx) {
     }
 
     const cfClient = new CloudflareClient({ token: cfToken }, log);
-    const accounts = await cfClient.listAccounts();
-    return ok(accounts);
+    try {
+      const accounts = await cfClient.listAccounts();
+      return ok(accounts);
+    } catch (e) {
+      return cfErrorResponse(e, 'account listing');
+    }
   };
 
   /**
@@ -120,32 +173,12 @@ function LlmoCloudflareController(ctx) {
     }
 
     const cfClient = new CloudflareClient({ token: cfToken }, log);
-    const zones = await cfClient.listZones();
-    return ok(zones);
-  };
-
-  /**
-   * GET /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes
-   */
-  const listRoutes = async (context) => {
-    const result = await getSiteAndCheckAccess(context);
-    if (result.status) {
-      return result;
+    try {
+      const zones = await cfClient.listZones();
+      return ok(zones);
+    } catch (e) {
+      return cfErrorResponse(e, 'zone listing');
     }
-
-    const cfToken = getCfToken(context);
-    if (!cfToken) {
-      return badRequest(CF_TOKEN_MISSING);
-    }
-
-    const { zoneId } = context.params;
-    if (!hasText(zoneId)) {
-      return badRequest('Missing zoneId');
-    }
-
-    const cfClient = new CloudflareClient({ token: cfToken }, log);
-    const routes = await cfClient.listRoutes(zoneId);
-    return ok(routes);
   };
 
   /**
@@ -166,18 +199,23 @@ function LlmoCloudflareController(ctx) {
       return badRequest(CF_TOKEN_MISSING);
     }
 
-    const body = await context.request.json();
-    const { accountId, scriptName, targetHost } = body || {};
+    const { accountId, targetHost } = context.data || {};
 
     if (!hasText(accountId)) {
       return badRequest('Missing accountId in request body');
     }
-    if (!hasText(scriptName)) {
-      return badRequest('Missing scriptName in request body');
+    if (!CF_ID_RE.test(accountId)) {
+      return badRequest('accountId must be a 32-character hexadecimal Cloudflare account ID');
     }
     if (!hasText(targetHost)) {
       return badRequest('Missing targetHost in request body');
     }
+    if (!HOSTNAME_RE.test(targetHost)) {
+      return badRequest('targetHost must be a valid hostname');
+    }
+
+    // The worker name is owned by the service and derived from the site, not client-supplied.
+    const scriptName = deriveWorkerName(site.getBaseURL());
 
     const llmoApiKey = await getLlmoApiKey(site, context);
     if (!hasText(llmoApiKey)) {
@@ -185,7 +223,12 @@ function LlmoCloudflareController(ctx) {
       return internalServerError('LLMO API key not configured for this site');
     }
 
-    const workerScript = await fetchWorkerScript();
+    let workerScript;
+    try {
+      workerScript = await fetchWorkerScript();
+    } catch (e) {
+      return cfErrorResponse(e, 'worker script fetch');
+    }
 
     const cfClient = new CloudflareClient({ token: cfToken }, log);
 
@@ -193,8 +236,37 @@ function LlmoCloudflareController(ctx) {
       { name: EDGE_OPTIMIZE_TARGET_HOST_BINDING, type: 'plain_text', text: targetHost },
     ];
 
-    await cfClient.deployWorkerScript(accountId, scriptName, workerScript, bindings);
-    await cfClient.setWorkerSecret(accountId, scriptName, EDGE_OPTIMIZE_API_KEY_SECRET, llmoApiKey);
+    try {
+      await cfClient.deployWorkerScript(accountId, scriptName, workerScript, bindings);
+    } catch (e) {
+      return cfErrorResponse(e, 'worker deployment');
+    }
+
+    try {
+      await cfClient.setWorkerSecret(
+        accountId,
+        scriptName,
+        EDGE_OPTIMIZE_API_KEY_SECRET,
+        llmoApiKey,
+      );
+    } catch (e) {
+      // The worker is already live on the edge but lacks its API key, so it is not yet
+      // functional. We cannot delete it (the client exposes no delete-script operation), so
+      // log the partial state explicitly and return a structured response the caller can
+      // act on (re-deploy to set the secret).
+      log.error(
+        `Worker '${scriptName}' deployed for site ${site.getId()} but setting the `
+        + `${EDGE_OPTIMIZE_API_KEY_SECRET} secret failed: ${e.message}. `
+        + 'The worker is live but non-functional and must be re-deployed.',
+      );
+      return createResponse({
+        message: 'Worker deployed but failed to set its API key secret; '
+          + 'the worker is live but not yet functional. Re-deploy to complete setup.',
+        scriptName,
+        accountId,
+        partial: true,
+      }, 502);
+    }
 
     log.info(`Deployed Cloudflare worker '${scriptName}' for site ${site.getId()}`);
     return ok({ scriptName, accountId, targetHost });
@@ -203,12 +275,15 @@ function LlmoCloudflareController(ctx) {
   /**
    * POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes
    * Body: { pattern, scriptName }
+   * Verifies server-side that the pattern does not collide with an existing route in the zone
+   * before creating it, so a deploy cannot silently override a route the customer already has.
    */
   const addRoute = async (context) => {
     const result = await getSiteAndCheckAccess(context);
     if (result.status) {
       return result;
     }
+    const { site } = result;
 
     const cfToken = getCfToken(context);
     if (!cfToken) {
@@ -219,27 +294,51 @@ function LlmoCloudflareController(ctx) {
     if (!hasText(zoneId)) {
       return badRequest('Missing zoneId');
     }
+    if (!CF_ID_RE.test(zoneId)) {
+      return badRequest('zoneId must be a 32-character hexadecimal Cloudflare zone ID');
+    }
 
-    const body = await context.request.json();
-    const { pattern, scriptName } = body || {};
+    const { pattern } = context.data || {};
 
     if (!hasText(pattern)) {
       return badRequest('Missing pattern in request body');
     }
-    if (!hasText(scriptName)) {
-      return badRequest('Missing scriptName in request body');
-    }
+
+    // The route targets the service-owned worker derived from the site, not a client value.
+    const scriptName = deriveWorkerName(site.getBaseURL());
 
     const cfClient = new CloudflareClient({ token: cfToken }, log);
-    const route = await cfClient.addRoute(zoneId, pattern, scriptName);
-    return ok(route);
+
+    // Guard against overriding an existing route: fetch the zone's current routes and reject
+    // if the requested pattern already exists.
+    let existingRoutes;
+    try {
+      existingRoutes = await cfClient.listRoutes(zoneId);
+    } catch (e) {
+      return cfErrorResponse(e, 'route lookup');
+    }
+
+    const conflict = (existingRoutes || []).find((route) => route?.pattern === pattern);
+    if (conflict) {
+      log.info(`Route pattern '${pattern}' already exists in zone ${zoneId}; refusing to override`);
+      return createResponse({
+        message: `A route for pattern '${pattern}' already exists in this zone`,
+        existingRoute: conflict,
+      }, 409);
+    }
+
+    try {
+      const route = await cfClient.addRoute(zoneId, pattern, scriptName);
+      return ok(route);
+    } catch (e) {
+      return cfErrorResponse(e, 'route creation');
+    }
   };
 
   return {
     getCloudflareConfig,
     listAccounts,
     listZones,
-    listRoutes,
     deployWorker,
     addRoute,
   };

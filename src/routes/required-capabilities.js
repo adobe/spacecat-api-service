@@ -132,6 +132,14 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
+  // LLMO Cloudflare onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
+  // uses a caller-supplied x-cloudflare-token, not S2S JWT
+  'GET /sites/:siteId/llmo/onboarding/cloudflare/config',
+  'GET /sites/:siteId/llmo/onboarding/cloudflare/accounts',
+  'GET /sites/:siteId/llmo/onboarding/cloudflare/zones',
+  'POST /sites/:siteId/llmo/onboarding/cloudflare/deploy',
+  'POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',

@@ -81,6 +81,11 @@ export function buildEnv(publicKeyB64) {
     AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-audits',
     S3_CONFIG_BUCKET: 'dummy-config-bucket',
 
+    // LLMO Cloudflare onboarding — GET .../cloudflare/config returns this verbatim to the
+    // browser PKCE flow. Other cloudflare endpoints call the external Cloudflare API and are
+    // not exercised by the IT suite (no external HTTP mocking).
+    CLOUDFLARE_CLIENT_ID: 'it-cloudflare-client-id',
+
     // Consumers (S2S) — allow ORG_1 IMS org for seeding and IT tests
     S2S_ALLOWED_IMS_ORG_IDS: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
 

@@ -19,10 +19,11 @@ use(sinonChai);
 
 const SITE_ID = 'a1b2c3d4-e5f6-1234-abcd-000000000001';
 const CF_TOKEN = 'cf-bearer-token-abc';
-const ACCOUNT_ID = 'acc-123';
-const ZONE_ID = 'zone-456';
+const ACCOUNT_ID = '0123456789abcdef0123456789abcdef';
+const ZONE_ID = 'fedcba9876543210fedcba9876543210';
 const ROUTE_ID = 'route-789';
-const SCRIPT_NAME = 'edge-optimize-worker';
+// Worker name is derived server-side from the site base URL (https://www.example.com).
+const DERIVED_SCRIPT_NAME = 'edge-optimize-router-example-com';
 const TARGET_HOST = 'www.example.com';
 const LLMO_API_KEY = 'llmo-api-key-xyz';
 const CF_CLIENT_ID = 'b3ef23f21b249c43b757bc8ef000c917';
@@ -40,35 +41,21 @@ describe('LlmoCloudflareController', () => {
   let mockFetch;
 
   before(async () => {
-    sandbox = sinon.createSandbox();
-
-    mockCfClient = {
-      listAccounts: sandbox.stub(),
-      listZones: sandbox.stub(),
-      listRoutes: sandbox.stub(),
-      deployWorkerScript: sandbox.stub(),
-      setWorkerSecret: sandbox.stub(),
-      addRoute: sandbox.stub(),
-    };
-
-    mockTokowakaClient = {
-      fetchMetaconfig: sandbox.stub(),
-    };
-
-    mockFetch = sandbox.stub();
-
+    // esmock is expensive, so wire it once. The mock factories deliberately read the mutable
+    // outer references (reassigned per-test in beforeEach) so each test gets fresh stubs
+    // without re-running esmock.
     const mod = await esmock('../../../src/controllers/llmo/llmo-cloudflare.js', {
       '@adobe/spacecat-shared-cloudflare-client': {
-        default: sandbox.stub().returns(mockCfClient),
+        default: function CloudflareClientMock() { return mockCfClient; },
       },
       '@adobe/spacecat-shared-tokowaka-client': {
         default: {
-          createFrom: sandbox.stub().returns(mockTokowakaClient),
+          createFrom: () => mockTokowakaClient,
         },
       },
       '@adobe/spacecat-shared-utils': {
         hasText: (v) => typeof v === 'string' && v.trim().length > 0,
-        tracingFetch: mockFetch,
+        tracingFetch: (...args) => mockFetch(...args),
       },
       '../../../src/support/access-control-util.js': {
         default: {
@@ -81,6 +68,28 @@ describe('LlmoCloudflareController', () => {
   });
 
   beforeEach(() => {
+    sandbox = sinon.createSandbox();
+
+    mockCfClient = {
+      listAccounts: sandbox.stub(),
+      listZones: sandbox.stub(),
+      listRoutes: sandbox.stub(),
+      deployWorkerScript: sandbox.stub(),
+      setWorkerSecret: sandbox.stub(),
+      addRoute: sandbox.stub(),
+    };
+
+    mockTokowakaClient = {
+      fetchMetaconfig: sandbox.stub().resolves({ apiKeys: [LLMO_API_KEY] }),
+    };
+
+    mockFetch = sandbox.stub().resolves({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: sandbox.stub().resolves(WORKER_SCRIPT_TEXT),
+    });
+
     mockSite = {
       getId: () => SITE_ID,
       getBaseURL: () => 'https://www.example.com',
@@ -90,15 +99,6 @@ describe('LlmoCloudflareController', () => {
       hasAccess: sandbox.stub().resolves(true),
       isLLMOAdministrator: sandbox.stub().returns(true),
     };
-
-    mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [LLMO_API_KEY] });
-
-    mockFetch.resolves({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: sandbox.stub().resolves(WORKER_SCRIPT_TEXT),
-    });
 
     const mockSiteModel = {
       findById: sandbox.stub().resolves(mockSite),
@@ -120,9 +120,7 @@ describe('LlmoCloudflareController', () => {
       dataAccess: {
         Site: mockSiteModel,
       },
-      request: {
-        json: sandbox.stub(),
-      },
+      data: {},
     };
 
     controller = LlmoCloudflareController(mockContext);
@@ -191,6 +189,24 @@ describe('LlmoCloudflareController', () => {
       const res = await controller.listAccounts(mockContext);
       expect(res.status).to.equal(404);
     });
+
+    it('returns 401 when Cloudflare auth fails', async () => {
+      mockCfClient.listAccounts.rejects(new Error('Cloudflare API returned 401 on /accounts: bad token'));
+      const res = await controller.listAccounts(mockContext);
+      expect(res.status).to.equal(401);
+    });
+
+    it('returns 429 when Cloudflare rate-limits', async () => {
+      mockCfClient.listAccounts.rejects(new Error('Cloudflare API returned 429 on /accounts: slow down'));
+      const res = await controller.listAccounts(mockContext);
+      expect(res.status).to.equal(429);
+    });
+
+    it('returns 502 on generic Cloudflare failure', async () => {
+      mockCfClient.listAccounts.rejects(new Error('Cloudflare API request to /accounts failed: ECONNRESET'));
+      const res = await controller.listAccounts(mockContext);
+      expect(res.status).to.equal(502);
+    });
   });
 
   // ── listZones ────────────────────────────────────────────────────────────
@@ -211,34 +227,11 @@ describe('LlmoCloudflareController', () => {
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(400);
     });
-  });
 
-  // ── listRoutes ───────────────────────────────────────────────────────────
-
-  describe('listRoutes', () => {
-    it('returns routes for a zone', async () => {
-      const routes = [{ id: ROUTE_ID, pattern: 'example.com/*', script: SCRIPT_NAME }];
-      mockCfClient.listRoutes.resolves(routes);
-      mockContext.params = { siteId: SITE_ID, zoneId: ZONE_ID };
-
-      const res = await controller.listRoutes(mockContext);
-      expect(res.status).to.equal(200);
-      const body = await res.json();
-      expect(body).to.deep.equal(routes);
-      expect(mockCfClient.listRoutes).to.have.been.calledWith(ZONE_ID);
-    });
-
-    it('returns 400 when zoneId is missing', async () => {
-      mockContext.params = { siteId: SITE_ID, zoneId: '' };
-      const res = await controller.listRoutes(mockContext);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when CF token is missing', async () => {
-      mockContext.pathInfo.headers = {};
-      mockContext.params = { siteId: SITE_ID, zoneId: ZONE_ID };
-      const res = await controller.listRoutes(mockContext);
-      expect(res.status).to.equal(400);
+    it('returns 403 when Cloudflare authorization fails', async () => {
+      mockCfClient.listZones.rejects(new Error('Cloudflare API returned 403 on /zones: forbidden'));
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(403);
     });
   });
 
@@ -247,12 +240,10 @@ describe('LlmoCloudflareController', () => {
   describe('deployWorker', () => {
     beforeEach(() => {
       mockContext.params = { siteId: SITE_ID };
-      mockContext.request.json.resolves({
-        accountId: ACCOUNT_ID, scriptName: SCRIPT_NAME, targetHost: TARGET_HOST,
-      });
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: TARGET_HOST };
     });
 
-    it('deploys worker script and sets secret', async () => {
+    it('deploys worker script with a derived name and sets secret', async () => {
       mockCfClient.deployWorkerScript.resolves();
       mockCfClient.setWorkerSecret.resolves();
 
@@ -261,37 +252,55 @@ describe('LlmoCloudflareController', () => {
 
       expect(mockCfClient.deployWorkerScript).to.have.been.calledWith(
         ACCOUNT_ID,
-        SCRIPT_NAME,
+        DERIVED_SCRIPT_NAME,
         WORKER_SCRIPT_TEXT,
         [{ name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: TARGET_HOST }],
       );
       expect(mockCfClient.setWorkerSecret).to.have.been.calledWith(
         ACCOUNT_ID,
-        SCRIPT_NAME,
+        DERIVED_SCRIPT_NAME,
         'EDGE_OPTIMIZE_API_KEY',
         LLMO_API_KEY,
       );
 
       const body = await res.json();
       expect(body).to.deep.equal({
-        scriptName: SCRIPT_NAME, accountId: ACCOUNT_ID, targetHost: TARGET_HOST,
+        scriptName: DERIVED_SCRIPT_NAME, accountId: ACCOUNT_ID, targetHost: TARGET_HOST,
       });
     });
 
+    it('fetches the worker script from a pinned commit SHA with a timeout', async () => {
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      await controller.deployWorker(mockContext);
+
+      const [url, opts] = mockFetch.firstCall.args;
+      expect(url).to.match(/raw\.githubusercontent\.com\/adobe\/llmo-code-samples\/[0-9a-f]{40}\//);
+      expect(url).to.not.include('/main/');
+      expect(opts).to.have.property('signal');
+    });
+
     it('returns 400 when accountId is missing', async () => {
-      mockContext.request.json.resolves({ scriptName: SCRIPT_NAME, targetHost: TARGET_HOST });
+      mockContext.data = { targetHost: TARGET_HOST };
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
     });
 
-    it('returns 400 when scriptName is missing', async () => {
-      mockContext.request.json.resolves({ accountId: ACCOUNT_ID, targetHost: TARGET_HOST });
+    it('returns 400 when accountId is not a 32-char hex id', async () => {
+      mockContext.data = { accountId: 'acc-123', targetHost: TARGET_HOST };
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when targetHost is missing', async () => {
-      mockContext.request.json.resolves({ accountId: ACCOUNT_ID, scriptName: SCRIPT_NAME });
+      mockContext.data = { accountId: ACCOUNT_ID };
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when targetHost is not a valid hostname', async () => {
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'not a host' };
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
     });
@@ -308,15 +317,28 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('returns 500 when worker script fetch fails', async () => {
+    it('returns 502 when worker script fetch fails', async () => {
       mockFetch.resolves({ ok: false, status: 404, statusText: 'Not Found' });
-      let threw = false;
-      try {
-        await controller.deployWorker(mockContext);
-      } catch {
-        threw = true;
-      }
-      expect(threw).to.be.true;
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+    });
+
+    it('returns 502 when worker deployment fails', async () => {
+      mockCfClient.deployWorkerScript.rejects(new Error('Cloudflare API returned 500 on /workers: boom'));
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
+    it('returns 502 with partial flag when secret set fails after deploy', async () => {
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.rejects(new Error('Cloudflare API returned 500 on /secrets: boom'));
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+      const body = await res.json();
+      expect(body.partial).to.be.true;
+      expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
+      expect(mockContext.log.error).to.have.been.called;
     });
   });
 
@@ -325,30 +347,44 @@ describe('LlmoCloudflareController', () => {
   describe('addRoute', () => {
     beforeEach(() => {
       mockContext.params = { siteId: SITE_ID, zoneId: ZONE_ID };
-      mockContext.request.json.resolves({ pattern: 'example.com/*', scriptName: SCRIPT_NAME });
+      mockContext.data = { pattern: 'example.com/*' };
+      mockCfClient.listRoutes.resolves([]);
     });
 
-    it('adds a route and returns it', async () => {
-      const route = { id: ROUTE_ID, pattern: 'example.com/*', script: SCRIPT_NAME };
+    it('adds a route targeting the derived worker when no conflicting route exists', async () => {
+      const route = { id: ROUTE_ID, pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
       mockCfClient.addRoute.resolves(route);
 
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body).to.deep.equal(route);
-      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', SCRIPT_NAME);
+      expect(mockCfClient.listRoutes).to.have.been.calledWith(ZONE_ID);
+      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
+    });
+
+    it('returns 409 and does not add when the pattern already exists', async () => {
+      const existing = { id: ROUTE_ID, pattern: 'example.com/*', script: 'other-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.existingRoute).to.deep.equal(existing);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
     });
 
     it('returns 400 when pattern is missing', async () => {
-      mockContext.request.json.resolves({ scriptName: SCRIPT_NAME });
+      mockContext.data = {};
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });
 
-    it('returns 400 when scriptName is missing', async () => {
-      mockContext.request.json.resolves({ pattern: 'example.com/*' });
+    it('returns 404 when site is not found', async () => {
+      mockContext.dataAccess.Site.findById.resolves(null);
       const res = await controller.addRoute(mockContext);
-      expect(res.status).to.equal(400);
+      expect(res.status).to.equal(404);
+      expect(mockCfClient.listRoutes).to.not.have.been.called;
     });
 
     it('returns 400 when zoneId is missing', async () => {
@@ -357,10 +393,29 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 when zoneId is not a 32-char hex id', async () => {
+      mockContext.params = { siteId: SITE_ID, zoneId: 'zone-456' };
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
     it('returns 400 when CF token is missing', async () => {
       mockContext.pathInfo.headers = {};
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 502 when the route lookup fails', async () => {
+      mockCfClient.listRoutes.rejects(new Error('Cloudflare API request to /routes failed: ETIMEDOUT'));
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('returns 502 when route creation fails', async () => {
+      mockCfClient.addRoute.rejects(new Error('Cloudflare API returned 500 on /routes: boom'));
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(502);
     });
   });
 });

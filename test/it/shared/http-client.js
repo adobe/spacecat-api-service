@@ -14,12 +14,14 @@
  * Creates an HTTP client with pre-configured auth personas.
  *
  * @param {string} baseUrl - The dev server base URL (e.g., http://localhost:3002)
- * @param {{ admin: string, user: string, trialUser: string, delegatedUser: string,
+ * @param {{ admin: string, user: string, trialUser: string, llmoAdmin: string,
+ *   delegatedUser: string,
  *   delegatedUserTruncated: string, delegatedUserNoSource: string,
  *   readOnlyAdmin: string,
  *   s2sConsumerReadOnly: string, s2sConsumerReadAll: string,
  *   s2sConsumerUnknown: string }} tokens - JWT tokens
- * @returns {{ admin: object, user: object, trialUser: object, delegatedUser: object,
+ * @returns {{ admin: object, user: object, trialUser: object, llmoAdmin: object,
+ *   delegatedUser: object,
  *   delegatedUserTruncated: object, delegatedUserNoSource: object,
  *   readOnlyAdmin: object,
  *   s2sConsumerReadOnly: object, s2sConsumerReadAll: object,
@@ -79,6 +81,7 @@ export function createHttpClient(baseUrl, tokens) {
     admin: makeMethods(tokens.admin),
     user: makeMethods(tokens.user),
     trialUser: makeMethods(tokens.trialUser),
+    llmoAdmin: makeMethods(tokens.llmoAdmin),
     delegatedUser: makeMethods(tokens.delegatedUser),
     delegatedUserTruncated: makeMethods(tokens.delegatedUserTruncated),
     delegatedUserNoSource: makeMethods(tokens.delegatedUserNoSource),

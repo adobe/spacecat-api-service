@@ -340,6 +340,14 @@ describe('getRouteHandlers', () => {
     updateQueryIndex: () => null,
   };
 
+  const mockLlmoCloudflareController = {
+    getCloudflareConfig: () => null,
+    listAccounts: () => null,
+    listZones: () => null,
+    deployWorker: () => null,
+    addRoute: () => null,
+  };
+
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
   };
@@ -580,6 +588,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockLlmoCloudflareController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -1089,6 +1098,11 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
+      'GET /sites/:siteId/llmo/onboarding/cloudflare/config',
+      'GET /sites/:siteId/llmo/onboarding/cloudflare/accounts',
+      'GET /sites/:siteId/llmo/onboarding/cloudflare/zones',
+      'POST /sites/:siteId/llmo/onboarding/cloudflare/deploy',
+      'POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',

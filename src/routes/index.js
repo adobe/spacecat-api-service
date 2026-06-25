@@ -496,7 +496,6 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/onboarding/cloudflare/config': llmoCloudflareController.getCloudflareConfig,
     'GET /sites/:siteId/llmo/onboarding/cloudflare/accounts': llmoCloudflareController.listAccounts,
     'GET /sites/:siteId/llmo/onboarding/cloudflare/zones': llmoCloudflareController.listZones,
-    'GET /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes': llmoCloudflareController.listRoutes,
     'POST /sites/:siteId/llmo/onboarding/cloudflare/deploy': llmoCloudflareController.deployWorker,
     'POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes': llmoCloudflareController.addRoute,
 
