@@ -575,7 +575,10 @@ export async function applyEdgeOptimizeCacheHeaders(
   addEoHeaders(clonedParams);
   cloned.ParametersInCacheKeyAndForwardedToOrigin = clonedParams;
 
-  // Idempotent: reuse an existing edgeoptimize-cache custom policy if a prior run created it.
+  // Idempotent: reuse an existing clone only when it matches the FULL derived name (exact)
+  // <sourceName-without-Managed->-adobe-<distId>. If the customer re-pointed the behavior to a
+  // different source since a prior run, the derived name differs, so we create a clone matching the
+  // CURRENT source instead of reusing a clone built from a different base.
   const customList = await client.send(new ListCachePoliciesCommand({ Type: 'custom' }));
   const existing = (customList.CachePolicyList?.Items || []).find(
     (i) => i.CachePolicy.CachePolicyConfig.Name === clonedName,
@@ -1623,6 +1626,9 @@ export async function planEdgeOptimizeDeploy(
         const srcConfig = srcResult.CachePolicy?.CachePolicyConfig || {};
         const sourceName = srcConfig.Name || 'cache';
         const clonedName = buildEoClonedCachePolicyName(sourceName, distributionId);
+        // Match the FULL derived name (exact): <sourceName-without-Managed->-adobe-<distId> — not
+        // just the suffix. If the customer re-pointed the behavior to a different source, a clone
+        // with a different prefix is NOT a match, so the deploy creates one for the current source.
         const customList = await client.send(new ListCachePoliciesCommand({ Type: 'custom' }));
         const cloneExists = (customList.CachePolicyList?.Items || []).some(
           (i) => i.CachePolicy.CachePolicyConfig.Name === clonedName,
