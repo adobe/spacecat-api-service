@@ -33,17 +33,20 @@ const WS = 'subworkspace-ws-1';
 function project({
   id = 'p1', location = 2276, language = 'de', country = null, publishStatus = 'live',
   createdAt = '2026-06-01T00:00:00Z', updatedAt = '2026-06-02T00:00:00Z',
+  domain = 'example.com',
 } = {}) {
   // Mirrors the live v1 list item shape: nested location/language objects,
   // updated_at present, created_at usually absent (passed here for mapping
   // assertions; the no-created_at path is covered separately). `country` mirrors
   // the Semrush-UI shape where settings.ai.location.id is null but a country is
-  // set (settings.ai.country.code); omitted by default.
+  // set (settings.ai.country.code); omitted by default. `domain` is the project's
+  // top-level primary host (null to mirror a project that carries none).
   return {
     id,
     publish_status: publishStatus,
     created_at: createdAt,
     updated_at: updatedAt,
+    ...(domain === null ? {} : { domain }),
     settings: {
       ai: {
         location: location === null ? null : { id: location, name: 'X' },
@@ -82,7 +85,12 @@ describe('subworkspace-projects', () => {
         updatedAt: '2026-06-02T00:00:00Z',
         status: 'live',
         semrushProjectId: 'p1',
+        domain: 'example.com',
       });
+    });
+    it('surfaces the project domain, and nulls it when the project carries none', () => {
+      expect(projectToSlice(project({ domain: 'acme.com' }), BRAND).domain).to.equal('acme.com');
+      expect(projectToSlice(project({ domain: null }), BRAND).domain).to.equal(null);
     });
     it('lowercases the language and nulls an invalid geo', () => {
       const s = projectToSlice(project({ location: 'x', language: 'EN' }), BRAND);
