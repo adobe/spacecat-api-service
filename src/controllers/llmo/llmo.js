@@ -31,11 +31,8 @@ import crypto from 'crypto';
 import { getDomain, parse as parseDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
-import { ImsClient } from '@adobe/spacecat-shared-ims-client';
-import yaml from 'js-yaml';
-import AccessControlUtil from '../../support/access-control-util.js';
-import {
+import TokowakaClient, {
+  calculateForwardedHost,
   assumeConnectorRole,
   listCloudFrontDistributions,
   getDistributionConfig,
@@ -48,7 +45,10 @@ import {
   verifyEdgeOptimizeRouting,
   runEdgeOptimizeDeployStep,
   planEdgeOptimizeDeploy,
-} from '../../support/edge-optimize.js';
+} from '@adobe/spacecat-shared-tokowaka-client';
+import { ImsClient } from '@adobe/spacecat-shared-ims-client';
+import yaml from 'js-yaml';
+import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { cachedOk } from '../../support/cached-response.js';
 import {
