@@ -113,7 +113,7 @@ function AddOaeStageDomainCommand(context) {
         }
 
         if (!hasSamePathname(stageBaseURL, prodBaseURL)) {
-          throw new Error(`Stage domain \`${domain}\` should be have same path for path scoped prod sites`);
+          throw new Error(`Stage domain \`${domain}\` must be within the site pathname scope of the production site`);
         }
       }
       /* eslint-enable no-await-in-loop */

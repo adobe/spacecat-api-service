@@ -2041,7 +2041,7 @@ function LlmoController(ctx) {
       }
 
       if (!allHaveSamePathname(stagingDomains, site.getBaseURL())) {
-        return badRequest('Staging paths must be belong to the path as the production site');
+        return badRequest('Staging domains must be within the site pathname scope of the production site');
       }
 
       const tokowakaClient = TokowakaClient.createFrom(context);

@@ -15,7 +15,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
-import { llmoConfig, isWithinSiteScope } from '@adobe/spacecat-shared-utils';
+import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
 import {
   EMPTY_SHEET_PAYLOAD,
@@ -253,7 +253,6 @@ describe('LlmoController', () => {
           return uuidRegex.test(uuid);
         },
         isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
-        isWithinSiteScope,
       },
       '../../../src/support/utils.js': {
         exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
@@ -7277,7 +7276,7 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('same base domain');
     });
 
-    it('should return 400 when staging domain is not within the pathname scope of a prod site', async () => {
+    it('should return 400 when staging domain does not have same path as that of prod site', async () => {
       mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
       stageConfigContext.data = { stagingDomains: ['staging.lovesac.com'] };
 
@@ -7288,7 +7287,7 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('site scope');
     });
 
-    it('should accept staging domain within the pathname scope of a prod site', async () => {
+    it('should accept staging domain which has same path as that of prod site', async () => {
       mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
       stageConfigContext.data = { stagingDomains: ['https://www.lovesac.com/docs/preview'] };
 

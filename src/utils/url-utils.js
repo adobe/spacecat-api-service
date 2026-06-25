@@ -26,10 +26,12 @@ export function toPathname(url) {
   }
 }
 
+// TODO: move to spacecat-shared-util
 export function hasSamePathname(url, referenceUrl) {
   return toPathname(url) === toPathname(referenceUrl);
 }
 
+// TODO: move to spacecat-shared-util
 export function allHaveSamePathname(urls, referenceUrl) {
   return urls.every((url) => hasSamePathname(url, referenceUrl));
 }
