@@ -1,3 +1,15 @@
+## [1.601.2](https://github.com/adobe/spacecat-api-service/compare/v1.601.1...v1.601.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps:** redeploy http-utils 1.30.0 revert to prod (back office outage) ([#2692](https://github.com/adobe/spacecat-api-service/issues/2692)) ([5c3cb11](https://github.com/adobe/spacecat-api-service/commit/5c3cb11029aeb6a63c7a7316085263d07751c34a)), closes [#2691](https://github.com/adobe/spacecat-api-service/issues/2691)
+
+
+### Reverts
+
+* fix(deps): bump spacecat-shared-http-utils 1.30.0 to 1.31.0 ([#2691](https://github.com/adobe/spacecat-api-service/issues/2691)) ([d8c8d8b](https://github.com/adobe/spacecat-api-service/commit/d8c8d8b8371539961cf26018bab09a60515af000)), closes [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [adobe/spacecat-shared#1712](https://github.com/adobe/spacecat-shared/issues/1712) [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2637](https://github.com/adobe/spacecat-api-service/issues/2637) [#2681](https://github.com/adobe/spacecat-api-service/issues/2681)
+
 ## [1.601.1](https://github.com/adobe/spacecat-api-service/compare/v1.601.0...v1.601.1) (2026-06-25)
 
 
