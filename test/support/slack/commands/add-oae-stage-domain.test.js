@@ -293,27 +293,52 @@ describe('AddOaeStageDomainCommand', () => {
       expect(mockProdSite.save).to.not.have.been.called;
     });
 
-    it('allows stage domain with a different registered domain than prod (no base-domain check)', async () => {
-      // staging.completely-different.io has a different registered domain from example.com —
-      // the API would reject this, but the Slack command must allow it.
-      const crossDomain = 'staging.completely-different.io';
-      const crossBaseURL = 'https://staging.completely-different.io';
-      const mockCrossSite = {
-        getId: sinon.stub().returns('cross-site-id'),
-        getBaseURL: sinon.stub().returns(crossBaseURL),
-      };
+    it('throws and reports error when stage domain is not within the subpath scope of a subpath prod site', async () => {
+      mockProdSite.getBaseURL.returns('https://example.com/docs');
 
       dataAccessStub.Site.findByBaseURL.callsFake((url) => Promise.resolve(
         url === PROD_SITE_URL ? mockProdSite : null,
       ));
-      dataAccessStub.Site.create.resolves(mockCrossSite);
+
+      const command = AddOaeStageDomainCommand(context);
+      await command.handleExecution([PROD_SITE_INPUT, STAGE_DOMAIN], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWithMatch(/site pathname scope/);
+      expect(dataAccessStub.Site.create).to.not.have.been.called;
+      expect(mockProdSite.save).to.not.have.been.called;
+    });
+
+    it('accepts stage domain within the pathname scope of a prod site', async () => {
+      const subpathStageDomain = 'example.com/docs/preview';
+      const subpathStageBaseURL = 'https://example.com/docs/preview';
+      const mockSubpathStageSite = {
+        getId: sinon.stub().returns('subpath-stage-id'),
+        getBaseURL: sinon.stub().returns(subpathStageBaseURL),
+      };
+
+      mockProdSite.getBaseURL.returns('https://example.com/docs');
+
+      dataAccessStub.Site.findByBaseURL.callsFake((url) => {
+        if (url === PROD_SITE_URL) {
+          return Promise.resolve(mockProdSite);
+        }
+        if (url === subpathStageBaseURL) {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve(null);
+      });
+      dataAccessStub.Site.create.resolves(mockSubpathStageSite);
       tokowakaClientStub.fetchMetaconfig.resolves(null);
       tokowakaClientStub.createMetaconfig.resolves({ apiKeys: ['key1'] });
 
       const command = AddOaeStageDomainCommand(context);
-      await command.handleExecution([PROD_SITE_INPUT, crossDomain], slackContext);
+      await command.handleExecution([PROD_SITE_INPUT, subpathStageDomain], slackContext);
 
       expect(slackContext.say).to.have.been.calledWithMatch(/Successfully onboarded 1 stage domain/);
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: subpathStageBaseURL,
+        organizationId: 'org-id-456',
+      });
     });
 
     it('handles multiple comma-separated staging domains', async () => {
