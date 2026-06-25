@@ -24,6 +24,7 @@ export const FixDto = {
   /**
    * Converts a FixEntity object into a JSON object.
    * @param {Readonly<FixEntity>} fix - FixEntity object.
+   * @param {string|null} [locale] - Optional locale code (e.g. 'fr_fr', 'ja_jp').
    * @returns {{
    *  id: string
    *  opportunityId: string
@@ -38,7 +39,7 @@ export const FixDto = {
    *  suggestions?: Array<object>
    * }} JSON object.
    */
-  toJSON(fix) {
+  toJSON(fix, locale = null) {
     const result = {
       id: fix.getId(),
       opportunityId: fix.getOpportunityId(),
@@ -65,7 +66,9 @@ export const FixDto = {
     // eslint-disable-next-line no-underscore-dangle
     if (fix._suggestions && Array.isArray(fix._suggestions)) {
       // eslint-disable-next-line no-underscore-dangle
-      result.suggestions = fix._suggestions.map((suggestion) => SuggestionDto.toJSON(suggestion));
+      result.suggestions = fix._suggestions.map(
+        (suggestion) => SuggestionDto.toJSON(suggestion, 'full', null, locale),
+      );
     }
 
     return result;
