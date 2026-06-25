@@ -130,6 +130,11 @@ sites:
       - **Paginated (with `limit` and/or `cursor`):** returns `{ sites, pagination }` with
         the full unfiltered result set. Iterate using `pagination.cursor` until
         `pagination.hasMore` is `false` to fetch all sites.
+      - **Substring search (with `baseUrlLike`):** returns `{ sites, pagination }` where
+        `sites` are those whose `baseURL` contains the (case-insensitive) substring.
+        `pagination` is `{ limit, hasMore }` (no `cursor`; this branch is not
+        cursor-iterable). Defaults to a limit of 50 (clamped to 500). The search term
+        must be at least 3 characters after trimming (otherwise 400).
 
       Required capabilities: admin access (legacy admin path) or S2S `site:readAll`.
     operationId: getSites
@@ -160,6 +165,20 @@ sites:
           type: string
           maxLength: 256
           example: "eyJvZmZzZXQiOjEwMH0="
+      - name: baseUrlLike
+        in: query
+        required: false
+        description: |
+          Case-insensitive substring to match against each site's `baseURL`. When
+          provided, the response uses a non-cursor paginated envelope
+          (`{ sites, pagination: { limit, hasMore } }`). Must be at least 3 characters
+          after trimming (otherwise 400). LIKE wildcards (`%`, `_`, `\`) in the value
+          are escaped and treated literally. The `limit` parameter (default 50, clamped
+          to 500) bounds the result size; `cursor` is not used on this path.
+        schema:
+          type: string
+          minLength: 3
+          example: "adobe"
     responses:
       '200':
         description: |

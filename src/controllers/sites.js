@@ -430,6 +430,11 @@ function SitesController(ctx, log, env) {
    * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
    * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   *
+   * Optional `baseUrlLike` query param: when provided (min 3 chars), performs a
+   * case-insensitive substring search on `baseURL` and returns a non-cursor
+   * `{ sites, pagination: { limit, hasMore } }` response. LIKE wildcards in the
+   * input are escaped so callers cannot inject their own wildcards.
    * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
@@ -446,6 +451,42 @@ function SitesController(ctx, log, env) {
     }
 
     const limitParam = context?.data?.limit;
+
+    // Optional substring search by base URL. Runs after the authz check (so
+    // unauthorized callers still get 403) and before the cursor/legacy branches.
+    const baseUrlLike = context?.data?.baseUrlLike;
+    if (hasText(baseUrlLike)) {
+      const q = baseUrlLike.trim();
+      if (q.length < 3) {
+        return badRequest('baseUrlLike must be at least 3 characters');
+      }
+
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : 50;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+
+      // Escape LIKE special chars so user input cannot inject its own wildcards.
+      const escaped = q.replace(/([\\%_])/g, '\\$1');
+
+      // Fetch one extra row to detect whether more results exist beyond the limit.
+      const rows = await Site.all({}, {
+        where: (s) => s.ilike('baseURL', `%${escaped}%`),
+        limit: effectiveLimit + 1,
+        order: 'asc',
+      });
+      const list = Array.isArray(rows) ? rows : (rows?.data ?? []);
+      const hasMore = list.length > effectiveLimit;
+      const sites = list.slice(0, effectiveLimit).map((site) => SiteDto.toListJSON(site));
+
+      if (s2sResult.allowed) {
+        log.info(`[s2s-readall] GET /sites (baseUrlLike) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+      }
+
+      return ok({ sites, pagination: { limit: effectiveLimit, hasMore } });
+    }
+
     const cursor = context?.data?.cursor || null;
     const paginated = hasText(limitParam) || hasText(cursor);
 

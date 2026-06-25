@@ -1188,6 +1188,140 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('GET /sites - baseUrlLike substring search', () => {
+    it('queries Site.all with an ilike where clause, order asc, and limit N+1', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '10' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false });
+
+      expect(mockDataAccess.Site.all).to.have.been.calledOnce;
+      const [firstArg, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(firstArg).to.deep.equal({});
+      expect(opts.order).to.equal('asc');
+      expect(opts.limit).to.equal(11); // effectiveLimit (10) + 1
+
+      // Invoke the captured `where` builder to assert it builds an ilike on baseURL.
+      const builder = { ilike: sinon.stub().returnsThis() };
+      opts.where(builder);
+      expect(builder.ilike).to.have.been.calledOnceWithExactly('baseURL', '%site%');
+    });
+
+    it('uses default limit of 50 when no limit param is provided', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.limit).to.equal(51); // 50 + 1
+    });
+
+    it('sets hasMore:true and trims the body to the limit when N+1 rows are returned', async () => {
+      // effectiveLimit = 1, so fetching limit+1 = 2 rows means "more exists".
+      mockDataAccess.Site.all.resolves(sites); // 2 rows
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '1' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array').with.lengthOf(1); // trimmed to limit
+      expect(body.pagination).to.deep.equal({ limit: 1, hasMore: true });
+    });
+
+    it('escapes LIKE wildcards in the user input', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      await sitesController.getAll({ ...context, data: { baseUrlLike: 'a%b_c\\d' } });
+
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const builder = { ilike: sinon.stub().returnsThis() };
+      opts.where(builder);
+      expect(builder.ilike).to.have.been.calledOnceWithExactly('baseURL', '%a\\%b\\_c\\\\d%');
+    });
+
+    it('returns the slim DTO shape for matched sites', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const body = await result.json();
+
+      expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+      expect(body.sites[0]).to.have.property('baseURL', 'https://site1.com');
+      expect(body.sites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+    });
+
+    it('accepts a non-array (cursor-shaped) result by reading rows.data', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites });
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '10' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false });
+    });
+
+    ['ab', 'a', '', '  x '].forEach((shortValue) => {
+      it(`returns 400 when baseUrlLike trims to fewer than 3 chars ("${shortValue}")`, async () => {
+        mockDataAccess.Site.all.resolves(sites);
+        const result = await sitesController.getAll({
+          ...context,
+          data: { baseUrlLike: shortValue },
+        });
+
+        if (shortValue.trim() === '') {
+          // empty/whitespace-only is not "text" -> falls through to the
+          // legacy path rather than the search branch.
+          expect(result.status).to.equal(200);
+          return;
+        }
+        const error = await result.json();
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'baseUrlLike must be at least 3 characters');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
+      });
+    });
+
+    it('returns 400 when baseUrlLike is valid but limit is invalid', async () => {
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: 'abc' } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'limit must be a positive integer');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    it('clamps the search limit to MAX_LIMIT (500)', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '9999' } });
+      const body = await result.json();
+
+      expect(body.pagination.limit).to.equal(500);
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.limit).to.equal(501); // 500 + 1
+    });
+
+    it('denies a non-admin/non-S2S caller with 403 even with baseUrlLike', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+  });
+
   describe('GET /sites - S2S readAll capability', () => {
     function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
       return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
