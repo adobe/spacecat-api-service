@@ -366,6 +366,10 @@ describe('routeFacsCapabilities', () => {
       ).to.deep.equal([]);
     });
 
+    // Enforces the convention documented in CLAUDE.md ("Classifying route params
+    // when adding ANY endpoint"): every dynamic :param must be classified so
+    // facsWrapper can resolve or correctly ignore the ReBAC resource for a route.
+    // A new endpoint cannot merge until its param lands in exactly one bucket.
     it('every :param in src/routes/index.js is classified (resource OR non-resource)', () => {
       const claimedByAnyProduct = unionOfProductAliases();
       const nonResource = new Set(routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS);
@@ -374,7 +378,12 @@ describe('routeFacsCapabilities', () => {
       );
       expect(
         unclassified,
-        `unclassified params (add to PRODUCTS_FACS_RESOURCE_PARAM_ALIASES.<product>.<resource> or FACS_NON_RESOURCE_PARAMS): ${unclassified.join(', ')}`,
+        'Unclassified route param(s): '
+        + `${unclassified.join(', ')}. Reuse the existing entity alias in `
+        + 'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES.<product>.<resource> if this param '
+        + 'identifies an existing ReBAC entity (brand → brandId, site → siteId); '
+        + 'otherwise add it to FACS_NON_RESOURCE_PARAMS. A new entity\'s identifier '
+        + 'defaults to FACS_NON_RESOURCE_PARAMS until ReBAC is implemented for it.',
       ).to.deep.equal([]);
     });
 
