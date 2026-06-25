@@ -627,6 +627,34 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
+  /sites/{siteId}/llmo/edge-optimize-bootstrap-url:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-bootstrap-url'
+  /sites/{siteId}/llmo/edge-optimize/connect:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-connect'
+  /sites/{siteId}/llmo/edge-optimize/distributions:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-distributions'
+  /sites/{siteId}/llmo/edge-optimize/prerequisites:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-prerequisites'
+  /sites/{siteId}/llmo/edge-optimize/origins:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-origins'
+  /sites/{siteId}/llmo/edge-optimize/behaviors:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-behaviors'
+  /sites/{siteId}/llmo/edge-optimize/create-origin:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-create-origin'
+  /sites/{siteId}/llmo/edge-optimize/create-function:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-create-function'
+  /sites/{siteId}/llmo/edge-optimize/apply-cache:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-apply-cache'
+  /sites/{siteId}/llmo/edge-optimize/create-lambda:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-create-lambda'
+  /sites/{siteId}/llmo/edge-optimize/lambda-status:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-lambda-status'
+  /sites/{siteId}/llmo/edge-optimize/apply-associations:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-apply-associations'
+  /sites/{siteId}/llmo/edge-optimize/verify:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-verify'
+  /sites/{siteId}/llmo/edge-optimize/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-deploy'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
