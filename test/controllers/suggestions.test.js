@@ -8499,6 +8499,69 @@ describe('Suggestions Controller', () => {
       expect(payload.patternBasedSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
     });
 
+    it('chunks pattern-based-covered-marking jobs when payload exceeds SQS message size', async () => {
+      const suggestionIds = Array.from(
+        { length: 7000 },
+        (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      );
+      const domainWideSuggestions = suggestionIds.map((id, index) => ({
+        getId: () => id,
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => index + 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/.*$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      }));
+      const suggestionsById = new Map(
+        domainWideSuggestions.map((suggestion) => [suggestion.getId(), suggestion]),
+      );
+      mockSuggestion.findById.callsFake(async (id) => suggestionsById.get(id) || null);
+      mockSuggestion.allByOpportunityId.resolves(domainWideSuggestions);
+
+      const suggestionsControllerWithImportWorkerQueue = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker',
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: domainWideSuggestions,
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      });
+
+      await suggestionsControllerWithImportWorkerQueue.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds },
+      });
+
+      expect(mockSqs.sendMessage.callCount).to.be.greaterThan(1);
+      const sentPayloads = mockSqs.sendMessage.getCalls().map((call) => call.args[1]);
+      expect(sentPayloads.flatMap((payload) => payload.patternBasedSuggestionIds)).to.have.lengthOf(7000);
+      sentPayloads.forEach((payload) => {
+        expect(Buffer.byteLength(JSON.stringify(payload), 'utf8')).to.be.at.most(240 * 1024);
+      });
+      expect(context.log.info.calledWithMatch('Splitting covered marking')).to.equal(true);
+    });
+
     it('logs warning but still returns 207 when pattern-based-covered-marking SQS enqueue fails', async () => {
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],

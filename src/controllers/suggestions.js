@@ -58,6 +58,132 @@ import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+const SQS_MAX_MESSAGE_SIZE_BYTES = 256 * 1024;
+const SQS_SAFE_MESSAGE_SIZE_BYTES = Math.floor((SQS_MAX_MESSAGE_SIZE_BYTES * 15) / 16);
+
+function createPatternJobPayload({
+  type,
+  siteId,
+  opportunityId,
+  patternBasedSuggestionIds,
+}) {
+  return {
+    type,
+    siteId,
+    opportunityId,
+    patternBasedSuggestionIds,
+  };
+}
+
+function getMessageSizeBytes(payload) {
+  return Buffer.byteLength(JSON.stringify(payload), 'utf8');
+}
+
+function createPatternJobPayloadChunks(job) {
+  const fullPayload = createPatternJobPayload(job);
+  const fullPayloadSizeBytes = getMessageSizeBytes(fullPayload);
+
+  if (fullPayloadSizeBytes <= SQS_SAFE_MESSAGE_SIZE_BYTES) {
+    return [{ payload: fullPayload, payloadSizeBytes: fullPayloadSizeBytes }];
+  }
+
+  const chunks = [];
+  let currentIds = [];
+  let currentPayloadSizeBytes = 0;
+
+  job.patternBasedSuggestionIds.forEach((id) => {
+    const candidatePayload = createPatternJobPayload({
+      ...job,
+      patternBasedSuggestionIds: [...currentIds, id],
+    });
+    const candidatePayloadSizeBytes = getMessageSizeBytes(candidatePayload);
+
+    if (candidatePayloadSizeBytes > SQS_SAFE_MESSAGE_SIZE_BYTES) {
+      if (currentIds.length === 0) {
+        throw new Error(
+          `Pattern job payload for suggestion ${id} exceeds safe SQS message size threshold`,
+        );
+      }
+
+      chunks.push({
+        payload: createPatternJobPayload({
+          ...job,
+          patternBasedSuggestionIds: currentIds,
+        }),
+        payloadSizeBytes: currentPayloadSizeBytes,
+      });
+      currentIds = [id];
+      currentPayloadSizeBytes = getMessageSizeBytes(createPatternJobPayload({
+        ...job,
+        patternBasedSuggestionIds: currentIds,
+      }));
+    } else {
+      currentIds = [...currentIds, id];
+      currentPayloadSizeBytes = candidatePayloadSizeBytes;
+    }
+  });
+
+  if (currentIds.length > 0) {
+    chunks.push({
+      payload: createPatternJobPayload({
+        ...job,
+        patternBasedSuggestionIds: currentIds,
+      }),
+      payloadSizeBytes: currentPayloadSizeBytes,
+    });
+  }
+
+  return chunks;
+}
+
+async function enqueuePatternJob({
+  sqs,
+  queueUrl,
+  job,
+  log,
+  logPrefix,
+  actionLabel,
+  warningLabel,
+  skipLabel,
+}) {
+  const { patternBasedSuggestionIds } = job;
+  if (patternBasedSuggestionIds.length === 0) {
+    return;
+  }
+
+  if (!queueUrl) {
+    log.warn(
+      `[${logPrefix}] IMPORT_WORKER_QUEUE_URL not configured; skipping ${skipLabel} enqueue`,
+    );
+    return;
+  }
+
+  try {
+    const payloadChunks = createPatternJobPayloadChunks(job);
+    if (payloadChunks.length > 1) {
+      log.info(
+        `[${logPrefix}] Splitting ${actionLabel} into ${payloadChunks.length} SQS message(s)`,
+      );
+    }
+
+    await Promise.all(payloadChunks.map(async ({ payload, payloadSizeBytes }) => {
+      log.info(
+        `[${logPrefix}] Queueing pattern-based ${actionLabel} `
+        + `for ${payload.patternBasedSuggestionIds.length} suggestion(s); `
+        + `payloadSizeBytes=${payloadSizeBytes}`,
+      );
+
+      await sqs.sendMessage(queueUrl, payload);
+    }));
+
+    log.info(
+      `[${logPrefix}] Queued domain-wide ${actionLabel} for `
+      + `${patternBasedSuggestionIds.length} domain-wide suggestion(s)`,
+    );
+  } catch (sqsError) {
+    log.warn(`[${logPrefix}] Failed to queue domain-wide ${warningLabel}: ${sqsError.message}`);
+  }
+}
 
 async function isSitePlgTier(site, log) {
   try {
@@ -2205,36 +2331,21 @@ function SuggestionsController(ctx, sqs, env) {
         .map(({ suggestion }) => suggestion.getId())
         .filter((id) => succeededSuggestions.some((s) => s.getId() === id));
 
-      const { IMPORT_WORKER_QUEUE_URL } = env;
-      if (succeededDomainWideIds.length > 0 && IMPORT_WORKER_QUEUE_URL) {
-        try {
-          const coveredMarkingPayload = {
-            type: PATTERN_COVERED_MARKING_TYPE,
-            siteId,
-            opportunityId,
-            patternBasedSuggestionIds: succeededDomainWideIds,
-          };
-          const coveredMarkingPayloadSizeBytes = Buffer.byteLength(
-            JSON.stringify(coveredMarkingPayload),
-            'utf8',
-          );
-          context.log.info(
-            '[edge-deploy] Queueing pattern-based covered marking '
-            + `for ${succeededDomainWideIds.length} suggestion(s); `
-            + `payloadSizeBytes=${coveredMarkingPayloadSizeBytes}`,
-          );
-
-          await sqs.sendMessage(
-            IMPORT_WORKER_QUEUE_URL,
-            coveredMarkingPayload,
-          );
-          context.log.info(`[edge-deploy] Queued domain-wide covered marking for ${succeededDomainWideIds.length} domain-wide suggestion(s)`);
-        } catch (sqsError) {
-          context.log.warn(`[edge-deploy] Failed to queue domain-wide covered marking: ${sqsError.message}`);
-        }
-      } else if (succeededDomainWideIds.length > 0) {
-        context.log.warn('[edge-deploy] IMPORT_WORKER_QUEUE_URL not configured; skipping covered-marking enqueue');
-      }
+      await enqueuePatternJob({
+        sqs,
+        queueUrl: env.IMPORT_WORKER_QUEUE_URL,
+        job: {
+          type: PATTERN_COVERED_MARKING_TYPE,
+          siteId,
+          opportunityId,
+          patternBasedSuggestionIds: succeededDomainWideIds,
+        },
+        log: context.log,
+        logPrefix: 'edge-deploy',
+        actionLabel: 'covered marking',
+        warningLabel: 'covered marking',
+        skipLabel: 'covered-marking',
+      });
     } catch (error) {
       context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying to edge: ${error.message}`, error);
       allTargetSuggestions.forEach((suggestion) => {
@@ -2602,44 +2713,21 @@ function SuggestionsController(ctx, sqs, env) {
           .map((suggestion) => suggestion.getId())
           .filter((id) => succeededSuggestions.some((s) => s.getId() === id));
 
-        const { IMPORT_WORKER_QUEUE_URL } = env;
-        if (succeededDomainWideIds.length > 0 && IMPORT_WORKER_QUEUE_URL) {
-          try {
-            const coveredCleanupPayload = {
-              type: PATTERN_COVERED_CLEANUP_TYPE,
-              siteId,
-              opportunityId,
-              patternBasedSuggestionIds: succeededDomainWideIds,
-            };
-            const coveredCleanupPayloadSizeBytes = Buffer.byteLength(
-              JSON.stringify(coveredCleanupPayload),
-              'utf8',
-            );
-            context.log.info(
-              '[edge-rollback] Queueing pattern-based covered cleanup '
-              + `for ${succeededDomainWideIds.length} suggestion(s); `
-              + `payloadSizeBytes=${coveredCleanupPayloadSizeBytes}`,
-            );
-
-            await sqs.sendMessage(
-              IMPORT_WORKER_QUEUE_URL,
-              coveredCleanupPayload,
-            );
-            context.log.info(
-              '[edge-rollback] Queued domain-wide covered cleanup for '
-              + `${succeededDomainWideIds.length} domain-wide suggestion(s)`,
-            );
-          } catch (sqsError) {
-            context.log.warn(
-              `[edge-rollback] Failed to queue domain-wide covered cleanup: ${sqsError.message}`,
-            );
-          }
-        } else if (succeededDomainWideIds.length > 0) {
-          context.log.warn(
-            '[edge-rollback] IMPORT_WORKER_QUEUE_URL not configured; '
-            + 'skipping covered-cleanup enqueue',
-          );
-        }
+        await enqueuePatternJob({
+          sqs,
+          queueUrl: env.IMPORT_WORKER_QUEUE_URL,
+          job: {
+            type: PATTERN_COVERED_CLEANUP_TYPE,
+            siteId,
+            opportunityId,
+            patternBasedSuggestionIds: succeededDomainWideIds,
+          },
+          log: context.log,
+          logPrefix: 'edge-rollback',
+          actionLabel: 'covered cleanup',
+          warningLabel: 'covered cleanup',
+          skipLabel: 'covered-cleanup',
+        });
       } catch (error) {
         context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during rollback: ${error.message}`, error);
         validSuggestions.forEach((suggestion) => {
