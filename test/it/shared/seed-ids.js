@@ -47,6 +47,18 @@ export const MARKET_SITE_1_BASE_URL = 'https://semrush-market.example.fr';
 
 export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
 
+// ── FACS state-layer managers (hybrid-model §8.3) ──
+// The brandManager persona holds state-layer `llmo/can_manage_users` on
+// MANAGED_BRAND_ID only (seeded in facs-access-mappings.js). It has an EMPTY
+// JWT facs_permissions set, so its management authority is purely state-layer
+// and resource-scoped. UNMANAGED_BRAND_ID is a brand it does NOT manage.
+export const BRAND_MANAGER_SUBJECT = 'brand-manager@AdobeID';
+export const MANAGED_BRAND_ID = 'b0000001-0000-4000-8000-000000000001';
+export const UNMANAGED_BRAND_ID = 'b0000002-0000-4000-8000-000000000002';
+// A pre-seeded binding on the UNMANAGED brand, used to assert the brandManager
+// cannot PATCH / DELETE bindings on resources it does not manage.
+export const UNMANAGED_MAPPING_ID = 'aa000002-0000-4000-8000-000000000002';
+
 // ── Audits ──
 
 export const AUDIT_TYPE_CWV = 'cwv';
