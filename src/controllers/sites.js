@@ -1633,14 +1633,13 @@ function SitesController(ctx, log, env) {
     );
 
     const isOrgWaitingForIpAllowlisting = async (org) => {
-      const imsOrgId = org.getImsOrgId();
-      if (!hasText(imsOrgId) || !PlgOnboarding) {
+      if (!PlgOnboarding) {
         return false;
       }
       try {
-        const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
+        const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
         const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
-        return records?.some((r) => r.getStatus() === waitingStatus) ?? false;
+        return Array.isArray(records) && records.some((r) => r.getStatus() === waitingStatus);
       } catch (e) {
         log.warn('[resolveSite] PlgOnboarding lookup failed, treating as not waiting', e);
         return false;
