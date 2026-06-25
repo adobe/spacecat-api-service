@@ -89,7 +89,7 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
-import { areStagePathsSameAsBase } from '../../utils/url-utils.js';
+import { allHaveSamePathname } from '../../utils/url-utils.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -2040,7 +2040,7 @@ function LlmoController(ctx) {
         return badRequest('Staging domains must belong to the same base domain as the production site');
       }
 
-      if (!areStagePathsSameAsBase(stagingDomains, site.getBaseURL())) {
+      if (!allHaveSamePathname(stagingDomains, site.getBaseURL())) {
         return badRequest('Staging paths must be belong to the path as the production site');
       }
 

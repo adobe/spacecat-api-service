@@ -12,7 +12,7 @@
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import { isStagePathSameAsBase } from '../../../utils/url-utils.js';
+import { hasSamePathname } from '../../../utils/url-utils.js';
 import BaseCommand from './base.js';
 import {
   extractURLFromSlackInput,
@@ -112,7 +112,7 @@ function AddOaeStageDomainCommand(context) {
           throw new Error(`Stage domain \`${domain}\` already belongs to a different organization.`);
         }
 
-        if (!isStagePathSameAsBase(stageBaseURL, prodBaseURL)) {
+        if (!hasSamePathname(stageBaseURL, prodBaseURL)) {
           throw new Error(`Stage domain \`${domain}\` should be have same path for path scoped prod sites`);
         }
       }

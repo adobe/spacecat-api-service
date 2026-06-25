@@ -26,10 +26,10 @@ export function toPathname(url) {
   }
 }
 
-export function isStagePathSameAsBase(stageBaseUrl, prodBaseURL) {
-  return toPathname(stageBaseUrl) === toPathname(prodBaseURL);
+export function hasSamePathname(url, referenceUrl) {
+  return toPathname(url) === toPathname(referenceUrl);
 }
 
-export function areStagePathsSameAsBase(stageBaseUrls, prodBaseURL) {
-  return stageBaseUrls.every((stageBaseURL) => isStagePathSameAsBase(stageBaseURL, prodBaseURL));
+export function allHaveSamePathname(urls, referenceUrl) {
+  return urls.every((url) => hasSamePathname(url, referenceUrl));
 }
