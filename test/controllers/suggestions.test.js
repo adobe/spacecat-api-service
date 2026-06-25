@@ -6718,8 +6718,15 @@ describe('Suggestions Controller', () => {
 
   describe('deploySuggestionToEdge (Experiment Async Flow)', () => {
     let edgeSuggestions;
+    let suggestionsById;
     let mockDrsClient;
     const JOB_ID = 'c3a7b5e2-1234-4abc-9def-567890abcdef';
+    const setEdgeSuggestions = (suggestions) => {
+      suggestionsById = new Map(
+        suggestions.map((suggestion) => [suggestion.getId(), suggestion]),
+      );
+      mockSuggestion.allByOpportunityId.resolves(suggestions);
+    };
     const asyncExperimentEnv = {
       AWS_ENV: 'dev',
       EXPERIMENT_SCHEDULE_CONFIG: JSON.stringify({
@@ -6852,13 +6859,9 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(headingsOpportunity);
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
       mockSuggestion.allByOpportunityId.resetBehavior();
-      mockSuggestion.allByOpportunityId.resolves(edgeSuggestions);
+      setEdgeSuggestions(edgeSuggestions);
       mockSuggestion.findById.resetBehavior();
-      mockSuggestion.findById.callsFake(async (id) => {
-        const results = await mockSuggestion.allByOpportunityId(OPPORTUNITY_ID);
-        const suggestions = Array.isArray(results) ? results : results?.data || [];
-        return suggestions.find((suggestion) => suggestion.getId() === id) || null;
-      });
+      mockSuggestion.findById.callsFake(async (id) => suggestionsById.get(id) || null);
 
       mockDrsClient = {
         createExperimentSchedule: sandbox.stub().resolves({
@@ -6902,7 +6905,7 @@ describe('Suggestions Controller', () => {
           recommendedAction: 'New Heading Title',
         }),
       };
-      mockSuggestion.allByOpportunityId.resolves([noPromptsSugg]);
+      setEdgeSuggestions([noPromptsSugg]);
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -7085,7 +7088,7 @@ describe('Suggestions Controller', () => {
     });
 
     it('returns 207 with all failed suggestions when no valid suggestions found', async () => {
-      mockSuggestion.allByOpportunityId.resolves([]);
+      setEdgeSuggestions([]);
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -7097,6 +7100,31 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
+    });
+
+    it('returns 207 when a requested suggestion belongs to a different opportunity', async () => {
+      const crossOpportunitySuggestion = {
+        ...edgeSuggestions[0],
+        getOpportunityId: () => OPPORTUNITY_ID_NOT_ENABLED,
+      };
+      setEdgeSuggestions([crossOpportunitySuggestion]);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: {},
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0]).to.include({
+        uuid: SUGGESTION_IDS[0],
+        statusCode: 404,
+        message: 'Suggestion not found',
+      });
     });
 
     it('returns 207 with failure when GeoExperiment data access is missing', async () => {
@@ -7150,7 +7178,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([approvedSugg]);
+      setEdgeSuggestions([approvedSugg]);
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -7175,7 +7203,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSugg]);
+      setEdgeSuggestions([domainWideSugg]);
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -7225,7 +7253,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSugg, regularSugg]);
+      setEdgeSuggestions([domainWideSugg, regularSugg]);
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -7312,7 +7340,7 @@ describe('Suggestions Controller', () => {
         }),
       };
       // Ordered low-before-high in allSuggestions to confirm sort reorders them
-      mockSuggestion.allByOpportunityId.resolves([
+      setEdgeSuggestions([
         domainWideSugg, lowScoreSugg, highScoreSugg, approvedSugg,
       ]);
 
@@ -7413,7 +7441,7 @@ describe('Suggestions Controller', () => {
         }),
       };
 
-      mockSuggestion.allByOpportunityId.resolves([
+      setEdgeSuggestions([
         domainWideSugg, eligibleSugg, deployedSugg, noSummarySugg, notValuableSugg,
       ]);
 
@@ -7484,7 +7512,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSugg, regularSugg]);
+      setEdgeSuggestions([domainWideSugg, regularSugg]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().callsFake(async () => {
@@ -7546,7 +7574,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, coveredSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, coveredSuggestion]);
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().callsFake(async ({ updatedBy }) => {
           coveredSuggestion.setUpdatedBy(updatedBy);
@@ -7607,7 +7635,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, skippedSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, skippedSuggestion]);
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().callsFake(async ({ updatedBy }) => {
           skippedSuggestion.setUpdatedBy(updatedBy);
@@ -8034,7 +8062,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([staleSuggestion, ineligibleSuggestion]);
+      setEdgeSuggestions([staleSuggestion, ineligibleSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().callsFake(async () => {
@@ -8109,7 +8137,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, coveredSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, coveredSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().resolves({
@@ -8173,7 +8201,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, nonCoveredSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, nonCoveredSuggestion]);
 
       const deployToEdgeStub = sandbox.stub().resolves({
         succeededSuggestions: [domainWideSuggestion, nonCoveredSuggestion],
@@ -8290,7 +8318,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, skippedSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, skippedSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().callsFake(async () => {
@@ -8355,7 +8383,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().rejects(new Error('save failed')),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, skippedSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, skippedSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().resolves({
@@ -8422,7 +8450,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().rejects(new Error('covered save failed')),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, coveredSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, coveredSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().callsFake(async () => {
@@ -8467,7 +8495,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion]);
 
       const suggestionsControllerWithImportWorkerQueue = SuggestionsController({
         dataAccess: mockSuggestionDataAccess,
@@ -8527,11 +8555,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       }));
-      const suggestionsById = new Map(
-        domainWideSuggestions.map((suggestion) => [suggestion.getId(), suggestion]),
-      );
-      mockSuggestion.findById.callsFake(async (id) => suggestionsById.get(id) || null);
-      mockSuggestion.allByOpportunityId.resolves(domainWideSuggestions);
+      setEdgeSuggestions(domainWideSuggestions);
 
       const suggestionsControllerWithImportWorkerQueue = SuggestionsController({
         dataAccess: mockSuggestionDataAccess,
@@ -8596,7 +8620,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion]);
 
       const failingSqs = { sendMessage: sandbox.stub().rejects(new Error('SQS unavailable')) };
       const suggestionsControllerWithFailingSqs = SuggestionsController({
@@ -8647,7 +8671,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion]);
 
       const suggestionsControllerWithoutImportWorkerQueue = SuggestionsController({
         dataAccess: mockSuggestionDataAccess,
@@ -8710,7 +8734,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, noUrlSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion, noUrlSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().resolves({
@@ -8784,7 +8808,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([
+      setEdgeSuggestions([
         domainWideSuggestion,
         noUrlRequestedSuggestion,
         nonRequestedCoveredSuggestion,
@@ -8831,7 +8855,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion]);
 
       const deployToEdgeStub = sandbox.stub().resolves({
         succeededSuggestions: [domainWideSuggestion],
@@ -8907,7 +8931,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([
+      setEdgeSuggestions([
         domainWideSuggestion,
         approvedSuggestion,
         secondaryDomainWideSuggestion,
@@ -8952,7 +8976,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').returns({
         deployToEdge: sandbox.stub().resolves({
@@ -8997,7 +9021,7 @@ describe('Suggestions Controller', () => {
         setUpdatedBy: sandbox.stub().returnsThis(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+      setEdgeSuggestions([domainWideSuggestion]);
 
       sandbox.stub(TokowakaClient, 'createFrom').throws(new Error('tokowaka init failed'));
 

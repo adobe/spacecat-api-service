@@ -79,6 +79,10 @@ function getMessageSizeBytes(payload) {
   return Buffer.byteLength(JSON.stringify(payload), 'utf8');
 }
 
+function getJsonValueSizeBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
 export function createPatternJobPayloadChunks(job) {
   const fullPayload = createPatternJobPayload(job);
   const fullPayloadSizeBytes = getMessageSizeBytes(fullPayload);
@@ -89,14 +93,17 @@ export function createPatternJobPayloadChunks(job) {
 
   const chunks = [];
   let currentIds = [];
-  let currentPayloadSizeBytes = 0;
+  const emptyPayloadSizeBytes = getMessageSizeBytes(createPatternJobPayload({
+    ...job,
+    patternBasedSuggestionIds: [],
+  }));
+  let currentPayloadSizeBytes = emptyPayloadSizeBytes;
 
   job.patternBasedSuggestionIds.forEach((id) => {
-    const candidatePayload = createPatternJobPayload({
-      ...job,
-      patternBasedSuggestionIds: [...currentIds, id],
-    });
-    const candidatePayloadSizeBytes = getMessageSizeBytes(candidatePayload);
+    const idPayloadSizeBytes = getJsonValueSizeBytes(id);
+    const candidatePayloadSizeBytes = currentPayloadSizeBytes
+      + idPayloadSizeBytes
+      + (currentIds.length > 0 ? 1 : 0);
 
     if (candidatePayloadSizeBytes > SQS_SAFE_MESSAGE_SIZE_BYTES) {
       if (currentIds.length === 0) {
@@ -113,12 +120,14 @@ export function createPatternJobPayloadChunks(job) {
         payloadSizeBytes: currentPayloadSizeBytes,
       });
       currentIds = [id];
-      currentPayloadSizeBytes = getMessageSizeBytes(createPatternJobPayload({
-        ...job,
-        patternBasedSuggestionIds: currentIds,
-      }));
+      currentPayloadSizeBytes = emptyPayloadSizeBytes + idPayloadSizeBytes;
+      if (currentPayloadSizeBytes > SQS_SAFE_MESSAGE_SIZE_BYTES) {
+        throw new Error(
+          `Pattern job payload for suggestion ${id} exceeds safe SQS message size threshold`,
+        );
+      }
     } else {
-      currentIds = [...currentIds, id];
+      currentIds.push(id);
       currentPayloadSizeBytes = candidatePayloadSizeBytes;
     }
   });
@@ -1931,6 +1940,8 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
+    // suggestionIds is bounded by the request body; fetching only requested IDs
+    // avoids loading thousands of unrelated opportunity suggestions in this API path.
     const requestedSuggestions = await Promise.all(
       suggestionIds.map((suggestionId) => Suggestion.findById(suggestionId)),
     );
@@ -2608,6 +2619,8 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
+    // suggestionIds is bounded by the request body; fetching only requested IDs
+    // avoids loading thousands of unrelated opportunity suggestions in this API path.
     const requestedSuggestions = await Promise.all(
       suggestionIds.map((suggestionId) => Suggestion.findById(suggestionId)),
     );
@@ -2711,7 +2724,7 @@ function SuggestionsController(ctx, sqs, env) {
         // outside the API request path to avoid large synchronous save fanout.
         const succeededSuggestionIds = new Set(succeededSuggestions.map((s) => s.getId()));
         const succeededDomainWideIds = validPatterns
-          .filter((suggestion) => suggestion.getData()?.isDomainWide === true)
+          .filter(isDomainWideSuggestion)
           .map((suggestion) => suggestion.getId())
           .filter((id) => succeededSuggestionIds.has(id));
 
