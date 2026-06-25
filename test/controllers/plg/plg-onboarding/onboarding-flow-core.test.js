@@ -430,7 +430,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       expect(loadProfileConfigStub).to.have.been.calledWith('aso_plg');
       expect(createOrFindOrganizationStub).to.have.been.calledWith(TEST_IMS_ORG_ID, context);
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(TEST_BASE_URL);
-      expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: TEST_BASE_URL });
+      expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: TEST_BASE_URL, headers: {} });
       expect(findDeliveryTypeStub).to.have.been.calledWith(TEST_BASE_URL);
       expect(mockDataAccess.Site.create).to.have.been.called;
       expect(enableImportsStub).to.have.been.called;

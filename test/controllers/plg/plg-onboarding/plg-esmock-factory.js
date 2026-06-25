@@ -61,6 +61,15 @@ export async function createPlgEsmock(stubs, {
         isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
         resolveCanonicalUrl: resolveCanonicalUrlStub,
       },
+      // Keep onboarding tests hermetic: delegate the multi-client probe to the
+      // injected @adobe/fetch stub (detectBotBlockerFn) instead of making a real
+      // undici network call. The multi-client aggregation is unit-tested separately.
+      '../../../../src/support/bot-blocker-multi-client.js': {
+        detectBotBlockerMultiClient: async ({ baseUrl, headers }, opts = {}) => {
+          const fn = opts.detectBotBlockerFn || detectBotBlockerStub;
+          return fn({ baseUrl, headers });
+        },
+      },
       '@adobe/spacecat-shared-http-utils': {
         badRequest: (msg) => ({ status: 400, value: msg }),
         created: (data) => ({ status: 201, value: data }),

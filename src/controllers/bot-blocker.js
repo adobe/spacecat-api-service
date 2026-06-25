@@ -11,12 +11,13 @@
  */
 
 import {
-  isNonEmptyObject, isValidUUID, detectBotBlocker,
+  isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../support/access-control-util.js';
+import { detectBotBlockerMultiClient } from '../support/bot-blocker-multi-client.js';
 
 /**
  * Creates a bot blocker controller instance
@@ -83,7 +84,10 @@ function BotBlockerController(ctx, log) {
 
       log.debug(`Checking bot blocker for site ${siteId} with baseURL: ${baseURL}, customHeaders: ${Object.keys(customHeaders).join(',') || 'none'}`);
 
-      const result = await detectBotBlocker({ baseUrl: baseURL, headers: customHeaders });
+      const result = await detectBotBlockerMultiClient(
+        { baseUrl: baseURL, headers: customHeaders },
+        { log },
+      );
 
       log.debug(`Bot blocker check completed for site ${siteId}: crawlable=${result.crawlable}, type=${result.type}, confidence=${result.confidence}`);
 
