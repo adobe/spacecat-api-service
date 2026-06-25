@@ -24,7 +24,6 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
-  isWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -90,6 +89,7 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
+import { areStagePathsSameAsBase } from '../../utils/url-utils.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -1995,19 +1995,6 @@ function LlmoController(ctx) {
   }
 
   /**
-   * Check if all staging domains are within the site scope of prodBaseURL.
-   * For non-subpath prod sites this is always true. For subpath prod sites
-   * (e.g. https://example.com/docs) every staging domain must share the same
-   * hostname and have a pathname that starts with the prod pathname.
-   * @param {string[]} stagingSiteUrls the list of staging site URLs to check.
-   * @param {string} prodBaseURL the production base URL to scope against.
-   * @returns {boolean}
-   */
-  function areStagingSitesUnderSiteScope(stagingSiteUrls, prodBaseURL) {
-    return stagingSiteUrls.every((stageSiteURL) => isWithinSiteScope(stageSiteURL, prodBaseURL));
-  }
-
-  /**
    * POST /sites/{siteId}/llmo/edge-optimize-config/stage
    * Adds staging domains for edge optimize (stage environment support).
    * Creates or finds stage sites in Spacecat (same org), creates Tokowaka metaconfig per stage site
@@ -2053,8 +2040,8 @@ function LlmoController(ctx) {
         return badRequest('Staging domains must belong to the same base domain as the production site');
       }
 
-      if (!areStagingSitesUnderSiteScope(stagingDomains, site.getBaseURL())) {
-        return badRequest('Staging domains must be within the site scope of the production site');
+      if (!areStagePathsSameAsBase(stagingDomains, site.getBaseURL())) {
+        return badRequest('Staging paths must be belong to the path as the production site');
       }
 
       const tokowakaClient = TokowakaClient.createFrom(context);
