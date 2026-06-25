@@ -1633,9 +1633,6 @@ function SitesController(ctx, log, env) {
     );
 
     const isOrgWaitingForIpAllowlisting = async (org) => {
-      if (!PlgOnboarding) {
-        return false;
-      }
       try {
         const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
         const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;

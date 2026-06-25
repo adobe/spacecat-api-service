@@ -7232,26 +7232,6 @@ describe('Sites Controller', () => {
         expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
-      it('internal caller, PlgOnboarding unavailable in dataAccess → 404 site_not_enrolled (fail-open)', async () => {
-        context.data = {
-          siteId: SITE_IDS[0],
-          imsOrg: INTERNAL_ORG_IMS_ID,
-          callerImsOrg: INTERNAL_ORG_IMS_ID,
-        };
-        mockDataAccess.Site.findById.resolves(testSites[0]);
-        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
-        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
-        const originalPlgOnboarding = mockDataAccess.PlgOnboarding;
-        mockDataAccess.PlgOnboarding = undefined;
-
-        const response = await sitesController.resolveSite(context);
-
-        mockDataAccess.PlgOnboarding = originalPlgOnboarding;
-        expect(response.status).to.equal(404);
-        const body = await response.json();
-        expect(body.resolveStatus).to.equal('site_not_enrolled');
-      });
-
       it('internal caller, PlgOnboarding returns null records → 404 site_not_enrolled (null-safe)', async () => {
         context.data = {
           siteId: SITE_IDS[0],
