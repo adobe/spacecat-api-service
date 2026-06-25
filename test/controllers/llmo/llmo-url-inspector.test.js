@@ -454,6 +454,8 @@ describe('URL Inspector Handlers', () => {
             { week_start: '2026-01-12', value: 4400 },
             { week_start: '2026-01-19', value: 5000 },
           ],
+          avg_citability_score: 88.0,
+          deployed_at_edge: true,
           total_count: 100,
         },
         {
@@ -464,6 +466,24 @@ describe('URL Inspector Handlers', () => {
           regions: ['US'],
           weekly_citations: [{ week: '2026-W10', value: 15 }],
           weekly_prompts_cited: [{ week: '2026-W10', value: 4 }],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
+          referral_hits: 0,
+          referral_hits_trend: [],
+          avg_citability_score: null,
+          deployed_at_edge: false,
+          total_count: 100,
+        },
+        {
+          // Row that OMITS citability/deployed entirely (defends the deploy-order
+          // gap where an older RPC hasn't shipped the columns yet).
+          url: 'https://example.com/page3',
+          citations: 10,
+          prompts_cited: 2,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
           agentic_hits: 0,
           agentic_hits_trend: [],
           referral_hits: 0,
@@ -481,7 +501,7 @@ describe('URL Inspector Handlers', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(body.urls).to.have.length(2);
+      expect(body.urls).to.have.length(3);
       expect(body.totalCount).to.equal(100);
       expect(body.urls[0].url).to.equal('https://example.com/page1');
       expect(body.urls[0].citations).to.equal(42);
@@ -506,6 +526,10 @@ describe('URL Inspector Handlers', () => {
       ]);
       expect(body.urls[1].referralHits).to.equal(0);
       expect(body.urls[1].referralHitsTrend).to.deep.equal([]);
+      // LLMO-5586: citability/deployed are NOT surfaced here — the owned table
+      // sources them UI-side (single citability source, Anuj's RCV hook).
+      expect(body.urls[0]).to.not.have.property('avgCitabilityScore');
+      expect(body.urls[0]).to.not.have.property('deployedAtEdge');
     });
 
     // Same defence-in-depth as the agentic-trend test below — referral side
@@ -838,10 +862,10 @@ describe('URL Inspector Handlers', () => {
     });
 
     it('forwards every whitelisted referralSource verbatim', async () => {
-      // Pin the four known sources so a future contributor adding (or
+      // Pin the known sources so a future contributor adding (or
       // removing) one in the whitelist must update this assertion in lock-
       // step with the controller + the underlying RPC's CASE branches.
-      for (const source of ['optel', 'cdn', 'adobe_analytics', 'ga4']) {
+      for (const source of ['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']) {
         // eslint-disable-next-line no-await-in-loop
         const { context, rpcStub } = createContext(
           {},

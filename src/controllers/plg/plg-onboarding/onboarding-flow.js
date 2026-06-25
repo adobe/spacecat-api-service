@@ -379,6 +379,7 @@ async function handlePreonboardedFastPath({
     const { entitlement } = await ensureAsoEntitlement(site, organization, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
     await updateLaunchDarklyFlags(site, organization, context);
+    await enrollPlgConfigHandlers(site, context);
 
     const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
     if (needsOrgReassignment) {
@@ -636,6 +637,43 @@ export async function performAsoPlgOnboarding({
     }
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
+
+    // Step 5a: Alert when detected delivery type differs from the stored one.
+    // Skip for newly created sites — delivery type was just set from findDeliveryType in Step 5.
+    // We alert instead of auto-correcting because findDeliveryType is not 100% reliable.
+    if (!presetDeliveryType && !steps.siteCreated) {
+      const existingDeliveryType = site.getDeliveryType();
+      let detectedDeliveryType;
+      try {
+        detectedDeliveryType = await findDeliveryType(baseURL);
+      } catch (e) {
+        log.warn(`Failed to detect delivery type for ${baseURL}: ${e.message}`);
+      }
+      if (
+        detectedDeliveryType
+        && detectedDeliveryType !== SiteModel.DELIVERY_TYPES.OTHER
+        && detectedDeliveryType !== existingDeliveryType
+      ) {
+        log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${existingDeliveryType} detected=${detectedDeliveryType}`);
+        const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+        const token = env.SLACK_BOT_TOKEN;
+        /* c8 ignore next */
+        if (channelId && token) {
+          const message = ':warning: *PLG Onboarding — Delivery Type Mismatch*\n\n'
+            + `• *Site ID:* \`${site.getId()}\`\n`
+            + `• *Domain:* \`${baseURL}\`\n`
+            + `• *Org ID:* \`${organizationId}\`\n`
+            + `• *Org:* ${organization.getName()} (\`${imsOrgId}\`)\n`
+            + `• *Stored delivery type:* \`${existingDeliveryType}\`\n`
+            + `• *Detected delivery type:* \`${detectedDeliveryType}\``;
+          try {
+            await context.postSlackMessage(channelId, message, token);
+          } catch (err) {
+            log.error(`Failed to post delivery type mismatch alert: ${err.message}`);
+          }
+        }
+      }
+    }
 
     // Step 5b: Resolve canonical URL early so the RUM lookup uses the correct hostname
     const siteConfig = site.getConfig();

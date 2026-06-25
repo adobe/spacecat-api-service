@@ -30,7 +30,7 @@ import { checkDateRange } from './traffic-date-range.js';
 const ERR_SITE_ACCESS = 'belonging to the organization';
 const ERR_NOT_FOUND = 'not found';
 
-const VALID_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
+const VALID_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']);
 const DEFAULT_SOURCE = 'optel';
 
 const SOURCE_TO_TABLE = {
@@ -38,6 +38,7 @@ const SOURCE_TO_TABLE = {
   cdn: 'referral_traffic_cdn',
   adobe_analytics: 'referral_traffic_adobe_analytics',
   ga4: 'referral_traffic_ga4',
+  cja: 'referral_traffic_cja',
 };
 
 const DEFAULT_BY_URL_PAGE_SIZE = 50;
@@ -557,7 +558,7 @@ export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
  * GET /sites/:siteId/referral-traffic/weeks
  *
  * Returns the ISO weeks for which the site has referral traffic data for the
- * requested source. Accepts ?source (optel|cdn|adobe_analytics|ga4, default optel).
+ * requested source. Accepts ?source (optel|cdn|adobe_analytics|ga4|cja, default optel).
  * Powers the ContinuousWeekPicker (custom-weeks time range option) — each source
  * tab passes its own source so the picker shows only weeks where that source has data.
  *
@@ -631,16 +632,18 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
 /**
  * GET /sites/:siteId/referral-traffic/business-impact
  *
- * Aggregates business metrics from adobe_analytics or ga4 sources. Returns a
+ * Aggregates business metrics from adobe_analytics, ga4 or cja sources. Returns a
  * normalized shape so the UI can render the same metric cards regardless of
- * provider. Defaults to source=adobe_analytics; caller passes ?source=ga4 for GA4.
+ * provider. Defaults to source=adobe_analytics; caller passes ?source=ga4 or
+ * ?source=cja for the other providers. CJA mirrors adobe_analytics one-for-one.
  * Passing any other source (optel, cdn) returns a 400 — those sources do not
  * carry the business metric columns required by this endpoint.
  *
  * bounce_rate is computed server-side as SUM(bounces) / SUM(visits); null when
  * visits = 0.
  */
-const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics']);
+const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics', 'cja']);
+const DEFAULT_BUSINESS_IMPACT_SOURCE = 'adobe_analytics';
 
 // ============================================================================
 // /by-url-trend
@@ -705,9 +708,9 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
         const q = ctx.data || {};
         const rawSource = q.source;
         if (rawSource != null && !VALID_BUSINESS_IMPACT_SOURCES.has(rawSource)) {
-          return badRequest('Business impact is only available for adobe_analytics and ga4 sources');
+          return badRequest('Business impact is only available for adobe_analytics, ga4 and cja sources');
         }
-        const source = rawSource === 'ga4' ? 'ga4' : 'adobe_analytics';
+        const source = rawSource != null ? rawSource : DEFAULT_BUSINESS_IMPACT_SOURCE;
         const parsed = { ...parseParams(ctx), source };
 
         const { data, error } = await client.rpc(

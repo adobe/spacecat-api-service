@@ -1,3 +1,4 @@
 npx lint-staged
 npm run docs:lint
+npm run type-check
 

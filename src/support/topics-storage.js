@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { throwOnPgConstraintViolation } from './errors.js';
 
@@ -141,17 +141,30 @@ export async function createTopic({
   // categoryId is a UUID FK to categories.id — resolve it from the payload.
   const categoryId = topic.categoryId || null;
   if (categoryId && data?.id) {
-    const { error: junctionError } = await postgrestClient
-      .from('topic_categories')
-      .upsert(
-        { topic_id: data.id, category_id: categoryId },
-        { onConflict: 'topic_id,category_id' },
-      );
-    // Upsert errors are intentionally not thrown — the topic was already
-    // created successfully.  A missing or invalid categoryId should not
-    // fail the entire operation.
-    if (junctionError) {
-      log?.warn(`Failed to link topic ${data.id} to category ${categoryId}: ${junctionError.message}`);
+    if (!isValidUUID(categoryId)) {
+      // A non-UUID categoryId (e.g. a category slug / business-key) can never
+      // satisfy the uuid FK to categories.id and would only produce a
+      // guaranteed PostgREST 400. Skip the doomed write rather than emit it.
+      // The value is caller-controlled and unbounded — truncate it so a
+      // malformed payload cannot produce multi-KB log lines.
+      log?.warn(`Skipping topic_categories link for topic ${data.id}: categoryId "${String(categoryId).slice(0, 64)}" is not a valid UUID`);
+    } else {
+      const { error: junctionError } = await postgrestClient
+        .from('topic_categories')
+        .upsert(
+          { topic_id: data.id, category_id: categoryId },
+          { onConflict: 'topic_id,category_id' },
+        );
+      // Upsert errors are intentionally not thrown — the topic was already
+      // created successfully. A missing or invalid categoryId should not fail
+      // the entire operation. The SQLSTATE + details are logged (not just the
+      // message) so a recurring failure — e.g. 23503 when the category row is
+      // not committed yet or belongs to another org — is diagnosable.
+      if (junctionError) {
+        const code = junctionError.code ?? 'n/a';
+        const details = junctionError.details ? `, details=${junctionError.details}` : '';
+        log?.warn(`Failed to link topic ${data.id} to category ${categoryId}: ${junctionError.message} (code=${code}${details})`);
+      }
     }
   }
 

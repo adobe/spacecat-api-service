@@ -200,6 +200,7 @@ async function resolveImsEmailsForPlgRecords(records, context) {
 const PLG_REJECTION_MESSAGES = {
   'internal-org': { emoji: ':no_entry:', label: 'Rejected — Internal Org' },
   'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
+  'frescopa-domain': { emoji: ':no_entry:', label: 'Rejected — Frescopa Domain' },
 };
 
 async function postPlgRejectionNotification(domain, imsOrgId, reason, context, org) {
@@ -289,6 +290,11 @@ function PlgOnboardingController(ctx) {
     if (!isValidDomain(domain)) {
       log.warn(`PLG onboard rejected — invalid domain syntax. rawDomain=${JSON.stringify(rawDomain)} normalized=${JSON.stringify(domain)} imsOrgId=${imsOrgId}`);
       return badRequest('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)');
+    }
+
+    if (domain.toLowerCase().includes('frescopa')) {
+      await postPlgRejectionNotification(domain, imsOrgId, 'frescopa-domain', context);
+      return badRequest('PLG onboarding is not available for frescopa domains');
     }
 
     try {
