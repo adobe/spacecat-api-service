@@ -6974,6 +6974,7 @@ describe('Sites Controller', () => {
       });
 
       it('internal caller, no entitlement + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product (PLG wizard preserved)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
         context.data = {
           siteId: SITE_IDS[0],
           imsOrg: INTERNAL_ORG_IMS_ID,
@@ -6991,6 +6992,27 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      it('internal caller, non-ASO product + WAITING_FOR_IP_ALLOWLISTING → 404 site_not_enrolled (PLG check skipped)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'LLMO' } };
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
       it('internal caller, no entitlement + other PlgOnboarding records (not WAITING) → 404 site_not_enrolled (remap preserved)', async () => {
@@ -7197,6 +7219,7 @@ describe('Sites Controller', () => {
       });
 
       it('internal caller, organizationId path: no entitlement + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
         context.data = {
           organizationId: INTERNAL_ORG_SPACECAT_ID,
           callerImsOrg: INTERNAL_ORG_IMS_ID,
@@ -7215,6 +7238,7 @@ describe('Sites Controller', () => {
       });
 
       it('internal caller, PlgOnboarding lookup throws → 404 site_not_enrolled (fail-open)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
         context.data = {
           siteId: SITE_IDS[0],
           imsOrg: INTERNAL_ORG_IMS_ID,
@@ -7233,6 +7257,7 @@ describe('Sites Controller', () => {
       });
 
       it('internal caller, PlgOnboarding returns null records → 404 site_not_enrolled (null-safe)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
         context.data = {
           siteId: SITE_IDS[0],
           imsOrg: INTERNAL_ORG_IMS_ID,
@@ -7241,6 +7266,40 @@ describe('Sites Controller', () => {
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
         mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves(null);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, organizationId path: PlgOnboarding lookup throws → 404 site_not_enrolled (fail-open)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.rejects(new Error('DB error'));
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, organizationId path: PlgOnboarding returns null records → 404 site_not_enrolled (null-safe)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
         mockDataAccess.PlgOnboarding.allByImsOrgId.resolves(null);
 
         const response = await sitesController.resolveSite(context);

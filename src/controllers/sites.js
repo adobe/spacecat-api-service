@@ -57,7 +57,7 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
-import { STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
+import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -1633,6 +1633,9 @@ function SitesController(ctx, log, env) {
     );
 
     const isOrgWaitingForIpAllowlisting = async (org) => {
+      if (productCode !== ASO_PRODUCT_CODE) {
+        return false;
+      }
       try {
         const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
         const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
