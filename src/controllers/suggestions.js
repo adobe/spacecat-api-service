@@ -79,7 +79,7 @@ function getMessageSizeBytes(payload) {
   return Buffer.byteLength(JSON.stringify(payload), 'utf8');
 }
 
-function createPatternJobPayloadChunks(job) {
+export function createPatternJobPayloadChunks(job) {
   const fullPayload = createPatternJobPayload(job);
   const fullPayloadSizeBytes = getMessageSizeBytes(fullPayload);
 
@@ -2327,9 +2327,10 @@ function SuggestionsController(ctx, sqs, env) {
       // Enqueue async covered marking for deployed domain-wide suggestions.
       // The sync Promise.all inside deployToEdge times out at 2-3k+ suggestions;
       // the import worker job guarantees marking happens regardless.
+      const succeededSuggestionIds = new Set(succeededSuggestions.map((s) => s.getId()));
       const succeededDomainWideIds = domainWideSuggestions
         .map(({ suggestion }) => suggestion.getId())
-        .filter((id) => succeededSuggestions.some((s) => s.getId() === id));
+        .filter((id) => succeededSuggestionIds.has(id));
 
       await enqueuePatternJob({
         sqs,
@@ -2708,10 +2709,11 @@ function SuggestionsController(ctx, sqs, env) {
         // Enqueue async covered cleanup for rolled-back domain-wide suggestions.
         // The import worker removes coveredByDomainWide from affected URL suggestions
         // outside the API request path to avoid large synchronous save fanout.
+        const succeededSuggestionIds = new Set(succeededSuggestions.map((s) => s.getId()));
         const succeededDomainWideIds = validPatterns
           .filter((suggestion) => suggestion.getData()?.isDomainWide === true)
           .map((suggestion) => suggestion.getId())
-          .filter((id) => succeededSuggestions.some((s) => s.getId() === id));
+          .filter((id) => succeededSuggestionIds.has(id));
 
         await enqueuePatternJob({
           sqs,

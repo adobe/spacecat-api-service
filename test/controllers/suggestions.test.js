@@ -22,7 +22,9 @@ import { ValidationError, Site as SiteModel } from '@adobe/spacecat-shared-data-
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
-import SuggestionsController from '../../src/controllers/suggestions.js';
+import SuggestionsController, {
+  createPatternJobPayloadChunks,
+} from '../../src/controllers/suggestions.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -8499,11 +8501,12 @@ describe('Suggestions Controller', () => {
       expect(payload.patternBasedSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
     });
 
-    it('chunks pattern-based-covered-marking jobs when payload exceeds SQS message size', async () => {
-      const suggestionIds = Array.from(
-        { length: 7000 },
-        (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
-      );
+    it('chunks pattern-based-covered-marking jobs when payload exceeds SQS safe size', async () => {
+      const suggestionIds = [
+        'a'.repeat(100 * 1024),
+        'b'.repeat(100 * 1024),
+        'c'.repeat(100 * 1024),
+      ];
       const domainWideSuggestions = suggestionIds.map((id, index) => ({
         getId: () => id,
         getType: () => 'headings',
@@ -8546,20 +8549,30 @@ describe('Suggestions Controller', () => {
         }),
       });
 
-      await suggestionsControllerWithImportWorkerQueue.deploySuggestionToEdge({
+      const response = await suggestionsControllerWithImportWorkerQueue.deploySuggestionToEdge({
         ...context,
         pathInfo: { headers: {} },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds },
       });
 
+      expect(response.status).to.equal(207);
       expect(mockSqs.sendMessage.callCount).to.be.greaterThan(1);
       const sentPayloads = mockSqs.sendMessage.getCalls().map((call) => call.args[1]);
-      expect(sentPayloads.flatMap((payload) => payload.patternBasedSuggestionIds)).to.have.lengthOf(7000);
+      expect(sentPayloads.flatMap((payload) => payload.patternBasedSuggestionIds)).to.have.lengthOf(3);
       sentPayloads.forEach((payload) => {
         expect(Buffer.byteLength(JSON.stringify(payload), 'utf8')).to.be.at.most(240 * 1024);
       });
       expect(context.log.info.calledWithMatch('Splitting covered marking')).to.equal(true);
+    });
+
+    it('throws when a single pattern-based-covered-marking id exceeds SQS safe size', () => {
+      expect(() => createPatternJobPayloadChunks({
+        type: 'pattern-based-covered-marking',
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        patternBasedSuggestionIds: ['a'.repeat(250 * 1024)],
+      })).to.throw('exceeds safe SQS message size threshold');
     });
 
     it('logs warning but still returns 207 when pattern-based-covered-marking SQS enqueue fails', async () => {
