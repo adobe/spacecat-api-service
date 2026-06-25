@@ -141,6 +141,52 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
+   * Resolves the caller's Cloudflare token into a client, or a badRequest when it is missing.
+   * @returns {{ client: CloudflareClient } | { error: Response }}
+   */
+  const requireCfClient = (context) => {
+    const cfToken = getCfToken(context);
+    if (!cfToken) {
+      return { error: badRequest(CF_TOKEN_MISSING) };
+    }
+    return { client: new CloudflareClient({ token: cfToken }, log) };
+  };
+
+  /**
+   * Derives the service-owned worker name for a site, or a badRequest when the site base URL
+   * yields no usable slug.
+   * @returns {{ scriptName: string } | { error: Response }}
+   */
+  const requireScriptName = (site) => {
+    const scriptName = deriveWorkerName(site.getBaseURL());
+    if (!scriptName) {
+      log.error(`Unable to derive a worker name from site base URL ${site.getBaseURL()}`);
+      return { error: badRequest('Unable to derive a worker name from the site base URL') };
+    }
+    return { scriptName };
+  };
+
+  /**
+   * Builds a handler for a parameter-less Cloudflare list call (accounts, zones, ...): runs
+   * access control + token resolution, invokes `cfClient[method]()`, and maps failures.
+   */
+  const cfListProxy = (method, action) => async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+    const { client, error } = requireCfClient(context);
+    if (error) {
+      return error;
+    }
+    try {
+      return ok(await client[method]());
+    } catch (e) {
+      return cfErrorResponse(e, action);
+    }
+  };
+
+  /**
    * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config
    * Returns the Cloudflare OAuth client ID for browser PKCE flow.
    */
@@ -158,51 +204,11 @@ function LlmoCloudflareController(ctx) {
     return ok({ clientId });
   };
 
-  /**
-   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
-   */
-  const listAccounts = async (context) => {
-    const result = await getSiteAndCheckAccess(context);
-    if (result.status) {
-      return result;
-    }
+  // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
+  const listAccounts = cfListProxy('listAccounts', 'account listing');
 
-    const cfToken = getCfToken(context);
-    if (!cfToken) {
-      return badRequest(CF_TOKEN_MISSING);
-    }
-
-    const cfClient = new CloudflareClient({ token: cfToken }, log);
-    try {
-      const accounts = await cfClient.listAccounts();
-      return ok(accounts);
-    } catch (e) {
-      return cfErrorResponse(e, 'account listing');
-    }
-  };
-
-  /**
-   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones
-   */
-  const listZones = async (context) => {
-    const result = await getSiteAndCheckAccess(context);
-    if (result.status) {
-      return result;
-    }
-
-    const cfToken = getCfToken(context);
-    if (!cfToken) {
-      return badRequest(CF_TOKEN_MISSING);
-    }
-
-    const cfClient = new CloudflareClient({ token: cfToken }, log);
-    try {
-      const zones = await cfClient.listZones();
-      return ok(zones);
-    } catch (e) {
-      return cfErrorResponse(e, 'zone listing');
-    }
-  };
+  // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones
+  const listZones = cfListProxy('listZones', 'zone listing');
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
@@ -218,16 +224,15 @@ function LlmoCloudflareController(ctx) {
     }
     const { site } = result;
 
-    const cfToken = getCfToken(context);
-    if (!cfToken) {
-      return badRequest(CF_TOKEN_MISSING);
+    const { client: cfClient, error: cfError } = requireCfClient(context);
+    if (cfError) {
+      return cfError;
     }
 
     // The worker name is owned by the service and derived from the site, not client-supplied.
-    const scriptName = deriveWorkerName(site.getBaseURL());
-    if (!scriptName) {
-      log.error(`Unable to derive a worker name from site base URL ${site.getBaseURL()}`);
-      return badRequest('Unable to derive a worker name from the site base URL');
+    const { scriptName, error: nameError } = requireScriptName(site);
+    if (nameError) {
+      return nameError;
     }
 
     const { accountId, targetHost } = context.data || {};
@@ -266,8 +271,6 @@ function LlmoCloudflareController(ctx) {
     } catch (e) {
       return cfErrorResponse(e, 'worker script fetch');
     }
-
-    const cfClient = new CloudflareClient({ token: cfToken }, log);
 
     const bindings = [
       { name: EDGE_OPTIMIZE_TARGET_HOST_BINDING, type: 'plain_text', text: targetHost },
@@ -323,16 +326,15 @@ function LlmoCloudflareController(ctx) {
     }
     const { site } = result;
 
-    const cfToken = getCfToken(context);
-    if (!cfToken) {
-      return badRequest(CF_TOKEN_MISSING);
+    const { client: cfClient, error: cfError } = requireCfClient(context);
+    if (cfError) {
+      return cfError;
     }
 
     // The route targets the service-owned worker derived from the site, not a client value.
-    const scriptName = deriveWorkerName(site.getBaseURL());
-    if (!scriptName) {
-      log.error(`Unable to derive a worker name from site base URL ${site.getBaseURL()}`);
-      return badRequest('Unable to derive a worker name from the site base URL');
+    const { scriptName, error: nameError } = requireScriptName(site);
+    if (nameError) {
+      return nameError;
     }
 
     const { zoneId } = context.params;
@@ -351,8 +353,6 @@ function LlmoCloudflareController(ctx) {
     if (!hostInSiteDomain(routePatternHost(pattern), site.getBaseURL())) {
       return badRequest('route pattern must target the site\'s domain');
     }
-
-    const cfClient = new CloudflareClient({ token: cfToken }, log);
 
     // Guard against overriding an existing route: fetch the zone's current routes and reject
     // if the requested pattern already exists.
