@@ -512,11 +512,11 @@ export default function getRouteHandlers(
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
 
     // LLMO Cloudflare Onboarding Routes
-    'GET /sites/:siteId/llmo/onboarding/cloudflare/config': llmoCloudflareController.getCloudflareConfig,
-    'GET /sites/:siteId/llmo/onboarding/cloudflare/accounts': llmoCloudflareController.listAccounts,
-    'GET /sites/:siteId/llmo/onboarding/cloudflare/zones': llmoCloudflareController.listZones,
-    'POST /sites/:siteId/llmo/onboarding/cloudflare/deploy': llmoCloudflareController.deployWorker,
-    'POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes': llmoCloudflareController.addRoute,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': llmoCloudflareController.getCloudflareConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': llmoCloudflareController.listAccounts,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes': llmoCloudflareController.addRoute,
 
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,

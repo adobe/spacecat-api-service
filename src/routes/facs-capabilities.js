@@ -141,11 +141,11 @@ const routeFacsCapabilities = {
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
     // LLMO Cloudflare onboarding — LLMO-admin manual provisioning, gated by
     // isLLMOAdministrator() with a caller-supplied x-cloudflare-token; not a FACS surface.
-    'GET /sites/:siteId/llmo/onboarding/cloudflare/config',
-    'GET /sites/:siteId/llmo/onboarding/cloudflare/accounts',
-    'GET /sites/:siteId/llmo/onboarding/cloudflare/zones',
-    'POST /sites/:siteId/llmo/onboarding/cloudflare/deploy',
-    'POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)

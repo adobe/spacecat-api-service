@@ -636,15 +636,15 @@ paths:
     $ref: './llmo-api.yaml#/llmo-probe-edge-optimize'
   /sites/{siteId}/llmo/edge-optimize-routing:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
-  /sites/{siteId}/llmo/onboarding/cloudflare/config:
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/config:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-config'
-  /sites/{siteId}/llmo/onboarding/cloudflare/accounts:
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/accounts:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-accounts'
-  /sites/{siteId}/llmo/onboarding/cloudflare/zones:
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-zones'
-  /sites/{siteId}/llmo/onboarding/cloudflare/deploy:
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/deploy:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
-  /sites/{siteId}/llmo/onboarding/cloudflare/zones/{zoneId}/routes:
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones/{zoneId}/routes:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-zone-routes'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'

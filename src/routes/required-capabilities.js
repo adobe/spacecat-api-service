@@ -134,11 +134,11 @@ export const INTERNAL_ROUTES = [
 
   // LLMO Cloudflare onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
   // uses a caller-supplied x-cloudflare-token, not S2S JWT
-  'GET /sites/:siteId/llmo/onboarding/cloudflare/config',
-  'GET /sites/:siteId/llmo/onboarding/cloudflare/accounts',
-  'GET /sites/:siteId/llmo/onboarding/cloudflare/zones',
-  'POST /sites/:siteId/llmo/onboarding/cloudflare/deploy',
-  'POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',

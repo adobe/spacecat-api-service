@@ -129,7 +129,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * GET /sites/:siteId/llmo/onboarding/cloudflare/config
+   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config
    * Returns the Cloudflare OAuth client ID for browser PKCE flow.
    */
   const getCloudflareConfig = async (context) => {
@@ -147,7 +147,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * GET /sites/:siteId/llmo/onboarding/cloudflare/accounts
+   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
    */
   const listAccounts = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -170,7 +170,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * GET /sites/:siteId/llmo/onboarding/cloudflare/zones
+   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones
    */
   const listZones = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -193,7 +193,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * POST /sites/:siteId/llmo/onboarding/cloudflare/deploy
+   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
    * Body: { accountId, targetHost }
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), then sets the LLMO API key as the
@@ -288,7 +288,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes
+   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes
    * Body: { pattern, scriptName }
    * Verifies server-side that the pattern does not collide with an existing route in the zone
    * before creating it, so a deploy cannot silently override a route the customer already has.

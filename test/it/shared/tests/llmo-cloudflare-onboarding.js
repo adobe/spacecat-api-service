@@ -22,11 +22,11 @@ import {
  * Shared LLMO Cloudflare onboarding endpoint tests.
  *
  * Endpoints under test (src/controllers/llmo/llmo-cloudflare.js):
- *   GET  /sites/:siteId/llmo/onboarding/cloudflare/config
- *   GET  /sites/:siteId/llmo/onboarding/cloudflare/accounts
- *   GET  /sites/:siteId/llmo/onboarding/cloudflare/zones
- *   POST /sites/:siteId/llmo/onboarding/cloudflare/deploy
- *   POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes
+ *   GET  /sites/:siteId/llmo/cdn-onboard/cloudflare/config
+ *   GET  /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
+ *   GET  /sites/:siteId/llmo/cdn-onboard/cloudflare/zones
+ *   POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
+ *   POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes
  *
  * SCOPE — IT only exercises code paths that short-circuit BEFORE any external call.
  * The accounts/zones/deploy/route-create handlers ultimately call the external Cloudflare
@@ -61,7 +61,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('llmoAdmin: returns 404 for a non-existent site', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.get(
-          `/sites/${NON_EXISTENT_SITE_ID}/llmo/onboarding/cloudflare/config`,
+          `/sites/${NON_EXISTENT_SITE_ID}/llmo/cdn-onboard/cloudflare/config`,
         );
         expect(res.status).to.equal(404);
       });
@@ -69,7 +69,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('llmoAdmin: returns 403 for a site in another org', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.get(
-          `/sites/${SITE_3_ID}/llmo/onboarding/cloudflare/config`,
+          `/sites/${SITE_3_ID}/llmo/cdn-onboard/cloudflare/config`,
         );
         expect(res.status).to.equal(403);
       });
@@ -77,7 +77,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('user: returns 403 when the caller is not an LLMO administrator', async () => {
         const http = getHttpClient();
         const res = await http.user.get(
-          `/sites/${SITE_1_ID}/llmo/onboarding/cloudflare/config`,
+          `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/config`,
         );
         expect(res.status).to.equal(403);
       });
@@ -85,7 +85,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('admin: returns 403 — admin access does not grant the LLMO-admin role', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(
-          `/sites/${SITE_1_ID}/llmo/onboarding/cloudflare/config`,
+          `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/config`,
         );
         expect(res.status).to.equal(403);
       });
@@ -97,7 +97,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('llmoAdmin: returns the configured Cloudflare client ID', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.get(
-          `/sites/${SITE_1_ID}/llmo/onboarding/cloudflare/config`,
+          `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/config`,
         );
         expect(res.status).to.equal(200);
         expect(res.body).to.deep.equal({ clientId: 'it-cloudflare-client-id' });
@@ -110,7 +110,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('llmoAdmin: returns 400 when x-cloudflare-token header is missing', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.get(
-          `/sites/${SITE_1_ID}/llmo/onboarding/cloudflare/accounts`,
+          `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/accounts`,
         );
         expect(res.status).to.equal(400);
       });
@@ -120,7 +120,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('llmoAdmin: returns 400 when x-cloudflare-token header is missing', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.get(
-          `/sites/${SITE_1_ID}/llmo/onboarding/cloudflare/zones`,
+          `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/zones`,
         );
         expect(res.status).to.equal(400);
       });
@@ -129,7 +129,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
     // ── POST deploy — validation runs before any external call ─────────────────────
 
     describe('POST .../cloudflare/deploy', () => {
-      const deployPath = `/sites/${SITE_1_ID}/llmo/onboarding/cloudflare/deploy`;
+      const deployPath = `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/deploy`;
 
       it('returns 400 when x-cloudflare-token header is missing', async () => {
         const http = getHttpClient();
@@ -173,7 +173,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
     // ── POST route create — token, zoneId and body validation precede external calls ─
 
     describe('POST .../cloudflare/zones/:zoneId/routes', () => {
-      const routesPath = (zoneId) => `/sites/${SITE_1_ID}/llmo/onboarding/cloudflare/zones/${zoneId}/routes`;
+      const routesPath = (zoneId) => `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/zones/${zoneId}/routes`;
 
       it('returns 400 when x-cloudflare-token header is missing', async () => {
         const http = getHttpClient();
