@@ -65,16 +65,16 @@ export function hostnameFromUrlString(value) {
  * public-looking hostname pass this check; blocking resolution-time SSRF is the
  * downstream fetcher's responsibility and relies on network egress controls.
  *
- * @param {string} hostname - a URL or bare hostname (canonicalized internally)
+ * @param {string} hostnameOrUrl - a URL or bare hostname (canonicalized internally)
  * @returns {boolean} true when the host is a public domain name
  */
-export function isPublicHostname(hostname) {
-  if (!hostname || !hasText(hostname)) {
+export function isPublicHostname(hostnameOrUrl) {
+  if (!hostnameOrUrl || !hasText(hostnameOrUrl)) {
     return false;
   }
   // Canonicalize through WHATWG `URL` so the function is self-defending rather
   // than relying on every caller having passed `hostnameFromUrlString` output.
-  const normalized = hostnameFromUrlString(hostname);
+  const normalized = hostnameFromUrlString(hostnameOrUrl);
   if (normalized === null) {
     return false;
   }
