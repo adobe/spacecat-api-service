@@ -139,8 +139,18 @@ function serializeTicket(ticket, suggestions) {
  *   GET    /organizations/:organizationId/task-management/:provider/projects
  *
  * v1 scope — intentional deviations from the architecture spec (PR #150):
- *   - suggestionIds: only the first element is processed per request.
- *     Multi-suggestion batch creation (207 Multi-Status) is v2.
+ *   - Ticket creation modes (individual + grouped) are BOTH implemented in v1
+ *     contrary to the original scope which planned grouped as v2. The architecture
+ *     reviewers asked for clarity on multi-suggestion semantics; the implementation
+ *     resolves this by shipping both modes with explicit caps (individual: ≤10,
+ *     grouped: ≤400) and full idempotency enforcement.
+ *   - Attachment upload is included inline in POST /tickets (v1). The spec discussed
+ *     attachments as an optional feature; they are implemented with a partial-success
+ *     model: ticket creation succeeds even when attachment upload fails, with a
+ *     warning in the response body.
+ *   - Idempotency-Key header is enforced in v1 (not deferred). The idempotency_keys
+ *     table (DB PR #720) is used with a 24-hour TTL. Status machine: processing →
+ *     completed | failed. Duplicate requests return the cached response.
  *   - connectionId in POST body: accepted as an optional field. When provided, the
  *     specified connection is used directly. When absent, the single active connection
  *     for the org+provider is resolved automatically. The spec's mandatory 400 guard
@@ -514,7 +524,7 @@ function TaskManagementController(context) {
    *   "description":   "string (optional, plain text)",
    *   "issueType":     "string (optional, defaults to 'Task')",
    *   "labels":        ["string"] (optional),
-   *   "mode":          "'individual' (default) | 'grouped' (returns 400 in v1)",
+   *   "mode":          "'individual' (default) | 'grouped'",
    *   "suggestionIds": ["uuid"] — max 10; v1 processes only the first element,
    *   "opportunityId": "uuid (optional)"
    * }
