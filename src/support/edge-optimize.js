@@ -31,6 +31,7 @@ import {
   IAMClient,
   CreateRoleCommand,
   GetRoleCommand,
+  GetRolePolicyCommand,
   PutRolePolicyCommand,
   UpdateAssumeRolePolicyCommand,
 } from '@aws-sdk/client-iam';
@@ -948,6 +949,110 @@ export async function getEdgeOptimizeLambdaStatus(
 }
 
 /**
+ * Read-only inspection of the Lambda@Edge execution role so the Review screen can say whether an
+ * existing role (e.g. left by a prior partial run) is the right one. The deploy ALWAYS conforms the
+ * role to the required trust (lambda + edgelambda) and CloudWatch-logs policy, so this only drives
+ * the wording — it never changes behavior.
+ *
+ * @param {IAMClient} iam - an IAM client built with the connector credentials.
+ * @param {string} roleName - the EO Lambda@Edge execution role name.
+ * @returns {Promise<{exists: boolean, trustOk?: boolean, logsPolicyOk?: boolean}>}
+ */
+async function inspectEdgeOptimizeLambdaRole(iam, roleName) {
+  let role;
+  try {
+    const res = await iam.send(new GetRoleCommand({ RoleName: roleName }));
+    role = res.Role;
+  } catch (err) {
+    if (err.name === 'NoSuchEntityException') {
+      return { exists: false };
+    }
+    throw err;
+  }
+
+  // Trust must allow both lambda.amazonaws.com and edgelambda.amazonaws.com (Lambda@Edge).
+  let trustOk = false;
+  const rawTrust = role.AssumeRolePolicyDocument || '';
+  if (rawTrust) {
+    let doc = null;
+    try {
+      doc = JSON.parse(decodeURIComponent(rawTrust));
+    } catch {
+      doc = null;
+    }
+    const services = ((doc && doc.Statement) || []).flatMap((st) => {
+      const svc = st.Principal && st.Principal.Service;
+      return Array.isArray(svc) ? svc : [svc];
+    }).filter(Boolean);
+    trustOk = services.includes('lambda.amazonaws.com')
+      && services.includes('edgelambda.amazonaws.com');
+  }
+
+  // The CloudWatch-logs inline policy the deploy attaches.
+  let logsPolicyOk = false;
+  try {
+    await iam.send(new GetRolePolicyCommand({
+      RoleName: roleName,
+      PolicyName: 'EdgeOptimizeLambdaLogging',
+    }));
+    logsPolicyOk = true;
+  } catch (err) {
+    if (err.name !== 'NoSuchEntityException') {
+      throw err;
+    }
+  }
+
+  return { exists: true, trustOk, logsPolicyOk };
+}
+
+// Edge Optimize owns exactly these association slots on a behavior; every other association is the
+// customer's and must be preserved. A non-EO association ON one of these slots is a conflict we
+// refuse (rather than overwrite), so customer edge logic is never silently removed.
+const EDGE_OPTIMIZE_LAMBDA_EVENTS = ['origin-request', 'origin-response'];
+const isEdgeOptimizeFunctionArn = (arn) => /edgeoptimize-routing/i.test(arn || '');
+const isEdgeOptimizeLambdaArn = (arn) => /edgeoptimize-origin/i.test(arn || '');
+
+/**
+ * Inspect a behavior's existing associations and return a conflict message when a NON-Edge-Optimize
+ * association occupies a slot EO needs (a different viewer-request function, a viewer-request
+ * Lambda@Edge that CloudFront forbids alongside a function, or an origin-request/origin-response
+ * Lambda@Edge). Returns null when EO can be wired in while preserving everything else. EO's own
+ * prior associations (matched by name) are never flagged, so re-deploys stay idempotent.
+ *
+ * @param {object} behavior - the cache behavior config.
+ * @param {string} pathPattern - the behavior label (for the message).
+ * @returns {string|null}
+ */
+function findEdgeOptimizeAssociationConflict(behavior, pathPattern) {
+  const fns = behavior?.FunctionAssociations?.Items || [];
+  const lambdas = behavior?.LambdaFunctionAssociations?.Items || [];
+
+  const viewerFn = fns.find(
+    (a) => a.EventType === 'viewer-request' && !isEdgeOptimizeFunctionArn(a.FunctionARN),
+  );
+  if (viewerFn) {
+    return `Behavior '${pathPattern}' already has a different viewer-request function associated `
+      + `(${viewerFn.FunctionARN}). Remove it before applying Edge Optimize routing.`;
+  }
+  const viewerLambda = lambdas.find((a) => a.EventType === 'viewer-request');
+  if (viewerLambda) {
+    return `Behavior '${pathPattern}' already has a viewer-request Lambda@Edge `
+      + `(${viewerLambda.LambdaFunctionARN}) which conflicts with the Edge Optimize routing `
+      + 'function. Remove it before applying Edge Optimize routing.';
+  }
+  const originLambda = lambdas.find(
+    (a) => EDGE_OPTIMIZE_LAMBDA_EVENTS.includes(a.EventType)
+      && !isEdgeOptimizeLambdaArn(a.LambdaFunctionARN),
+  );
+  if (originLambda) {
+    return `Behavior '${pathPattern}' already has a different ${originLambda.EventType} `
+      + `Lambda@Edge associated (${originLambda.LambdaFunctionARN}). Remove it before applying `
+      + 'Edge Optimize routing.';
+  }
+  return null;
+}
+
+/**
  * Wire the routing CloudFront Function (viewer-request) and the Lambda@Edge function
  * (origin-request + origin-response) onto a selected cache behavior. Mirrors the standalone
  * wizard's apply-associations step.
@@ -991,27 +1096,31 @@ export async function applyEdgeOptimizeAssociations(
   const config = distResult.DistributionConfig;
   const behavior = getBehaviorFromConfig(config, pathPattern);
 
-  // Surface a conflicting viewer-request association rather than silently clobbering it.
-  const existingViewerFns = (behavior.FunctionAssociations?.Items || [])
-    .filter((a) => a.EventType === 'viewer-request' && a.FunctionARN !== cfFunctionArn);
-  if (existingViewerFns.length > 0) {
-    throw new Error(
-      `Behavior '${pathPattern}' already has a different viewer-request function associated `
-      + `(${existingViewerFns[0].FunctionARN}). Remove it before applying Edge Optimize routing.`,
-    );
+  // Refuse (rather than silently clobber) if the customer already owns a slot EO needs.
+  const conflict = findEdgeOptimizeAssociationConflict(behavior, pathPattern);
+  if (conflict) {
+    throw new Error(conflict);
   }
 
-  behavior.FunctionAssociations = {
-    Quantity: 1,
-    Items: [{ FunctionARN: cfFunctionArn, EventType: 'viewer-request' }],
-  };
-  behavior.LambdaFunctionAssociations = {
-    Quantity: 2,
-    Items: [
-      { LambdaFunctionARN: lambdaVersionArn, EventType: 'origin-request', IncludeBody: false },
-      { LambdaFunctionARN: lambdaVersionArn, EventType: 'origin-response', IncludeBody: false },
-    ],
-  };
+  // Merge, don't replace: preserve every association on event types EO does NOT own (e.g. a
+  // viewer-response function, a viewer-response lambda) and (re)set ONLY EO's own slots —
+  // viewer-request (function) + origin-request/origin-response (lambda). Wholesale replacement here
+  // would drop the customer's edge logic.
+  const existingFns = behavior.FunctionAssociations?.Items || [];
+  const existingLambdas = behavior.LambdaFunctionAssociations?.Items || [];
+  const mergedFns = [
+    ...existingFns.filter((a) => a.EventType !== 'viewer-request'),
+    { FunctionARN: cfFunctionArn, EventType: 'viewer-request' },
+  ];
+  const mergedLambdas = [
+    ...existingLambdas.filter(
+      (a) => a.EventType !== 'viewer-request' && !EDGE_OPTIMIZE_LAMBDA_EVENTS.includes(a.EventType),
+    ),
+    { LambdaFunctionARN: lambdaVersionArn, EventType: 'origin-request', IncludeBody: false },
+    { LambdaFunctionARN: lambdaVersionArn, EventType: 'origin-response', IncludeBody: false },
+  ];
+  behavior.FunctionAssociations = { Quantity: mergedFns.length, Items: mergedFns };
+  behavior.LambdaFunctionAssociations = { Quantity: mergedLambdas.length, Items: mergedLambdas };
 
   await client.send(new UpdateDistributionCommand({
     Id: distributionId,
@@ -1541,31 +1650,61 @@ export async function planEdgeOptimizeDeploy(
 
   // ── lambda ──────────────────────────────────────────────────────────────
   // 'exists' when the Lambda@Edge function exists (ready or still provisioning); else 'create'.
+  // Also surface the execution role: a role with our name may already exist from a prior partial
+  // run. We say whether it is correctly configured — the deploy ALWAYS conforms it to the required
+  // trust (lambda + edgelambda) + logs policy, so a mismatch is auto-corrected, not a blocker.
   try {
-    const ls = await getEdgeOptimizeLambdaStatus(credentials, distributionId, region);
+    const iam = new IAMClient({ region, credentials });
+    const roleName = eoLambdaRoleName(distributionId);
+    const [ls, role] = await Promise.all([
+      getEdgeOptimizeLambdaStatus(credentials, distributionId, region),
+      inspectEdgeOptimizeLambdaRole(iam, roleName),
+    ]);
+    let roleNote;
+    if (!role.exists) {
+      roleNote = ` Execution role ${roleName} will be created.`;
+    } else if (role.trustOk && role.logsPolicyOk) {
+      roleNote = ` Execution role ${roleName} already exists and is correctly configured `
+        + '(trust + logs) — it will be reused.';
+    } else {
+      roleNote = ` Execution role ${roleName} already exists but is not correctly configured `
+        + '— the deploy will correct its trust + logs policy.';
+    }
     if (ls.exists) {
       byKey('lambda').action = 'exists';
-      byKey('lambda').detail = ls.ready
-        ? `Lambda@Edge ${eoLambdaFunctionName(distributionId)} already published`
-        : `Lambda@Edge ${eoLambdaFunctionName(distributionId)} exists (still provisioning)`;
+      byKey('lambda').detail = (ls.ready
+        ? `Lambda@Edge ${eoLambdaFunctionName(distributionId)} already published.`
+        : `Lambda@Edge ${eoLambdaFunctionName(distributionId)} exists (still provisioning).`)
+        + roleNote;
     } else {
-      byKey('lambda').detail = `create Lambda@Edge ${eoLambdaFunctionName(distributionId)}`;
+      byKey('lambda').detail = `create Lambda@Edge ${eoLambdaFunctionName(distributionId)}.${roleNote}`;
     }
   } catch (err) {
     byKey('lambda').detail = `could not read Lambda@Edge status: ${err.message}`;
   }
 
   // ── associate ───────────────────────────────────────────────────────────
-  // HARD BLOCK: if the behavior is already associated with EO routes, the automation refuses to
-  // proceed (it would clobber the customer's existing wiring). This is the only blocker.
+  // HARD BLOCK in two cases: (1) the behavior is already EO-associated (nothing to do), or (2) the
+  // customer already owns a slot EO needs (a different viewer-request function, a viewer-request
+  // lambda, or an origin-request/response lambda) — we refuse rather than remove their edge logic.
+  // Otherwise EO is merged in, preserving every other association on the behavior.
   try {
+    const assocBehavior = config ? getBehaviorFromConfig(config, behavior) : null;
+    const assocConflict = assocBehavior
+      ? findEdgeOptimizeAssociationConflict(assocBehavior, behavior) : null;
     if (await isBehaviorAlreadyAssociated(client, distributionId, behavior)) {
       byKey('associate').action = 'blocked';
       byKey('associate').detail = 'this behaviour is already associated with Edge Optimize routes';
       canProceed = false;
       blocker = "This behaviour is already associated with routes, please recheck — can't proceed with this automation.";
+    } else if (assocConflict) {
+      byKey('associate').action = 'blocked';
+      byKey('associate').detail = assocConflict;
+      canProceed = false;
+      blocker = assocConflict;
     } else {
-      byKey('associate').detail = 'will associate routing function + Lambda@Edge to the behavior';
+      byKey('associate').detail = 'will add the routing function + Lambda@Edge, '
+        + 'preserving your other associations on this behavior';
     }
   } catch (err) {
     byKey('associate').detail = `could not read behavior associations: ${err.message}`;

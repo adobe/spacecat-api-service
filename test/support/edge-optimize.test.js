@@ -79,6 +79,7 @@ describe('edge-optimize support', () => {
         },
         CreateRoleCommand: iamCommand('CreateRole'),
         GetRoleCommand: iamCommand('GetRole'),
+        GetRolePolicyCommand: iamCommand('GetRolePolicy'),
         PutRolePolicyCommand: iamCommand('PutRolePolicy'),
         UpdateAssumeRolePolicyCommand: iamCommand('UpdateAssumeRolePolicy'),
       },
@@ -969,6 +970,65 @@ describe('edge-optimize support', () => {
       expect(error.message).to.include('already has a different viewer-request function');
     });
 
+    it('preserves the customer\'s other-slot associations (merge, not wholesale replace)', async () => {
+      cfSendStub.onFirstCall().resolves({
+        FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } },
+      });
+      cfSendStub.onSecondCall().resolves({
+        DistributionConfig: {
+          DefaultCacheBehavior: {
+            FunctionAssociations: {
+              Quantity: 1,
+              Items: [{ EventType: 'viewer-response', FunctionARN: 'arn:cust-fn' }],
+            },
+            LambdaFunctionAssociations: {
+              Quantity: 1,
+              Items: [{ EventType: 'viewer-response', LambdaFunctionARN: 'arn:cust-lambda', IncludeBody: false }],
+            },
+          },
+        },
+        ETag: 'dist-etag',
+      });
+      cfSendStub.onThirdCall().resolves({});
+
+      await edgeOptimize.applyEdgeOptimizeAssociations({}, 'E2EXAMPLE', 'default', lambdaArn);
+      const behavior = cfSendStub.thirdCall.args[0].input.DistributionConfig.DefaultCacheBehavior;
+      // Customer's viewer-response function is preserved; EO's viewer-request function is added.
+      expect(behavior.FunctionAssociations.Items)
+        .to.deep.include({ EventType: 'viewer-response', FunctionARN: 'arn:cust-fn' });
+      expect(behavior.FunctionAssociations.Items)
+        .to.deep.include({ FunctionARN: 'arn:cf-fn', EventType: 'viewer-request' });
+      // Customer's viewer-response lambda is preserved; EO's origin-request/response are added.
+      const lambdaEvents = behavior.LambdaFunctionAssociations.Items.map((i) => i.EventType);
+      expect(lambdaEvents).to.include.members(['viewer-response', 'origin-request', 'origin-response']);
+      expect(behavior.LambdaFunctionAssociations.Items
+        .find((i) => i.EventType === 'viewer-response').LambdaFunctionARN).to.equal('arn:cust-lambda');
+    });
+
+    it('refuses to overwrite a customer origin-request Lambda@Edge', async () => {
+      cfSendStub.onFirstCall().resolves({
+        FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } },
+      });
+      cfSendStub.onSecondCall().resolves({
+        DistributionConfig: {
+          DefaultCacheBehavior: {
+            LambdaFunctionAssociations: {
+              Items: [{ EventType: 'origin-request', LambdaFunctionARN: 'arn:cust-origin-lambda' }],
+            },
+          },
+        },
+        ETag: 'dist-etag',
+      });
+      let error;
+      try {
+        await edgeOptimize.applyEdgeOptimizeAssociations({}, 'E2EXAMPLE', 'default', lambdaArn);
+      } catch (e) {
+        error = e;
+      }
+      expect(error.message).to.include('different origin-request');
+      expect(cfSendStub.thirdCall).to.equal(null); // never issued an UpdateDistribution
+    });
+
     it('throws when lambdaVersionArn is missing', async () => {
       let error;
       try {
@@ -1733,7 +1793,20 @@ describe('edge-optimize support', () => {
           ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: 'arn:lambda:3', CodeSha256: 'sha' }] },
         },
         {
-          GetRole: { Role: { Arn: 'arn:role' } },
+          GetRole: {
+            Role: {
+              Arn: 'arn:role',
+              AssumeRolePolicyDocument: encodeURIComponent(JSON.stringify({
+                Version: '2012-10-17',
+                Statement: [{
+                  Effect: 'Allow',
+                  Principal: { Service: ['lambda.amazonaws.com', 'edgelambda.amazonaws.com'] },
+                  Action: 'sts:AssumeRole',
+                }],
+              })),
+            },
+          },
+          GetRolePolicy: { PolicyName: 'EdgeOptimizeLambdaLogging', PolicyDocument: '{}' },
         },
       );
 
@@ -1744,6 +1817,9 @@ describe('edge-optimize support', () => {
       expect(stepOf(result.steps, 'cache').action).to.equal('update');
       expect(stepOf(result.steps, 'cache').detail).to.include('my-custom-policy');
       expect(stepOf(result.steps, 'lambda').action).to.equal('exists');
+      // Role visibility: an existing, correctly-configured execution role is surfaced + reused.
+      expect(stepOf(result.steps, 'lambda').detail).to.include('Execution role');
+      expect(stepOf(result.steps, 'lambda').detail).to.include('correctly configured');
       expect(stepOf(result.steps, 'associate').action).to.equal('create');
       expect(result.canProceed).to.equal(true);
     });
