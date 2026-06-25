@@ -124,6 +124,17 @@ describe('preflight-config helpers', () => {
 
       expect(getPreflightMissingConfigLabels(site)).to.deep.equal(['AMS URL']);
     });
+
+    it('treats null getDeliveryConfig() and getHlxConfig() as empty objects (lines 71-72 fallback)', () => {
+      const site = {
+        getAuthoringType: () => 'cs',
+        getDeliveryConfig: () => null,
+        getHlxConfig: () => null,
+      };
+
+      // null delivery config → || {} → no programId/environmentId → flags AEM CS Preview URL
+      expect(getPreflightMissingConfigLabels(site)).to.deep.equal(['AEM CS Preview URL']);
+    });
   });
 
   describe('promptPreflightConfig', () => {
@@ -346,6 +357,33 @@ describe('preflight-config helpers', () => {
       const result = await isPreflightSiteConfigReady(site, context);
       expect(result.ready).to.be.false;
       expect(result.needsContentSourcePath).to.be.true;
+    });
+
+    it('treats null getDeliveryConfig() as empty object inside isPreflightSiteConfigReady (line 157 fallback)', async () => {
+      // getDeliveryConfig is called twice:
+      //   1st call (in getPreflightMissingConfigLabels): must return valid config so no missing labels
+      //   2nd call (line 157 in isPreflightSiteConfigReady): returns null → || {} branch fires
+      const getDeliveryConfigStub = sandbox.stub();
+      getDeliveryConfigStub.onFirstCall().returns({ programId: '12345', environmentId: '67890' });
+      getDeliveryConfigStub.onSecondCall().returns(null);
+
+      const site = {
+        getId: () => 'site1',
+        getOrganizationId: () => 'org1',
+        getAuthoringType: () => 'cs',
+        getDeliveryConfig: getDeliveryConfigStub,
+        getHlxConfig: () => ({}),
+      };
+      const context = {
+        dataAccess: {
+          Site: { allByExternalOwnerIdAndExternalSiteId: sandbox.stub().resolves([site]) },
+        },
+      };
+
+      const result = await isPreflightSiteConfigReady(site, context);
+      // null → {} → no programId/environmentId → isContentSourcePathRequired returns false → ready
+      expect(result.ready).to.be.true;
+      expect(result.needsContentSourcePath).to.be.false;
     });
 
     it('returns ready when CS site has all required config including content source path', async () => {
