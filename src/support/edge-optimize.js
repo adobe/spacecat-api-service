@@ -891,71 +891,9 @@ export async function createEdgeOptimizeLambda(
 }
 
 /**
- * Read-only status of the Edge Optimize Lambda@Edge function so the wizard can check on entry
- * (and poll after a slow/timed-out create) whether it already exists and has a published version.
- *
- * @param {object} credentials - temporary credentials from {@link assumeConnectorRole}.
- * @param {string} [region] - control-plane region.
- * @returns {Promise<{exists: boolean, state?: string, lastUpdateStatus?: string,
- *   functionArn?: string, versionArn: string|null, version?: string}>}
- */
-export async function getEdgeOptimizeLambdaStatus(
-  credentials,
-  distributionId,
-  region = EDGE_OPTIMIZE_REGION,
-) {
-  if (!hasText(distributionId)) {
-    throw new Error('distributionId is required');
-  }
-  const lambdaName = eoLambdaFunctionName(distributionId);
-  const roleName = eoLambdaRoleName(distributionId);
-  const lambda = new LambdaClient({ region, credentials });
-  const iam = new IAMClient({ region, credentials });
-
-  // Execution role status (created synchronously by create-lambda's ack call).
-  let roleExists = false;
-  try {
-    await iam.send(new GetRoleCommand({ RoleName: roleName }));
-    roleExists = true;
-  } catch (err) {
-    if (err.name !== 'NoSuchEntityException') {
-      throw err;
-    }
-  }
-
-  // Function status.
-  let cfg;
-  try {
-    cfg = await lambda.send(
-      new GetFunctionConfigurationCommand({ FunctionName: lambdaName }),
-    );
-  } catch (err) {
-    if (err.name === 'ResourceNotFoundException') {
-      return {
-        roleExists, exists: false, versionArn: null, ready: false,
-      };
-    }
-    throw err;
-  }
-  const latest = await getLatestLambdaVersion(lambda, lambdaName);
-  const ready = cfg.State === 'Active' && cfg.LastUpdateStatus !== 'InProgress' && !!latest;
-  return {
-    roleExists,
-    exists: true,
-    state: cfg.State,
-    lastUpdateStatus: cfg.LastUpdateStatus,
-    functionArn: cfg.FunctionArn,
-    versionArn: latest?.versionArn || null,
-    version: latest?.version,
-    ready,
-  };
-}
-
-/**
- * Read-only inspection of the Lambda@Edge execution role so the Review screen can say whether an
- * existing role (e.g. left by a prior partial run) is the right one. The deploy ALWAYS conforms the
- * role to the required trust (lambda + edgelambda) and CloudWatch-logs policy, so this only drives
- * the wording — it never changes behavior.
+ * Read-only inspection of the Lambda@Edge execution role: whether it exists and is correctly
+ * configured. Checks the trust policy (must allow both lambda + edgelambda) and the CloudWatch-logs
+ * inline policy the deploy attaches. Drives both the Review wording and the deploy's heal decision.
  *
  * @param {IAMClient} iam - an IAM client built with the connector credentials.
  * @param {string} roleName - the EO Lambda@Edge execution role name.
@@ -1006,6 +944,68 @@ async function inspectEdgeOptimizeLambdaRole(iam, roleName) {
   }
 
   return { exists: true, trustOk, logsPolicyOk };
+}
+
+/**
+ * Read-only status of the Edge Optimize Lambda@Edge function AND its execution role, so the wizard
+ * can check on entry (and poll after a slow/timed-out create) whether the function exists and has a
+ * published version, and whether the role is present (`roleExists`) and correctly configured
+ * (`roleOk` = exists + trust + logs policy). `roleOk` lets the deploy heal a missing or
+ * mis-configured role even when the function is already published.
+ *
+ * @param {object} credentials - temporary credentials from {@link assumeConnectorRole}.
+ * @param {string} [region] - control-plane region.
+ * @returns {Promise<{exists: boolean, roleExists: boolean, roleOk: boolean, state?: string,
+ *   lastUpdateStatus?: string, functionArn?: string, versionArn: string|null, version?: string,
+ *   ready: boolean}>}
+ */
+export async function getEdgeOptimizeLambdaStatus(
+  credentials,
+  distributionId,
+  region = EDGE_OPTIMIZE_REGION,
+) {
+  if (!hasText(distributionId)) {
+    throw new Error('distributionId is required');
+  }
+  const lambdaName = eoLambdaFunctionName(distributionId);
+  const roleName = eoLambdaRoleName(distributionId);
+  const lambda = new LambdaClient({ region, credentials });
+  const iam = new IAMClient({ region, credentials });
+
+  // Execution role status: present AND correctly configured (trust + logs policy). roleOk gates the
+  // deploy's "done" decision so a missing OR mis-configured role is healed even when the function
+  // is already published.
+  const role = await inspectEdgeOptimizeLambdaRole(iam, roleName);
+  const roleExists = Boolean(role.exists);
+  const roleOk = Boolean(role.exists && role.trustOk && role.logsPolicyOk);
+
+  // Function status.
+  let cfg;
+  try {
+    cfg = await lambda.send(
+      new GetFunctionConfigurationCommand({ FunctionName: lambdaName }),
+    );
+  } catch (err) {
+    if (err.name === 'ResourceNotFoundException') {
+      return {
+        roleExists, roleOk, exists: false, versionArn: null, ready: false,
+      };
+    }
+    throw err;
+  }
+  const latest = await getLatestLambdaVersion(lambda, lambdaName);
+  const ready = cfg.State === 'Active' && cfg.LastUpdateStatus !== 'InProgress' && !!latest;
+  return {
+    roleExists,
+    roleOk,
+    exists: true,
+    state: cfg.State,
+    lastUpdateStatus: cfg.LastUpdateStatus,
+    functionArn: cfg.FunctionArn,
+    versionArn: latest?.versionArn || null,
+    version: latest?.version,
+    ready,
+  };
 }
 
 // Edge Optimize owns exactly these association slots on a behavior; every other association is the
@@ -1341,7 +1341,11 @@ export async function runEdgeOptimizeDeployStep(
   // "provisioning" forever.
   try {
     const ls = await getEdgeOptimizeLambdaStatus(credentials, distributionId, region);
-    if (ls.ready) {
+    // Done only when the function is ready AND the role is present + correctly configured. If the
+    // role is missing or mis-configured (even with a published function), fall through to
+    // createEdgeOptimizeLambda — it (re)creates the role + heals its trust/logs policy; the
+    // function already exists so it just reuses the published version and returns ready.
+    if (ls.ready && ls.roleOk) {
       lambdaVersionArn = ls.versionArn;
       byKey('lambda').status = 'done';
     } else {
@@ -1660,16 +1664,14 @@ export async function planEdgeOptimizeDeploy(
   // run. We say whether it is correctly configured — the deploy ALWAYS conforms it to the required
   // trust (lambda + edgelambda) + logs policy, so a mismatch is auto-corrected, not a blocker.
   try {
-    const iam = new IAMClient({ region, credentials });
     const roleName = eoLambdaRoleName(distributionId);
-    const [ls, role] = await Promise.all([
-      getEdgeOptimizeLambdaStatus(credentials, distributionId, region),
-      inspectEdgeOptimizeLambdaRole(iam, roleName),
-    ]);
+    // getEdgeOptimizeLambdaStatus already inspects the role (roleExists + roleOk = trust + logs),
+    // so we derive the role note from it — no separate IAM read needed.
+    const ls = await getEdgeOptimizeLambdaStatus(credentials, distributionId, region);
     let roleNote;
-    if (!role.exists) {
+    if (!ls.roleExists) {
       roleNote = ` Execution role ${roleName} will be created.`;
-    } else if (role.trustOk && role.logsPolicyOk) {
+    } else if (ls.roleOk) {
       roleNote = ` Execution role ${roleName} already exists and is correctly configured `
         + '(trust + logs) — it will be reused.';
     } else {

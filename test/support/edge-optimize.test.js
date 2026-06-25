@@ -867,12 +867,28 @@ describe('edge-optimize support', () => {
       const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({}, 'E2EXAMPLE');
 
       expect(result).to.deep.equal({
-        roleExists: false, exists: false, versionArn: null, ready: false,
+        roleExists: false, roleOk: false, exists: false, versionArn: null, ready: false,
       });
     });
 
-    it('reports the role + published version and ready:true when fully provisioned', async () => {
-      iamSendStub.callsFake(() => Promise.resolve({ Role: { Arn: 'arn:role' } }));
+    it('reports the role (roleOk) + published version and ready:true when fully provisioned', async () => {
+      const trust = encodeURIComponent(JSON.stringify({
+        Version: '2012-10-17',
+        Statement: [{
+          Effect: 'Allow',
+          Principal: { Service: ['lambda.amazonaws.com', 'edgelambda.amazonaws.com'] },
+          Action: 'sts:AssumeRole',
+        }],
+      }));
+      iamSendStub.callsFake((cmd) => {
+        if (cmd.commandName === 'GetRole') {
+          return Promise.resolve({ Role: { Arn: 'arn:role', AssumeRolePolicyDocument: trust } });
+        }
+        if (cmd.commandName === 'GetRolePolicy') {
+          return Promise.resolve({ PolicyName: 'EdgeOptimizeLambdaLogging', PolicyDocument: '{}' });
+        }
+        throw new Error(`unexpected iam: ${cmd.commandName}`);
+      });
       lambdaSendStub.callsFake((cmd) => {
         if (cmd.commandName === 'GetFunctionConfiguration') {
           return Promise.resolve({ FunctionArn: 'arn:fn', State: 'Active', LastUpdateStatus: 'Successful' });
@@ -886,6 +902,7 @@ describe('edge-optimize support', () => {
       const result = await edgeOptimize.getEdgeOptimizeLambdaStatus({}, 'E2EXAMPLE');
 
       expect(result.roleExists).to.equal(true);
+      expect(result.roleOk).to.equal(true);
       expect(result.exists).to.equal(true);
       expect(result.state).to.equal('Active');
       expect(result.versionArn).to.equal('arn:fn:2');
@@ -1147,6 +1164,70 @@ describe('edge-optimize support', () => {
       throw e;
     };
 
+    const iamCalls = (name) => iamSendStub.getCalls().filter((c) => c.args[0].commandName === name);
+
+    // Encoded trust doc allowing both Lambda@Edge principals — what inspectRole treats as valid.
+    const validTrust = encodeURIComponent(JSON.stringify({
+      Version: '2012-10-17',
+      Statement: [{
+        Effect: 'Allow',
+        Principal: { Service: ['lambda.amazonaws.com', 'edgelambda.amazonaws.com'] },
+        Action: 'sts:AssumeRole',
+      }],
+    }));
+    // IAM mock for an existing, correctly-configured role (roleExists + roleOk = true).
+    const okRoleIam = (extra = {}) => ({
+      GetRole: { Role: { Arn: 'arn:role', AssumeRolePolicyDocument: validTrust } },
+      GetRolePolicy: { PolicyName: 'EdgeOptimizeLambdaLogging', PolicyDocument: '{}' },
+      UpdateAssumeRolePolicy: {},
+      PutRolePolicy: {},
+      ...extra,
+    });
+
+    // CF + Lambda wiring for "function already published, behavior not yet associated, propagation
+    // still in progress" — the role-heal gate tests reuse this and only vary the IAM/role mock.
+    const readyDeployCf = () => ({
+      GetDistributionConfig: () => ({
+        DistributionConfig: {
+          Origins: {
+            Items: [{
+              Id: 'EdgeOptimize_Origin',
+              DomainName: 'dev.edgeoptimize.net',
+              CustomHeaders: {
+                Items: [
+                  { HeaderName: 'x-edgeoptimize-api-key', HeaderValue: 'eo-key' },
+                  { HeaderName: 'x-forwarded-host', HeaderValue: 'www.example.com' },
+                ],
+              },
+            }],
+          },
+          DefaultCacheBehavior: { CachePolicyId: 'cp-1' },
+        },
+        ETag: 'etag',
+      }),
+      DescribeFunction: { FunctionSummary: { FunctionMetadata: { FunctionARN: 'arn:cf-fn' } } },
+      ListCachePolicies: { CachePolicyList: { Items: [] } },
+      GetCachePolicyConfig: {
+        CachePolicyConfig: {
+          Name: 'p',
+          MinTTL: 0,
+          ParametersInCacheKeyAndForwardedToOrigin: {
+            HeadersConfig: {
+              HeaderBehavior: 'whitelist',
+              Headers: { Quantity: 2, Items: ['x-edgeoptimize-config', 'x-edgeoptimize-url'] },
+            },
+          },
+        },
+        ETag: 'cp-etag',
+      },
+      UpdateDistribution: {},
+      ListDistributions: { DistributionList: { Items: [{ Id: 'E2EXAMPLE123', DomainName: 'd123.cloudfront.net', Status: 'InProgress' }] } },
+    });
+    const readyLambda = () => ({
+      GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
+      ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: 'arn:lambda:3', CodeSha256: 'sha' }] },
+    });
+
     const makeFetchResponse = (status, headerMap) => ({
       status,
       headers: { forEach: (cb) => Object.entries(headerMap).forEach(([k, v]) => cb(v, k)) },
@@ -1206,12 +1287,8 @@ describe('edge-optimize support', () => {
           ListVersionsByFunction: { Versions: [] },
           CreateFunction: { FunctionArn: 'arn:lambda', Version: '$LATEST' },
         },
-        {
-          // Role already exists → no role-propagation wait (the slow create path is avoided).
-          GetRole: { Role: { Arn: 'arn:role' } },
-          UpdateAssumeRolePolicy: {},
-          PutRolePolicy: {},
-        },
+        // Role already exists + correctly configured → no role-propagation wait.
+        okRoleIam(),
       );
 
       const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
@@ -1274,9 +1351,7 @@ describe('edge-optimize support', () => {
           GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
           ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: lambdaVersionArn, CodeSha256: 'sha' }] },
         },
-        {
-          GetRole: { Role: { Arn: 'arn:role' } },
-        },
+        okRoleIam(),
       );
       // verify probe: bot lacks request-id → not passed yet (propagation).
       fetchStub = sinon.stub(global, 'fetch');
@@ -1342,7 +1417,7 @@ describe('edge-optimize support', () => {
           GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
           ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: lambdaVersionArn, CodeSha256: 'sha' }] },
         },
-        { GetRole: { Role: { Arn: 'arn:role' } } },
+        okRoleIam(),
       );
       fetchStub = sinon.stub(global, 'fetch');
       fetchStub.onFirstCall().resolves(makeFetchResponse(200, { 'x-edgeoptimize-request-id': 'req-1' }));
@@ -1408,7 +1483,7 @@ describe('edge-optimize support', () => {
           GetFunctionConfiguration: { State: 'Active', LastUpdateStatus: 'Successful', FunctionArn: 'arn:lambda' },
           ListVersionsByFunction: { Versions: [{ Version: '3', FunctionArn: lambdaVersionArn, CodeSha256: 'sha' }] },
         },
-        { GetRole: { Role: { Arn: 'arn:role' } } },
+        okRoleIam(),
       );
 
       const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
@@ -1500,7 +1575,7 @@ describe('edge-optimize support', () => {
           GetFunctionConfiguration: { State: 'Pending', LastUpdateStatus: 'InProgress', FunctionArn: 'arn:lambda' },
           ListVersionsByFunction: { Versions: [] },
         },
-        { GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} },
+        okRoleIam(),
       );
 
       const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
@@ -1562,7 +1637,7 @@ describe('edge-optimize support', () => {
           ListVersionsByFunction: { Versions: [] },
           PublishVersion: { Version: '1', FunctionArn: lambdaVersionArn },
         },
-        { GetRole: { Role: { Arn: 'arn:role' } }, UpdateAssumeRolePolicy: {}, PutRolePolicy: {} },
+        okRoleIam(),
       );
       fetchStub = sinon.stub(global, 'fetch');
       fetchStub.onFirstCall().resolves(makeFetchResponse(200, { 'x-edgeoptimize-request-id': 'req-1' }));
@@ -1577,6 +1652,58 @@ describe('edge-optimize support', () => {
       expect(statusOf(out.steps, 'verify')).to.equal('done');
       expect(out.routingDeployed).to.equal(true);
       expect(out.verified).to.equal(true);
+    });
+
+    // Role-heal gate: the lambda step is "done" only when the function is ready AND the role is
+    // present + correctly configured. The next three cover each role state on a ready function.
+    it('lambda ready + role MISSING → recreates the role, then completes the lambda step', async () => {
+      wire(readyDeployCf(), readyLambda(), {
+        GetRole: throwNamed('NoSuchEntityException', 'no role'),
+        CreateRole: { Role: { Arn: 'arn:role' } },
+        PutRolePolicy: {},
+      });
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'lambda')).to.equal('done');
+      expect(iamCalls('CreateRole')).to.have.length(1); // role recreated despite a ready function
+      expect(iamCalls('PutRolePolicy')).to.have.length(1); // logs policy re-attached
+      expect(out.routingDeployed).to.equal(true);
+      expect(statusOf(out.steps, 'propagation')).to.equal('in_progress');
+    });
+
+    it('lambda ready + role MIS-CONFIGURED → heals trust + logs, then completes', async () => {
+      const badTrust = encodeURIComponent(JSON.stringify({
+        Version: '2012-10-17',
+        // missing edgelambda.amazonaws.com → roleOk is false
+        Statement: [{ Effect: 'Allow', Principal: { Service: 'lambda.amazonaws.com' }, Action: 'sts:AssumeRole' }],
+      }));
+      wire(readyDeployCf(), readyLambda(), {
+        GetRole: { Role: { Arn: 'arn:role', AssumeRolePolicyDocument: badTrust } },
+        GetRolePolicy: { PolicyName: 'EdgeOptimizeLambdaLogging', PolicyDocument: '{}' },
+        UpdateAssumeRolePolicy: {},
+        PutRolePolicy: {},
+      });
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'lambda')).to.equal('done');
+      expect(iamCalls('UpdateAssumeRolePolicy')).to.have.length(1); // trust corrected
+      expect(iamCalls('PutRolePolicy')).to.have.length(1); // logs policy re-attached
+      expect(iamCalls('CreateRole')).to.have.length(0); // role exists → not recreated
+      expect(out.routingDeployed).to.equal(true);
+    });
+
+    it('lambda ready + role OK → completes WITHOUT touching the role (no churn)', async () => {
+      wire(readyDeployCf(), readyLambda(), okRoleIam());
+
+      const out = await edgeOptimize.runEdgeOptimizeDeployStep({}, deployParams);
+
+      expect(statusOf(out.steps, 'lambda')).to.equal('done');
+      expect(iamCalls('CreateRole')).to.have.length(0);
+      expect(iamCalls('UpdateAssumeRolePolicy')).to.have.length(0);
+      expect(iamCalls('PutRolePolicy')).to.have.length(0); // gate passed → createLambda skipped
+      expect(out.routingDeployed).to.equal(true);
     });
   });
 
