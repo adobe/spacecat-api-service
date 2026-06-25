@@ -331,7 +331,10 @@ export async function ensureInitialCustomerConfigV2({
  * a Helix-safe token marking the `/` path boundary. Because a literal `z` is
  * always doubled, a lone `z` can only introduce a structural token, so `zs` can
  * never appear by accident inside a part: the encoding is unambiguous and
- * reversible (`zz` -> `z`, `zs` -> `/`).
+ * reversible by a left-to-right scanner that, on each `z`, consumes the next
+ * character to decide escape-vs-boundary (`zz` -> `z`, `zs` -> `/`). A naive
+ * `String.split('zs')` is NOT a correct decoder: a part whose content contains
+ * `zs` is stored as `zzs`, which a blind split would wrongly break apart.
  *
  * This keeps the path boundary distinguishable from a `.` (which sanitizes to
  * `-`): `nba.com/com` -> `nba-comzscom` stays distinct from `nba.com.com` ->
@@ -359,15 +362,15 @@ export function generateDataFolder(baseURL, env = 'dev') {
   // Self-escape the boundary marker letter so a lone `z` can only ever introduce
   // the `zs` path-boundary token (see join below). Run on already-sanitized,
   // lowercased parts.
-  const escapeMarker = (s) => s.replace(/z/g, 'zz');
-  const host = escapeMarker(sanitize(url.hostname));
+  const escapeZ = (s) => s.replace(/z/g, 'zz');
+  const host = escapeZ(sanitize(url.hostname));
   const segments = url.pathname.split('/').filter(Boolean)
     .map((seg) => {
       let decoded = seg;
       try {
         decoded = decodeURIComponent(seg);
       } catch { /* keep raw on percent-encoded sequences that are not valid UTF-8 */ }
-      return escapeMarker(sanitize(decoded));
+      return escapeZ(sanitize(decoded));
     })
     .filter(Boolean);
   // Join host + path segments with `zs`, the Helix-safe marker for the `/` boundary.
@@ -1705,7 +1708,13 @@ export async function performLlmoOffboarding(site, config, context) {
   const baseURL = site.getBaseURL();
   const llmoConfig = config.getLlmoConfig();
 
-  // Check if site has LLMO config with data folder, if not calculate it
+  // Check if site has LLMO config with data folder, if not calculate it.
+  // NOTE: re-deriving here assumes the folder was created with the CURRENT
+  // generateDataFolder scheme. A site onboarded under an older scheme whose
+  // stored dataFolder is missing could derive a name that does not match its
+  // actual SharePoint folder (so deleteSharePointFolder below would miss it).
+  // Onboarded sites always persist dataFolder, so this fallback should not fire
+  // in practice (prod scan confirmed zero affected, LLMO-5859).
   let dataFolder = llmoConfig?.dataFolder;
   if (!dataFolder) {
     log.debug(`Data folder not found in LLMO config, calculating from base URL: ${baseURL}`);

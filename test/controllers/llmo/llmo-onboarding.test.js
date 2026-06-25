@@ -441,6 +441,8 @@ describe('LLMO Onboarding Functions', () => {
       expect(generateDataFolder('https://nba.com/zs', 'prod')).to.equal('nba-comzszzs');
       expect(generateDataFolder('https://nba.com/zs', 'prod'))
         .to.not.equal(generateDataFolder('https://nba.com/z/s', 'prod'));
+      // Host starting with the marker letter, immediately adjacent to the boundary.
+      expect(generateDataFolder('https://zsecurity.com/page', 'prod')).to.equal('zzsecurity-comzspage');
     });
 
     it('should never emit the Helix-reserved `--` in a folder name (LLMO-5859)', () => {
@@ -455,13 +457,16 @@ describe('LLMO Onboarding Functions', () => {
         'https://nba.com/a/b/c/d',
       ];
       urls.forEach((url) => {
-        expect(generateDataFolder(url, 'prod')).to.not.include('--');
-        expect(generateDataFolder(url, 'dev')).to.not.include('--');
+        expect(generateDataFolder(url, 'prod'), `prod: ${url}`).to.not.include('--');
+        expect(generateDataFolder(url, 'dev'), `dev: ${url}`).to.not.include('--');
       });
     });
 
     it('should handle malformed percent-encoded path segments without throwing', () => {
       expect(() => generateDataFolder('https://a.com/%FF', 'prod')).to.not.throw();
+      // `%FF` is not valid UTF-8, so decode is skipped and the raw segment is
+      // sanitized to `ff`; assert the concrete result to catch regressions.
+      expect(generateDataFolder('https://a.com/%FF', 'prod')).to.equal('a-comzsff');
     });
 
     it('should normalize percent-encoded path segments', () => {
