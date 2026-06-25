@@ -41,6 +41,9 @@ function makeConnection(overrides = {}) {
     getUpdatedAt: () => '2025-01-01T00:00:00Z',
     markDisconnected: sinon.stub().resolves(),
     markRequiresReauth: sinon.stub().resolves(),
+    setLastUsedAt: sinon.stub().returnsThis(),
+    setErrorMessage: sinon.stub().returnsThis(),
+    save: sinon.stub().resolves(),
     ...overrides,
   };
 }
@@ -51,7 +54,7 @@ function makeTicket(overrides = {}) {
     getOrganizationId: () => ORG_ID,
     getTaskManagementConnectionId: () => CONN_ID,
     getConnectionId: () => undefined,
-    getTicketId: () => 'PROJ-42',
+    getExternalTicketId: () => 'PROJ-42',
     getTicketKey: () => 'PROJ-42',
     getTicketUrl: () => 'https://mysite.atlassian.net/browse/PROJ-42',
     getTicketStatus: () => 'open',
@@ -913,6 +916,102 @@ describe('TaskManagementController', () => {
       expect(callArgs.parent).to.equal('ASO-42');
     });
 
+    it('passes field pass-through in grouped mode', async () => {
+      const conn = makeConnection();
+      const createTicketStub = sinon.stub().resolves({
+        ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1', ticketStatus: 'To Do',
+      });
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          Ticket: { create: sinon.stub().resolves(makeTicket()) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+        },
+      });
+      const { createTicket } = Ctrl(ctx);
+      const s2 = '22222222-2222-2222-2222-222222222222';
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped',
+          projectKey: 'ASO',
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID, s2],
+          priority: 'Low',
+          dueDate: '2027-01-15',
+          components: ['Backend'],
+          parent: 'ASO-100',
+        },
+      }));
+      expect(res.status).to.equal(201);
+      const callArgs = createTicketStub.firstCall.args[0];
+      expect(callArgs.priority).to.equal('Low');
+      expect(callArgs.dueDate).to.equal('2027-01-15');
+      expect(callArgs.components).to.deep.equal(['Backend']);
+      expect(callArgs.parent).to.equal('ASO-100');
+    });
+
+    it('passes field pass-through in batch mode', async () => {
+      const conn = makeConnection();
+      const createTicketStub = sinon.stub().resolves({
+        ticketId: 'P-1', ticketKey: 'P-1', ticketUrl: 'https://x.net/P-1', ticketStatus: 'To Do',
+      });
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          Ticket: { create: sinon.stub().resolves(makeTicket()) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+        },
+      });
+      const { createTicket } = Ctrl(ctx);
+      const s2 = '33333333-3333-3333-3333-333333333333';
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch',
+          projectKey: 'ASO',
+          mode: 'individual',
+          suggestionIds: [SUGGESTION_ID, s2],
+          priority: 'Medium',
+          components: ['Infra'],
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const callArgs = createTicketStub.firstCall.args[0];
+      expect(callArgs.priority).to.equal('Medium');
+      expect(callArgs.components).to.deep.equal(['Infra']);
+    });
+
     it('returns 500 on generic ticket client error', async () => {
       const conn = makeConnection();
       const err = new Error('timeout');
@@ -1277,6 +1376,75 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(ctx);
       const res = await createTicket(makeReqCtx());
       expect(res.status).to.equal(500);
+    });
+
+    it('treats expired idempotency key as absent (proceeds to create)', async () => {
+      const conn = makeConnection();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+          },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx());
+      expect(res.status).to.equal(201);
+    });
+
+    // ── Explicit connectionId resolution ────────────────────────────────────
+
+    it('resolves explicit connectionId and creates ticket', async () => {
+      const conn = makeConnection();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findById: sinon.stub().resolves(conn),
+          },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix it',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+        },
+      }));
+      expect(res.status).to.equal(201);
+    });
+
+    it('returns 404 when explicit connectionId is not found', async () => {
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findById: sinon.stub().resolves(null),
+          },
+        },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix it',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+        },
+      }));
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 400 when explicit connectionId is not a valid UUID', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix it',
+          projectKey: 'PROJ',
+          connectionId: 'not-a-uuid',
+        },
+      }));
+      expect(res.status).to.equal(400);
     });
 
     // ── Suggestion existence validation ────────────────────────────────────

@@ -106,7 +106,7 @@ function serializeTicket(ticket, suggestions) {
     id: ticket.getId(),
     organizationId: ticket.getOrganizationId(),
     connectionId: ticket.getTaskManagementConnectionId?.() ?? ticket.getConnectionId?.(),
-    ticketId: ticket.getTicketId(),
+    externalTicketId: ticket.getExternalTicketId(),
     ticketKey: ticket.getTicketKey(),
     ticketUrl: ticket.getTicketUrl(),
     ticketStatus: ticket.getTicketStatus(),
@@ -866,7 +866,7 @@ function TaskManagementController(context) {
                 ticketProvider: provider,
                 createdBy,
                 opportunityId: data.opportunityId,
-                ticketId: batchTicketResult.ticketId,
+                externalTicketId: batchTicketResult.ticketId,
                 ticketKey: batchTicketResult.ticketKey,
                 ticketUrl: batchTicketResult.ticketUrl,
                 ticketStatus: batchTicketResult.ticketStatus,
@@ -920,6 +920,15 @@ function TaskManagementController(context) {
         }
       }
 
+      const hasSuccess = results.some((r) => r.status === STATUS_CREATED);
+      if (hasSuccess) {
+        connection.setLastUsedAt(new Date().toISOString());
+        connection.setErrorMessage(null);
+      }
+      connection.save().catch((saveErr) => {
+        log.warn({ saveErr }, 'Failed to update connection metadata after batch');
+      });
+
       const batchResponseBody = { results };
       await markIdempotencyDone(207, batchResponseBody);
       return createResponse(batchResponseBody, 207);
@@ -950,6 +959,11 @@ function TaskManagementController(context) {
           await markIdempotencyFailed(STATUS_CONFLICT, body);
           return createResponse(body, STATUS_CONFLICT);
         }
+        connection.setErrorMessage(err.message ?? 'Unknown grouped ticket creation error');
+        connection.save().catch((saveErr) => {
+          log.warn({ saveErr }, 'Failed to persist errorMessage on connection');
+        });
+
         log.error({ organizationId, provider, err }, 'Failed to create grouped ticket');
         const body = { message: 'Failed to create ticket' };
         await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
@@ -964,7 +978,7 @@ function TaskManagementController(context) {
           ticketProvider: provider,
           createdBy,
           opportunityId: data.opportunityId,
-          ticketId: groupedTicketResult.ticketId,
+          externalTicketId: groupedTicketResult.ticketId,
           ticketKey: groupedTicketResult.ticketKey,
           ticketUrl: groupedTicketResult.ticketUrl,
           ticketStatus: groupedTicketResult.ticketStatus,
@@ -992,6 +1006,12 @@ function TaskManagementController(context) {
         imsActor: createdBy,
         projectKey: data.projectKey,
         issueType: data.issueType ?? 'Task',
+      });
+
+      connection.setLastUsedAt(new Date().toISOString());
+      connection.setErrorMessage(null);
+      connection.save().catch((saveErr) => {
+        log.warn({ saveErr }, 'Failed to update lastUsedAt on connection');
       });
 
       // Link all suggestions to the single ticket — non-fatal on individual bridge failure.
@@ -1073,6 +1093,11 @@ function TaskManagementController(context) {
         return createResponse(body, STATUS_CONFLICT);
       }
 
+      connection.setErrorMessage(err.message ?? 'Unknown ticket creation error');
+      connection.save().catch((saveErr) => {
+        log.warn({ saveErr }, 'Failed to persist errorMessage on connection');
+      });
+
       log.error({ organizationId, provider, err }, 'Failed to create ticket');
       const body = { message: 'Failed to create ticket' };
       await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
@@ -1089,7 +1114,7 @@ function TaskManagementController(context) {
         ticketProvider: provider,
         createdBy,
         opportunityId: data.opportunityId,
-        ticketId: ticketResult.ticketId,
+        externalTicketId: ticketResult.ticketId,
         ticketKey: ticketResult.ticketKey,
         ticketUrl: ticketResult.ticketUrl,
         ticketStatus: ticketResult.ticketStatus,
@@ -1099,7 +1124,7 @@ function TaskManagementController(context) {
         {
           organizationId,
           provider,
-          ticketId: ticketResult.ticketId,
+          externalTicketId: ticketResult.ticketId,
           ticketKey: ticketResult.ticketKey,
           ticketUrl: ticketResult.ticketUrl,
           err,
@@ -1123,6 +1148,12 @@ function TaskManagementController(context) {
       imsActor: createdBy,
       projectKey: data.projectKey,
       issueType: data.issueType ?? 'Task',
+    });
+
+    connection.setLastUsedAt(new Date().toISOString());
+    connection.setErrorMessage(null);
+    connection.save().catch((saveErr) => {
+      log.warn({ saveErr }, 'Failed to update lastUsedAt on connection');
     });
 
     // --- Create the TicketSuggestion bridge row --------------------------------
