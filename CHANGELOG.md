@@ -1,3 +1,10 @@
+## [1.601.1](https://github.com/adobe/spacecat-api-service/compare/v1.601.0...v1.601.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **preflight:** rename scan_id wire field to async_job_id in callMysticatAnalyze (SITES-47173) ([#2689](https://github.com/adobe/spacecat-api-service/issues/2689)) ([3098758](https://github.com/adobe/spacecat-api-service/commit/3098758825762f6b3934601d98a13a357fb06e5a))
+
 # [1.601.0](https://github.com/adobe/spacecat-api-service/compare/v1.600.0...v1.601.0) (2026-06-25)
 
 
