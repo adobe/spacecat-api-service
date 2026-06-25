@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   handleListMarketsSubworkspace,
@@ -970,5 +971,88 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(res.status).to.equal(201);
     const projectBody = transport.createProject.firstCall.args[1];
     expect(projectBody.name).to.equal('explicit-project-name');
+  });
+
+  // Lines 124 and 218 are defensive `: []` / `|| ''` guards inside
+  // buildCreateProjectBody and generateAndAttachPrompts respectively. Through the
+  // normal handler they are unreachable: `collectAliasNames` (brand-aliases.js)
+  // always returns a clean string[] (Array.isArray guard + dedupeAliases drops
+  // empties), so the handler never feeds a non-array — nor an array with a falsy
+  // element — into those guards. We esmock collectAliasNames to inject exactly
+  // those degenerate shapes so the guards are exercised.
+
+  // Line 124: `...(Array.isArray(brandAliases) ? brandAliases : [])` else branch.
+  // collectAliasNames returns a NON-array (null); with generateTopics:false the
+  // unguarded `...aliasNames` spread (line 411) is never reached, so the null
+  // only lands on buildCreateProjectBody's `brandAliases` param, where the
+  // Array.isArray guard coerces it to [].
+  it('buildCreateProjectBody: coerces a non-array aliasNames to [] (collectAliasNames returns null)', async () => {
+    const handler = await esmock(
+      '../../../../src/support/serenity/handlers/markets-subworkspace.js',
+      {
+        '../../../../src/support/serenity/brand-aliases.js': {
+          collectAliasNames: () => null,
+        },
+      },
+    );
+    const transport = makeTransport();
+    const res = await handler.handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      { ...createBody, brandNames: ['BrandX'] },
+      log,
+      null,
+      null,
+      // generateTopics omitted (false) → line 411 `...aliasNames` not reached.
+      { brandAliases: [{ name: 'ignored', regions: ['us'] }] },
+    );
+    expect(res.status).to.equal(201);
+    const projectBody = transport.createProject.firstCall.args[1];
+    // Non-array aliasNames → else branch → [] → brand_names is just the primary.
+    expect(projectBody.brand_names).to.deep.equal(['BrandX']);
+  });
+
+  // Line 218: `String(s || '')` falsy branch. collectAliasNames returns an array
+  // CONTAINING a falsy element (''); with generateTopics:true that element flows
+  // through the `brandNames` array spread (line 411) into generateAndAttachPrompts,
+  // where `.map((s) => String(s || ''))` hits the `|| ''` side for the falsy entry
+  // (coerced to '' then filtered out, so it produces no needle).
+  it('generateAndAttachPrompts: coerces a falsy alias element via `s || ""` (collectAliasNames returns ["", "Real"])', async () => {
+    const handler = await esmock(
+      '../../../../src/support/serenity/handlers/markets-subworkspace.js',
+      {
+        '../../../../src/support/serenity/brand-aliases.js': {
+          collectAliasNames: () => ['', 'Real'],
+        },
+      },
+    );
+    const transport = makeTransport({
+      getBrandTopics: sinon.stub().resolves([
+        { topic: 'T', volume: 10, prompts: ['real deal', 'plain text'] },
+      ]),
+      createTaggedPrompts: sinon.stub().resolves(null),
+    });
+    const res = await handler.handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      { ...createBody, brandNames: ['B'] },
+      log,
+      null,
+      null,
+      {
+        generateTopics: true,
+        standardTags: [],
+        brandAliases: [{ name: 'ignored', regions: ['us'] }],
+        publishMode: 'skip',
+      },
+    );
+    expect(res.status).to.equal(201);
+    const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
+    // Needles = ['b','real'] (the '' element was coerced + filtered out).
+    // 'real deal' contains 'real' → branded; 'plain text' → non-branded.
+    expect(promptsByText['real deal']).to.include('type:branded');
+    expect(promptsByText['plain text']).to.include('type:non-branded');
   });
 });

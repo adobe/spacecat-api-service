@@ -1245,6 +1245,24 @@ describe('Sites Controller', () => {
       );
     });
 
+    it('logs clientId=unknown-s2s on the legacy path when a granted consumer has no clientId', async () => {
+      // Granted S2S consumer (non-admin) reaching the legacy flat-array path with a
+      // falsy clientId: the log marker falls back to `unknown-s2s` (not `admin-bypass`).
+      context.s2sConsumer = makeS2SConsumer({ clientId: '' });
+      context.invocation = { id: 'req-unknown-s2s-1' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+
+      const result = await sitesController.getAll(context);
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-unknown-s2s-1 clientId=unknown-s2s/,
+      );
+    });
+
     it('denies S2S consumer with only site:read (no readAll)', async () => {
       context.s2sConsumer = makeS2SConsumer();
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
@@ -1627,6 +1645,24 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.findById).to.not.have.been.called;
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
+      );
+    });
+
+    it('denies a non-admin caller with no s2sConsumer and logs clientId/consumerId as n/a', async () => {
+      // No s2sConsumer set: hasS2SCapability short-circuits with reason=not-s2s and
+      // undefined clientId/consumerId, so the deny log falls back to `n/a`.
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=not-s2s clientId=n\/a consumerId=n\/a/,
       );
     });
   });
@@ -5557,6 +5593,41 @@ describe('Sites Controller', () => {
         data: { scraperConfig },
         ...defaultAuthAttributes,
       })).to.be.rejectedWith('DDB throttle');
+    });
+
+    it('returns bad request when context.data is missing entirely', async () => {
+      // No `data` property on the context at all: `context.data || {}` defaults to
+      // `{}`, so `scraperConfig` is undefined and the request fails the object guard.
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('logs an empty header list when an unexpected error fires for a headerless config', async () => {
+      // Re-throw path (non-validation error) for a scraperConfig with no `headers`:
+      // `scraperConfig.headers || {}` falls back to `{}` so the error log lists no headers.
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub(), writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().rejects(new Error('DDB throttle'));
+
+      await expect(sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: { someOtherKey: 'value' } },
+        ...defaultAuthAttributes,
+      })).to.be.rejectedWith('DDB throttle');
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(
+        /Error updating scraper config for site .* \(headers=\):/,
+      );
     });
   });
 

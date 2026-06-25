@@ -415,6 +415,74 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateProject).to.have.been.calledOnce;
     });
 
+    it('treats a non-array listBenchmarks response as no benchmarks (skips the PUT)', async () => {
+      // brand_names drift forces the PATCH; the benchmark listing comes back in a
+      // non-array shape, so the own-brand lookup sees [] and the PUT never fires.
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Brand'] })],
+        {},
+      );
+      transport.listBenchmarks.resolves({ aio_benchmarks: null });
+
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Acme', regions: [] }],
+        'Brand',
+        WS,
+        undefined,
+      );
+
+      expect(transport.updateProject).to.have.been.calledOnce;
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result).to.deep.equal({
+        markets: 1, projectsUpdated: 1, benchmarksUpdated: 0, rejected: [],
+      });
+    });
+
+    it('uses brand_name = "" when the benchmark, display, and project domain are all absent', async () => {
+      // No display passed and no ai.brand_name_display → display stays null. The
+      // own benchmark (main_brand, no domain) lacks brand_name, and the project
+      // carries no domain → the brand_name fallback chain bottoms out at ''.
+      const transport = makeTransport(
+        [{ id: 'p-us', settings: { ai: { country: { code: 'us' } } } }], // no domain
+        { 'p-us': [{ id: 'own', main_brand: true, brand_aliases: [] }] },
+      );
+
+      await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Acme', regions: [] }],
+        null,
+        WS,
+        undefined,
+      );
+
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
+        brand_name: '',
+        domain: undefined,
+        brand_aliases: ['Acme'],
+      });
+    });
+
+    it('treats a non-array re-read after the PUT as no benchmarks (no rejected captured)', async () => {
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Brand'] })],
+        {
+          'p-us': [{
+            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: [],
+          }],
+        },
+      );
+      // The post-PUT re-read surfaces a non-array body → list falls back to [].
+      transport.listBenchmarks.onSecondCall().resolves({ aio_benchmarks: 'oops' });
+      const aliases = [{ name: 'Acme', regions: [] }];
+
+      const result = await syncBrandAliasesAcrossMarkets(transport, aliases, 'Brand', WS, undefined);
+
+      expect(transport.listBenchmarks).to.have.been.calledTwice;
+      expect(result.benchmarksUpdated).to.equal(1);
+      expect(result.rejected).to.deep.equal([]);
+    });
+
     it('treats a non-array listProjects response as no projects', async () => {
       const transport = {
         listProjects: sandbox.stub().resolves({}),

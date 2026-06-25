@@ -29,6 +29,7 @@ function buildContext() {
   return {
     env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
     pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
+    attributes: { authInfo: { getType: () => 'ims' } },
   };
 }
 
@@ -79,6 +80,49 @@ describe('provisionBrandSubworkspace', () => {
   });
 
   it('provisions the sub-workspace and returns its id', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: false });
+  });
+
+  it('exposes a brand stub whose getters/save are usable by the handler', async () => {
+    // Exercises the stub's getSemrushWorkspaceId() (initially undefined) and the
+    // no-op save() that the real handler invokes while driving provisioning.
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      expect(brand.getSemrushWorkspaceId()).to.equal(undefined);
+      brand.setSemrushWorkspaceId(NEW_WS);
+      await brand.save();
+      return { status: 201, body: { brandId: brand.getId() } };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result.semrushWorkspaceId).to.equal(NEW_WS);
+  });
+
+  it('returns published:true when the initial market was published', async () => {
+    // result.body.published truthy → Boolean(...) true branch (line 225).
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushWorkspaceId(NEW_WS);
+      return { status: 201, body: { brandId: brand.getId(), published: true } };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: true });
+  });
+
+  it('returns published:false when a successful result carries no body (result.body || {})', async () => {
+    // result.body is undefined on the success path → the `|| {}` fallback fires
+    // before reading `.published` (line 225 right branch).
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushWorkspaceId(NEW_WS);
+      return { status: 200 };
+    });
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
@@ -340,6 +384,7 @@ describe('releaseProvisionedWorkspace', () => {
     return {
       env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
       pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
+      attributes: { authInfo: { getType: () => 'ims' } },
     };
   }
 

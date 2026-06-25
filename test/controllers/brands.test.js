@@ -4797,6 +4797,38 @@ describe('Brands Controller', () => {
         });
       });
 
+      it('stashes the primary URL from a bare STRING url entry on a pending draft', async () => {
+        // The wizard may send `urls` as plain strings rather than { value }
+        // objects; the pending primaryUrl resolution must accept either shape.
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'New Brand',
+            status: 'pending',
+            // Plain strings, not { value } objects.
+            urls: ['https://acme.com/path'],
+            semrushMarket: { market: 'us', languageCode: 'en' },
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
+          primaryUrl: 'https://acme.com/path',
+          markets: [{ market: 'us', languageCode: 'en' }],
+          generatePrompts: false,
+        });
+      });
+
       it('seeds the initial market modelIds from semrushModelIds on a pending draft (no provisioning)', async () => {
         const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
@@ -5010,6 +5042,37 @@ describe('Brands Controller', () => {
         expect(loggerStub.info).to.have.been.calledWithMatch(
           'brands: dropped self-referential competitor(s) on create',
         );
+      });
+
+      it('keeps competitors when the brand payload carries no resolvable own domain', async () => {
+        // brandDomainFromPayload returns null (urls is empty), so the reserved
+        // list starts EMPTY (primaryDomain falsy → []). No competitor matches a
+        // reserved own-property domain, so nothing is dropped.
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'No Domain Brand' });
+        const controller = await buildCreateController({ upsertBrand: upsertStub });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'No Domain Brand',
+            // No urls → brandDomainFromPayload() === null → reserved = [].
+            competitors: [
+              { name: 'Rival A', url: 'https://rival-a.com' },
+              { name: 'Rival B', url: 'https://rival-b.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        const { brand } = upsertStub.firstCall.firstArg;
+        // Nothing dropped: both competitors survive.
+        expect(brand.competitors.map((c) => c.url)).to.deep.equal([
+          'https://rival-a.com',
+          'https://rival-b.com',
+        ]);
       });
 
       it('does NOT enter Semrush mode for a flat create carrying generatePrompts:false (no market)', async () => {
@@ -5854,6 +5917,134 @@ describe('Brands Controller', () => {
         expect(loggerStub.info).to.have.been.calledWithMatch(
           'brands: dropped self-referential competitor(s) on update',
         );
+      });
+
+      it('uses the INCOMING urls (not the stored ones) when the same PATCH edits both urls and competitors', async () => {
+        // The same PATCH changes urls AND competitors → the guard must reserve the
+        // incoming urls (updates.urls !== undefined branch), so a competitor on a
+        // freshly-added own URL is dropped even though it is not a stored URL.
+        const updated = {
+          id: BRAND_UUID,
+          name: 'Flat Brand',
+          semrushWorkspaceId: null,
+          urls: [{ value: 'https://new.acme.com' }],
+          socialAccounts: [],
+          earnedContent: [],
+          competitors: [{ name: 'Real Rival', url: 'https://rival.com' }],
+        };
+        const updateBrandStub = sinon.stub().resolves(updated);
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          // Stored urls differ from the incoming ones; the guard must ignore these.
+          urls: [{ value: 'https://old.acme.com' }],
+          semrushWorkspaceId: undefined,
+        });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            // Incoming urls (NOT the stored old.acme.com) drive the reserved set.
+            urls: [{ value: 'https://new.acme.com' }],
+            competitors: [
+              { name: 'Incoming Own', url: 'https://new.acme.com' },
+              { name: 'Real Rival', url: 'https://rival.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(200);
+        const { updates } = updateBrandStub.firstCall.firstArg;
+        // The incoming own-URL competitor is dropped; the stored old URL is NOT
+        // reserved (so a competitor on it would have survived).
+        expect(updates.competitors.map((c) => c.url)).to.deep.equal(['https://rival.com']);
+      });
+
+      it('falls back to an empty own-URL set when the stored brand has no urls (competitor-only edit)', async () => {
+        // Competitor-only PATCH (updates.urls === undefined → use stored), and the
+        // stored brand has no `urls` field at all → brandState?.urls || [] fallback.
+        const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          // No `urls` key → brandState?.urls is undefined → `|| []` fallback.
+          semrushWorkspaceId: undefined,
+        });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            // No urls on the PATCH → updates.urls === undefined.
+            competitors: [
+              { name: 'Self', url: 'https://acme.com' },
+              { name: 'Real Rival', url: 'https://rival.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(200);
+        const { updates } = updateBrandStub.firstCall.firstArg;
+        // Only the baseUrl is reserved (no website URLs), so the primary self-ref
+        // is dropped and the real rival survives.
+        expect(updates.competitors.map((c) => c.url)).to.deep.equal(['https://rival.com']);
+      });
+
+      it('tolerates a listProjects result without an items array and an alias sync without a rejected list', async () => {
+        // sharedListing has no `items` array → sharedProjects falls back to [];
+        // syncBrandAliasesAcrossMarkets resolves undefined → rejected fallback [].
+        const updated = {
+          id: BRAND_UUID,
+          name: 'Updated Brand',
+          semrushWorkspaceId: 'ws-9',
+          brandAliases: [{ name: 'Acme', regions: [] }],
+        };
+        const updateBrandStub = sinon.stub().resolves(updated);
+        // Resolves an object with NO items key → Array.isArray(items) === false.
+        const listProjectsStub = sinon.stub().resolves({});
+        const createTransportStub = sinon.stub().returns({
+          name: 't', listProjects: listProjectsStub,
+        });
+        // Resolves undefined → aliasResult?.rejected ?? [] hits the ?? fallback.
+        const aliasSyncStub = sinon.stub().resolves(undefined);
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          createSerenityTransport: createTransportStub,
+          syncBrandAliasesAcrossMarkets: aliasSyncStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { brandAliases: [{ name: 'Acme', regions: [] }] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(200);
+        expect(aliasSyncStub).to.have.been.calledOnce;
+        // Empty fallback array passed to the alias sync (sharedProjects === []).
+        expect(aliasSyncStub.firstCall.args[5]).to.deep.equal([]);
+        const body = await response.json();
+        // No rejected aliases accumulated (aliasResult?.rejected ?? [] → []), so
+        // the response omits the semrushRejectedAliases key entirely.
+        expect(body.semrushRejectedAliases).to.equal(undefined);
       });
     });
   });

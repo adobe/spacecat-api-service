@@ -87,6 +87,13 @@ describe('competitor-benchmarks helpers', () => {
       expect([...buildReservedDomains(null, undefined)].length).to.equal(0);
       expect([...buildReservedDomains(['not a url', ''], [null, { value: '' }])].length).to.equal(0);
     });
+
+    it('treats a non-array urls argument as no brand URLs (else branch at line 57)', () => {
+      // urls passed as a string (not an array) → the `Array.isArray(urls) ? urls : []`
+      // else arm short-circuits the URL loop; only the domains fold in.
+      const reserved = buildReservedDomains(['https://www.brand.com'], 'https://shop.brand.io');
+      expect([...reserved]).to.deep.equal(['brand.com']);
+    });
   });
 
   describe('dropReservedCompetitors', () => {
@@ -259,6 +266,23 @@ describe('competitor-benchmarks helpers', () => {
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
       expect(transport.updateBenchmark).to.not.have.been.called;
       expect(result.changed).to.equal(false);
+    });
+
+    it('treats a non-array re-read after an alias write as no benchmarks (no rejections)', async () => {
+      // An alias-bearing create sets wroteAliases → the re-read fires, but the
+      // body is non-array, so `Array.isArray(after?.aio_benchmarks) ? ... : []`
+      // (line 265) falls to [] and nothing is flagged rejected.
+      const transport = makeTransport([]);
+      transport.listBenchmarks.onSecondCall().resolves({ aio_benchmarks: null });
+      const competitors = [
+        {
+          name: 'Duck', url: 'https://duckduckgo.com', aliases: ['DDG'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.listBenchmarks).to.have.been.calledTwice;
+      expect(result.created).to.equal(1);
+      expect(result.rejected).to.deep.equal([]);
     });
 
     it('captures rejected_brand_aliases Semrush dropped on a competitor benchmark', async () => {

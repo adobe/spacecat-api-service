@@ -988,6 +988,48 @@ describe('Semrush REST transport', () => {
       });
     });
 
+    describe('unwrap error/data/null fallback (line 159)', () => {
+      it('falls through to data then null when the non-2xx error body parses to JSON null', async () => {
+        // openapi-fetch parses a JSON `null` error body to `error === null`
+        // (nullish), so `error ?? data ?? null` evaluates the `data` operand
+        // (also nullish here) and finally the `null` literal — exercising both
+        // right-hand operands of the coalescing chain. (A `''` error body would
+        // short-circuit at `error` since '' is not nullish, which is why the
+        // empty-body test does not reach these branches.)
+        fetchStub.resolves(new Response('null', {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        }));
+        const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+        try {
+          await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+          expect.fail('should have thrown');
+        } catch (err) {
+          expect(err).to.be.instanceOf(SerenityTransportError);
+          expect(err.status).to.equal(500);
+          // error(null) ?? data(undefined) ?? null → null; line 163 keeps null.
+          expect(err.body).to.equal(null);
+        }
+      });
+    });
+
+    describe('createTimeoutFetch re-throws a non-abort error via the wrapped fetch (line 135)', () => {
+      it('propagates a non-AbortError rejection from the wrapped fetch unchanged', async () => {
+        // Drive the timeout-fetch catch with a rejection whose name is NOT
+        // 'AbortError' so the `if` guard is false and `throw e` re-raises the
+        // original error verbatim (no 504 mapping).
+        const boom = Object.assign(new Error('EPIPE'), { name: 'TypeError', code: 'EPIPE' });
+        fetchStub.rejects(boom);
+        const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+        const err = await transport.publishProject(WORKSPACE_ID, PROJECT_ID).catch((e) => e);
+        expect(err).to.equal(boom);
+        expect(err).to.not.be.instanceOf(SerenityTransportError);
+        expect(err.message).to.equal('EPIPE');
+      });
+    });
+
     describe('getBrandTopics with undefined domain and country', () => {
       it('falls back to empty string for undefined domain and country (String(?? "") branches)', async () => {
         // String(domain ?? '') and String(country ?? '') right-side branches.

@@ -511,6 +511,20 @@ describe('SerenityController', () => {
       expect(handlers.handleGetMarket.firstCall.args[2]).to.equal(null);
     });
 
+    it('getMarket forwards null for an empty geoTargetId path segment', async () => {
+      // Empty path segment → pGeo is '' → `pGeo || ''` right side → regex rejects
+      // '' → geoTargetId forwarded as null (handler 400s).
+      handlers.handleGetMarket.rejects(
+        new ErrorWithStatusCode('geoTargetId must be a positive integer', 400),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getMarket(fakeContext({
+        params: { geoTargetId: '', languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleGetMarket.firstCall.args[2]).to.equal(null);
+    });
+
     it('getMarket maps a handler 404 marketNotFound to a 404 envelope carrying that token', async () => {
       const err = new ErrorWithStatusCode('No market for this slice', 404);
       err.code = 'marketNotFound';
@@ -956,10 +970,71 @@ describe('SerenityController', () => {
         .to.deep.equal(competitors);
     });
 
+    it('createMarket opts into topic generation (cap + standard tags) when generatePrompts is true', async () => {
+      // generatePrompts:true → genMarketTopics true → the true side of each
+      // ternary (topicCap, standardTags, projectTags) is forwarded.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          generatePrompts: true,
+        },
+      }));
+      expect(response.status).to.equal(201);
+      const opts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+      expect(opts.generateTopics).to.equal(true);
+      // Topic cap + tag lists are populated (non-empty) on the opt-in path.
+      expect(opts.topicCap).to.be.a('number').and.to.be.greaterThan(0);
+      expect(opts.standardTags).to.be.an('array').and.to.have.length.greaterThan(0);
+      expect(opts.projectTags).to.be.an('array').and.to.have.length.greaterThan(0);
+    });
+
     it('deleteMarket routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleDeleteMarketSubworkspace.resolves({ status: 204 });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
+      expect(response.status).to.equal(204);
+      expect(handlers.handleDeleteMarketSubworkspace).to.have.been.calledOnce;
+    });
+
+    it('getMarket defaults the path slice to an empty object when ctx.params is absent post-auth', async () => {
+      // Defensive `ctx?.params || {}` guard: authorize reads brandId/spaceCatId up
+      // front, so if params is later cleared, the slice parsing must still tolerate
+      // a missing params object (both geoTargetId and languageCode resolve to null).
+      handlers.handleGetMarketSubworkspace.resolves({
+        brandId: BRAND, geoTargetId: null, languageCode: null,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } });
+      // authorize() reads params first, then awaits resolveBrandWorkspace — clear
+      // params during that await so the post-auth `|| {}` fallback is exercised.
+      resolveBrandWorkspaceStub.callsFake(async () => {
+        ctx.params = undefined;
+        return { mode: 'subworkspace', workspaceId: 'subworkspace-ws-1', parentWorkspaceId: WORKSPACE };
+      });
+      const response = await controller.getMarket(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleGetMarketSubworkspace).to.have.been.calledOnce;
+      const { args } = handlers.handleGetMarketSubworkspace.firstCall;
+      // geoTargetId + languageCode forwarded as null (empty-object fallback).
+      expect(args[3]).to.equal(null);
+      expect(args[4]).to.equal(null);
+    });
+
+    it('deleteMarket defaults the path slice to an empty object when ctx.params is absent post-auth', async () => {
+      // Same defensive `ctx?.params || {}` guard in deleteMarket.
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } });
+      resolveBrandWorkspaceStub.callsFake(async () => {
+        ctx.params = undefined;
+        return { mode: 'subworkspace', workspaceId: 'subworkspace-ws-1', parentWorkspaceId: WORKSPACE };
+      });
+      const response = await controller.deleteMarket(ctx);
       expect(response.status).to.equal(204);
       expect(handlers.handleDeleteMarketSubworkspace).to.have.been.calledOnce;
     });
@@ -1640,6 +1715,31 @@ describe('SerenityController', () => {
       expect(log.error).to.have.been.calledWithMatch('SERENITY_ACTIVATE_SAVE_DIVERGENCE');
     });
 
+    it('counts an already-existing (409) market as live in the save-divergence log when the status save fails', async () => {
+      // A re-activate where the only market already exists upstream (409) is still
+      // "fully live"; when the active-flip save then fails, the divergence log's
+      // marketsLive count must include the 409 (the r.status === 409 side of the
+      // filter), not just freshly-created 201s.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
+      ensureMarketSiteStub.resolves('site-uuid-1');
+      const brand = makeBrandModel();
+      brand.save = sinon.stub().rejects(new Error('db down'));
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      // Every market live (via 409) + site linked, but the active-flip save fails.
+      expect(response.status).to.equal(502);
+      const divergenceCall = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].includes('SERENITY_ACTIVATE_SAVE_DIVERGENCE'),
+      );
+      expect(divergenceCall, 'expected a SAVE_DIVERGENCE error log').to.not.equal(undefined);
+      // The lone 409 market is counted as live.
+      expect(divergenceCall.args[1].marketsLive).to.equal(1);
+    });
+
     it('activate stays pending with a 502 when every market is live but the brand_sites link fails', async () => {
       // The brand_sites mirror (type='serenity') is a REQUIRED activation step:
       // even with every market live, a failed site link keeps the brand pending so
@@ -1756,6 +1856,25 @@ describe('SerenityController', () => {
       expect(clearBrandWorkspaceCacheStub).to.have.been.called;
       // distinct, greppable token so the orphaned state is alertable.
       expect(log.error).to.have.been.calledWithMatch('SERENITY_DEACTIVATE_SAVE_DIVERGENCE');
+    });
+
+    it('logs a null decommissionedWorkspaceId on a save-divergence for a brand that had no subworkspace', async () => {
+      // No subworkspace → the decommission block is skipped, but the status save
+      // still runs (and here fails). The divergence log's decommissionedWorkspaceId
+      // must be null (the `: null` side of hasText(subworkspaceId) ? ... : null).
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      brand.save = sinon.stub().rejects(new Error('db down'));
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(500);
+      // Nothing was decommissioned (no subworkspace to empty).
+      expect(decommissionStub).to.not.have.been.called;
+      const divergenceCall = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].includes('SERENITY_DEACTIVATE_SAVE_DIVERGENCE'),
+      );
+      expect(divergenceCall, 'expected a SAVE_DIVERGENCE error log').to.not.equal(undefined);
+      expect(divergenceCall.args[1].decommissionedWorkspaceId).to.equal(null);
     });
 
     it('deactivate surfaces a decommission failure without clearing the pointer or status', async () => {
