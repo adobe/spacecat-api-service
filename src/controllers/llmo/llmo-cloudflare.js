@@ -17,6 +17,7 @@ import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { deriveWorkerName, hostInSiteDomain, routePatternHost } from './llmo-cloudflare-utils.js';
 
 const CF_TOKEN_HEADER = 'x-cloudflare-token';
 const CF_TOKEN_MISSING = 'Missing x-cloudflare-token header';
@@ -33,44 +34,6 @@ const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
 // Boundary input validation (defense-in-depth, independent of CloudflareClient behaviour).
 const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
-
-const WORKER_NAME_PREFIX = 'edge-optimize-router';
-const CF_MAX_SCRIPT_NAME_LEN = 63; // Cloudflare worker script name max length
-
-/**
- * Derives the Edge Optimize worker name from a site's base URL: the canonical host (leading
- * "www." removed) with every run of non-alphanumeric characters collapsed to a single hyphen,
- * prefixed and length-capped, e.g. https://www.example.com -> edge-optimize-router-example-com.
- * Cloudflare worker names must match ^[a-z0-9][a-z0-9-]{0,62}$ (no dots), which this guarantees.
- */
-const deriveWorkerName = (baseURL) => {
-  const host = new URL(baseURL).hostname.replace(/^www\./i, '');
-  const slug = host.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  if (!slug) {
-    return null;
-  }
-  return `${WORKER_NAME_PREFIX}-${slug}`.slice(0, CF_MAX_SCRIPT_NAME_LEN).replace(/-+$/g, '');
-};
-
-/**
- * Whether `host` belongs to the onboarded site's domain: it must equal the site's canonical
- * host (base URL host minus leading "www.") or be a subdomain of it. Prevents pointing the
- * worker / a route at a host unrelated to the site being onboarded.
- */
-const hostInSiteDomain = (host, baseURL) => {
-  const siteHost = new URL(baseURL).hostname.replace(/^www\./i, '').toLowerCase();
-  const h = host.toLowerCase();
-  return h === siteHost || h.endsWith(`.${siteHost}`);
-};
-
-/**
- * Extracts the host from a Cloudflare route pattern (e.g. "*.example.com/path*" -> "example.com",
- * "https://www.example.com/*" -> "www.example.com"), stripping any scheme and leading wildcard.
- */
-const routePatternHost = (pattern) => pattern
-  .replace(/^https?:\/\//i, '')
-  .split('/')[0]
-  .replace(/^\*\.?/, '');
 
 function LlmoCloudflareController(ctx) {
   const { log, env } = ctx;
