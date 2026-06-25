@@ -144,7 +144,7 @@ function BrandsController(ctx, log, env) {
       );
       log.warn(`BrandDemotionBlocked: ${operation} attempted an active->pending demotion `
         + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
-        + `updatedBy=${context?.attributes?.authInfo?.profile?.email || 'system'}); rejected — `
+        + `updatedBy=${context?.attributes?.authInfo?.profile?.sub || 'system'}); rejected — `
         + 'use PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status for intentful transitions.');
     } catch {
       // best-effort: metric/log emission must never affect the request path

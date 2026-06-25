@@ -28,6 +28,18 @@ const BRAND_SELECT = [
   'brand_urls(url)',
 ].join(', ');
 
+// Re-landed from Igor Grubic's #2504 (LLMO-5183): map the data-layer
+// chk_active_brand_has_site_id CheckViolation to a typed 400 (covers the race
+// where site_id is cleared between our SELECT and this write).
+function rethrowCheckViolation(error, fallbackMessage) {
+  if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
+    const err = new Error('Cannot activate a brand without a base site URL');
+    err.status = 400;
+    throw err;
+  }
+  throw new Error(fallbackMessage);
+}
+
 function normalizeNullableText(value, fieldName) {
   if (value === undefined) {
     return undefined;
@@ -948,15 +960,7 @@ export async function upsertBrand({
       err.status = 409;
       throw err;
     }
-    // Re-landed from Igor Grubic's #2504 (LLMO-5183): map the data-layer
-    // chk_active_brand_has_site_id CheckViolation to a typed 400 (covers the race
-    // where site_id is cleared between our SELECT and this write).
-    if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
-      const err = new Error('Cannot activate a brand without a base site URL');
-      err.status = 400;
-      throw err;
-    }
-    throw new Error(`Failed to upsert brand: ${error.message}`);
+    rethrowCheckViolation(error, `Failed to upsert brand: ${error.message}`);
   }
 
   const brandId = upserted.id;
@@ -1114,15 +1118,7 @@ export async function updateBrand({
       err.status = 409;
       throw err;
     }
-    // Re-landed from Igor Grubic's #2504 (LLMO-5183): map the data-layer
-    // chk_active_brand_has_site_id CheckViolation to a typed 400 (covers the race
-    // where site_id is cleared between our SELECT and this write).
-    if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
-      const err = new Error('Cannot activate a brand without a base site URL');
-      err.status = 400;
-      throw err;
-    }
-    throw new Error(`Failed to update brand: ${error.message}`);
+    rethrowCheckViolation(error, `Failed to update brand: ${error.message}`);
   }
   if (!data) {
     return null;
