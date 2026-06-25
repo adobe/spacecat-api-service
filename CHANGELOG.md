@@ -1,3 +1,36 @@
+## [1.601.2](https://github.com/adobe/spacecat-api-service/compare/v1.601.1...v1.601.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps:** redeploy http-utils 1.30.0 revert to prod (back office outage) ([#2692](https://github.com/adobe/spacecat-api-service/issues/2692)) ([5c3cb11](https://github.com/adobe/spacecat-api-service/commit/5c3cb11029aeb6a63c7a7316085263d07751c34a)), closes [#2691](https://github.com/adobe/spacecat-api-service/issues/2691)
+
+
+### Reverts
+
+* fix(deps): bump spacecat-shared-http-utils 1.30.0 to 1.31.0 ([#2691](https://github.com/adobe/spacecat-api-service/issues/2691)) ([d8c8d8b](https://github.com/adobe/spacecat-api-service/commit/d8c8d8b8371539961cf26018bab09a60515af000)), closes [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [adobe/spacecat-shared#1712](https://github.com/adobe/spacecat-shared/issues/1712) [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2637](https://github.com/adobe/spacecat-api-service/issues/2637) [#2681](https://github.com/adobe/spacecat-api-service/issues/2681)
+
+## [1.601.1](https://github.com/adobe/spacecat-api-service/compare/v1.601.0...v1.601.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **preflight:** rename scan_id wire field to async_job_id in callMysticatAnalyze (SITES-47173) ([#2689](https://github.com/adobe/spacecat-api-service/issues/2689)) ([3098758](https://github.com/adobe/spacecat-api-service/commit/3098758825762f6b3934601d98a13a357fb06e5a))
+
+# [1.601.0](https://github.com/adobe/spacecat-api-service/compare/v1.600.0...v1.601.0) (2026-06-25)
+
+
+### Features
+
+* **llmo:** add Cloudflare onboarding API endpoints ([#2681](https://github.com/adobe/spacecat-api-service/issues/2681)) ([acf70c4](https://github.com/adobe/spacecat-api-service/commit/acf70c4a49b48a0f5e6fbfd038dad2756651a81f))
+
+# [1.600.0](https://github.com/adobe/spacecat-api-service/compare/v1.599.0...v1.600.0) (2026-06-25)
+
+
+### Features
+
+* **brands:** guard against active->pending demotion in updateBrand/upsertBrand (LLMO-5587) ([#2637](https://github.com/adobe/spacecat-api-service/issues/2637)) ([410ae58](https://github.com/adobe/spacecat-api-service/commit/410ae58ebd4fa9105f0c058129f340a49270ef3e)), closes [#2139](https://github.com/adobe/spacecat-api-service/issues/2139) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2137](https://github.com/adobe/spacecat-api-service/issues/2137) [#2139](https://github.com/adobe/spacecat-api-service/issues/2139) [#2504](https://github.com/adobe/spacecat-api-service/issues/2504) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2504](https://github.com/adobe/spacecat-api-service/issues/2504)
+
 # [1.599.0](https://github.com/adobe/spacecat-api-service/compare/v1.598.1...v1.599.0) (2026-06-25)
 
 
