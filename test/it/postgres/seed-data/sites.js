@@ -80,6 +80,19 @@ export const sites = [
     is_live: true,
     name: 'Site Four (Delegate)',
   },
+  // Serenity market-mirror Site (ORG_1): mirrors a Semrush market domain.
+  // delivery_type 'other' — a Semrush-managed market site is not an AEM target
+  // (matches ensureMarketSite). Linked to BRAND_1 via a type='serenity'
+  // brand_sites row (see seed-data/brand-sites.js) which must NOT surface in
+  // the brand's urls[] / siteIds.
+  {
+    id: '5e111111-1111-4111-b111-1111111111fe',
+    base_url: 'https://semrush-market.example.fr',
+    organization_id: '11111111-1111-4111-b111-111111111111',
+    delivery_type: 'other',
+    is_live: true,
+    name: 'Semrush Market Mirror (FR)',
+  },
   // TEMPORARY: LLMO mode-resolution test sites — remove with resolveLlmoOnboardingMode legacy check
   {
     id: 'fd111111-1111-4111-b111-111111111111',
