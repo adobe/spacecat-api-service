@@ -833,6 +833,44 @@ SitePagedResponse:
   required:
     - sites
     - pagination
+SiteSearchResponse:
+  type: object
+  description: |
+    Response for the `baseUrlLike` substring search on `GET /sites`. Unlike
+    `SitePagedResponse`, this path is not cursor-iterable: `pagination` carries no
+    `cursor`, and instead echoes the trimmed `baseUrlLike` query so a client can
+    confirm the search was actually applied (an older deployment that ignores
+    `baseUrlLike` but honors `limit` would return `SitePagedResponse` with no echo).
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/SiteListItem'
+    pagination:
+      type: object
+      properties:
+        limit:
+          description: The maximum number of items returned (default 50, clamped to 500)
+          type: integer
+          example: 50
+        hasMore:
+          description: Indicates whether more matching sites exist beyond this result
+          type: boolean
+          example: false
+        baseUrlLike:
+          description: |
+            The trimmed `baseUrlLike` query that was applied (3-256 chars). Echoed so
+            clients can confirm the search ran; absent on deployments that ignore the
+            param.
+          type: string
+          example: "adobe"
+      required:
+        - limit
+        - hasMore
+        - baseUrlLike
+  required:
+    - sites
+    - pagination
 SiteWithLatestAuditList:
   type: array
   items:

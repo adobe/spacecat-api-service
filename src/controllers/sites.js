@@ -139,6 +139,7 @@ const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 const DEFAULT_LIMIT = 100;
+const SEARCH_DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 
 /**
@@ -431,10 +432,12 @@ function SitesController(ctx, log, env) {
    * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    *
-   * Optional `baseUrlLike` query param: when provided (min 3 chars), performs a
-   * case-insensitive substring search on `baseURL` and returns a non-cursor
-   * `{ sites, pagination: { limit, hasMore } }` response. LIKE wildcards in the
-   * input are escaped so callers cannot inject their own wildcards.
+   * Optional `baseUrlLike` query param: when provided (3-256 chars after trim),
+   * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
+   * `{ sites, pagination: { limit, hasMore, baseUrlLike } }` response. The trimmed query
+   * is echoed back in `pagination.baseUrlLike` so a client can confirm its search was
+   * applied even if it hits an older deployment that ignores the param. LIKE wildcards in
+   * the input are escaped so callers cannot inject their own wildcards.
    * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
@@ -460,8 +463,11 @@ function SitesController(ctx, log, env) {
       if (q.length < 3) {
         return badRequest('baseUrlLike must be at least 3 characters');
       }
+      if (q.length > 256) {
+        return badRequest('baseUrlLike exceeds maximum length');
+      }
 
-      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : 50;
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : SEARCH_DEFAULT_LIMIT;
       if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
         return badRequest('limit must be a positive integer');
       }
@@ -484,7 +490,15 @@ function SitesController(ctx, log, env) {
         log.info(`[s2s-readall] GET /sites (baseUrlLike) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
       }
 
-      return ok({ sites, pagination: { limit: effectiveLimit, hasMore } });
+      // Unconditional observability for both admin and S2S paths. Never log the raw
+      // query value (URLs may be sensitive) — only its length and result counts.
+      log.info(`[sites][baseUrlLike] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
+
+      // Echo the trimmed query in the pagination so a new client can confirm its
+      // search was actually applied. An older deployment that ignores `baseUrlLike`
+      // but still honors `limit` would return the cursor envelope with unfiltered
+      // sites and no `baseUrlLike` echo — letting clients detect the version skew.
+      return ok({ sites, pagination: { limit: effectiveLimit, hasMore, baseUrlLike: q } });
     }
 
     const cursor = context?.data?.cursor || null;

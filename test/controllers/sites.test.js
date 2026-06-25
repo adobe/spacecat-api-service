@@ -1198,7 +1198,7 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(200);
       expect(body).to.have.all.keys('sites', 'pagination');
       expect(body.sites).to.be.an('array').with.lengthOf(2);
-      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false });
+      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false, baseUrlLike: 'site' });
 
       expect(mockDataAccess.Site.all).to.have.been.calledOnce;
       const [firstArg, opts] = mockDataAccess.Site.all.firstCall.args;
@@ -1219,7 +1219,7 @@ describe('Sites Controller', () => {
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false });
+      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false, baseUrlLike: 'site' });
       const [, opts] = mockDataAccess.Site.all.firstCall.args;
       expect(opts.limit).to.equal(51); // 50 + 1
     });
@@ -1233,7 +1233,7 @@ describe('Sites Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(body.sites).to.be.an('array').with.lengthOf(1); // trimmed to limit
-      expect(body.pagination).to.deep.equal({ limit: 1, hasMore: true });
+      expect(body.pagination).to.deep.equal({ limit: 1, hasMore: true, baseUrlLike: 'site' });
     });
 
     it('escapes LIKE wildcards in the user input', async () => {
@@ -1266,7 +1266,56 @@ describe('Sites Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(body.sites).to.be.an('array').with.lengthOf(2);
-      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false });
+      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false, baseUrlLike: 'site' });
+    });
+
+    it('returns an empty list with hasMore:false and the baseUrlLike echo when Site.all resolves []', async () => {
+      mockDataAccess.Site.all.resolves([]);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'nomatch' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array').that.is.empty;
+      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false, baseUrlLike: 'nomatch' });
+    });
+
+    it('echoes the trimmed query in pagination.baseUrlLike', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: '  Adobe  ', limit: '10' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      // The echo is the trimmed query, not the raw padded input.
+      expect(body.pagination.baseUrlLike).to.equal('Adobe');
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const builder = { ilike: sinon.stub().returnsThis() };
+      opts.where(builder);
+      expect(builder.ilike).to.have.been.calledOnceWithExactly('baseURL', '%Adobe%');
+    });
+
+    it('accepts an exactly-3-char query (inclusive lower boundary) and calls Site.all', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'abc' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.all).to.have.been.calledOnce;
+      expect(body.pagination.baseUrlLike).to.equal('abc');
+    });
+
+    it('returns 400 when baseUrlLike exceeds 256 chars after trimming', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      const longValue = 'a'.repeat(257);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: longValue } });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'baseUrlLike exceeds maximum length');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
 
     ['ab', 'a', '', '  x '].forEach((shortValue) => {
