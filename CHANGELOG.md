@@ -1,3 +1,17 @@
+## [1.598.1](https://github.com/adobe/spacecat-api-service/compare/v1.598.0...v1.598.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps:** bump spacecat-shared-http-utils 1.30.0 → 1.31.0 (FACS getFacsPermissions) ([#2686](https://github.com/adobe/spacecat-api-service/issues/2686)) ([96c5c10](https://github.com/adobe/spacecat-api-service/commit/96c5c1047606cddcda5e513d847d5892410b7ea8)), closes [#1712](https://github.com/adobe/spacecat-api-service/issues/1712)
+
+# [1.598.0](https://github.com/adobe/spacecat-api-service/compare/v1.597.0...v1.598.0) (2026-06-25)
+
+
+### Features
+
+* fix-inconsistent-locale-propagation-in-fixes-API-and-embedded-suggestion-DTOs | LLMO-5430 ([#2677](https://github.com/adobe/spacecat-api-service/issues/2677)) ([5446407](https://github.com/adobe/spacecat-api-service/commit/54464070bafe2b798534dbac0fa1ec09a183f142))
+
 # [1.597.0](https://github.com/adobe/spacecat-api-service/compare/v1.596.0...v1.597.0) (2026-06-25)
 
 
