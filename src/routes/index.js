@@ -73,6 +73,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -134,6 +135,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  llmoCloudflareController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -489,6 +491,15 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+
+    // LLMO Cloudflare Onboarding Routes
+    'GET /sites/:siteId/llmo/onboarding/cloudflare/config': llmoCloudflareController.getCloudflareConfig,
+    'GET /sites/:siteId/llmo/onboarding/cloudflare/accounts': llmoCloudflareController.listAccounts,
+    'GET /sites/:siteId/llmo/onboarding/cloudflare/zones': llmoCloudflareController.listZones,
+    'GET /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes': llmoCloudflareController.listRoutes,
+    'POST /sites/:siteId/llmo/onboarding/cloudflare/deploy': llmoCloudflareController.deployWorker,
+    'POST /sites/:siteId/llmo/onboarding/cloudflare/zones/:zoneId/routes': llmoCloudflareController.addRoute,
+
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
 
