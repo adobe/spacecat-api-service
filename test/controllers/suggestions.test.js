@@ -8599,6 +8599,18 @@ describe('Suggestions Controller', () => {
       })).to.throw('exceeds safe SQS message size threshold');
     });
 
+    it('throws when a later pattern-based-covered-marking id exceeds SQS safe size', () => {
+      expect(() => createPatternJobPayloadChunks({
+        type: 'pattern-based-covered-marking',
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        patternBasedSuggestionIds: [
+          'valid-pattern-id',
+          'a'.repeat(250 * 1024),
+        ],
+      })).to.throw('exceeds safe SQS message size threshold');
+    });
+
     it('logs warning but still returns 207 when pattern-based-covered-marking SQS enqueue fails', async () => {
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
