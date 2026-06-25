@@ -177,7 +177,17 @@ function benchmarkBody(c) {
  * it re-reads the benchmarks to capture any `rejected_brand_aliases` Semrush
  * silently dropped, so the caller can surface them.
  *
+ * @param {object} transport - Semrush transport (lists/creates/updates/deletes benchmarks).
+ * @param {string} workspaceId - the brand's sub-workspace id.
+ * @param {string} projectId - the market/project to sync competitor benchmarks on.
+ * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}
+ *   competitors - the brand's competitors to track (region-filtered by
+ *   {@link collectCompetitorBenchmarks}).
  * @param {string[]} removedDomains - normalized domains removed from the brand.
+ * @param {string} market - ISO-2 country code of the target project.
+ * @param {object} [log] - optional logger ({ info? }).
+ * @param {Set<string>} [reservedDomains=new Set()] - the brand's own normalized
+ *   domains, excluded so a competitor can't be one of the brand's properties.
  * @returns {Promise<{created: number, updated: number, deleted: number,
  *   changed: boolean, rejected: {domain: string, aliases: string[]}[]}>}
  */

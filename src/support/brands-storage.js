@@ -1008,11 +1008,18 @@ export async function updateBrand({
   // baseSiteId is immutable once set — only allow setting from NULL.
   // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
   if (hasText(updates.baseSiteId)) {
-    const { data: current } = await postgrestClient
+    const { data: current, error: currentError } = await postgrestClient
       .from('brands')
       .select('site_id')
       .eq('id', brandId)
       .maybeSingle();
+    // Fail closed: a swallowed read error leaves `current` null, so the guard
+    // below would treat the brand as having no site_id and re-point the
+    // immutable site_id on a transient failure (the LLMO-5556 regression this
+    // block guards against). Throw instead of silently corrupting the link.
+    if (currentError) {
+      throw new Error(`Failed to read current baseSiteId for brand: ${currentError.message}`);
+    }
 
     if (!current?.site_id) {
       patch.site_id = updates.baseSiteId;

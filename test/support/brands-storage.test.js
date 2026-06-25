@@ -2449,6 +2449,28 @@ describe('brands-storage', () => {
       expect(result).to.not.be.null;
     });
 
+    it('fails closed by throwing when the current baseSiteId read errors (LLMO-5556)', async () => {
+      // PostgREST returns { data: null, error } instead of throwing. Without the
+      // guard, `current` is null so the block would treat the brand as having no
+      // site_id and re-point the immutable site_id on a transient read failure.
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current site_id fails
+          { data: null, error: { message: 'connection reset' } },
+        ],
+      });
+
+      await expect(updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'some-site-id' },
+        postgrestClient: client,
+      })).to.be.rejectedWith('Failed to read current baseSiteId for brand: connection reset');
+
+      // The update must not run — site_id must never be patched on a read failure.
+      expect(client.capturedCalls.update).to.have.lengthOf(0);
+    });
+
     it('successfully updates scalar fields (name, status, origin, description, vertical)', async () => {
       const fullBrandRow = makeBrandRow({
         name: 'NewName',

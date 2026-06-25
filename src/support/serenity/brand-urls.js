@@ -142,7 +142,13 @@ export function normalizeBenchmarkDomain(value) {
  * `null` only when there is no benchmark to reuse AND no usable domain to create
  * one with — callers then skip the URL attach (never a hard failure).
  *
+ * @param {object} transport - Semrush transport (lists/creates benchmarks).
+ * @param {string} workspaceId - the brand's sub-workspace id.
+ * @param {string} projectId - the market/project to ensure the benchmark on.
  * @param {object} brand - { name, domain, aliases? } identity of the own brand.
+ * @param {object} [log] - optional logger ({ info?, warn? }).
+ * @returns {Promise<string|null>} the resolved benchmark id, or null when none
+ *   exists and none can be created (no usable brand domain).
  */
 export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId, brand, log) {
   const resp = await transport.listBenchmarks(workspaceId, projectId);
@@ -200,8 +206,14 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
  * propagates; the upstream silently skips URLs already present, so a re-attach
  * is idempotent.
  *
+ * @param {object} transport - Semrush transport (ensures the benchmark, creates URLs).
+ * @param {string} workspaceId - the brand's sub-workspace id.
+ * @param {string} projectId - the market/project to attach the URLs to.
+ * @param {Array<{url: string, type: string}>} entries - the brand-URL entries to
+ *   push (a no-op when empty).
  * @param {object} brand - { name, domain, aliases? } of the project's own brand,
  *   used to find-or-create the benchmark the URLs attach to.
+ * @param {object} [log] - optional logger ({ info?, warn? }).
  * @returns {Promise<{created: number, skipped?: boolean}>} count submitted
  *   (0 on no-op or when skipped for a missing benchmark).
  */

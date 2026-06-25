@@ -58,6 +58,7 @@ import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
+import { resolveProjects } from '../support/serenity/resolve-projects.js';
 import {
   buildReservedDomains,
   dropReservedCompetitors,
@@ -1829,8 +1830,7 @@ function BrandsController(ctx, log, env) {
           // listProjects round-trips into one on a single edit. Kept inside the try
           // so a listProjects failure still emits the workspace-scoped re-sync
           // breadcrumb below rather than escaping to the generic outer catch.
-          const sharedListing = await transport.listProjects(updated.semrushWorkspaceId);
-          const sharedProjects = Array.isArray(sharedListing?.items) ? sharedListing.items : [];
+          const sharedProjects = await resolveProjects(transport, updated.semrushWorkspaceId);
           if (urlsTouched) {
             await syncBrandUrlsAcrossMarkets(
               transport,

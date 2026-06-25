@@ -57,6 +57,11 @@ export function hostnameFromUrlString(value) {
  * addresses) are neutralized only by that upstream `new URL()` normalization,
  * not by this function in isolation.
  *
+ * SYNTACTIC guard only — it inspects the hostname string, never resolves DNS.
+ * Wildcard-DNS services (e.g. `nip.io`, `sslip.io`) that embed a private IP in a
+ * public-looking hostname pass this check; blocking resolution-time SSRF is the
+ * downstream fetcher's responsibility and relies on network egress controls.
+ *
  * @param {string} hostname - a bare hostname (as returned by hostnameFromUrlString)
  * @returns {boolean} true when the host is a public domain name
  */
@@ -83,6 +88,7 @@ export function isPublicHostname(hostname) {
     return false;
   }
   // Reserved / internal-use TLDs (RFC 6761 + the common `.internal`/`.local`).
+  // Source of truth for this list is RFC 6761 / the IANA Special-Use Domain Names registry.
   if (/\.(local|internal|localdomain|intranet|home|corp|lan|test|invalid|example|localhost)$/.test(host)) {
     return false;
   }
