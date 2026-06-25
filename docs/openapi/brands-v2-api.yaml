@@ -85,6 +85,16 @@ v2-brands-for-org:
         description: User does not have access to this organization
       '404':
         $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '409':
+        description: |
+          Conflict. A by-name upsert matched an existing **active** brand and the
+          supplied `status` would demote it to `pending`. Silent demotion is
+          rejected (`code: brand_status_demotion_not_allowed`). Use
+          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+          status transitions.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -166,6 +176,15 @@ v2-brand-for-org:
         description: User does not have access to this organization
       '404':
         description: Organization or brand not found
+      '409':
+        description: |
+          Conflict. The PATCH would demote an **active** brand to `pending` via the
+          generic update path (`code: brand_status_demotion_not_allowed`). Use
+          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+          status transitions.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
       '503':
