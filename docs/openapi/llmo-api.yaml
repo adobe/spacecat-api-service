@@ -3298,6 +3298,91 @@ site-llmo-edge-optimize-deploy:
     security:
       - api_key: [ ]
 
+site-llmo-edge-optimize-plan:
+  post:
+    tags:
+      - llmo
+    summary: Preview (non-mutating) the Edge Optimize CloudFront deploy plan
+    description: |
+      Read-only "Review & Deploy" preview for the CloudFront wizard. Mirrors the deploy endpoint
+      (same validation, access gate, role assumption, and server-derived Edge Optimize origin
+      headers) but runs the NON-mutating planner and returns the per-step plan plus
+      `canProceed`/`blocker` so the frontend can show exactly what will happen before the customer
+      commits. The caller passes the selected distribution, failover origin, and behavior; the Edge
+      Optimize API key and forwarded host are derived server-side from the site (env-aware via the
+      optional `environment` flag). The response also includes `targetDomain` — the resolved host
+      the backend will route to for the chosen environment.
+    operationId: planEdgeOptimize
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-plan-request'
+    responses:
+      '200':
+        description: The per-step plan plus whether the deploy can proceed.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - canProceed
+                - steps
+              properties:
+                canProceed:
+                  type: boolean
+                  description: True when the deploy can proceed (no blocking condition detected).
+                blocker:
+                  type:
+                    - string
+                    - 'null'
+                  description: Human-readable reason the deploy cannot proceed, or null.
+                targetDomain:
+                  type: string
+                  description: >-
+                    The resolved host the backend will route to for the chosen environment
+                    (the forwarded host). Informational — the frontend also knows it locally.
+                  example: www.example.com
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - key
+                      - label
+                      - action
+                    properties:
+                      key:
+                        type: string
+                        enum:
+                          - origin
+                          - function
+                          - cache
+                          - lambda
+                          - associate
+                          - verify
+                      label:
+                        type: string
+                      action:
+                        type: string
+                      detail:
+                        type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 edge-optimize-connector-request:
   type: object
   required:
@@ -3424,6 +3509,61 @@ edge-optimize-deploy-request:
       type: string
       description: The cache behavior path pattern to target; use `default` for the default behavior.
       example: default
+    environment:
+      type: string
+      description: >-
+        Which environment to route. Optional; defaults to `production` (backward-compatible). When
+        `stage`, the backend resolves the site's single configured stage domain and uses the stage
+        site's Edge Optimize API key + forwarded host instead of production's.
+      enum:
+        - production
+        - stage
+      default: production
+      example: production
+
+edge-optimize-plan-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+    - distributionId
+    - originId
+    - behavior
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+    distributionId:
+      type: string
+      description: The CloudFront distribution ID to preview.
+      example: E2EXAMPLE123
+    originId:
+      type: string
+      description: >-
+        The customer's existing failover origin id (the default behavior's target origin),
+        baked into the routing function's failover origin group.
+      example: origin-aem
+    behavior:
+      type: string
+      description: The cache behavior path pattern to target; use `default` for the default behavior.
+      example: default
+    environment:
+      type: string
+      description: >-
+        Which environment to route. Optional; defaults to `production` (backward-compatible). When
+        `stage`, the backend resolves the site's single configured stage domain and uses the stage
+        site's Edge Optimize API key + forwarded host instead of production's.
+      enum:
+        - production
+        - stage
+      default: production
+      example: production
 
 llmo-probe-edge-optimize:
   get:

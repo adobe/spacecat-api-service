@@ -2558,6 +2558,64 @@ function LlmoController(ctx) {
     }
   };
 
+  // Single source of environment-awareness for the CloudFront wizard. The FE sends only an optional
+  // `environment` flag ('production' | 'stage'); the BE does ALL resolution here and returns the EO
+  // origin headers (apiKey + forwardedHost) plus the resolved baseURL the wizard will route to.
+  //
+  // - 'production' / absent → today's behavior: prod site baseURL → first metaconfig apiKey +
+  //   calculateForwardedHost(prod baseURL).
+  // - 'stage' → resolve the single stage domain persisted on the prod site's edgeOptimizeConfig
+  //   (stagingDomains[0]); compose its baseURL; look up the (already-onboarded) stage site; use
+  //   that stage site's first metaconfig apiKey + calculateForwardedHost(stage baseURL).
+  //
+  // Returns `{ target: { baseURL, apiKey, forwardedHost }, error }`. On any resolution failure
+  // `error` is a badRequest Response the caller returns directly; otherwise `error` is undefined.
+  const resolveEoTarget = async (context, site, environment, log) => {
+    const { Site } = context.dataAccess;
+    const tokowakaClient = TokowakaClient.createFrom(context);
+
+    if (environment === 'stage') {
+      const edgeConfig = site.getConfig().getEdgeOptimizeConfig() || {};
+      const stagingDomains = Array.isArray(edgeConfig.stagingDomains)
+        ? edgeConfig.stagingDomains
+        : [];
+      const stageDomain = String(stagingDomains[0]?.domain || '').trim();
+      if (!hasText(stageDomain)) {
+        return { error: badRequest('No stage domain configured for this site') };
+      }
+
+      const stageBaseURL = composeBaseURL(stageDomain);
+      const stageSite = await Site.findByBaseURL(stageBaseURL);
+      if (!stageSite) {
+        return { error: badRequest('Stage site not found — add the stage domain first') };
+      }
+
+      const metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+      const apiKey = metaconfig?.apiKeys?.[0];
+      if (!hasText(apiKey)) {
+        return {
+          error: badRequest('Stage site has no Edge Optimize API key'
+            + ' — enable Edge Optimize for the stage domain first'),
+        };
+      }
+      const forwardedHost = calculateForwardedHost(stageBaseURL, log);
+      return { target: { baseURL: stageBaseURL, apiKey, forwardedHost } };
+    }
+
+    // production / absent
+    const baseURL = site.getBaseURL();
+    const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+    const apiKey = metaconfig?.apiKeys?.[0];
+    if (!hasText(apiKey)) {
+      return {
+        error: badRequest('Site has no Edge Optimize API key'
+          + ' — enable Edge Optimize for this site first'),
+      };
+    }
+    const forwardedHost = calculateForwardedHost(baseURL, log);
+    return { target: { baseURL, apiKey, forwardedHost } };
+  };
+
   // Add the Edge Optimize origin to the selected distribution (mutation). Idempotent: returns
   // { created: false, alreadyExisted: true } when the origin is already present. Used by the
   // wizard's "Create Edge Optimize origin" step.
@@ -2568,6 +2626,7 @@ function LlmoController(ctx) {
     const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
     const externalId = String(context.data?.externalId || '').trim();
     const distributionId = String(context.data?.distributionId || '').trim();
+    const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
@@ -2580,6 +2639,9 @@ function LlmoController(ctx) {
     if (!hasText(distributionId)) {
       return badRequest('distributionId is required');
     }
+    if (environment !== 'production' && environment !== 'stage') {
+      return badRequest("environment must be 'production' or 'stage'");
+    }
 
     try {
       const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize origin');
@@ -2589,15 +2651,13 @@ function LlmoController(ctx) {
 
       // The EO origin needs custom headers so the routing function's request authenticates to Edge
       // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
-      // are derived server-side from the site — no UI input. Without them Verify never goes green.
-      const baseURL = site.getBaseURL();
-      const tokowakaClient = TokowakaClient.createFrom(context);
-      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-      const apiKey = metaconfig?.apiKeys?.[0];
-      if (!hasText(apiKey)) {
-        return badRequest('Site has no Edge Optimize API key — enable Edge Optimize for this site first');
+      // are derived server-side from the site (env-aware via resolveEoTarget) — no UI input beyond
+      // the optional `environment` flag. Without them Verify never goes green.
+      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      if (targetError) {
+        return targetError;
       }
-      const forwardedHost = calculateForwardedHost(baseURL, log);
+      const { apiKey, forwardedHost } = target;
 
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
       const result = await createEdgeOptimizeOrigin(
@@ -2912,6 +2972,7 @@ function LlmoController(ctx) {
     const distributionId = String(context.data?.distributionId || '').trim();
     const originId = String(context.data?.originId || '').trim();
     const behavior = String(context.data?.behavior || '').trim();
+    const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
@@ -2930,6 +2991,9 @@ function LlmoController(ctx) {
     if (!hasText(behavior)) {
       return badRequest('behavior is required');
     }
+    if (environment !== 'production' && environment !== 'stage') {
+      return badRequest("environment must be 'production' or 'stage'");
+    }
 
     try {
       const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'deploy edge optimize routing');
@@ -2939,15 +3003,13 @@ function LlmoController(ctx) {
 
       // The EO origin needs custom headers so the routing function's request authenticates to Edge
       // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
-      // are derived server-side from the site — no UI input. Without them Verify never goes green.
-      const baseURL = site.getBaseURL();
-      const tokowakaClient = TokowakaClient.createFrom(context);
-      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-      const apiKey = metaconfig?.apiKeys?.[0];
-      if (!hasText(apiKey)) {
-        return badRequest('Site has no Edge Optimize API key — enable Edge Optimize for this site first');
+      // are derived server-side from the site (env-aware via resolveEoTarget) — no UI input beyond
+      // the optional `environment` flag. Without them Verify never goes green.
+      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      if (targetError) {
+        return targetError;
       }
-      const forwardedHost = calculateForwardedHost(baseURL, log);
+      const { apiKey, forwardedHost } = target;
 
       // Assume the connector role ONCE; all steps run with the same short-lived credentials.
       const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
@@ -2985,6 +3047,7 @@ function LlmoController(ctx) {
     const distributionId = String(context.data?.distributionId || '').trim();
     const originId = String(context.data?.originId || '').trim();
     const behavior = String(context.data?.behavior || '').trim();
+    const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
@@ -3003,6 +3066,9 @@ function LlmoController(ctx) {
     if (!hasText(behavior)) {
       return badRequest('behavior is required');
     }
+    if (environment !== 'production' && environment !== 'stage') {
+      return badRequest("environment must be 'production' or 'stage'");
+    }
 
     try {
       const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'preview edge optimize routing');
@@ -3010,16 +3076,14 @@ function LlmoController(ctx) {
         return error;
       }
 
-      // Derive the EO origin headers server-side (same as deploy) so the origin step of the plan
-      // reflects whether the existing origin already carries the right headers.
-      const baseURL = site.getBaseURL();
-      const tokowakaClient = TokowakaClient.createFrom(context);
-      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-      const apiKey = metaconfig?.apiKeys?.[0];
-      if (!hasText(apiKey)) {
-        return badRequest('Site has no Edge Optimize API key — enable Edge Optimize for this site first');
+      // Derive the EO origin headers server-side (same as deploy, env-aware via resolveEoTarget) so
+      // the origin step of the plan reflects whether the existing origin already carries the right
+      // headers for the chosen environment.
+      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      if (targetError) {
+        return targetError;
       }
-      const forwardedHost = calculateForwardedHost(baseURL, log);
+      const { apiKey, forwardedHost } = target;
 
       const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
         accountId, externalId, roleName,
@@ -3036,7 +3100,9 @@ function LlmoController(ctx) {
 
       log.info(`[edge-optimize-plan] site ${siteId}: canProceed=${result.canProceed},`
         + ` steps=${result.steps.map((s) => `${s.key}:${s.action}`).join(',')}`);
-      return ok(result);
+      // targetDomain lets the FE display exactly the host the BE will route to for this env.
+      // Loosely coupled: the FE also knows it locally, so this is purely informational.
+      return ok({ ...result, targetDomain: forwardedHost });
     } catch (error) {
       log.error(`[edge-optimize-plan] Failed for site ${siteId}:`, error);
       return badRequest(cleanupHeaderValue(error.message));
