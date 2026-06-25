@@ -139,6 +139,13 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
+    // LLMO Cloudflare onboarding — LLMO-admin manual provisioning, gated by
+    // isLLMOAdministrator() with a caller-supplied x-cloudflare-token; not a FACS surface.
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
@@ -1139,6 +1146,9 @@ const routeFacsCapabilities = {
     // External / shared identifiers:
     'accessId', 'batchId', 'clientId', 'consumerId', 'contactSalesLeadId',
     'externalUserId', 'imsOrgId', 'grantId', 'userId',
+    // Cloudflare zone identifier (LLMO Cloudflare onboarding route-create endpoint) —
+    // an upstream Cloudflare ID, not a SpaceCat ReBAC entity.
+    'zoneId',
     // ASO dispatcher-overlay service name (GET /config/:service/redirects.txt) —
     // an X-ASO-API-Key-authenticated internal route, not a FACS resource.
     'service',
