@@ -56,8 +56,14 @@ Add an optional **`baseUrlLike`** query parameter to `GET /sites`:
   heavy infrastructure and unjustified for an internal tool at this scale.
 
 ## Consequences
-- Backoffice drops the bulk-load entirely (and its two rarely-used dropdown filters): it now searches
-  by base-URL substring or looks a site up by exact ID. See OneAdobe/experience-success-studio-backoffice#332.
+- The Backoffice **Sites page** drops the bulk-load (and its two rarely-used dropdown filters): it now
+  searches by base-URL substring or looks a site up by exact ID. See OneAdobe/experience-success-studio-backoffice#332.
+  (The legacy `getSites` bulk walk still backs `LLMOptimizerData.js` — eliminating that is tracked as a
+  separate follow-up; this ADR does not address it.)
+- **Deploy ordering.** The Backoffice client always sends `limit`, so an *older* API deployment would
+  ignore `baseUrlLike` and return unfiltered cursor results. To avoid silent wrong results, the search
+  response echoes `pagination.baseUrlLike`; the client treats a missing/mismatched echo as "search
+  unsupported" and surfaces an error. Deploy the API before (or with) the Backoffice change.
 - **No trigram index yet.** `base_url` has a UNIQUE btree but no `pg_trgm` GIN index, so a leading-wildcard
   `ILIKE '%…%'` is a sequential scan. At ~18k small rows this is single-digit-ms in Postgres and only
   matches cross the wire, so it is acceptable for now. **Deferred follow-up:** add
