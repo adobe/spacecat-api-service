@@ -4394,7 +4394,7 @@ site-llmo-cloudflare-config:
                 clientId:
                   type: string
                   description: Cloudflare OAuth client ID
-                  example: 'b3ef23f21b249c43b757bc8ef000c917'
+                  example: 'example-cloudflare-client-id'
       '403':
         $ref: './responses.yaml#/403'
       '404':

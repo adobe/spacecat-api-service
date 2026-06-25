@@ -26,7 +26,7 @@ const ROUTE_ID = 'route-789';
 const DERIVED_SCRIPT_NAME = 'edge-optimize-router-example-com';
 const TARGET_HOST = 'www.example.com';
 const LLMO_API_KEY = 'llmo-api-key-xyz';
-const CF_CLIENT_ID = 'b3ef23f21b249c43b757bc8ef000c917';
+const CF_CLIENT_ID = 'example-cloudflare-client-id';
 const WORKER_SCRIPT_TEXT = '/* worker */';
 
 describe('LlmoCloudflareController', () => {
