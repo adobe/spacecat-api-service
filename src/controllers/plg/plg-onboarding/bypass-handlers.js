@@ -196,3 +196,22 @@ export async function bypassDomainAlreadyAssigned({ onboarding, siteConfig }, co
     'siteConfig.moveSite or siteConfig.alternateDomain is required for DOMAIN_ALREADY_ASSIGNED bypass',
   );
 }
+
+/**
+ * BYPASS for NON_PROD_DOMAIN: admin has confirmed the domain should be onboarded despite
+ * containing a non-production subdomain (qa, stage, dev, etc.). Re-runs the PLG flow with
+ * bypassNonProdDomain=true to skip the non-prod guard.
+ */
+export async function bypassNonProdDomain({ onboarding }, context) {
+  const { ok } = context;
+  await onboarding.save();
+  const result = await performAsoPlgOnboarding(
+    {
+      domain: onboarding.getDomain(),
+      imsOrgId: onboarding.getImsOrgId(),
+      bypassNonProdDomain: true,
+    },
+    context,
+  );
+  return ok(PlgOnboardingDto.toAdminJSON(result));
+}

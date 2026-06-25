@@ -1345,4 +1345,40 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
         .to.have.been.calledWithMatch(/cannot be moved.*active products/);
     });
   });
+
+  describe('onboard - non-production domain guard', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
+      mockDataAccess.PlgOnboarding.create.resolves(mockOnboarding);
+    });
+
+    const NON_PROD_DOMAINS = ['qa.example.com', 'stage.example.com', 'staging.example.com', 'dev.example.com', 'development.example.com', 'example.qa.com', 'example.stage.com'];
+
+    for (const domain of NON_PROD_DOMAINS) {
+      // eslint-disable-next-line no-loop-func
+      it(`waitlists domain containing non-prod subdomain: ${domain}`, async () => {
+        mockOnboarding.getDomain.returns(domain);
+        const context = buildContext({ domain });
+
+        const res = await controller.onboard(context);
+
+        expect(res.status).to.equal(200);
+        expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(mockOnboarding.setWaitlistReason)
+          .to.have.been.calledWithMatch(/non-production domain/);
+        expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ nonProdDomain: true });
+      });
+    }
+
+    it('does not waitlist a normal production domain', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+  });
 });

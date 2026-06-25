@@ -24,6 +24,7 @@ import {
 import {
   DOMAIN_ALREADY_ASSIGNED,
   DOMAIN_ALREADY_ONBOARDED_IN_ORG,
+  NON_PROD_DOMAIN,
   persistAndNotify,
   postPlgOnboardingNotification,
 } from './notifications.js';
@@ -422,8 +423,21 @@ async function handlePreonboardedFastPath({
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
+const NON_PROD_SUBDOMAIN_PATTERN = /(?:^|\.)(qa|stage|staging|dev|development)(?:\.|\/|$)/i;
+
+/**
+ * Returns true if the domain contains a non-production subdomain (qa, stage, staging, dev,
+ * development). These are waitlisted by default to prevent accidental onboarding of test
+ * environments, but an admin can bypass this check.
+ */
+function isNonProdDomain(domain) {
+  const hostPart = domain.split('/')[0];
+  return NON_PROD_SUBDOMAIN_PATTERN.test(hostPart);
+}
+
 export async function performAsoPlgOnboarding({
   domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
+  bypassNonProdDomain,
 }, context) {
   const domain = prepareDomain(rawDomain);
   const callerIdentity = getReviewerIdentity(context);
@@ -498,6 +512,15 @@ export async function performAsoPlgOnboarding({
   onboarding.setUpdatedBy(callerIdentity);
   if (isFromAsoUI(context)) {
     onboarding.setCreatedBy(callerIdentity);
+  }
+
+  if (!bypassNonProdDomain && isNonProdDomain(domain)) {
+    log.info(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    onboarding.setSteps({ ...(onboarding.getSteps() || {}), nonProdDomain: true });
+    await persistAndNotify(onboarding, context);
+    return onboarding;
   }
 
   const terminalFromGuard = await handleExistingOnboardedDomain({
