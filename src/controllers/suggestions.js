@@ -50,10 +50,149 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  PATTERN_COVERED_CLEANUP_TYPE,
+  PATTERN_COVERED_MARKING_TYPE,
+} from '../support/edge-routing-utils.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+const SQS_MAX_MESSAGE_SIZE_BYTES = 256 * 1024;
+const SQS_SAFE_MESSAGE_SIZE_BYTES = Math.floor((SQS_MAX_MESSAGE_SIZE_BYTES * 15) / 16);
+
+function createPatternJobPayload({
+  type,
+  siteId,
+  opportunityId,
+  patternBasedSuggestionIds,
+}) {
+  return {
+    type,
+    siteId,
+    opportunityId,
+    patternBasedSuggestionIds,
+  };
+}
+
+function getMessageSizeBytes(payload) {
+  return Buffer.byteLength(JSON.stringify(payload), 'utf8');
+}
+
+function getJsonValueSizeBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+export function createPatternJobPayloadChunks(job) {
+  const fullPayload = createPatternJobPayload(job);
+  const fullPayloadSizeBytes = getMessageSizeBytes(fullPayload);
+
+  if (fullPayloadSizeBytes <= SQS_SAFE_MESSAGE_SIZE_BYTES) {
+    return [{ payload: fullPayload, payloadSizeBytes: fullPayloadSizeBytes }];
+  }
+
+  const chunks = [];
+  let currentIds = [];
+  const emptyPayloadSizeBytes = getMessageSizeBytes(createPatternJobPayload({
+    ...job,
+    patternBasedSuggestionIds: [],
+  }));
+  let currentPayloadSizeBytes = emptyPayloadSizeBytes;
+
+  job.patternBasedSuggestionIds.forEach((id) => {
+    const idPayloadSizeBytes = getJsonValueSizeBytes(id);
+    const candidatePayloadSizeBytes = currentPayloadSizeBytes
+      + idPayloadSizeBytes
+      + (currentIds.length > 0 ? 1 : 0);
+
+    if (candidatePayloadSizeBytes > SQS_SAFE_MESSAGE_SIZE_BYTES) {
+      if (currentIds.length === 0) {
+        throw new Error(
+          `Pattern job payload for suggestion ${id} exceeds safe SQS message size threshold`,
+        );
+      }
+
+      chunks.push({
+        payload: createPatternJobPayload({
+          ...job,
+          patternBasedSuggestionIds: currentIds,
+        }),
+        payloadSizeBytes: currentPayloadSizeBytes,
+      });
+      currentIds = [id];
+      currentPayloadSizeBytes = emptyPayloadSizeBytes + idPayloadSizeBytes;
+      if (currentPayloadSizeBytes > SQS_SAFE_MESSAGE_SIZE_BYTES) {
+        throw new Error(
+          `Pattern job payload for suggestion ${id} exceeds safe SQS message size threshold`,
+        );
+      }
+    } else {
+      currentIds.push(id);
+      currentPayloadSizeBytes = candidatePayloadSizeBytes;
+    }
+  });
+
+  if (currentIds.length > 0) {
+    chunks.push({
+      payload: createPatternJobPayload({
+        ...job,
+        patternBasedSuggestionIds: currentIds,
+      }),
+      payloadSizeBytes: currentPayloadSizeBytes,
+    });
+  }
+
+  return chunks;
+}
+
+async function enqueuePatternJob({
+  sqs,
+  queueUrl,
+  job,
+  log,
+  logPrefix,
+  actionLabel,
+  warningLabel,
+  skipLabel,
+}) {
+  const { patternBasedSuggestionIds } = job;
+  if (patternBasedSuggestionIds.length === 0) {
+    return;
+  }
+
+  if (!queueUrl) {
+    log.warn(
+      `[${logPrefix}] IMPORT_WORKER_QUEUE_URL not configured; skipping ${skipLabel} enqueue`,
+    );
+    return;
+  }
+
+  try {
+    const payloadChunks = createPatternJobPayloadChunks(job);
+    if (payloadChunks.length > 1) {
+      log.info(
+        `[${logPrefix}] Splitting ${actionLabel} into ${payloadChunks.length} SQS message(s)`,
+      );
+    }
+
+    await Promise.all(payloadChunks.map(async ({ payload, payloadSizeBytes }) => {
+      log.info(
+        `[${logPrefix}] Queueing pattern-based ${actionLabel} `
+        + `for ${payload.patternBasedSuggestionIds.length} suggestion(s); `
+        + `payloadSizeBytes=${payloadSizeBytes}`,
+      );
+
+      await sqs.sendMessage(queueUrl, payload);
+    }));
+
+    log.info(
+      `[${logPrefix}] Queued domain-wide ${actionLabel} for `
+      + `${patternBasedSuggestionIds.length} domain-wide suggestion(s)`,
+    );
+  } catch (sqsError) {
+    log.warn(`[${logPrefix}] Failed to queue domain-wide ${warningLabel}: ${sqsError.message}`);
+  }
+}
 
 async function isSitePlgTier(site, log) {
   try {
@@ -1801,8 +1940,12 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
-    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
-    context.log.info(`[edge-deploy] allSuggestions count: ${allSuggestions.length}`);
+    // suggestionIds is bounded by the request body; fetching only requested IDs
+    // avoids loading thousands of unrelated opportunity suggestions in this API path.
+    const requestedSuggestions = await Promise.all(
+      suggestionIds.map((suggestionId) => Suggestion.findById(suggestionId)),
+    );
+    context.log.info(`[edge-deploy] requestedSuggestions count: ${requestedSuggestions.filter(Boolean).length}`);
 
     const isEdgeDeployableStatus = (status) => status === SuggestionModel.STATUSES.NEW
       || status === SuggestionModel.STATUSES.PENDING_VALIDATION;
@@ -1815,9 +1958,9 @@ function SuggestionsController(ctx, sqs, env) {
     let coveredSuggestionsCount = 0;
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
-      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+      const suggestion = requestedSuggestions[index];
 
-      if (!suggestion) {
+      if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
         context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} not found`);
         failedSuggestions.push({
           uuid: suggestionId,
@@ -1937,6 +2080,8 @@ function SuggestionsController(ctx, sqs, env) {
         );
         let promptSources;
         if (domainWideSuggestions.length > 0) {
+          const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+          context.log.info(`[edge-geo-exp] allSuggestions count: ${allSuggestions.length}`);
           promptSources = [...allSuggestions]
             .filter((s) => {
               const data = s.getData() || {};
@@ -2172,7 +2317,6 @@ function SuggestionsController(ctx, sqs, env) {
         site,
         opportunity,
         targetSuggestions: allTargetSuggestions,
-        allSuggestions,
         updatedBy: profile?.email || 'tokowaka-deployment',
       });
 
@@ -2190,6 +2334,30 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       context.log.info(`[edge-deploy] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
+
+      // Enqueue async covered marking for deployed domain-wide suggestions.
+      // The sync Promise.all inside deployToEdge times out at 2-3k+ suggestions;
+      // the import worker job guarantees marking happens regardless.
+      const succeededSuggestionIds = new Set(succeededSuggestions.map((s) => s.getId()));
+      const succeededDomainWideIds = domainWideSuggestions
+        .map(({ suggestion }) => suggestion.getId())
+        .filter((id) => succeededSuggestionIds.has(id));
+
+      await enqueuePatternJob({
+        sqs,
+        queueUrl: env.IMPORT_WORKER_QUEUE_URL,
+        job: {
+          type: PATTERN_COVERED_MARKING_TYPE,
+          siteId,
+          opportunityId,
+          patternBasedSuggestionIds: succeededDomainWideIds,
+        },
+        log: context.log,
+        logPrefix: 'edge-deploy',
+        actionLabel: 'covered marking',
+        warningLabel: 'covered marking',
+        skipLabel: 'covered-marking',
+      });
     } catch (error) {
       context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying to edge: ${error.message}`, error);
       allTargetSuggestions.forEach((suggestion) => {
@@ -2451,10 +2619,12 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
-    // Fetch all suggestions for this opportunity
-    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
-
-    context.log.info(`[edge-rollback] allSuggestions count: ${allSuggestions.length}`);
+    // suggestionIds is bounded by the request body; fetching only requested IDs
+    // avoids loading thousands of unrelated opportunity suggestions in this API path.
+    const requestedSuggestions = await Promise.all(
+      suggestionIds.map((suggestionId) => Suggestion.findById(suggestionId)),
+    );
+    context.log.info(`[edge-rollback] requestedSuggestions count: ${requestedSuggestions.filter(Boolean).length}`);
 
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
@@ -2462,9 +2632,9 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Check each requested suggestion
     suggestionIds.forEach((suggestionId, index) => {
-      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+      const suggestion = requestedSuggestions[index];
 
-      if (!suggestion) {
+      if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
         context.log.warn(`[edge-rollback-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} not found`);
         failedSuggestions.push({
           uuid: suggestionId,
@@ -2498,7 +2668,7 @@ function SuggestionsController(ctx, sqs, env) {
       `[edge-rollback] valid: ${validSuggestions.length}`
       + ` (pattern=${validPatterns.length}, perUrl=${validPerUrl.length}),`
       + ` failed: ${failedSuggestions.length},`
-      + ` allSuggestions: ${allSuggestions.length}`,
+      + ` selectedSuggestions: ${requestedSuggestions.filter(Boolean).length}`,
     );
     validPatterns.forEach((s) => {
       const d = s.getData();
@@ -2522,7 +2692,6 @@ function SuggestionsController(ctx, sqs, env) {
           opportunity,
           validSuggestions,
           {
-            allSuggestions,
             updatedBy: profile?.email,
           },
         );
@@ -2545,7 +2714,35 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`);
+        context.log.info(
+          `[edge-rollback] Successfully rolled back ${succeededSuggestions.length} `
+          + `suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`,
+        );
+
+        // Enqueue async covered cleanup for rolled-back domain-wide suggestions.
+        // The import worker removes coveredByDomainWide from affected URL suggestions
+        // outside the API request path to avoid large synchronous save fanout.
+        const succeededSuggestionIds = new Set(succeededSuggestions.map((s) => s.getId()));
+        const succeededDomainWideIds = validPatterns
+          .filter(isDomainWideSuggestion)
+          .map((suggestion) => suggestion.getId())
+          .filter((id) => succeededSuggestionIds.has(id));
+
+        await enqueuePatternJob({
+          sqs,
+          queueUrl: env.IMPORT_WORKER_QUEUE_URL,
+          job: {
+            type: PATTERN_COVERED_CLEANUP_TYPE,
+            siteId,
+            opportunityId,
+            patternBasedSuggestionIds: succeededDomainWideIds,
+          },
+          log: context.log,
+          logPrefix: 'edge-rollback',
+          actionLabel: 'covered cleanup',
+          warningLabel: 'covered cleanup',
+          skipLabel: 'covered-cleanup',
+        });
       } catch (error) {
         context.log.error(`[edge-rollback-failed] site: ${apexBaseUrl}, Error during rollback: ${error.message}`, error);
         validSuggestions.forEach((suggestion) => {
