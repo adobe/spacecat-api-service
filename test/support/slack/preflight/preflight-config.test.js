@@ -361,8 +361,8 @@ describe('preflight-config helpers', () => {
 
     it('treats null getDeliveryConfig() as empty object inside isPreflightSiteConfigReady (line 157 fallback)', async () => {
       // getDeliveryConfig is called twice:
-      //   1st call (in getPreflightMissingConfigLabels): must return valid config so no missing labels
-      //   2nd call (line 157 in isPreflightSiteConfigReady): returns null → || {} branch fires
+      // 1st call (getPreflightMissingConfigLabels): return a valid config (no missing labels)
+      // 2nd call (line 157 in isPreflightSiteConfigReady): return null so the || {} branch runs
       const getDeliveryConfigStub = sandbox.stub();
       getDeliveryConfigStub.onFirstCall().returns({ programId: '12345', environmentId: '67890' });
       getDeliveryConfigStub.onSecondCall().returns(null);
