@@ -1683,6 +1683,7 @@ function SitesController(ctx, log, env) {
       if (!entitlement) {
         if (callerIsInternal) {
           if (await isOrgWaitingForIpAllowlisting(org)) {
+            log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for org=${org.getId()}`);
             return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
           }
           return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);

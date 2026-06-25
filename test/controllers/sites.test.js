@@ -6991,8 +6991,6 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('no_entitlement_for_product');
-
-        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
       });
 
       it('internal caller, no entitlement + other PlgOnboarding records (not WAITING) → 404 site_not_enrolled (remap preserved)', async () => {
@@ -7214,8 +7212,6 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('no_entitlement_for_product');
-
-        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
       });
 
       it('internal caller, imsOrg path (no siteId): no entitlement → 404 site_not_enrolled', async () => {
