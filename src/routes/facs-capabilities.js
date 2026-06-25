@@ -139,6 +139,25 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
+    // LLMO CloudFront "Optimize at Edge" onboarding wizard — admin-only
+    // (gateEdgeOptimizeWizard requires LLMO admin); cross-account control-plane, not a
+    // customer FACS surface.
+    'POST /sites/:siteId/llmo/edge-optimize-bootstrap-url',
+    'POST /sites/:siteId/llmo/edge-optimize/connect',
+    'POST /sites/:siteId/llmo/edge-optimize/distributions',
+    'POST /sites/:siteId/llmo/edge-optimize/prerequisites',
+    'POST /sites/:siteId/llmo/edge-optimize/origins',
+    'POST /sites/:siteId/llmo/edge-optimize/behaviors',
+    'POST /sites/:siteId/llmo/edge-optimize/create-origin',
+    'POST /sites/:siteId/llmo/edge-optimize/create-function',
+    'POST /sites/:siteId/llmo/edge-optimize/apply-cache',
+    'POST /sites/:siteId/llmo/edge-optimize/create-lambda',
+    'POST /sites/:siteId/llmo/edge-optimize/lambda-status',
+    'POST /sites/:siteId/llmo/edge-optimize/apply-associations',
+    'POST /sites/:siteId/llmo/edge-optimize/verify',
+    'POST /sites/:siteId/llmo/edge-optimize/deploy',
+    'POST /sites/:siteId/llmo/edge-optimize/plan',
+    'GET /sites/:siteId/llmo/edge-optimize/permissions',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
