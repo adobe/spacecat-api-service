@@ -172,6 +172,54 @@ export default function siteTests(getHttpClient, resetData) {
         const page1Ids = new Set(page1.body.sites.map((s) => s.id));
         page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
       });
+
+      // ── baseUrlLike substring search (SITES-47203, ADR-006) ──
+      // These exercise the REAL PostgREST `ilike` path end-to-end (not a stub):
+      // the where-builder, deterministic ordering, N+1 hasMore, and DB-level
+      // wildcard escaping against actual seeded rows.
+      it('admin: baseUrlLike returns only matching sites in the search envelope with the echo', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlLike=semrush');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, baseUrlLike: 'semrush' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: baseUrlLike honors limit and reports hasMore (N+1 against real rows)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlLike=example.com&limit=2');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(res.body.pagination).to.include({ limit: 2, hasMore: true, baseUrlLike: 'example.com' });
+        // every returned row genuinely matches the substring (proves real ilike filtering)
+        res.body.sites.forEach((s) => expect(s.baseURL.toLowerCase()).to.include('example.com'));
+      });
+
+      it('admin: baseUrlLike escapes LIKE wildcards so user % cannot widen the match', async () => {
+        // '%example' is escaped to a literal; no base_url literally contains "%example",
+        // so the result is empty. If escaping were broken it would behave like
+        // '%%example%' and match every *.example.com site.
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites?baseUrlLike=${encodeURIComponent('%example')}`);
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(0);
+        expect(res.body.pagination).to.include({ hasMore: false });
+      });
+
+      it('admin: baseUrlLike shorter than 3 chars is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlLike=ab');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: baseUrlLike still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?baseUrlLike=semrush');
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /sites/:siteId', () => {
