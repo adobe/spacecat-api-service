@@ -11,7 +11,7 @@
  */
 import { randomUUID } from 'crypto';
 
-import BrandClient from '@adobe/spacecat-shared-brand-client';
+import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
 import {
   badRequest,
   notFound,
@@ -64,7 +64,7 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
-import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
+import { createIntentClassifier } from '../support/intent-classifier.js';
 import {
   listCategories,
   createCategory,
@@ -124,10 +124,6 @@ function BrandsController(ctx, log, env) {
   // configured, in which case intent is simply left null. Built once per
   // controller instance and passed into the prompt storage layer.
   const classifyIntent = createIntentClassifier({ env, log });
-  // Total wall-clock ceiling for the bulk-create classification batch, so a slow
-  // Azure can't stall the write past the Lambda timeout (per-call timeout only
-  // bounds a single call). On expiry, completed classifications are kept.
-  const classifyIntentBatchTimeoutMs = resolveBatchTimeoutMs(env);
 
   /**
    * Fetches an organization by ID and returns a 404 error if not found.
@@ -269,6 +265,26 @@ function BrandsController(ctx, log, env) {
   }
 
   /**
+   * Gets IMS config for the Brand Governance Agent from the environment.
+   * Returns null if Brand Governance is not configured in this environment.
+   * @returns {object|null} Brand Governance IMS config or null.
+   */
+  function getImsConfigForBrandGovernance() {
+    const {
+      IMS_HOST: host,
+      BRAND_GOV_IMS_CLIENT_ID: clientId,
+      BRAND_GOV_IMS_CLIENT_CODE: clientCode,
+      BRAND_GOV_IMS_CLIENT_SECRET: clientSecret,
+    } = env;
+    if (!hasText(host) || !hasText(clientId) || !hasText(clientCode) || !hasText(clientSecret)) {
+      return null;
+    }
+    return {
+      host, clientId, clientCode, clientSecret,
+    };
+  }
+
+  /**
    * Gets Brand Guidelines for a site.
    *
    * @param {object} context - Context of the request.
@@ -289,22 +305,41 @@ function BrandsController(ctx, log, env) {
         return forbidden('Only users belonging to the organization of the site can view its brand guidelines');
       }
 
+      const organizationId = site.getOrganizationId();
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound(`Organization not found for site: ${siteId}`);
+      }
+      const imsOrgId = organization.getImsOrgId();
+
+      // Try Brand Governance Agent first (URL-based lookup, no brandId required)
+      const govConfig = getImsConfigForBrandGovernance();
+      if (govConfig) {
+        try {
+          const brandGovClient = BrandGovernanceClient.createFrom(context);
+          const brandGovGuidelines = await brandGovClient.getBrandGuidelinesForUrl(
+            site.getBaseURL(),
+            imsOrgId,
+            govConfig,
+          );
+          if (brandGovGuidelines) {
+            return ok(brandGovGuidelines);
+          }
+        } catch (govError) {
+          log.warn(`Brand Governance Agent failed for site ${siteId}, falling back to Brand Publish: ${govError.message}`);
+        }
+      }
+
+      // Fall back to Adobe Brand Publish (requires brandId + userId in site config)
       const brandId = site.getConfig()?.getBrandConfig()?.brandId;
       const userId = site.getConfig()?.getBrandConfig()?.userId;
-      const brandConfig = {
-        brandId,
-        userId,
-      };
       if (!hasText(brandId) || !hasText(userId)) {
         return notFound(`Brand config is missing, brandId or userId for site ID: ${siteId}`);
       }
-      const organizationId = site.getOrganizationId();
-      const organization = await Organization.findById(organizationId);
-      const imsOrgId = organization?.getImsOrgId();
       const imsConfig = getImsConfig();
       const brandClient = BrandClient.createFrom(context);
       const brandGuidelines = await brandClient.getBrandGuidelines(
-        brandConfig,
+        { brandId, userId },
         imsOrgId,
         imsConfig,
       );
@@ -486,7 +521,6 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
         updatedBy,
         classifyIntent,
-        classifyIntentBatchTimeoutMs,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);

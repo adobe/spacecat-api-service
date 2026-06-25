@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../utils.js';
@@ -207,7 +209,7 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  * @param {number} marketCount - sizing input for the allocation.
  * @param {object} log
  * @param {object} [timing] - injectable poll timing for tests.
- * @param {function} [reloadPointer] - optional async () => string|null that
+ * @param {function|null} [reloadPointer] - optional async () => string|null that
  *   re-reads the brand's CURRENT semrush_workspace_id from the data layer.
  *   When supplied, the create path uses it as a last-update concurrency guard
  *   (see below) so a parallel activation cannot orphan a resourced workspace.

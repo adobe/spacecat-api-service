@@ -31,14 +31,12 @@ import { triggerAuditForSite } from '../../utils.js';
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
-const PRERENDER_BATCH_SIZE = 320;
 const PRERENDER_MODES = {
   ALL: 'all',
   AI_ONLY: 'ai-only',
   AI_ONLY_CURRENT: 'ai-only-current',
   AI_ONLY_MISSING: 'ai-only-missing',
 };
-const PRERENDER_SUGGESTION_STATUSES = ['NEW', 'FIXED'];
 const ALL_AUDITS = [
   'apex',
   'cwv',
@@ -108,23 +106,24 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for NEW/FIXED suggestions missing an AI summary. CSV uploads are batched at 320 URLs.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for NEW/FIXED suggestions missing an AI summary.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current|ai-only-missing] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
-  const { Configuration, Site, Opportunity } = dataAccess;
+  const { Configuration, Site } = dataAccess;
 
   const buildEffectiveData = (baseData, mode) => {
-    if (mode !== PRERENDER_MODES.AI_ONLY
+    if (mode !== PRERENDER_MODES.ALL
+      && mode !== PRERENDER_MODES.AI_ONLY
       && mode !== PRERENDER_MODES.AI_ONLY_CURRENT
       && mode !== PRERENDER_MODES.AI_ONLY_MISSING) {
       return baseData;
     }
     return JSON.stringify({
       ...(baseData ? JSON.parse(baseData) : {}),
-      mode: PRERENDER_MODES.AI_ONLY,
+      mode,
     });
   };
 
@@ -151,111 +150,6 @@ function RunAuditCommand(context) {
     }
 
     return urls;
-  };
-
-  /**
-   * Fetches unique URLs from prerender suggestions with NEW or FIXED status.
-   * @param {string} siteId - The site ID.
-   * @returns {Promise<string[]>} Deduplicated URLs.
-   */
-  const fetchPrerenderSuggestionUrls = async (siteId) => {
-    const opportunities = await Opportunity.allBySiteId(siteId);
-    const prerenderOpps = opportunities.filter(
-      (opp) => opp.getType() === PRERENDER,
-    );
-
-    const urls = new Set();
-    for (const opp of prerenderOpps) {
-      // eslint-disable-next-line no-await-in-loop
-      const suggestions = await opp.getSuggestions();
-      suggestions
-        .filter((s) => PRERENDER_SUGGESTION_STATUSES
-          .includes(s.getStatus()))
-        .forEach((s) => {
-          const url = s.getData()?.url;
-          if (url && isValidUrl(url) && !url.includes('*')) {
-            urls.add(url);
-          }
-        });
-    }
-
-    return [...urls];
-  };
-
-  /**
-   * Returns true when a suggestion belongs to the "current" tab:
-   * status NEW, valid non-wildcard URL, not coveredByDomainWide,
-   * not edgeDeployed, not coveredByPattern.
-   * @param {object} s - A suggestion object.
-   * @returns {boolean}
-   */
-  const isCurrentTabSuggestion = (s) => {
-    if (s.getStatus() !== 'NEW') {
-      return false;
-    }
-    const d = s.getData();
-    if (!d?.url || d.url.includes('*')) {
-      return false;
-    }
-    if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
-      return false;
-    }
-    return isValidUrl(d.url);
-  };
-
-  /**
-   * Fetches unique URLs from prerender suggestions matching the "current" tab:
-   * status NEW, not coveredByDomainWide, not edgeDeployed, not coveredByPattern.
-   * @param {string} siteId - The site ID.
-   * @returns {Promise<string[]>} Deduplicated URLs.
-   */
-  const fetchCurrentPrerenderSuggestionUrls = async (siteId) => {
-    const opportunities = await Opportunity.allBySiteId(siteId);
-    const prerenderOpps = opportunities.filter(
-      (opp) => opp.getType() === PRERENDER,
-    );
-
-    const urls = new Set();
-    for (const opp of prerenderOpps) {
-      // eslint-disable-next-line no-await-in-loop
-      const suggestions = await opp.getSuggestions();
-      suggestions
-        .filter(isCurrentTabSuggestion)
-        .forEach((s) => {
-          urls.add(s.getData().url);
-        });
-    }
-
-    return [...urls];
-  };
-
-  /**
-   * Fetches unique URLs from NEW or FIXED prerender suggestions that are
-   * missing an AI summary (aiSummary is absent or empty).
-   * @param {string} siteId - The site ID.
-   * @returns {Promise<string[]>} Deduplicated URLs.
-   */
-  const fetchMissingAiPrerenderSuggestionUrls = async (siteId) => {
-    const opportunities = await Opportunity.allBySiteId(siteId);
-    const prerenderOpps = opportunities.filter(
-      (opp) => opp.getType() === PRERENDER,
-    );
-
-    const urls = new Set();
-    for (const opp of prerenderOpps) {
-      // eslint-disable-next-line no-await-in-loop
-      const suggestions = await opp.getSuggestions();
-      suggestions
-        .filter((s) => PRERENDER_SUGGESTION_STATUSES.includes(s.getStatus()))
-        .forEach((s) => {
-          const url = s.getData()?.url;
-          if (url && isValidUrl(url) && !url.includes('*') && !s.getData().aiSummary) {
-            urls.add(url);
-          }
-        });
-    }
-
-    return [...urls];
   };
 
   /**
@@ -397,30 +291,15 @@ function RunAuditCommand(context) {
         return;
       }
 
-      const batchCount = Math.ceil(
-        urls.length / PRERENDER_BATCH_SIZE,
+      await triggerAuditForSite(
+        site,
+        auditType,
+        auditData,
+        slackContext,
+        context,
+        { urls },
       );
-
-      for (let i = 0; i < batchCount; i += 1) {
-        const start = i * PRERENDER_BATCH_SIZE;
-        const batch = urls.slice(start, start + PRERENDER_BATCH_SIZE);
-        // eslint-disable-next-line no-await-in-loop
-        await triggerAuditForSite(
-          site,
-          auditType,
-          auditData,
-          slackContext,
-          context,
-          { urls: batch },
-        );
-
-        const batchLabel = batchCount > 1
-          ? ` (batch ${i + 1}/${batchCount})`
-          : '';
-        // eslint-disable-next-line no-await-in-loop
-        await say(`:white_check_mark: ${auditType} audit queued`
-          + ` for ${batch.length} URLs${batchLabel}.`);
-      }
+      await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
       await postErrorMessage(say, error);
@@ -506,44 +385,10 @@ function RunAuditCommand(context) {
           [PRERENDER_MODES.AI_ONLY_CURRENT]: 'AI-only-current',
           [PRERENDER_MODES.AI_ONLY_MISSING]: 'AI-only-missing',
         };
-        const MODE_HINTS = {
-          [PRERENDER_MODES.ALL]: 'with status NEW or FIXED',
-          [PRERENDER_MODES.AI_ONLY]: 'with status NEW or FIXED',
-          [PRERENDER_MODES.AI_ONLY_CURRENT]: 'matching current-tab filters',
-          [PRERENDER_MODES.AI_ONLY_MISSING]: 'with status NEW or FIXED and missing AI summary',
-        };
         const modeLabel = MODE_LABELS[prerenderMode];
-        await say(`:hourglass_flowing_sand: Fetching ${modeLabel}`
-          + ` prerender suggestions for ${baseURL}…`);
-
-        const site = await Site.findByBaseURL(baseURL);
-        if (!isNonEmptyObject(site)) {
-          await postSiteNotFoundMessage(say, baseURL);
-          return;
-        }
-
-        let urls;
-        if (prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT) {
-          urls = await fetchCurrentPrerenderSuggestionUrls(site.getId());
-        } else if (prerenderMode === PRERENDER_MODES.AI_ONLY_MISSING) {
-          urls = await fetchMissingAiPrerenderSuggestionUrls(site.getId());
-        } else {
-          urls = await fetchPrerenderSuggestionUrls(site.getId());
-        }
-
-        if (urls.length === 0) {
-          const hint = MODE_HINTS[prerenderMode];
-          await say(':white_check_mark: No active suggestions'
-            + ` ${hint} for *${baseURL}*`
-            + ' — nothing to audit.');
-          return;
-        }
-
         const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
-        await say(`:adobe-run: Triggering ${PRERENDER} audit`
-          + ` for ${baseURL} with ${urls.length} URLs`
-          + ` (${modeLabel} mode).`);
-        await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);
+        await say(`:adobe-run: Triggering ${PRERENDER} audit for ${baseURL} (${modeLabel} mode).`);
+        await runAuditForSite(baseURL, PRERENDER, effectiveData, slackContext);
       } else if (isPrerenderCsvRun) {
         const urls = await parsePrerenderUrlsFromCsv(files, botToken, say);
         if (!urls) {

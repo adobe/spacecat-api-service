@@ -568,13 +568,22 @@ export async function findDeliveryType(url) {
 }
 
 /**
- * Error class with a status code property.
+ * Error class with a status code property. An optional machine-readable `code`
+ * may be assigned by callers after construction (e.g. serenity handlers tag
+ * errors with `ERROR_CODES.*` for downstream branching).
  * @extends Error
  */
 export class ErrorWithStatusCode extends Error {
+  /**
+   * @param {string} message human-readable error message
+   * @param {number} status HTTP status code to surface
+   */
   constructor(message, status) {
     super(message);
+    /** @type {number} */
     this.status = status;
+    /** @type {string|undefined} */
+    this.code = undefined;
   }
 }
 
