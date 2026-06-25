@@ -54,6 +54,9 @@ export function resolveEnvironment(env = {}) {
  * @param {object} [options] - Emission options
  * @param {string} [options.environment='dev'] - Environment dimension value
  * @param {Function} [options.sink=console.log] - Output function; receives the JSON string
+ * @param {string} [options.namespace=NAMESPACE] - CloudWatch namespace. Defaults to the
+ *   GitHub-service namespace; pass a domain-specific one (e.g. 'Mysticat/Brands') for
+ *   metrics emitted from other subsystems.
  */
 // eslint-disable-next-line no-console
 const defaultSink = (line) => console.log(line);
@@ -62,7 +65,7 @@ export function emitMetric(
   {
     name, value = 1, unit = 'Count', dimensions = {},
   },
-  { environment = 'dev', sink = defaultSink } = {},
+  { environment = 'dev', sink = defaultSink, namespace = NAMESPACE } = {},
 ) {
   try {
     // Always include Environment as the first dimension so every metric is
@@ -79,7 +82,7 @@ export function emitMetric(
       _aws: {
         Timestamp: Date.now(),
         CloudWatchMetrics: [{
-          Namespace: NAMESPACE,
+          Namespace: namespace,
           Dimensions: [Object.keys(dims)],
           Metrics: [{ Name: name, Unit: unit }],
         }],

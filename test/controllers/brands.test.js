@@ -4570,7 +4570,10 @@ describe('Brands Controller', () => {
             data: {
               id: BRAND_UUID,
               name: 'New Brand',
-              status: 'active',
+              // 'pending' = no active same-name brand exists (a fresh-create
+              // precondition); avoids tripping the LLMO-5587 demotion guard, which
+              // only fires when an upsert-by-name would demote an *active* brand.
+              status: 'pending',
               origin: 'human',
               updated_at: '2026-01-01T00:00:00Z',
               updated_by: 'user@test.com',
@@ -4591,11 +4594,46 @@ describe('Brands Controller', () => {
       const response = await brandsController.createBrandForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID },
-        data: { name: 'New Brand' },
+        // baseSiteId keeps the brand active (an active brand requires a base site);
+        // without it the upsert would compute `pending` onto the same-name active
+        // brand the mock returns, which the LLMO-5587 demotion guard rejects.
+        data: { name: 'New Brand', baseSiteId: 'b2222222-2222-4222-b222-222222222222' },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
+    });
+
+    it('returns 409 when a by-name create would demote an active brand to pending (LLMO-5587)', async () => {
+      // An ACTIVE brand of the same name already exists; a create carrying
+      // status:'pending' would silently demote it via the (org, name) upsert.
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({ data: { id: BRAND_UUID, name: 'New Brand' }, error: null }),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID, name: 'New Brand', site_id: 'site-1', status: 'active',
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
     });
 
     it('returns 400 when brand data is missing', async () => {
@@ -5853,6 +5891,77 @@ describe('Brands Controller', () => {
       expect(ciSyncStub).to.not.have.been.called;
     });
 
+    it('returns 409 when demoting an active brand to pending (LLMO-5587)', async () => {
+      // beforeEach mock resolves a persisted brand with status 'active'; a generic
+      // PATCH carrying status:'pending' must be rejected (and emit BrandDemotionBlocked).
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
+    });
+
+    it('emits the BrandDemotionBlocked metric on a rejected demotion (LLMO-5587)', async () => {
+      // The EMF emitter writes the envelope to stdout via console.log; spy that
+      // sink and assert the emitted metric rather than mocking the emitter.
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await brandsController.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { status: 'pending' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandDemotionBlocked'));
+        expect(emfLine, 'expected a BrandDemotionBlocked EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandDemotionBlocked).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Product).to.equal('llmo');
+        // eslint-disable-next-line no-underscore-dangle
+        expect(envelope._aws.CloudWatchMetrics[0].Namespace).to.equal('Mysticat/Brands');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('swallows a logging failure during emission and still returns 409 (LLMO-5587, best-effort)', async () => {
+      // emitMetric is already best-effort; this proves emitBrandDemotionBlocked's own
+      // catch keeps a logger failure from breaking the request path (covers the catch).
+      const logSpy = sinon.stub(console, 'log');
+      const throwingLogger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub().throws(new Error('log boom')),
+        debug: sandbox.stub(),
+      };
+      const controller = BrandsController(context, throwingLogger, mockEnv);
+      try {
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { status: 'pending' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        expect(throwingLogger.warn).to.have.been.called;
+      } finally {
+        logSpy.restore();
+      }
+    });
+
     it('returns 400 when brandId is missing', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,
@@ -6410,6 +6519,256 @@ describe('Brands Controller', () => {
       const response = await brandsController.deleteBrandForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('transitionBrandStatusForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Express',
+              status: 'pending',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 and transitions status via the explicit path (LLMO-5587)', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 400 when status is not active or pending', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'deleted' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when status is missing', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when organization ID is missing', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand not found during resolve', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when the brand is soft-deleted (no resurrection via status transition)', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // resolveBrandUuid succeeds...
+      maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // ...but the status update is filtered out by .neq('status','deleted') → no row.
+      maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'active' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.transitionBrandStatusForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 400 when activating a brand without a base site (chk_active_brand_has_site_id, lifted from #2504)', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // resolveBrandUuid resolves the UUID...
+      maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // ...then setBrandStatus hits the DB constraint on the update.
+      maybeSingleStub.onSecondCall().resolves({
+        data: null,
+        error: {
+          code: '23514',
+          message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+        },
+      });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'active' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB connection lost')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.transitionBrandStatusForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
