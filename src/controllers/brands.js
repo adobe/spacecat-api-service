@@ -49,6 +49,7 @@ import {
   upsertBrand,
   updateBrand,
   deleteBrand,
+  setBrandStatus,
   getBrandById,
   getBrandBySite,
   getBrandCompetitors,
@@ -1969,6 +1970,66 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // Explicit, intentful brand status transition (approve -> active, move-to-pending ->
+  // pending). This is the sanctioned path for an active->pending demotion: the generic
+  // PATCH /brands/:brandId refuses that transition (LLMO-5587), routing intent here.
+  const transitionBrandStatusForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const { status } = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (status !== 'active' && status !== 'pending') {
+        return badRequest("status must be one of 'active' or 'pending'");
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const updated = await setBrandStatus({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        status,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!updated) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      return ok(updated);
+    } catch (error) {
+      log.error(`Error transitioning status for brand ${brandId} in organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
@@ -1986,6 +2047,7 @@ function BrandsController(ctx, log, env) {
     createBrandForOrg,
     updateBrandForOrg,
     deleteBrandForOrg,
+    transitionBrandStatusForOrg,
     listPromptsByBrand,
     getPromptByBrandAndId,
     getPromptStatsByBrand,
