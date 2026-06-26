@@ -1308,7 +1308,7 @@ describe('LlmoCloudFrontController', () => {
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
       applyEdgeOptimizeAssociationsStub = sinon.stub().resolves({
-        cfFunctionArn: 'arn:cf-fn',
+        cloudFrontFunctionArn: 'arn:cf-fn',
         lambdaArn: 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:1',
       });
       associateContext = {
@@ -1330,7 +1330,7 @@ describe('LlmoCloudFrontController', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.cfFunctionArn).to.equal('arn:cf-fn');
+      expect(body.cloudFrontFunctionArn).to.equal('arn:cf-fn');
       expect(applyEdgeOptimizeAssociationsStub.calledOnceWith(
         sinon.match.any,
         'E2EXAMPLE123',
