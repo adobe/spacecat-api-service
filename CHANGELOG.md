@@ -1,3 +1,10 @@
+# [1.606.0](https://github.com/adobe/spacecat-api-service/compare/v1.605.0...v1.606.0) (2026-06-26)
+
+
+### Features
+
+* **preflight:** shape new DTOs and join AsyncJob on detail (SITES-47254) ([#2713](https://github.com/adobe/spacecat-api-service/issues/2713)) ([c3adb21](https://github.com/adobe/spacecat-api-service/commit/c3adb21ef84e04980a413ea6e4aa302e6900a95f))
+
 # [1.605.0](https://github.com/adobe/spacecat-api-service/compare/v1.604.1...v1.605.0) (2026-06-26)
 
 
