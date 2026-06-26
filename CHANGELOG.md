@@ -1,3 +1,16 @@
+# [1.603.0](https://github.com/adobe/spacecat-api-service/compare/v1.602.1...v1.603.0) (2026-06-26)
+
+
+### Bug Fixes
+
+* **llmo:** temporary cloudflareToken body/query fallback for CF token ([#2701](https://github.com/adobe/spacecat-api-service/issues/2701)) ([b929f76](https://github.com/adobe/spacecat-api-service/commit/b929f764a27ca08f649e623c5a5521a89ea02462)), closes [#2681](https://github.com/adobe/spacecat-api-service/issues/2681) [#2697](https://github.com/adobe/spacecat-api-service/issues/2697)
+
+
+### Features
+
+* add POST /sites/:siteId/entitlements admin endpoint ([#2665](https://github.com/adobe/spacecat-api-service/issues/2665)) ([4374fc4](https://github.com/adobe/spacecat-api-service/commit/4374fc4ea6fa13e68754007f32eb68835732cef4))
+* **serenity:** bump project-engine-client to 1.2.0 and document v1/v2 read drift ([#2699](https://github.com/adobe/spacecat-api-service/issues/2699)) ([a1ea182](https://github.com/adobe/spacecat-api-service/commit/a1ea1829855fc92e1b8b2309487be2737e480934)), closes [Hi#level](https://github.com/Hi/issues/level) [#2584](https://github.com/adobe/spacecat-api-service/issues/2584)
+
 ## [1.602.1](https://github.com/adobe/spacecat-api-service/compare/v1.602.0...v1.602.1) (2026-06-26)
 
 
