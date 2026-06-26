@@ -30,6 +30,7 @@ export const ALLOWED_I18N_FIELDS = [
   'rationale',
   'aiRationale',
   'aiSuggestion',
+  'expectedOutcome',
   'actionItems',
   'persona',
 ];

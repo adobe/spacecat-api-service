@@ -1296,6 +1296,7 @@ site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixes
     summary: |
@@ -1309,6 +1310,8 @@ site-opportunity-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':
@@ -1487,6 +1490,7 @@ site-opportunity-fix-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/fixId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixSuggestions
     summary: |
@@ -1500,6 +1504,8 @@ site-opportunity-fix-suggestions:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':

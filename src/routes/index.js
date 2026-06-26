@@ -73,6 +73,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -100,6 +101,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} webhooksController - GitHub webhook handler controller.
  * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
  * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} stateAccessMappingsController - State-layer access mappings + caps.
  * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
@@ -134,6 +136,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  llmoCloudflareController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -162,6 +165,7 @@ export default function getRouteHandlers(
   webhooksController,
   aiVisibilityController,
   fanoutReportController,
+  stateAccessMappingsController,
   agenticCategoriesController,
   agenticPageTypesController,
   serenityController,
@@ -211,6 +215,7 @@ export default function getRouteHandlers(
     'DELETE /v2/orgs/:spaceCatId/topics/:topicId': brandsController.deleteTopicForOrg,
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': brandsController.transitionBrandStatusForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
@@ -412,6 +417,23 @@ export default function getRouteHandlers(
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
+
+    // Hybrid permission model — state-layer management + capability
+    // introspection endpoints. Self-gated at the controller level
+    // (`<product>/can_manage_users` for CRUD, `<product>/can_view` for
+    // capability introspection). Until `facsWrapper` is attached in
+    // api-service, the controller additionally restricts these endpoints to
+    // the dev environment (AWS_ENV === 'dev'); they 404 elsewhere. See:
+    //   - platform/decisions/mac-state-layer.md §"State Layer Management Endpoints"
+    //   - platform/decisions/rebac-hybrid-permission-model.md
+    'GET /state/access-mappings': stateAccessMappingsController.listMappings,
+    'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
+    'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
+    'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
+    'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
+
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'DELETE /tools/import/jobs/:jobId': importController.deleteImportJob,
@@ -489,6 +511,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+
+    // LLMO Cloudflare Onboarding Routes
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': llmoCloudflareController.getCloudflareConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': llmoCloudflareController.listAccounts,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes': llmoCloudflareController.addRoute,
+
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
 
