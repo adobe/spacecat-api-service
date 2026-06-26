@@ -85,6 +85,26 @@ export async function createUserToken() {
 }
 
 /**
+ * LLMO administrator — same ORG_1 tenancy as the `user` persona (so org/site access resolves
+ * identically) but with `is_llmo_administrator: true`. Required to reach the LLMO Cloudflare
+ * onboarding endpoints, which gate every handler behind `AccessControlUtil.isLLMOAdministrator()`
+ * (a raw JWT-claim check with no admin bypass — even the `admin` persona is denied without it).
+ */
+export async function createLlmoAdminToken() {
+  return signToken({
+    sub: 'test-llmo-admin@example.com',
+    email: 'test-llmo-admin@example.com',
+    is_admin: false,
+    is_llmo_administrator: true,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
  * Resource-scoped state-layer manager (hybrid-model §8.3). Member of ORG_1 with
  * an EMPTY JWT facs_permissions set — its `can_manage_users` authority comes
  * solely from a seeded state-layer binding on MANAGED_BRAND_ID. `sub` must match
@@ -261,13 +281,15 @@ export async function createS2SConsumerReadAllToken() {
 
 export async function createAllTokens() {
   const [
-    admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    admin, user, trialUser, llmoAdmin,
+    delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
     readOnlyAdmin, brandManager,
     s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
     createUserToken(),
     createTrialUserToken(),
+    createLlmoAdminToken(),
     createDelegatedUserToken(),
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
@@ -281,6 +303,7 @@ export async function createAllTokens() {
     admin,
     user,
     trialUser,
+    llmoAdmin,
     delegatedUser,
     delegatedUserTruncated,
     delegatedUserNoSource,

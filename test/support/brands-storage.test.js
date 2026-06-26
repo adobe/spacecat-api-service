@@ -26,6 +26,7 @@ import {
   upsertBrand,
   updateBrand,
   deleteBrand,
+  setBrandStatus,
   listRegions,
 } from '../../src/support/brands-storage.js';
 
@@ -2449,6 +2450,96 @@ describe('brands-storage', () => {
       expect(result).to.not.be.null;
     });
 
+    it('clears site_id when a pending brand passes baseSiteId: null (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — pending brand currently holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: null, status: 'pending' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: null },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal(null);
+    });
+
+    it('ignores baseSiteId: null on a non-pending (active) brand — never strips a live anchor (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — active brand holds a site
+          { data: { site_id: 'existing-site-id', status: 'active' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: 'existing-site-id', status: 'active' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: null },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row).to.not.have.property('site_id');
+    });
+
+    it('re-points site_id when a pending brand passes a different baseSiteId (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — pending brand already holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: 'different-site-id', status: 'pending' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'different-site-id' },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal('different-site-id');
+    });
+
+    it('throws 409 when a pending brand re-points onto a site held by another brand (LLMO-5870)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // 1st call: select current row — pending brand already holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update fails with unique constraint
+          { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'taken-site-id' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('This site is already the primary URL for another brand');
+      expect(err.status).to.equal(409);
+    });
+
     it('fails closed by throwing when the current baseSiteId read errors (LLMO-5556)', async () => {
       // PostgREST returns { data: null, error } instead of throwing. Without the
       // guard, `current` is null so the block would treat the brand as having no
@@ -2803,6 +2894,212 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
+    });
+  });
+  describe('active->pending demotion guard (LLMO-5587)', () => {
+    it('updateBrand rejects an active->pending demotion with a typed 409', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: { site_id: 'site-1', status: 'active' }, error: null }],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'pending' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_status_demotion_not_allowed');
+    });
+
+    it('updateBrand allows a pending->active promotion when a site is present', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: 'site-1', status: 'pending' }, error: null }, // existing fetch
+          { data: { id: BRAND_ID }, error: null }, // update
+          { data: makeBrandRow({ status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.status).to.equal('active');
+    });
+
+    it('updateBrand does not false-positive on a routine edit that omits status', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null }, // update (no existing fetch — status absent)
+          { data: makeBrandRow({ name: 'Renamed', status: 'active' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { name: 'Renamed' }, postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.status).to.equal('active');
+    });
+
+    it('updateBrand rejects a promote-to-active without a site_id with a 400 (re-land of #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: { site_id: null, status: 'pending' }, error: null }],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(400);
+    });
+
+    it('updateBrand maps a 23514 chk_active_brand_has_site_id violation to a 400 (re-land of #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: 'site-1', status: 'pending' }, error: null }, // existing fetch (guard passes)
+          {
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+            },
+          },
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+    });
+
+    it('upsertBrand rejects a by-name demotion of an active brand with a typed 409', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: { id: BRAND_ID, site_id: 'site-1', status: 'active' }, error: null }],
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Express', status: 'pending' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_status_demotion_not_allowed');
+      expect(err.message).to.contain(BRAND_ID);
+    });
+
+    it('upsertBrand maps a 23514 chk_active_brand_has_site_id violation to a 400 (re-land of #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: null }, // existing fetch (new brand)
+          {
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+            },
+          },
+        ],
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'New', status: 'active', baseSiteId: 'site-1' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+    });
+  });
+
+  describe('setBrandStatus', () => {
+    it('throws when postgrestClient is missing', async () => {
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'pending', postgrestClient: null,
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('updates status and returns the mapped brand (LLMO-5587 intentful path)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // 1st call: status update
+          { data: { id: BRAND_ID }, error: null },
+          // 2nd call: getBrandById re-fetch
+          { data: makeBrandRow({ status: 'pending' }), error: null },
+        ],
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        status: 'pending',
+        postgrestClient,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.status).to.equal('pending');
+    });
+
+    it('returns null when the brand is not found', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: null, error: null },
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result).to.be.null;
+    });
+
+    it('maps chk_active_brand_has_site_id violation to a 400 (lifted from #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{
+          data: null,
+          error: {
+            code: '23514',
+            message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+          },
+        }],
+      });
+
+      const err = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+      expect(err.status).to.equal(400);
+    });
+
+    it('throws a generic error on other database failures', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: null, error: { message: 'boom' } }],
+      });
+
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'pending', postgrestClient,
+      })).to.be.rejectedWith('Failed to set brand status: boom');
+    });
+
+    it('does not resurrect a soft-deleted brand (the .neq filter matches no row → null)', async () => {
+      // A deleted brand is excluded by .neq('status','deleted'), so the update
+      // affects no row and the function returns null (controller → 404).
+      const postgrestClient = createTableMockClient({
+        brands: { data: null, error: null },
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result).to.be.null;
     });
   });
 });

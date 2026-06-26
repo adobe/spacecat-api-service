@@ -28,6 +28,18 @@ const BRAND_SELECT = [
   'brand_urls(url)',
 ].join(', ');
 
+// Re-landed from Igor Grubic's #2504 (LLMO-5183): map the data-layer
+// chk_active_brand_has_site_id CheckViolation to a typed 400 (covers the race
+// where site_id is cleared between our SELECT and this write).
+function rethrowCheckViolation(error, fallbackMessage) {
+  if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
+    const err = new Error('Cannot activate a brand without a base site URL');
+    err.status = 400;
+    throw err;
+  }
+  throw new Error(fallbackMessage);
+}
+
 function normalizeNullableText(value, fieldName) {
   if (value === undefined) {
     return undefined;
@@ -791,6 +803,11 @@ export async function isSemrushMarketMirrorSite(organizationId, siteId, postgres
  * @param {object} params.brand - Brand data in V2 config shape
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
+ * @param {object} [params.log] - Logger (defaults to console).
+ * @param {string|null} [params.forceBrandId] - Pre-generated brand id to persist
+ *   (serenity-first provisioning); null lets the DB generate it.
+ * @param {string|null} [params.semrushWorkspaceId] - Provisioned sub-workspace
+ *   pointer to persist atomically with the row; null keeps the brand in flat mode.
  * @returns {Promise<object>} Created/updated brand in V2 config shape
  */
 export async function upsertBrand({
@@ -824,7 +841,7 @@ export async function upsertBrand({
   // re-upserts by name without passing baseSiteId.
   const { data: existing, error: existingError } = await postgrestClient
     .from('brands')
-    .select('site_id')
+    .select('id, site_id, status')
     .eq('organization_id', organizationId)
     .eq('name', brand.name)
     .maybeSingle();
@@ -849,6 +866,20 @@ export async function upsertBrand({
   const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
+
+  // LLMO-5587: a by-name upsert that resolves onto an existing *active* brand must
+  // not silently demote it to pending — that is the express.adobe.com vector (a
+  // create/re-upsert colliding on (org, name) with a stale/pending status). Intentful
+  // demotions go through setBrandStatus / PATCH /v2/orgs/{org}/brands/{id}/status.
+  if (status === 'pending' && existing?.status === 'active') {
+    const err = new Error(
+      `Brand "${brand.name}" already exists and is active; demoting it to pending `
+      + `must go through PATCH /v2/orgs/${organizationId}/brands/${existing.id}/status.`,
+    );
+    err.status = 409;
+    err.code = 'brand_status_demotion_not_allowed';
+    throw err;
+  }
 
   const row = {
     organization_id: organizationId,
@@ -934,7 +965,7 @@ export async function upsertBrand({
       err.status = 409;
       throw err;
     }
-    throw new Error(`Failed to upsert brand: ${error.message}`);
+    rethrowCheckViolation(error, `Failed to upsert brand: ${error.message}`);
   }
 
   const brandId = upserted.id;
@@ -1005,12 +1036,21 @@ export async function updateBrand({
     patch.vertical = updates.vertical;
   }
 
-  // baseSiteId is immutable once set — only allow setting from NULL.
-  // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
-  if (hasText(updates.baseSiteId)) {
+  // Fetch the persisted row once when baseSiteId or status is changing — it feeds
+  // the baseSiteId mutation rules, the active->pending demotion guard, and the
+  // active-without-site guard below. (Existing-fetch pattern adapted from Igor
+  // Grubic's #2504, broadened from site_id-only to also read `status`.)
+  // LLMO-5870: an explicit `baseSiteId: null` is an unset request — fetch the row
+  // so `existing.status` is available to gate the clear on pending brands.
+  const wantsClearBaseSite = updates.baseSiteId === null;
+  const needsExistingFetch = hasText(updates.baseSiteId)
+    || wantsClearBaseSite
+    || updates.status !== undefined;
+  let existing = null;
+  if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id')
+      .select('site_id, status')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1020,11 +1060,60 @@ export async function updateBrand({
     if (currentError) {
       throw new Error(`Failed to read current baseSiteId for brand: ${currentError.message}`);
     }
+    existing = current;
+  }
 
-    if (!current?.site_id) {
-      patch.site_id = updates.baseSiteId;
+  // baseSiteId mutation rules (LLMO-5870):
+  //  - First set (NULL -> value): allowed for any brand.
+  //  - Re-point (value -> different value): allowed ONLY for pending brands, so a
+  //    draft can swap its primary URL before activation.
+  //  - Clear (value -> NULL): allowed ONLY for pending brands, so the site can be
+  //    freed for reuse by another brand.
+  // Active brands stay immutable-once-set: a routine field save that echoes a
+  // stale baseSiteId must never re-point or strip a live brand's anchor (the
+  // LLMO-5556 / express.adobe.com regression guard). Clearing a pending brand's
+  // site_id is safe at the DB level — the partial unique index
+  // (brands_base_site_unique) skips NULLs and chk_active_brand_has_site_id only
+  // constrains active brands. The unique index still rejects a re-point that
+  // collides with another brand's primary URL.
+  const isPending = (existing?.status || '').toLowerCase() === 'pending';
+  if (wantsClearBaseSite) {
+    if (isPending) {
+      patch.site_id = null;
     }
-    // If site_id is already set, silently ignore the update (immutable).
+  } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
+    patch.site_id = updates.baseSiteId;
+  }
+
+  // LLMO-5587: the generic update path must not demote an active brand to pending.
+  // A routine field save that echoes a stale `status` is the express.adobe.com
+  // vector; intentful demotions go through setBrandStatus (the /status endpoint).
+  if (patch.status === 'pending' && existing?.status === 'active') {
+    const err = new Error(
+      'Demoting an active brand to pending must go through '
+      + `PATCH /v2/orgs/${organizationId}/brands/${brandId}/status.`,
+    );
+    err.status = 409;
+    err.code = 'brand_status_demotion_not_allowed';
+    throw err;
+  }
+
+  // Re-landed from Igor Grubic's #2504 (LLMO-5183): an active brand must have a base
+  // site. Reject a promote-to-active that would leave site_id NULL with a typed 400
+  // rather than surfacing the data-layer CheckViolation as a generic 500.
+  if (patch.status === 'active') {
+    // A clear-and-activate in the same PATCH must not lean on the old site_id —
+    // treat the brand as site-less so it returns the typed 400 below rather than
+    // letting the DB CheckViolation surface as a 500 (LLMO-5870).
+    const hasBaseSite = hasText(patch.site_id)
+      || (hasText(existing?.site_id) && !wantsClearBaseSite);
+    if (!hasBaseSite) {
+      const err = new Error(
+        'Cannot activate a brand without a base site URL — set baseSiteId in the same PATCH.',
+      );
+      err.status = 400;
+      throw err;
+    }
   }
 
   if (updates.region !== undefined) {
@@ -1059,7 +1148,7 @@ export async function updateBrand({
       err.status = 409;
       throw err;
     }
-    throw new Error(`Failed to update brand: ${error.message}`);
+    rethrowCheckViolation(error, `Failed to update brand: ${error.message}`);
   }
   if (!data) {
     return null;
@@ -1127,6 +1216,64 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
     throw new Error(`Failed to delete brand: ${error.message}`);
   }
   return !!data;
+}
+
+/**
+ * Explicitly sets a brand's lifecycle status (the intentful status-transition path,
+ * e.g. approve -> active, move-to-pending -> pending).
+ *
+ * This is deliberately kept separate from updateBrand and minimal (status + updated_by
+ * only, no child-table sync). The generic updateBrand path carries the active->pending
+ * demotion guard (LLMO-5587); legitimate, intended transitions route through here so they
+ * are not blocked by that guard.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandId - Brand UUID
+ * @param {string} params.status - Target status ('active' | 'pending')
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {string} [params.updatedBy] - User performing the operation
+ * @returns {Promise<object|null>} Updated brand in V2 shape, or null if not found
+ */
+export async function setBrandStatus({
+  organizationId,
+  brandId,
+  status,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ status, updated_by: updatedBy })
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    // Do not resurrect a soft-deleted brand via a status transition — a deleted
+    // brand matches no row here, so the caller gets a 404 (use a dedicated
+    // undelete flow if reactivation is ever needed).
+    .neq('status', 'deleted')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    // Lifted from Igor Grubic's PR #2504 (LLMO-5183): the data layer enforces
+    // chk_active_brand_has_site_id (an active brand must have a base site_id). Map the
+    // CheckViolation to a typed 400 rather than surfacing a generic 500.
+    if (error.code === '23514' && error.message?.includes('chk_active_brand_has_site_id')) {
+      const err = new Error('Cannot activate a brand without a base site URL');
+      err.status = 400;
+      throw err;
+    }
+    throw new Error(`Failed to set brand status: ${error.message}`);
+  }
+
+  if (!data) {
+    return null;
+  }
+  return getBrandById(organizationId, brandId, postgrestClient);
 }
 
 /**
