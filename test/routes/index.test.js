@@ -340,6 +340,14 @@ describe('getRouteHandlers', () => {
     updateQueryIndex: () => null,
   };
 
+  const mockLlmoCloudflareController = {
+    getCloudflareConfig: () => null,
+    listAccounts: () => null,
+    listZones: () => null,
+    deployWorker: () => null,
+    addRoute: () => null,
+  };
+
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
   };
@@ -370,6 +378,7 @@ describe('getRouteHandlers', () => {
   const mockEntitlementController = {
     getByOrganizationID: () => null,
     createEntitlement: () => null,
+    createSiteEntitlement: () => null,
   };
 
   const mockReportsController = {
@@ -518,6 +527,16 @@ describe('getRouteHandlers', () => {
     getFanoutReport: sinon.stub(),
   };
 
+  const mockStateAccessMappingsController = {
+    listMappings: sinon.stub(),
+    listHistory: sinon.stub(),
+    createMapping: sinon.stub(),
+    patchMapping: sinon.stub(),
+    getProductCapabilities: sinon.stub(),
+    getUserCapabilities: sinon.stub(),
+    getAuditLogs: sinon.stub(),
+  };
+
   const mockSerenityController = {
     listPrompts: sinon.stub(),
     createPrompts: sinon.stub(),
@@ -580,6 +599,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockLlmoCloudflareController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -608,6 +628,7 @@ describe('getRouteHandlers', () => {
       mockWebhooksController,
       mockAiVisibilityController,
       mockFanoutReportController,
+      mockStateAccessMappingsController,
       mockAgenticCategoriesController,
       mockAgenticPageTypesController,
       mockSerenityController,
@@ -644,6 +665,10 @@ describe('getRouteHandlers', () => {
       'GET /tools/api-keys',
       'GET /tools/proxy',
       'GET /monitoring/drs-bp-pg-audit',
+      'GET /state/access-mappings',
+      'GET /state/access-mappings/history',
+      'POST /state/access-mappings',
+      'GET /product/capabilities',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
@@ -775,6 +800,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
     const expectedDynamicRouteKeys = [
+      'PATCH /state/access-mappings/:id',
+      'GET /user/capabilities/:resourceId',
+      'GET /organizations/:organizationId/permission/audit-logs',
       'GET /audits/latest/:auditType',
       'POST /configurations/:version/restore',
       'GET /configurations/:version',
@@ -803,6 +831,7 @@ describe('getRouteHandlers', () => {
       'DELETE /v2/orgs/:spaceCatId/topics/:topicId',
       'POST /v2/orgs/:spaceCatId/brands',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/activate',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
@@ -1090,6 +1119,11 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
@@ -1100,6 +1134,7 @@ describe('getRouteHandlers', () => {
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
+      'POST /sites/:siteId/entitlements',
       'GET /organizations/:organizationId/feature-flags',
       'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
       'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -1207,6 +1242,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.createEntitlement);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['POST /sites/:siteId/entitlements'].handler).to.equal(mockEntitlementController.createSiteEntitlement);
+    expect(dynamicRoutes['POST /sites/:siteId/entitlements'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.putByOrganizationProductAndName);
     expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].paramNames).to.deep.equal(['organizationId', 'product', 'flagName']);
     expect(dynamicRoutes['DELETE /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.deleteByOrganizationProductAndName);

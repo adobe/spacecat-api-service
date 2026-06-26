@@ -351,7 +351,10 @@ export async function classifyIntents(
   if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
     let timer;
     const cap = new Promise((resolve) => {
-      timer = setTimeout(resolve, timeoutMs);
+      timer = setTimeout(() => {
+        cursor = unique.length; // stop workers from starting new calls after the cap
+        resolve();
+      }, timeoutMs);
     });
     await Promise.race([all, cap]).finally(() => clearTimeout(timer));
   } else {

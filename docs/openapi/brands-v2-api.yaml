@@ -85,6 +85,16 @@ v2-brands-for-org:
         description: User does not have access to this organization
       '404':
         $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '409':
+        description: |
+          Conflict. A by-name upsert matched an existing **active** brand and the
+          supplied `status` would demote it to `pending`. Silent demotion is
+          rejected (`code: brand_status_demotion_not_allowed`). Use
+          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+          status transitions.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -155,17 +165,29 @@ v2-brand-for-org:
             $ref: './schemas.yaml#/V2BrandUpdateInput'
     responses:
       '200':
-        description: Brand updated successfully
+        description: |
+          Brand updated successfully. For a sub-workspace brand whose edit changed
+          aliases/competitors, the body may include `semrushRejectedAliases` listing
+          per-market aliases Semrush refused during the re-sync.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/V2Brand'
+              $ref: './schemas.yaml#/V2BrandUpdateResponse'
       '400':
         $ref: './responses.yaml#/400'
       '403':
         description: User does not have access to this organization
       '404':
         description: Organization or brand not found
+      '409':
+        description: |
+          Conflict. The PATCH would demote an **active** brand to `pending` via the
+          generic update path (`code: brand_status_demotion_not_allowed`). Use
+          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+          status transitions.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -261,6 +283,70 @@ v2-brand-for-org-activate:
         description: |
           The brand's primary URL is already another brand's base site
           (violates the `brands_base_site_unique` constraint).
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-status-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  patch:
+    tags:
+      - brands
+      - customer-config
+    summary: Transition a brand's status (v2)
+    description: |
+      Explicitly transitions a brand's lifecycle status (approve -> `active`,
+      move-to-pending -> `pending`). This is the sanctioned path for an
+      active -> pending demotion. Once the companion demotion guard ships
+      (LLMO-5587 PR3), the generic
+      `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}` will refuse that transition.
+    operationId: transitionBrandStatusForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - status
+            properties:
+              status:
+                type: string
+                enum:
+                  - active
+                  - pending
+                description: Target brand status.
+    responses:
+      '200':
+        description: Brand status updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
       '500':
         $ref: './responses.yaml#/500'
       '503':

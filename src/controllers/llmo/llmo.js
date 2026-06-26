@@ -24,6 +24,7 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
+  allHaveSamePathname,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -2037,6 +2038,10 @@ function LlmoController(ctx) {
 
       if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
         return badRequest('Staging domains must belong to the same base domain as the production site');
+      }
+
+      if (!allHaveSamePathname(stagingDomains, site.getBaseURL())) {
+        return badRequest('Staging domains must be within the site pathname scope of the production site');
       }
 
       const tokowakaClient = TokowakaClient.createFrom(context);

@@ -3809,8 +3809,12 @@ Brand:
       description: The name of the brand
       type: string
     baseSiteId:
-      description: UUID of the brand's primary site. Immutable once set. Unique per organization.
-      type: string
+      description: >-
+        UUID of the brand's primary site. Unique per organization. Immutable once
+        set on an active brand. On a pending brand it may be re-pointed to a
+        different site or cleared (send null) to free the site for reuse by
+        another brand.
+      type: [string, 'null']
       format: uuid
     baseUrl:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
@@ -3849,6 +3853,13 @@ Brand:
                 type: string
               languageCode:
                 type: string
+              modelIds:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  AI model (LLM) ids to attach to this market's project at
+                  activation. Optional; omitted when none were chosen.
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
@@ -5729,6 +5740,63 @@ SiteEnrollment:
     updatedAt: "2024-01-15T10:30:00Z"
     updatedBy: "system"
 
+EnsureSiteEntitlementRequest:
+  type: object
+  description: |
+    Request body for ensuring entitlement and site enrollment for a site.
+    `productCode` is required; `tier` defaults to FREE_TRIAL when omitted.
+  properties:
+    productCode:
+      description: The product code to ensure entitlement for
+      type: string
+      enum: [LLMO, ASO, ACO]
+    tier:
+      description: |
+        The entitlement tier. When the organization already has an entitlement
+        for the product at a non-PAID tier, the tier is upgraded to this value.
+        Defaults to FREE_TRIAL when omitted.
+      type: string
+      enum: [FREE_TRIAL, PAID]
+      default: FREE_TRIAL
+  required:
+    - productCode
+  example:
+    productCode: "ASO"
+    tier: "FREE_TRIAL"
+
+EnsureSiteEntitlementResponse:
+  type: object
+  description: |
+    Result of an ensure-entitlement-for-site call. Contains the organization-
+    level entitlement (created or pre-existing) and the site enrollment that
+    links the site to it.
+  properties:
+    entitlement:
+      $ref: '#/Entitlement'
+    siteEnrollment:
+      $ref: '#/SiteEnrollment'
+  required:
+    - entitlement
+    - siteEnrollment
+  example:
+    entitlement:
+      id: "123e4567-e89b-12d3-a456-426614174000"
+      organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+      productCode: "ASO"
+      tier: "FREE_TRIAL"
+      quotas:
+        llmo_trial_prompts: 200
+      createdAt: "2024-01-15T10:30:00Z"
+      updatedAt: "2024-01-15T10:30:00Z"
+      updatedBy: "system"
+    siteEnrollment:
+      id: "abc12345-e89b-12d3-a456-426614174000"
+      siteId: "def67890-cca4-48d6-a086-aa1e0d86ec10"
+      entitlementId: "123e4567-e89b-12d3-a456-426614174000"
+      createdAt: "2024-01-15T10:30:00Z"
+      updatedAt: "2024-01-15T10:30:00Z"
+      updatedBy: "system"
+
 TrialUser:
   type: object
   description: A trial user represents a user participating in a trial program
@@ -7448,12 +7516,85 @@ V2BrandCompetitor:
         - 'null'
       description: Competitor URL
       example: 'https://www.acme.com'
+    aliases:
+      type: array
+      items:
+        type: string
+      description: >-
+        Alternate names the competitor is known by. Propagated to the competitor's
+        Semrush benchmark `brand_aliases` for sub-workspace brands.
+      example: ['Acme', 'Acme Corporation']
     regions:
       type: array
       items:
         type: string
       description: ISO-3166 country codes
       example: ['US']
+
+V2SemrushRejectedAlias:
+  type: object
+  description: >-
+    A set of aliases Semrush refused on one market/project's benchmark during a
+    brand-edit re-sync (the aliases were written but are not being tracked).
+  properties:
+    projectId:
+      type: string
+      description: Semrush project (market) id the rejection occurred on.
+    market:
+      type: string
+      description: ISO-3166 country code of that market.
+      example: 'us'
+    domain:
+      type: [string, 'null']
+      description: Benchmark domain the aliases were attached to (null when absent).
+      example: 'www.example.com'
+    aliases:
+      type: array
+      items:
+        type: string
+      description: The alias names Semrush rejected.
+      example: ['Bogus Name']
+
+V2PendingSemrushProvisioning:
+  type: [object, 'null']
+  description: >-
+    Deferred Semrush provisioning data for a pending (draft) brand: the primary
+    URL + initial markets (each with its chosen AI models/LLMs) collected at
+    "Save as pending" before the brand's sub-workspace + project exist, plus
+    whether activation should generate topics/prompts. Activation provisions each
+    market and removes it from the blob, nulling the field once none remain
+    (failed markets stay for retry). markets may be empty: with a primaryUrl a
+    single US/EN fallback project is provisioned; with neither a primaryUrl nor a
+    market a sub-workspace-only brand is provisioned. On a brand response this is
+    read-only and null for a non-pending brand. On a PATCH it is honored only
+    while the brand is (and stays) pending — the draft Markets tab appends a
+    market / edits a market's LLMs — and ignored otherwise.
+  properties:
+    primaryUrl:
+      type: [string, 'null']
+    generatePrompts:
+      type: boolean
+      description: >-
+        Whether activation generates topics/prompts for the provisioned
+        project(s). Defaults to false (project created empty). Requires a
+        primaryUrl (and thus a project) when true.
+    markets:
+      type: array
+      items:
+        type: object
+        required:
+          - market
+          - languageCode
+        properties:
+          market:
+            type: string
+          languageCode:
+            type: string
+          modelIds:
+            type: array
+            items:
+              type: string
+            description: AI model (LLM) ids to attach to this market at activation.
 
 V2Brand:
   type: object
@@ -7530,6 +7671,13 @@ V2Brand:
         type: string
         format: uuid
       description: IDs of sites linked to this brand (read-only, derived from brand_sites)
+    pendingSemrushProvisioning:
+      allOf:
+        - $ref: '#/V2PendingSemrushProvisioning'
+      readOnly: true
+      description: >-
+        Read-only deferred Semrush provisioning data for a pending (draft)
+        brand. Null for a non-pending brand. See V2PendingSemrushProvisioning.
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
@@ -7580,6 +7728,25 @@ V2Brand:
     siteIds: ['b2c3d4e5-6789-01ab-cdef-2345678901ab']
     updatedAt: '2026-03-15T10:30:00Z'
     updatedBy: 'user@adobe.com'
+
+V2BrandUpdateResponse:
+  description: >-
+    A brand (as returned by GET) plus, when the edit re-synced aliases/competitors
+    to a sub-workspace brand's Semrush markets and Semrush refused some aliases,
+    the `semrushRejectedAliases` set. The field is omitted when nothing was
+    rejected (or the brand is flat-mode).
+  allOf:
+    - $ref: '#/V2Brand'
+    - type: object
+      properties:
+        semrushRejectedAliases:
+          type: array
+          description: >-
+            Per-market alias rejections from the Semrush re-sync (own-brand and
+            competitor benchmarks). Present only when at least one alias was
+            rejected.
+          items:
+            $ref: '#/V2SemrushRejectedAlias'
 
 V2BrandInput:
   type: object
@@ -7691,6 +7858,13 @@ V2BrandUpdateInput:
       type: array
       items:
         $ref: '#/V2BrandCompetitor'
+    pendingSemrushProvisioning:
+      allOf:
+        - $ref: '#/V2PendingSemrushProvisioning'
+      description: >-
+        Deferred Semrush provisioning data. Honored only while the brand is (and
+        stays) pending — the draft Markets tab appends a market / edits a
+        market's LLMs; silently ignored on a non-pending brand.
 
 V2BrandListResponse:
   type: object
@@ -10929,6 +11103,15 @@ SerenityMarket:
     semrushProjectId:
       type: string
       description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
+    domain:
+      description: |
+        The market's own domain (its primary URL host, e.g. "example.com").
+        Each market has its own primary URL/domain — the brand itself has none.
+        Additive, sub-workspace mode only. Surfaced so the market overview can
+        display it. Null when the upstream project carries no domain.
+      oneOf:
+        - type: string
+        - type: 'null'
 
 SerenityMarketListResponse:
   type: object
@@ -10971,10 +11154,22 @@ SerenityActivateRequest:
     Activates a brand into sub-workspace mode: ensures the brand's own
     Semrush sub-workspace exists (creating + resourcing it on first call),
     then per supplied market creates-or-resumes a draft and publishes it once.
-    Markets are caller-supplied — reactivation re-supplies them (there is no
-    stored market memory). Sets the brand status to `active` once ≥1 market is live.
-  required: [brandDomain, brandNames, markets]
+
+    All fields are optional. A pending (draft) brand activated from the wizard
+    sends an EMPTY body `{}` and every value is read from its stashed
+    `pending_semrush_provisioning` (primary URL, markets, generatePrompts). A
+    reactivation of an already-live brand re-supplies them in the body (the body
+    wins when present; there is no stored market memory otherwise). When no
+    primary URL/domain is available at all, a sub-workspace-only brand is
+    activated (no project). With a domain but no market, a single US/EN fallback
+    project is provisioned.
   properties:
+    generatePrompts:
+      type: boolean
+      description: >-
+        Whether to generate topics/prompts for the provisioned project(s).
+        Overrides the stashed value; defaults to the stash (else false). Requires
+        a primary URL/domain (a project) — true with no domain is rejected (400).
     brandDomain:
       type: string
       description: Primary domain for the brand's upstream projects.
@@ -11008,6 +11203,15 @@ SerenityActivateRequest:
           name:
             type: string
             description: Optional display name for this market's upstream project.
+          modelIds:
+            type: array
+            items:
+              type: string
+            description: >-
+              Optional AI model (LLM) ids to attach to this market's project.
+              When omitted here, the markets stashed on the pending brand supply
+              them (a draft activated from the wizard carries per-market LLMs in
+              pending_semrush_provisioning).
 
 SerenityActivateResponse:
   type: object
@@ -11020,8 +11224,24 @@ SerenityActivateResponse:
       type: string
       enum: [active, pending]
       description: |
-        `active` when at least one market went live; `pending` when none did
-        (the response is HTTP 207 in that case). Mirrors the persisted brand status.
+        All-or-nothing. `active` (HTTP 200) only when the FULL provisioning chain
+        succeeded — sub-workspace ensured, every market's project live, the brand
+        linked to its sub-workspace, AND every project mirrored as a Site
+        (`brand_sites` type=`serenity`). Otherwise a pending (draft) brand stays
+        `pending` and the response is HTTP 502 (incomplete activation; body carries
+        `error`/`message` and the per-market outcomes — retry to converge). Mirrors
+        the persisted brand status.
+    error:
+      type: string
+      description: |
+        Present only on an incomplete activation (HTTP 502, `status: pending`): a
+        stable token identifying the failure class (e.g. `serenityActivationIncomplete`).
+    message:
+      type: string
+      description: |
+        Present only on an incomplete activation (HTTP 502): a human-readable
+        reason naming the failed step (markets vs. site link). Never leaks the
+        upstream gateway URL.
     markets:
       type: array
       description: Per-market outcome, in request order.
@@ -11035,7 +11255,7 @@ SerenityActivateResponse:
             type: string
           status:
             type: integer
-            description: Per-market HTTP-style status (201 live, 409 already-live, 4xx validation).
+            description: Per-market HTTP-style status (201 live, 409 already-live, 4xx/5xx failure).
           body:
             type: object
             additionalProperties: true
@@ -11664,3 +11884,178 @@ ReferralTrafficWeeks:
         $ref: '#/ReferralTrafficWeekEntry'
   required:
     - weeks
+
+StateAccessMapping:
+  type: object
+  description: |
+    One state-layer binding row. Identifies a subject (user or org) bound to
+    a resource within an IMS org under a product, with the per-resource
+    capability set the binding confers. Tombstoned rows carry non-null
+    `revokedAt` / `revokedBy` / `revokeReason`.
+  required:
+    - id
+    - subjectType
+    - subjectId
+    - resourceType
+    - resourceId
+    - imsOrgId
+    - product
+    - grantedCapabilities
+    - createdAt
+  properties:
+    id: { $ref: '#/Id' }
+    subjectType: { $ref: '#/StateAccessMappingSubjectType' }
+    subjectId:
+      type: string
+      example: someone@AdobeID
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId:
+      type: string
+      example: '11111111-2222-4333-9444-555555555555'
+    imsOrgId:
+      type: string
+      example: ABC123@AdobeOrg
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+      example: LLMO
+    grantedCapabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+    createdBy:
+      type: [string, 'null']
+      example: admin@AdobeID
+    createdAt: { $ref: '#/DateTime' }
+    updatedBy:
+      type: [string, 'null']
+      description: |
+        IMS ident of the last actor to edit the binding's capabilities, or
+        `system` when never edited since creation.
+      example: system
+    updatedAt:
+      oneOf:
+        - { $ref: '#/DateTime' }
+        - type: 'null'
+    revokedAt:
+      oneOf:
+        - { $ref: '#/DateTime' }
+        - type: 'null'
+    revokedBy:
+      type: [string, 'null']
+    revokeReason:
+      type: [string, 'null']
+
+StateAccessMappingCreateRequest:
+  type: object
+  required:
+    - subjectType
+    - subjectId
+    - resourceType
+    - resourceId
+    - grantedCapabilities
+  properties:
+    subjectType: { $ref: '#/StateAccessMappingSubjectType' }
+    subjectId:
+      type: string
+      example: someone@AdobeID
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId:
+      type: string
+      example: '11111111-2222-4333-9444-555555555555'
+    grantedCapabilities:
+      type: array
+      minItems: 1
+      items: { $ref: '#/StateGrantedCapability' }
+
+StateAccessMappingPatchRequest:
+  type: object
+  required:
+    - grantedCapabilities
+  properties:
+    grantedCapabilities:
+      type: array
+      minItems: 1
+      items: { $ref: '#/StateGrantedCapability' }
+
+StateAccessMappingsListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/StateAccessMapping' }
+    cursor:
+      type: [string, 'null']
+      description: Opaque cursor for fetching the next page, or null when the result is the final page.
+
+StateAccessMappingConflictResponse:
+  type: object
+  required: [message]
+  properties:
+    message: { type: string, example: Active access mapping already exists for this subject and resource }
+    id:
+      type: [string, 'null']
+      description: ID of the existing active row when known.
+
+ProductCapabilitiesResponse:
+  type: object
+  required: [product, capabilities]
+  properties:
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+    capabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+
+UserCapabilitiesResponse:
+  type: object
+  required: [product, resourceType, resourceId, capabilities, provenance]
+  description: |
+    Caller's effective capability set for one resource under the current
+    product. `capabilities` is the union over the JWT `facs_permissions` and
+    state-layer user-scoped + org-scoped bindings. `provenance` maps each
+    capability to the set of sources that contributed it (tags from
+    `jwt`, `state:user`, `state:org`).
+  properties:
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId: { type: string }
+    capabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+    provenance:
+      type: object
+      additionalProperties:
+        type: array
+        items:
+          type: string
+          enum: [jwt, 'state:user', 'state:org']
+# ── Referral Traffic PG schemas ───────────────────────────────────────────────
+
+
+StateAccessMappingSubjectType:
+  type: string
+  enum: [user, org]
+  description: |
+    Subject identifier kind. `user` is an `<ident>@<authSrc>` canonical IMS
+    user id; `org` is an `<ident>@AdobeOrg` canonical IMS org id (must equal
+    the caller's own org on POST).
+
+StateAccessMappingResourceType:
+  type: string
+  description: |
+    Product-specific resource kind. LLMO uses `brand`; ASO uses `site`.
+  example: brand
+
+StateGrantedCapability:
+  type: string
+  description: |
+    Fully-qualified capability string of the form `<product-lower>/<name>`.
+    Must belong to the product's capability catalog (see
+    `GET /product/capabilities`).
+  example: llmo/can_view
+  pattern: '^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$'
+

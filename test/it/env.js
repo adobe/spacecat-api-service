@@ -27,6 +27,10 @@ export function buildEnv(publicKeyB64) {
     // AWS_SESSION_TOKEN is cleared so that the CI configure-aws-credentials step's real
     // STS token does not leak into MinIO requests (MinIO validates or rejects STS tokens).
     AWS_REGION: 'us-east-1',
+    // Deployment env. The state-access-mapping endpoints are dev-only until
+    // facsWrapper fronts them (they 404 elsewhere), so the IT server must boot
+    // as 'dev' for that suite to exercise the real handlers.
+    AWS_ENV: 'dev',
     AWS_ACCESS_KEY_ID: 'minioadmin',
     AWS_SECRET_ACCESS_KEY: 'minioadmin',
     AWS_SESSION_TOKEN: '',
@@ -80,6 +84,11 @@ export function buildEnv(publicKeyB64) {
     // Other middleware (dummy values, not called by Tier 1 routes)
     AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-audits',
     S3_CONFIG_BUCKET: 'dummy-config-bucket',
+
+    // LLMO Cloudflare onboarding — GET .../cloudflare/config returns this verbatim to the
+    // browser PKCE flow. Other cloudflare endpoints call the external Cloudflare API and are
+    // not exercised by the IT suite (no external HTTP mocking).
+    CLOUDFLARE_CLIENT_ID: 'it-cloudflare-client-id',
 
     // Consumers (S2S) — allow ORG_1 IMS org for seeding and IT tests
     S2S_ALLOWED_IMS_ORG_IDS: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',

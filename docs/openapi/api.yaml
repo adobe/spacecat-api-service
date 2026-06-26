@@ -79,6 +79,9 @@ tags:
     description: Brand sentiment analysis topics and guidelines management
   - name: ai-visibility
     description: AI Visibility endpoints – proxy to Semrush gRPC for brand visibility, competitor gaps, topic research, and prompt analysis
+  - name: state-access-mappings
+    description: |
+      Hybrid permission model — state-layer access mappings + capability views.
 
 paths:
   /audits/latest/{auditType}:
@@ -129,6 +132,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}/activate:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org-activate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/status:
+    $ref: './brands-v2-api.yaml#/v2-brand-status-for-org'
   /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org-site'
   /v2/orgs/{spaceCatId}/categories:
@@ -256,6 +261,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/bot-blocker:
     $ref: './bot-blocker-api.yaml#/bot-blocker'
+  /sites/{siteId}/entitlements:
+    $ref: './entitlements-api.yaml#/ensure-entitlement-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
@@ -635,6 +642,16 @@ paths:
     $ref: './llmo-api.yaml#/llmo-probe-edge-optimize'
   /sites/{siteId}/llmo/edge-optimize-routing:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/config:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-config'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/accounts:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-accounts'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-zones'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:
@@ -743,6 +760,17 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-topics-export'
   /llmo/ai-visibility/v1/meta/meta:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
+
+  /state/access-mappings:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings'
+  /state/access-mappings/history:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings-history'
+  /state/access-mappings/{id}:
+    $ref: './state-access-mappings-api.yaml#/state-access-mapping-by-id'
+  /product/capabilities:
+    $ref: './state-access-mappings-api.yaml#/product-capabilities'
+  /user/capabilities/{resourceId}:
+    $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
 
 components:
   securitySchemes:
