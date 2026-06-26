@@ -4586,6 +4586,19 @@ site-llmo-cloudflare-deploy:
         $ref: './responses.yaml#/403'
       '404':
         $ref: './responses.yaml#/404'
+      '409':
+        description: A worker with the derived name already exists in the account.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                scriptName:
+                  type: string
+                accountId:
+                  type: string
       '429':
         $ref: './responses.yaml#/429'
       '500':

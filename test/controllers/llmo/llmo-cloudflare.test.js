@@ -222,17 +222,15 @@ describe('LlmoCloudflareController', () => {
       mockContext.data = { accountId: ACCOUNT_ID };
     });
 
-    it('returns only the zones belonging to the selected account', async () => {
-      const selected = { id: ZONE_ID, name: 'example.com', account: { id: ACCOUNT_ID } };
-      const other = { id: 'z2', name: 'other.com', account: { id: 'ffffffffffffffffffffffffffffffff' } };
-      const noAccount = { id: 'z3', name: 'noacct.com' };
-      // null + account-less entries exercise the zone?.account?.id guard.
-      mockCfClient.listZones.resolves([selected, other, noAccount, null]);
+    it('passes the accountId to the client and returns the account-scoped zones', async () => {
+      const zones = [{ id: ZONE_ID, name: 'example.com', account: { id: ACCOUNT_ID } }];
+      mockCfClient.listZones.resolves(zones);
 
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(200);
+      expect(mockCfClient.listZones).to.have.been.calledWith({ accountId: ACCOUNT_ID });
       const body = await res.json();
-      expect(body).to.deep.equal([selected]);
+      expect(body).to.deep.equal(zones);
     });
 
     it('treats a null zone list as empty', async () => {
@@ -433,6 +431,17 @@ describe('LlmoCloudflareController', () => {
       mockCfClient.deployWorkerScript.rejects(new Error('Cloudflare API returned 500 on /workers: boom'));
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(502);
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
+    it('returns 409 when a worker with the derived name already exists', async () => {
+      mockCfClient.deployWorkerScript.rejects(
+        new Error(`Worker script '${DERIVED_SCRIPT_NAME}' already exists in account ${ACCOUNT_ID}. Set overwrite: true to replace it.`),
+      );
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
       expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
     });
 

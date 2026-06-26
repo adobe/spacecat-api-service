@@ -195,8 +195,9 @@ function LlmoCloudflareController(ctx) {
     }
 
     try {
-      const zones = await client.listZones();
-      return ok((zones || []).filter((zone) => zone?.account?.id === accountId));
+      // The client pushes account.id to the Cloudflare API, so filtering happens server-side.
+      const zones = await client.listZones({ accountId });
+      return ok(zones || []);
     } catch (e) {
       return cfErrorResponse(e, 'zone listing');
     }
@@ -207,7 +208,8 @@ function LlmoCloudflareController(ctx) {
    * Body: { accountId, targetHost }
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), then sets the LLMO API key as the
-   * EDGE_OPTIMIZE_API_KEY secret on the worker.
+   * EDGE_OPTIMIZE_API_KEY secret on the worker. Returns 409 if a worker with the derived name
+   * already exists in the account (the client refuses to overwrite).
    */
   const deployWorker = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -269,8 +271,18 @@ function LlmoCloudflareController(ctx) {
     ];
 
     try {
+      // overwrite defaults to false, so the client rejects if the worker already exists,
+      // preventing an onboarding deploy from silently replacing one.
       await cfClient.deployWorkerScript(accountId, scriptName, workerScript, bindings);
     } catch (e) {
+      if (/already exists/i.test(e.message)) {
+        log.info(`Worker '${scriptName}' already exists in account ${accountId}; refusing to overwrite`);
+        return createResponse({
+          message: `A worker named '${scriptName}' already exists in this Cloudflare account`,
+          scriptName,
+          accountId,
+        }, 409);
+      }
       return cfErrorResponse(e, 'worker deployment');
     }
 
