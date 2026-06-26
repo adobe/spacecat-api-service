@@ -90,20 +90,104 @@ describe('LlmoCloudFrontController', () => {
 
   // The control-plane functions are imported from '@adobe/spacecat-shared-tokowaka-client';
   // the wrappers read the mutable outer stubs so each test can reassign them in beforeEach.
-  const getEdgeOptimizeStubs = () => ({
-    assumeConnectorRole: (...args) => assumeConnectorRoleStub(...args),
-    listDistributions: (...args) => listCloudFrontDistributionsStub(...args),
-    getDistributionConfig: (...args) => getDistributionConfigStub(...args),
-    createOrigin: (...args) => createEdgeOptimizeOriginStub(...args),
-    createCloudFrontFunction: (...args) => createEdgeOptimizeRoutingFunctionStub(...args),
-    updateCacheSettings: (...args) => applyEdgeOptimizeCacheHeadersStub(...args),
-    createLambdaAtEdge: (...args) => createEdgeOptimizeLambdaStub(...args),
-    getLambdaAtEdgeStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
-    applyAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
-    verifyRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
-    runDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
-    planDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
-  });
+  const getEdgeOptimizeStubs = () => {
+    function CloudFrontEdgeOptimizeClient({ credentials, region } = {}) {
+      this.credentials = credentials;
+      this.region = region;
+    }
+    CloudFrontEdgeOptimizeClient.prototype.listDistributions = function listDistributions() {
+      return listCloudFrontDistributionsStub(this.credentials, this.region);
+    };
+    CloudFrontEdgeOptimizeClient.prototype.getDistributionConfig = function getDistributionConfig(
+      distributionId,
+    ) {
+      return getDistributionConfigStub(this.credentials, distributionId, this.region);
+    };
+    CloudFrontEdgeOptimizeClient.prototype.createOrigin = function createOrigin(
+      distributionId,
+      originDomain,
+      headers,
+    ) {
+      return createEdgeOptimizeOriginStub(
+        this.credentials,
+        distributionId,
+        originDomain,
+        headers,
+        this.region,
+      );
+    };
+    CloudFrontEdgeOptimizeClient.prototype.createCloudFrontFunction = function createFunction(
+      defaultOriginId,
+      distributionId,
+      targetedPaths,
+    ) {
+      return createEdgeOptimizeRoutingFunctionStub(
+        this.credentials,
+        defaultOriginId,
+        distributionId,
+        targetedPaths,
+        this.region,
+      );
+    };
+    CloudFrontEdgeOptimizeClient.prototype.updateCacheSettings = function updateCacheSettings(
+      distributionId,
+      pathPattern,
+      opts,
+    ) {
+      return applyEdgeOptimizeCacheHeadersStub(
+        this.credentials,
+        distributionId,
+        pathPattern,
+        opts,
+      );
+    };
+    CloudFrontEdgeOptimizeClient.prototype.createLambdaAtEdge = function createLambdaAtEdge(
+      accountId,
+      opts,
+    ) {
+      return createEdgeOptimizeLambdaStub(this.credentials, accountId, opts);
+    };
+    CloudFrontEdgeOptimizeClient.prototype.getLambdaAtEdgeStatus = function getLambdaStatus(
+      distributionId,
+    ) {
+      return getEdgeOptimizeLambdaStatusStub(this.credentials, distributionId, this.region);
+    };
+    CloudFrontEdgeOptimizeClient.prototype.applyAssociations = function applyAssociations(
+      distributionId,
+      pathPattern,
+      lambdaVersionArn,
+    ) {
+      return applyEdgeOptimizeAssociationsStub(
+        this.credentials,
+        distributionId,
+        pathPattern,
+        lambdaVersionArn,
+        this.region,
+      );
+    };
+    CloudFrontEdgeOptimizeClient.prototype.runDeployStep = function runDeployStep(params) {
+      return runEdgeOptimizeDeployStepStub(this.credentials, params, this.region);
+    };
+    CloudFrontEdgeOptimizeClient.prototype.planDeploy = function planDeploy(params) {
+      return planEdgeOptimizeDeployStub(this.credentials, params, this.region);
+    };
+
+    return {
+      assumeConnectorRole: (...args) => assumeConnectorRoleStub(...args),
+      listDistributions: (...args) => listCloudFrontDistributionsStub(...args),
+      getDistributionConfig: (...args) => getDistributionConfigStub(...args),
+      createOrigin: (...args) => createEdgeOptimizeOriginStub(...args),
+      createCloudFrontFunction: (...args) => createEdgeOptimizeRoutingFunctionStub(...args),
+      updateCacheSettings: (...args) => applyEdgeOptimizeCacheHeadersStub(...args),
+      createLambdaAtEdge: (...args) => createEdgeOptimizeLambdaStub(...args),
+      getLambdaAtEdgeStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
+      applyAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
+      verifyRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
+      runDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
+      planDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
+      CloudFrontEdgeOptimizeClient,
+    };
+  };
 
   const calculateForwardedHostMock = (url) => {
     try {

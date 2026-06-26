@@ -20,17 +20,8 @@ import yaml from 'js-yaml';
 import TokowakaClient, {
   calculateForwardedHost,
   assumeConnectorRole,
-  listDistributions as listAwsDistributions,
-  getDistributionConfig,
-  createOrigin as createAwsOrigin,
-  createCloudFrontFunction as createAwsCloudFrontFunction,
-  updateCacheSettings as updateAwsCacheSettings,
-  createLambdaAtEdge as createAwsLambdaAtEdge,
-  getLambdaAtEdgeStatus as getAwsLambdaAtEdgeStatus,
-  applyAssociations as applyAwsAssociations,
   verifyRouting as verifyAwsRouting,
-  runDeployStep as runAwsDeployStep,
-  planDeploy as planAwsDeploy,
+  CloudFrontEdgeOptimizeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 
@@ -192,6 +183,14 @@ function LlmoCloudFrontController(ctx) {
     return { accountId, externalId, distributionId };
   };
 
+  const assumeCloudFrontClient = async ({ accountId, externalId, roleName }) => {
+    const assumed = await assumeConnectorRole({ accountId, externalId, roleName });
+    return {
+      ...assumed,
+      cloudFrontClient: new CloudFrontEdgeOptimizeClient({ credentials: assumed.credentials }),
+    };
+  };
+
   // Verify the customer's cross-account connector role is assumable. Used by the wizard's
   // "Allow access" step, which polls this after the customer creates the role via CloudFormation.
   const connect = async (context) => {
@@ -246,8 +245,10 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const distributions = await listAwsDistributions(credentials);
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const distributions = await cloudFrontClient.listDistributions();
       return ok({ distributions });
     } catch (error) {
       log.error(`Failed to list CloudFront distributions for site ${siteId}:`, error);
@@ -279,9 +280,11 @@ function LlmoCloudFrontController(ctx) {
       const cloudFrontReadCheck = { name: 'cloudFrontRead', ok: true };
 
       try {
-        const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+        const { cloudFrontClient } = await assumeCloudFrontClient({
+          accountId, externalId, roleName,
+        });
         try {
-          await listAwsDistributions(credentials);
+          await cloudFrontClient.listDistributions();
         } catch (listError) {
           cloudFrontReadCheck.ok = false;
           cloudFrontReadCheck.detail = cleanupHeaderValue(listError.message);
@@ -323,8 +326,10 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const { origins } = await getDistributionConfig(credentials, distributionId);
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const { origins } = await cloudFrontClient.getDistributionConfig(distributionId);
       const hasEdgeOptimizeOrigin = origins.some((origin) => /edgeoptimize/i.test(origin.id)
         || /edgeoptimize/i.test(origin.domainName || ''));
       return ok({ origins, hasEdgeOptimizeOrigin });
@@ -355,11 +360,11 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const { defaultCacheBehavior, cacheBehaviors } = await getDistributionConfig(
-        credentials,
-        distributionId,
-      );
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const { defaultCacheBehavior, cacheBehaviors } = await cloudFrontClient
+        .getDistributionConfig(distributionId);
       const behaviors = [];
       if (defaultCacheBehavior) {
         behaviors.push({ ...defaultCacheBehavior, isDefault: true });
@@ -467,9 +472,10 @@ function LlmoCloudFrontController(ctx) {
       }
       const { apiKey, forwardedHost } = target;
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const result = await createAwsOrigin(
-        credentials,
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const result = await cloudFrontClient.createOrigin(
         distributionId,
         originDomain,
         { apiKey, forwardedHost },
@@ -512,16 +518,17 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
       // Derive the default-behavior target origin id from the live distribution config.
-      const { defaultCacheBehavior } = await getDistributionConfig(credentials, distributionId);
+      const { defaultCacheBehavior } = await cloudFrontClient.getDistributionConfig(distributionId);
       const defaultOriginId = defaultCacheBehavior?.targetOriginId;
       if (!hasText(defaultOriginId)) {
         return badRequest('Could not determine the default cache behavior target origin');
       }
 
-      const result = await createAwsCloudFrontFunction(
-        credentials,
+      const result = await cloudFrontClient.createCloudFrontFunction(
         defaultOriginId,
         distributionId,
         targetedPaths,
@@ -556,8 +563,10 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const result = await updateAwsCacheSettings(credentials, distributionId, pathPattern);
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const result = await cloudFrontClient.updateCacheSettings(distributionId, pathPattern);
       log.info(`[edge-optimize-cache] Applied cache headers for site ${siteId}, behavior ${pathPattern}`);
       return ok(result);
     } catch (error) {
@@ -587,11 +596,11 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
-        accountId, externalId, roleName,
-      });
-      const result = await createAwsLambdaAtEdge(
-        credentials,
+      const {
+        cloudFrontClient,
+        accountId: resolvedAccountId,
+      } = await assumeCloudFrontClient({ accountId, externalId, roleName });
+      const result = await cloudFrontClient.createLambdaAtEdge(
         resolvedAccountId,
         { distributionId },
       );
@@ -624,8 +633,10 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const status = await getAwsLambdaAtEdgeStatus(credentials, distributionId);
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const status = await cloudFrontClient.getLambdaAtEdgeStatus(distributionId);
       return ok(status);
     } catch (error) {
       log.error(`Failed to read Lambda@Edge status for site ${siteId}:`, error);
@@ -666,9 +677,10 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const result = await applyAwsAssociations(
-        credentials,
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const result = await cloudFrontClient.applyAssociations(
         distributionId,
         pathPattern,
         lambdaVersionArn,
@@ -715,8 +727,10 @@ function LlmoCloudFrontController(ctx) {
         }
       }
       if (!hasText(domain)) {
-        const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-        const distributions = await listAwsDistributions(credentials);
+        const { cloudFrontClient } = await assumeCloudFrontClient({
+          accountId, externalId, roleName,
+        });
+        const distributions = await cloudFrontClient.listDistributions();
         const match = distributions.find((d) => d.id === distributionId);
         domain = match?.domainName || '';
       }
@@ -783,11 +797,12 @@ function LlmoCloudFrontController(ctx) {
       const { apiKey, forwardedHost } = target;
 
       // Assume the connector role ONCE; all steps run with the same short-lived credentials.
-      const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
-        accountId, externalId, roleName,
-      });
+      const {
+        cloudFrontClient,
+        accountId: resolvedAccountId,
+      } = await assumeCloudFrontClient({ accountId, externalId, roleName });
 
-      const result = await runAwsDeployStep(credentials, {
+      const result = await cloudFrontClient.runDeployStep({
         distributionId,
         originId,
         behavior,
@@ -850,11 +865,12 @@ function LlmoCloudFrontController(ctx) {
       }
       const { apiKey, forwardedHost } = target;
 
-      const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
-        accountId, externalId, roleName,
-      });
+      const {
+        cloudFrontClient,
+        accountId: resolvedAccountId,
+      } = await assumeCloudFrontClient({ accountId, externalId, roleName });
 
-      const result = await planAwsDeploy(credentials, {
+      const result = await cloudFrontClient.planDeploy({
         distributionId,
         originId,
         behavior,
