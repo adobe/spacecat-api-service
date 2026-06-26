@@ -383,14 +383,15 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('returns 400 when an unexpected error occurs', async () => {
+    it('returns 500 with a generic message when an unexpected error occurs', async () => {
       mockDataAccess.Site.findById.rejects(new Error('db boom'));
 
       const result = await controller.connect(connectContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('db boom');
+      expect(body.message).to.not.include('db boom');
+      expect(body.message).to.include('Failed to connect the edge optimize role');
     });
   });
 

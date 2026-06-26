@@ -223,7 +223,7 @@ function LlmoCloudFrontController(ctx) {
       }
     } catch (error) {
       log.error(`Failed to connect edge optimize role for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to connect the edge optimize role, please try again');
     }
   };
 
