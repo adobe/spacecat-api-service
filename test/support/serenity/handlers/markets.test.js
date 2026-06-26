@@ -1322,6 +1322,45 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
   });
 
+  // Guard for issue #2687 item 1: the standalone PUT /serenity/models path must
+  // ALWAYS republish a real model-set change to the live layer — the only
+  // `publish: false` caller is brand-create (which batches its own publish). The
+  // handler signature exposes no publish-control option, so a caller cannot turn
+  // republish off. This test pins that contract: a `publish`/`publishMode` field
+  // smuggled into the request body is IGNORED and the project still publishes.
+  it('always republishes on a model-set change — body publish flags cannot suppress it', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        modelIds: ['cat-gpt'],
+        // Hostile extras: neither must reach syncModelsForProject's publish gate.
+        publish: false,
+        publishMode: 'skip',
+      },
+      fakeLog(),
+    );
+
+    expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
+  });
+
   it('propagates transport errors from deleteAiModelsByIds', async () => {
     const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
     const da = makeDataAccess([]);

@@ -232,6 +232,17 @@ export function createSerenityTransport({ env, imsToken }) {
      * Multiple tag IDs use OR semantics: any prompt carrying at least one of
      * the supplied IDs is included. AND filtering must be done by the caller.
      *
+     * LIVE-LAYER READ (v1/v2 read drift — see docs/decisions/006-serenity-v1-v2-read-drift.md):
+     * prompt reads have NO v1 variant — `by_tags` exists only on /v2, and the v2
+     * prompt layer materialises the LIVE (published) view. A populated-but-
+     * unpublished draft therefore reads EMPTY here (the source of every "201 but
+     * count 0"). Counts/lists derived from this call (e.g. listTagsForProject)
+     * only reflect a slice's prompts AFTER the project is published. This differs
+     * from listProjects/getProject (above), which read draft-faithful project
+     * SETTINGS via /v1; the prompt layer cannot be read draft-faithfully at all.
+     * Migration-verification "did it land?" checks must publish first (or accept
+     * that an unpublished draft reads as 0 prompts), never treat empty as missing.
+     *
      * Note: Semrush rejects `sort_field` / `sort_dir` on this endpoint (see
      * commit history on the prior `serenity` handler). Body is restricted to
      * the fields the upstream documents as accepted.
@@ -596,13 +607,20 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * GET /v1/workspaces/{ws}/projects/{pid}/aio/init_status — AIO readiness
+     * GET /v2/workspaces/{ws}/projects/{pid}/aio/init_status — AIO readiness
      * for a live project (`{ initialized: bool }`). Surfaced on the single
      * market-detail read only, never per-item in the list (would be N+1).
+     *
+     * v2 (not v1): project-engine-client 1.2.0 moved init_status to /v2 and
+     * removed the /v1 route entirely (the v1 path no longer exists in the
+     * generated types). This is unrelated to the v1-draft / v2-live read split
+     * (see listProjects/getProject above) — init_status is a readiness boolean,
+     * not draft-settings, so the live-view materialisation v2 reads carries no
+     * draft-faithfulness concern here.
      */
     async getInitStatus(workspaceId, projectId) {
       return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}/aio/init_status',
+        '/v2/workspaces/{id}/projects/{project_id}/aio/init_status',
         { params: { path: { id: workspaceId, project_id: projectId } } },
       ));
     },
