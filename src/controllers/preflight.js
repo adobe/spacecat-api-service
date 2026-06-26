@@ -353,8 +353,16 @@ function PreflightController(ctx, log, env) {
 
   /**
    * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
-   * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
-   * identified by scanId.
+   * Mysticat processes the analysis asynchronously and writes results back to the
+   * AsyncJob identified by asyncJobId.
+   *
+   * SITES-47173: mystique owns the scan_id concept end-to-end (mints its own
+   * scan_id, registers `control_scan`, tags `async_jobs.metadata.scan_id` at
+   * scan-start). Spacecat passes the AsyncJob id under its real name; the
+   * scan_id concept is internal to mystique. After this call returns, the
+   * AsyncJob's `metadata.scan_id` is populated (best-effort by mystique) for
+   * any downstream consumer that needs to discover the scan_id without
+   * round-tripping back to mystique.
    *
    * Two distinct auth headers are sent (SITES-46967 — header layout swap):
    *  - `Authorization`: spacecat-api-service's own IMS service token,
@@ -369,7 +377,8 @@ function PreflightController(ctx, log, env) {
    *    rode `Authorization`, the IMS token rode `x-ims-authorization`).
    *
    * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
-   * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
+   * @param {string} asyncJobId - The AsyncJob id; mystique tags its minted
+   *   scan_id onto async_jobs.metadata for the projector lookup.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
    * @param {string} [pageAuthHeader] - Optional customer-site page-auth header.
@@ -377,7 +386,7 @@ function PreflightController(ctx, log, env) {
    */
   async function callMysticatAnalyze(
     mysticatBaseUrl,
-    scanId,
+    asyncJobId,
     siteId,
     url,
     pageAuthHeader,
@@ -398,7 +407,7 @@ function PreflightController(ctx, log, env) {
         body: JSON.stringify({
           site_id: siteId,
           url,
-          scan_id: scanId,
+          async_job_id: asyncJobId,
           persist: true,
         }),
       });

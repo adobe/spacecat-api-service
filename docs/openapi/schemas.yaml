@@ -5740,6 +5740,63 @@ SiteEnrollment:
     updatedAt: "2024-01-15T10:30:00Z"
     updatedBy: "system"
 
+EnsureSiteEntitlementRequest:
+  type: object
+  description: |
+    Request body for ensuring entitlement and site enrollment for a site.
+    `productCode` is required; `tier` defaults to FREE_TRIAL when omitted.
+  properties:
+    productCode:
+      description: The product code to ensure entitlement for
+      type: string
+      enum: [LLMO, ASO, ACO]
+    tier:
+      description: |
+        The entitlement tier. When the organization already has an entitlement
+        for the product at a non-PAID tier, the tier is upgraded to this value.
+        Defaults to FREE_TRIAL when omitted.
+      type: string
+      enum: [FREE_TRIAL, PAID]
+      default: FREE_TRIAL
+  required:
+    - productCode
+  example:
+    productCode: "ASO"
+    tier: "FREE_TRIAL"
+
+EnsureSiteEntitlementResponse:
+  type: object
+  description: |
+    Result of an ensure-entitlement-for-site call. Contains the organization-
+    level entitlement (created or pre-existing) and the site enrollment that
+    links the site to it.
+  properties:
+    entitlement:
+      $ref: '#/Entitlement'
+    siteEnrollment:
+      $ref: '#/SiteEnrollment'
+  required:
+    - entitlement
+    - siteEnrollment
+  example:
+    entitlement:
+      id: "123e4567-e89b-12d3-a456-426614174000"
+      organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+      productCode: "ASO"
+      tier: "FREE_TRIAL"
+      quotas:
+        llmo_trial_prompts: 200
+      createdAt: "2024-01-15T10:30:00Z"
+      updatedAt: "2024-01-15T10:30:00Z"
+      updatedBy: "system"
+    siteEnrollment:
+      id: "abc12345-e89b-12d3-a456-426614174000"
+      siteId: "def67890-cca4-48d6-a086-aa1e0d86ec10"
+      entitlementId: "123e4567-e89b-12d3-a456-426614174000"
+      createdAt: "2024-01-15T10:30:00Z"
+      updatedAt: "2024-01-15T10:30:00Z"
+      updatedBy: "system"
+
 TrialUser:
   type: object
   description: A trial user represents a user participating in a trial program

@@ -1,3 +1,63 @@
+# [1.603.0](https://github.com/adobe/spacecat-api-service/compare/v1.602.1...v1.603.0) (2026-06-26)
+
+
+### Bug Fixes
+
+* **llmo:** temporary cloudflareToken body/query fallback for CF token ([#2701](https://github.com/adobe/spacecat-api-service/issues/2701)) ([b929f76](https://github.com/adobe/spacecat-api-service/commit/b929f764a27ca08f649e623c5a5521a89ea02462)), closes [#2681](https://github.com/adobe/spacecat-api-service/issues/2681) [#2697](https://github.com/adobe/spacecat-api-service/issues/2697)
+
+
+### Features
+
+* add POST /sites/:siteId/entitlements admin endpoint ([#2665](https://github.com/adobe/spacecat-api-service/issues/2665)) ([4374fc4](https://github.com/adobe/spacecat-api-service/commit/4374fc4ea6fa13e68754007f32eb68835732cef4))
+* **serenity:** bump project-engine-client to 1.2.0 and document v1/v2 read drift ([#2699](https://github.com/adobe/spacecat-api-service/issues/2699)) ([a1ea182](https://github.com/adobe/spacecat-api-service/commit/a1ea1829855fc92e1b8b2309487be2737e480934)), closes [Hi#level](https://github.com/Hi/issues/level) [#2584](https://github.com/adobe/spacecat-api-service/issues/2584)
+
+## [1.602.1](https://github.com/adobe/spacecat-api-service/compare/v1.602.0...v1.602.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **deps:** re-bump spacecat-shared-http-utils 1.30.0 → 1.31.0 (after LD flag fix) ([#2698](https://github.com/adobe/spacecat-api-service/issues/2698)) ([3753f68](https://github.com/adobe/spacecat-api-service/commit/3753f68903c05b048a1afaf5c13d813ab35c22c2))
+
+# [1.602.0](https://github.com/adobe/spacecat-api-service/compare/v1.601.3...v1.602.0) (2026-06-26)
+
+
+### Features
+
+* **llmo:** pass Cloudflare account/zone IDs in body; scope zone listing by account ([#2697](https://github.com/adobe/spacecat-api-service/issues/2697)) ([88a23f8](https://github.com/adobe/spacecat-api-service/commit/88a23f88689b8e6fbb82a9a4e9f7080016a1f813)), closes [#2681](https://github.com/adobe/spacecat-api-service/issues/2681)
+
+## [1.601.3](https://github.com/adobe/spacecat-api-service/compare/v1.601.2...v1.601.3) (2026-06-26)
+
+
+### Bug Fixes
+
+* enforce site-scope validation for staging domains on subpath prod sites ([#2590](https://github.com/adobe/spacecat-api-service/issues/2590)) ([ed6be40](https://github.com/adobe/spacecat-api-service/commit/ed6be40295b6fa60a394dc79d0923c0e398bf95e))
+
+## [1.601.2](https://github.com/adobe/spacecat-api-service/compare/v1.601.1...v1.601.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps:** redeploy http-utils 1.30.0 revert to prod (back office outage) ([#2692](https://github.com/adobe/spacecat-api-service/issues/2692)) ([5c3cb11](https://github.com/adobe/spacecat-api-service/commit/5c3cb11029aeb6a63c7a7316085263d07751c34a)), closes [#2691](https://github.com/adobe/spacecat-api-service/issues/2691)
+
+
+### Reverts
+
+* fix(deps): bump spacecat-shared-http-utils 1.30.0 to 1.31.0 ([#2691](https://github.com/adobe/spacecat-api-service/issues/2691)) ([d8c8d8b](https://github.com/adobe/spacecat-api-service/commit/d8c8d8b8371539961cf26018bab09a60515af000)), closes [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [adobe/spacecat-shared#1712](https://github.com/adobe/spacecat-shared/issues/1712) [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2637](https://github.com/adobe/spacecat-api-service/issues/2637) [#2681](https://github.com/adobe/spacecat-api-service/issues/2681)
+
+## [1.601.1](https://github.com/adobe/spacecat-api-service/compare/v1.601.0...v1.601.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **preflight:** rename scan_id wire field to async_job_id in callMysticatAnalyze (SITES-47173) ([#2689](https://github.com/adobe/spacecat-api-service/issues/2689)) ([3098758](https://github.com/adobe/spacecat-api-service/commit/3098758825762f6b3934601d98a13a357fb06e5a))
+
+# [1.601.0](https://github.com/adobe/spacecat-api-service/compare/v1.600.0...v1.601.0) (2026-06-25)
+
+
+### Features
+
+* **llmo:** add Cloudflare onboarding API endpoints ([#2681](https://github.com/adobe/spacecat-api-service/issues/2681)) ([acf70c4](https://github.com/adobe/spacecat-api-service/commit/acf70c4a49b48a0f5e6fbfd038dad2756651a81f))
+
 # [1.600.0](https://github.com/adobe/spacecat-api-service/compare/v1.599.0...v1.600.0) (2026-06-25)
 
 
