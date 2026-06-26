@@ -1037,10 +1037,15 @@ export async function updateBrand({
   }
 
   // Fetch the persisted row once when baseSiteId or status is changing — it feeds
-  // the baseSiteId immutability check, the active->pending demotion guard, and the
+  // the baseSiteId mutation rules, the active->pending demotion guard, and the
   // active-without-site guard below. (Existing-fetch pattern adapted from Igor
   // Grubic's #2504, broadened from site_id-only to also read `status`.)
-  const needsExistingFetch = hasText(updates.baseSiteId) || updates.status !== undefined;
+  // LLMO-5870: an explicit `baseSiteId: null` is an unset request — fetch the row
+  // so `existing.status` is available to gate the clear on pending brands.
+  const wantsClearBaseSite = updates.baseSiteId === null;
+  const needsExistingFetch = hasText(updates.baseSiteId)
+    || wantsClearBaseSite
+    || updates.status !== undefined;
   let existing = null;
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
@@ -1058,9 +1063,25 @@ export async function updateBrand({
     existing = current;
   }
 
-  // baseSiteId is immutable once set — only allow setting from NULL.
-  // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
-  if (hasText(updates.baseSiteId) && !existing?.site_id) {
+  // baseSiteId mutation rules (LLMO-5870):
+  //  - First set (NULL -> value): allowed for any brand.
+  //  - Re-point (value -> different value): allowed ONLY for pending brands, so a
+  //    draft can swap its primary URL before activation.
+  //  - Clear (value -> NULL): allowed ONLY for pending brands, so the site can be
+  //    freed for reuse by another brand.
+  // Active brands stay immutable-once-set: a routine field save that echoes a
+  // stale baseSiteId must never re-point or strip a live brand's anchor (the
+  // LLMO-5556 / express.adobe.com regression guard). Clearing a pending brand's
+  // site_id is safe at the DB level — the partial unique index
+  // (brands_base_site_unique) skips NULLs and chk_active_brand_has_site_id only
+  // constrains active brands. The unique index still rejects a re-point that
+  // collides with another brand's primary URL.
+  const isPending = (existing?.status || '').toLowerCase() === 'pending';
+  if (wantsClearBaseSite) {
+    if (isPending) {
+      patch.site_id = null;
+    }
+  } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
     patch.site_id = updates.baseSiteId;
   }
 
@@ -1081,7 +1102,11 @@ export async function updateBrand({
   // site. Reject a promote-to-active that would leave site_id NULL with a typed 400
   // rather than surfacing the data-layer CheckViolation as a generic 500.
   if (patch.status === 'active') {
-    const hasBaseSite = hasText(patch.site_id) || hasText(existing?.site_id);
+    // A clear-and-activate in the same PATCH must not lean on the old site_id —
+    // treat the brand as site-less so it returns the typed 400 below rather than
+    // letting the DB CheckViolation surface as a 500 (LLMO-5870).
+    const hasBaseSite = hasText(patch.site_id)
+      || (hasText(existing?.site_id) && !wantsClearBaseSite);
     if (!hasBaseSite) {
       const err = new Error(
         'Cannot activate a brand without a base site URL — set baseSiteId in the same PATCH.',
