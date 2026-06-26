@@ -142,8 +142,16 @@ export async function resetSemrushMocks() {
   const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   try {
+    // Throw on a failed reset rather than swallow it: a silently-failed reset
+    // would leave mutated mock state behind and produce flaky, order-dependent
+    // tests (the mutating-lifecycle increment relies on this).
     await Promise.all(
-      MOCK_RESET_PATHS.map((url) => fetch(url, { method: 'POST' }).catch(() => {})),
+      MOCK_RESET_PATHS.map(async (url) => {
+        const res = await fetch(url, { method: 'POST' });
+        if (!res.ok) {
+          throw new Error(`Semrush mock reset failed (${res.status}) at ${url}`);
+        }
+      }),
     );
   } finally {
     if (prev === undefined) {

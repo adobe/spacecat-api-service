@@ -237,12 +237,21 @@ export function brandPointerReloader(ctx, brandUuid) {
   };
 }
 
+// Logged at most once per process: makes an accidental SERENITY_ALLOW_NON_IMS_AUTH
+// enablement in a deployed environment visible in the logs (the flag bypasses the
+// IMS-type gate — it must only ever be set for local/automated E2E).
+let warnedNonImsAuth = false;
+
 function SerenityController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
   }
   if (!log) {
     throw new Error('Log required');
+  }
+  if (!warnedNonImsAuth && (context?.env || env)?.SERENITY_ALLOW_NON_IMS_AUTH === 'true') {
+    warnedNonImsAuth = true;
+    log.warn('[serenity] SERENITY_ALLOW_NON_IMS_AUTH is enabled — the IMS-type auth gate is bypassed. This is test-only and must never be set in a deployed environment.');
   }
 
   /**

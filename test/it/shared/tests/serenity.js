@@ -84,7 +84,10 @@ export default function serenityTests(getHttpClient, resetData) {
     it('GET /serenity/languages returns 200 with the language catalog', async () => {
       const res = await getHttpClient().admin.get(`/v2/orgs/${ORG_1_ID}/serenity/languages`);
       expect(res.status).to.equal(200);
+      // Same { items: [...] } envelope as models; asserting the shape (not just
+      // "an object") catches schema drift / an error body slipping through as 200.
       expect(res.body).to.be.an('object');
+      expect(res.body.items).to.be.an('array').that.is.not.empty;
     });
   });
 
@@ -93,10 +96,21 @@ export default function serenityTests(getHttpClient, resetData) {
     // 401'd at requireImsBearer. With the flag, the same call now passes auth
     // and proceeds to brand resolution: an unknown brand under an accessible org
     // resolves to 404 (NOT 401), proving the relaxed path reaches the handler.
+    const unknownBrand = '99999999-9999-4999-b999-999999999999';
+
     it('brand-level GET markets returns 404 for an unknown brand (not 401)', async () => {
-      const unknownBrand = '99999999-9999-4999-b999-999999999999';
       const res = await getHttpClient().admin.get(
         `/v2/orgs/${ORG_1_ID}/brands/${unknownBrand}/serenity/markets`,
+      );
+      expect(res.status).to.equal(404);
+    });
+
+    // A second brand-level route for breadth: a different controller method
+    // (listPrompts) carrying a query string still routes, passes the relaxed
+    // auth, and 404s on the unknown brand — not 401, not a 500 from the query.
+    it('brand-level GET prompts returns 404 for an unknown brand (not 401)', async () => {
+      const res = await getHttpClient().admin.get(
+        `/v2/orgs/${ORG_1_ID}/brands/${unknownBrand}/serenity/prompts?geoTargetId=2840&languageCode=en`,
       );
       expect(res.status).to.equal(404);
     });
