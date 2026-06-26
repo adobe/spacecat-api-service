@@ -34,6 +34,13 @@
  *
  * @typedef {{ code: string, message: string, details?: object }} PreflightError
  *
+ * Entity getter return types use `| undefined` (not `| null`) for nullable
+ * columns because `spacecat-shared`'s `normalizeModelValue` maps DB NULL →
+ * `undefined`. Encoding that here lets tsc flag missing `?? null`
+ * coercions at the wire boundary — without it, `JSON.stringify` would
+ * silently drop those keys and violate the `string | null` /
+ * `object | null` wire contract.
+ *
  * @typedef {Object} PreflightEntity
  * @property {() => string} getId
  * @property {() => string} getSiteId
@@ -41,14 +48,14 @@
  * @property {() => string} getUrl
  * @property {() => string} getCreatedAt
  * @property {() => string} getUpdatedAt
- * @property {() => (string | null)} getEndedAt
+ * @property {() => (string | undefined)} getEndedAt
  * @property {() => PreflightActor} getCreatedBy
  *
  * @typedef {Object} AsyncJobEntity
  * @property {() => string} getStatus
- * @property {() => (string | null)} getEndedAt
- * @property {() => (object | null)} getResult
- * @property {() => (PreflightError | null)} getError
+ * @property {() => (string | undefined)} getEndedAt
+ * @property {() => (object | undefined)} getResult
+ * @property {() => (PreflightError | undefined)} getError
  *
  * @typedef {Object} PreflightCreated
  * @property {string} preflightId
@@ -102,7 +109,10 @@ export const PreflightDto = {
   toJSON: (preflight) => ({
     ...PreflightDto.toCreatedJSON(preflight),
     updatedAt: preflight.getUpdatedAt(),
-    endedAt: preflight.getEndedAt(),
+    // Coerce DB NULL (returned as `undefined` by normalizeModelValue) to
+    // `null` so JSON.stringify keeps the key — `endedAt: undefined` would
+    // be silently dropped, violating the `string | null` wire contract.
+    endedAt: preflight.getEndedAt() ?? null,
   }),
 
   /**
@@ -130,11 +140,15 @@ export const PreflightDto = {
    */
   toDetailJSON: (preflight, asyncJob) => ({
     ...PreflightDto.toJSON(preflight),
+    // `?? null` is load-bearing: normalizeModelValue maps DB NULL to
+    // `undefined`, and `{ endedAt: undefined }` would drop the key from the
+    // JSON response (overriding the correct `null` from the toJSON spread).
+    // Same for result / error below — wire contract is `<type> | null`.
     ...(asyncJob && {
       status: /** @type {PreflightStatus} */ (asyncJob.getStatus()),
-      endedAt: asyncJob.getEndedAt(),
+      endedAt: asyncJob.getEndedAt() ?? null,
     }),
-    result: asyncJob ? asyncJob.getResult() : null,
-    error: asyncJob ? asyncJob.getError() : null,
+    result: asyncJob ? (asyncJob.getResult() ?? null) : null,
+    error: asyncJob ? (asyncJob.getError() ?? null) : null,
   }),
 };

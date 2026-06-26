@@ -192,5 +192,44 @@ describe('PreflightDto', () => {
       // that need timing internals read them from `result`.
       expect(out).to.not.have.property('startedAt');
     });
+
+    it('coerces DB-NULL (returned as undefined) to JSON null on result/error/endedAt', () => {
+      // spacecat-shared's normalizeModelValue maps DB NULL to JS undefined.
+      // `JSON.stringify({ k: undefined })` drops the key — without the
+      // `?? null` coercion, an IN_PROGRESS preflight's detail response would
+      // be missing `result`/`error`/`endedAt` entirely, violating the
+      // documented `... | null` wire contract.
+      const inProgressJob = {
+        getStatus: () => 'IN_PROGRESS',
+        getEndedAt: () => undefined,
+        getResult: () => undefined,
+        getError: () => undefined,
+      };
+      const out = PreflightDto.toDetailJSON(makePreflight(), inProgressJob);
+      // Object-literal level: keys present, value is null (not undefined).
+      expect(out).to.have.property('endedAt');
+      expect(out.endedAt).to.equal(null);
+      expect(out).to.have.property('result');
+      expect(out.result).to.equal(null);
+      expect(out).to.have.property('error');
+      expect(out.error).to.equal(null);
+      // Serialised level: keys SURVIVE JSON.stringify (regression on the
+      // exact failure mode — `{ k: undefined }` would have dropped them).
+      const round = JSON.parse(JSON.stringify(out));
+      expect(round).to.have.property('endedAt', null);
+      expect(round).to.have.property('result', null);
+      expect(round).to.have.property('error', null);
+    });
+
+    it('list: coerces DB-NULL endedAt to JSON null (in-progress preflight)', () => {
+      // Same regression on the list shape — Preflight.getEndedAt() returns
+      // undefined for an in-progress row (NULL column); the wire shape
+      // promises `string | null`.
+      const inProgress = makePreflight({ endedAt: undefined });
+      const out = PreflightDto.toJSON(inProgress);
+      expect(out).to.have.property('endedAt', null);
+      const round = JSON.parse(JSON.stringify(out));
+      expect(round).to.have.property('endedAt', null);
+    });
   });
 });
