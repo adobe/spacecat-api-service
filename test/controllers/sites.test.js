@@ -1747,6 +1747,41 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('passes the locale path prefix to both RUM queries for locale-specific sites', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalClicks: 4901,
+      totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0.19,
+      totalClicks: 4560,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+      totalEngagement: 4800,
+    });
+
+    const getStoredMetrics = sinon.stub().resolves([]);
+    const getBaseURLPathPrefix = sinon.stub().returns('/de');
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+        getBaseURLPathPrefix,
+      },
+    });
+    await sitesControllerMock
+      .default(context, context.log)
+      .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } });
+
+    expect(getBaseURLPathPrefix).to.have.been.calledOnce;
+    expect(context.rumApiClient.query).to.have.been.calledTwice;
+    expect(context.rumApiClient.query.firstCall.args[1]).to.include({ pathPrefix: '/de' });
+    expect(context.rumApiClient.query.secondCall.args[1]).to.include({ pathPrefix: '/de' });
+  });
+
   it('gets the latest site metrics with no stored metrics', async () => {
     context.rumApiClient.query.onCall(0).resolves({
       totalCTR: 0.20,
