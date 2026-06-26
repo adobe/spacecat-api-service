@@ -654,7 +654,7 @@ describe('TaskManagementController', () => {
       // so individual tests can omit fields (e.g. no summary) without the default leaking in.
       const data = overrides.data !== undefined
         ? overrides.data
-        : { summary: 'Fix the thing', projectKey: 'PROJ' };
+        : { summary: 'Fix the thing', projectKey: 'PROJ', connectionId: CONN_ID };
       return {
         params: { organizationId: ORG_ID, provider: PROVIDER, ...(overrides.params ?? {}) },
         data,
@@ -680,21 +680,31 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 when connectionId is missing', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'PROJ' } }));
+      expect(res.status).to.equal(400);
+    });
+
     it('returns 400 when body has no summary', async () => {
       const { createTicket } = TaskManagementController(makeContext());
-      const res = await createTicket(makeReqCtx({ data: { projectKey: 'PROJ' } }));
+      const res = await createTicket(makeReqCtx({ data: { projectKey: 'PROJ', connectionId: CONN_ID } }));
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when body has no projectKey', async () => {
       const { createTicket } = TaskManagementController(makeContext());
-      const res = await createTicket(makeReqCtx({ data: { summary: 'Fix it' } }));
+      const res = await createTicket(makeReqCtx({ data: { summary: 'Fix it', connectionId: CONN_ID } }));
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 for grouped mode with no suggestionIds', async () => {
       const { createTicket } = TaskManagementController(makeContext());
-      const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'P', mode: 'grouped' } }));
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix', projectKey: 'P', mode: 'grouped', connectionId: CONN_ID,
+        },
+      }));
       expect(res.status).to.equal(400);
       const body = await res.json();
       expect(body.message).to.include('requires at least one suggestionId');
@@ -702,7 +712,11 @@ describe('TaskManagementController', () => {
 
     it('returns 400 for unknown mode (message lists supported modes)', async () => {
       const { createTicket } = TaskManagementController(makeContext());
-      const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'P', mode: 'batch' } }));
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix', projectKey: 'P', mode: 'batch', connectionId: CONN_ID,
+        },
+      }));
       expect(res.status).to.equal(400);
       const body = await res.json();
       expect(body.message).to.include('individual');
@@ -717,6 +731,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Fix',
           projectKey: 'P',
+          connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID, sid2],
           attachment: { content, mimeType: 'text/plain', filename: 'note.txt' },
         },
@@ -731,7 +746,7 @@ describe('TaskManagementController', () => {
       const suggestionIds = Array.from({ length: 11 }, (_, i) => `id-${i}`);
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix', projectKey: 'P', mode: 'individual', suggestionIds,
+          summary: 'Fix', projectKey: 'P', mode: 'individual', connectionId: CONN_ID, suggestionIds,
         },
       }));
       expect(res.status).to.equal(400);
@@ -745,7 +760,7 @@ describe('TaskManagementController', () => {
       const suggestionIds = Array.from({ length: 401 }, (_, i) => `aaaaaaaa-bbbb-cccc-dddd-${String(i).padStart(12, '0')}`);
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix', projectKey: 'P', mode: 'grouped', suggestionIds,
+          summary: 'Fix', projectKey: 'P', mode: 'grouped', connectionId: CONN_ID, suggestionIds,
         },
       }));
       expect(res.status).to.equal(400);
@@ -762,7 +777,7 @@ describe('TaskManagementController', () => {
 
     it('returns 500 on connection load error', async () => {
       const ctx = makeContext();
-      ctx.dataAccess.TaskManagementConnection.findActiveByOrganizationAndProvider.rejects(new Error('db'));
+      ctx.dataAccess.TaskManagementConnection.findById.rejects(new Error('db'));
       const { createTicket } = TaskManagementController(ctx);
       const res = await createTicket(makeReqCtx());
       expect(res.status).to.equal(500);
@@ -775,7 +790,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
         },
       });
@@ -807,7 +822,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
         },
       });
@@ -859,7 +874,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
         },
       });
@@ -889,7 +904,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
           Ticket: { create: sinon.stub().resolves(makeTicket()) },
@@ -901,6 +916,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Fix bug',
           projectKey: 'ASO',
+          connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID],
           priority: 'High',
           dueDate: '2026-12-31',
@@ -937,7 +953,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
           Ticket: { create: sinon.stub().resolves(makeTicket()) },
@@ -950,6 +966,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Grouped',
           projectKey: 'ASO',
+          connectionId: CONN_ID,
           mode: 'grouped',
           suggestionIds: [SUGGESTION_ID, s2],
           priority: 'Low',
@@ -987,7 +1004,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
           Ticket: { create: sinon.stub().resolves(makeTicket()) },
@@ -1000,6 +1017,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Batch',
           projectKey: 'ASO',
+          connectionId: CONN_ID,
           mode: 'individual',
           suggestionIds: [SUGGESTION_ID, s2],
           priority: 'Medium',
@@ -1031,7 +1049,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
         },
       });
@@ -1045,7 +1063,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: {
             create: sinon.stub().rejects(new Error('db error')),
@@ -1083,7 +1101,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: {
             create: sinon.stub().resolves(ticket),
@@ -1119,7 +1137,7 @@ describe('TaskManagementController', () => {
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix it', projectKey: 'PROJ', suggestionIds: [SUGGESTION_ID], opportunityId: OPPORTUNITY_ID,
+          summary: 'Fix it', projectKey: 'PROJ', connectionId: CONN_ID, suggestionIds: [SUGGESTION_ID], opportunityId: OPPORTUNITY_ID,
         },
       }));
       expect(res.status).to.equal(201);
@@ -1136,7 +1154,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: { create: sinon.stub().resolves(ticket) },
           TicketSuggestion: { create: sinon.stub().rejects(err) },
@@ -1165,7 +1183,9 @@ describe('TaskManagementController', () => {
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix', projectKey: 'P', suggestionIds: [SUGGESTION_ID] },
+        data: {
+          summary: 'Fix', projectKey: 'P', connectionId: CONN_ID, suggestionIds: [SUGGESTION_ID],
+        },
       }));
       expect(res.status).to.equal(500);
     });
@@ -1177,7 +1197,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: { create: sinon.stub().resolves(ticket) },
           TicketSuggestion: { create: sinon.stub().rejects(err) },
@@ -1208,7 +1228,9 @@ describe('TaskManagementController', () => {
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix', projectKey: 'P', suggestionIds: [SUGGESTION_ID] },
+        data: {
+          summary: 'Fix', projectKey: 'P', connectionId: CONN_ID, suggestionIds: [SUGGESTION_ID],
+        },
       }));
       expect(res.status).to.equal(409);
     });
@@ -1220,7 +1242,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: { create: sinon.stub().resolves(ticket) },
           TicketSuggestion: { create: bridgeCreate },
@@ -1343,7 +1365,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           services: {
             postgrestClient: makePostgrestClient({
@@ -1364,7 +1386,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           services: {
             postgrestClient: makePostgrestClient({
@@ -1383,7 +1405,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
         },
@@ -1454,7 +1476,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Suggestion: {
             findById: sinon.stub().resolves(null),
@@ -1463,7 +1485,9 @@ describe('TaskManagementController', () => {
       });
       const { createTicket } = TaskManagementController(ctx);
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix it', projectKey: 'PROJ', suggestionIds: [SUGGESTION_ID] },
+        data: {
+          summary: 'Fix it', projectKey: 'PROJ', connectionId: CONN_ID, suggestionIds: [SUGGESTION_ID],
+        },
       }));
       expect(res.status).to.equal(404);
       const body = await res.json();
@@ -1475,7 +1499,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Suggestion: {
             findById: sinon.stub().rejects(new Error('db error')),
@@ -1484,7 +1508,9 @@ describe('TaskManagementController', () => {
       });
       const { createTicket } = TaskManagementController(ctx);
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix it', projectKey: 'PROJ', suggestionIds: [SUGGESTION_ID] },
+        data: {
+          summary: 'Fix it', projectKey: 'PROJ', connectionId: CONN_ID, suggestionIds: [SUGGESTION_ID],
+        },
       }));
       expect(res.status).to.equal(500);
     });
@@ -1494,7 +1520,9 @@ describe('TaskManagementController', () => {
     it('returns 400 when attachment is missing content', async () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { mimeType: 'image/png', filename: 'a.png' } },
+        data: {
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { mimeType: 'image/png', filename: 'a.png' },
+        },
       }));
       expect(res.status).to.equal(400);
       const body = await res.json();
@@ -1504,7 +1532,9 @@ describe('TaskManagementController', () => {
     it('returns 400 when attachment is missing mimeType', async () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: Buffer.from('x').toString('base64'), filename: 'a.png' } },
+        data: {
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: Buffer.from('x').toString('base64'), filename: 'a.png' },
+        },
       }));
       expect(res.status).to.equal(400);
     });
@@ -1512,7 +1542,9 @@ describe('TaskManagementController', () => {
     it('returns 400 when attachment is missing filename', async () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: Buffer.from('x').toString('base64'), mimeType: 'image/png' } },
+        data: {
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: Buffer.from('x').toString('base64'), mimeType: 'image/png' },
+        },
       }));
       expect(res.status).to.equal(400);
     });
@@ -1521,7 +1553,9 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(makeContext());
       // base64 of empty string decodes to zero bytes
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: '', mimeType: 'image/png', filename: 'a.png' } },
+        data: {
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: '', mimeType: 'image/png', filename: 'a.png' },
+        },
       }));
       expect(res.status).to.equal(400);
     });
@@ -1530,7 +1564,9 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(makeContext());
       const oversized = Buffer.alloc(3 * 1024 * 1024 + 1, 0x00);
       const res = await createTicket(makeReqCtx({
-        data: { summary: 'Fix', projectKey: 'PROJ', attachment: { content: oversized.toString('base64'), mimeType: 'image/png', filename: 'big.png' } },
+        data: {
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: oversized.toString('base64'), mimeType: 'image/png', filename: 'big.png' },
+        },
       }));
       expect(res.status).to.equal(400);
       const body = await res.json();
@@ -1544,7 +1580,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: { create: sinon.stub().resolves(ticket) },
           TicketSuggestion: { create: sinon.stub().resolves() },
@@ -1578,6 +1614,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Fix it',
           projectKey: 'PROJ',
+          connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID],
           attachment: { content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' },
         },
@@ -1596,7 +1633,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: { create: sinon.stub().resolves(ticket) },
           TicketSuggestion: { create: sinon.stub().resolves() },
@@ -1630,6 +1667,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Fix it',
           projectKey: 'PROJ',
+          connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID],
           attachment: { content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' },
         },
@@ -1651,7 +1689,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: { create: sinon.stub().resolves(ticket) },
           TicketSuggestion: { create: bridgeCreate },
@@ -1682,6 +1720,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Grouped fix',
           projectKey: 'PROJ',
+          connectionId: CONN_ID,
           mode: 'grouped',
           suggestionIds: [SUGGESTION_ID, sid2],
           opportunityId: OPPORTUNITY_ID,
@@ -1721,7 +1760,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
           Ticket: { create: ticketCreate },
           TicketSuggestion: { create: bridgeCreate },
@@ -1757,6 +1796,7 @@ describe('TaskManagementController', () => {
         data: {
           summary: 'Fix both',
           projectKey: 'PROJ',
+          connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID, sid2],
           opportunityId: OPPORTUNITY_ID,
         },
