@@ -1,3 +1,10 @@
+## [1.601.3](https://github.com/adobe/spacecat-api-service/compare/v1.601.2...v1.601.3) (2026-06-26)
+
+
+### Bug Fixes
+
+* enforce site-scope validation for staging domains on subpath prod sites ([#2590](https://github.com/adobe/spacecat-api-service/issues/2590)) ([ed6be40](https://github.com/adobe/spacecat-api-service/commit/ed6be40295b6fa60a394dc79d0923c0e398bf95e))
+
 ## [1.601.2](https://github.com/adobe/spacecat-api-service/compare/v1.601.1...v1.601.2) (2026-06-25)
 
 
