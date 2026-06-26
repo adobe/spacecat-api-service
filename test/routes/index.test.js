@@ -340,6 +340,14 @@ describe('getRouteHandlers', () => {
     updateQueryIndex: () => null,
   };
 
+  const mockLlmoCloudflareController = {
+    getCloudflareConfig: () => null,
+    listAccounts: () => null,
+    listZones: () => null,
+    deployWorker: () => null,
+    addRoute: () => null,
+  };
+
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
   };
@@ -590,6 +598,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockLlmoCloudflareController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -821,6 +830,7 @@ describe('getRouteHandlers', () => {
       'DELETE /v2/orgs/:spaceCatId/topics/:topicId',
       'POST /v2/orgs/:spaceCatId/brands',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats',
@@ -1107,6 +1117,11 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',

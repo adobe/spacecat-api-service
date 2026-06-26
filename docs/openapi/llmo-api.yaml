@@ -4362,3 +4362,330 @@ llmo-referral-traffic-weeks:
       - api_key: []
       - ims_key: []
       - scoped_api_key: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLMO Cloudflare onboarding (LLMO-admin self-service; uses a caller-supplied
+# x-cloudflare-token, not S2S JWT). See src/controllers/llmo/llmo-cloudflare.js.
+# ─────────────────────────────────────────────────────────────────────────────
+site-llmo-cloudflare-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    operationId: getLlmoCloudflareConfig
+    summary: Get the Cloudflare OAuth client ID for the browser PKCE flow
+    description: |
+      Returns the Cloudflare OAuth client ID used by the onboarding UI to start a browser
+      PKCE flow. The resulting Cloudflare token is then passed back to the other Cloudflare
+      onboarding endpoints via the `x-cloudflare-token` header.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The Cloudflare OAuth client ID
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - clientId
+              properties:
+                clientId:
+                  type: string
+                  description: Cloudflare OAuth client ID
+                  example: 'example-cloudflare-client-id'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+site-llmo-cloudflare-accounts:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: x-cloudflare-token
+      in: header
+      required: true
+      description: Cloudflare API token obtained from the browser PKCE flow.
+      schema:
+        type: string
+  get:
+    operationId: listLlmoCloudflareAccounts
+    summary: List the Cloudflare accounts accessible to the supplied token
+    description: |
+      Lists the Cloudflare accounts the supplied `x-cloudflare-token` can access. Used by the
+      onboarding UI to let the user pick the account to deploy the Edge Optimize worker into.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: Cloudflare accounts accessible to the token
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+                properties:
+                  id:
+                    type: string
+                    description: Cloudflare account ID
+                  name:
+                    type: string
+                    description: Cloudflare account name
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
+site-llmo-cloudflare-zones:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: x-cloudflare-token
+      in: header
+      required: true
+      description: Cloudflare API token obtained from the browser PKCE flow.
+      schema:
+        type: string
+  get:
+    operationId: listLlmoCloudflareZones
+    summary: List the Cloudflare zones accessible to the supplied token
+    description: |
+      Lists the Cloudflare zones the supplied `x-cloudflare-token` can access. Used by the
+      onboarding UI to let the user pick the zone to attach the Edge Optimize worker route to.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: Cloudflare zones accessible to the token
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+                properties:
+                  id:
+                    type: string
+                    description: Cloudflare zone ID
+                  name:
+                    type: string
+                    description: Cloudflare zone (domain) name
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
+site-llmo-cloudflare-deploy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: x-cloudflare-token
+      in: header
+      required: true
+      description: Cloudflare API token obtained from the browser PKCE flow.
+      schema:
+        type: string
+  post:
+    operationId: deployLlmoCloudflareWorker
+    summary: Deploy the Edge Optimize worker to a Cloudflare account
+    description: |
+      Fetches the pinned Edge Optimize worker script and deploys it to the given Cloudflare
+      account. The worker name is derived server-side from the site's base URL
+      (`edge-optimize-router-<canonical-host>`, e.g. `edge-optimize-router-example-com`) and is
+      not client-supplied. Sets the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding to
+      `targetHost`, and sets the site's LLMO API key as the `EDGE_OPTIMIZE_API_KEY` secret.
+
+      If the worker is deployed but the secret cannot be set, the worker is live but
+      non-functional; the response is a `502` whose body carries `partial: true` so the
+      caller can re-deploy to complete setup.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - accountId
+              - targetHost
+            properties:
+              accountId:
+                type: string
+                description: Cloudflare account ID (32-character lowercase hex)
+                pattern: '^[0-9a-f]{32}$'
+                example: '0123456789abcdef0123456789abcdef'
+              targetHost:
+                type: string
+                description: >-
+                  Origin host the worker forwards optimized traffic to. Must belong to the
+                  site's domain — it has to equal the site's canonical host (base URL host
+                  minus a leading `www.`) or be a subdomain of it.
+                example: 'www.example.com'
+    responses:
+      '200':
+        description: Worker deployed and API key secret set
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scriptName:
+                  type: string
+                accountId:
+                  type: string
+                targetHost:
+                  type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        description: |
+          LLMO API key is not configured for this site, or another internal error occurred.
+        $ref: './responses.yaml#/500'
+      '502':
+        description: |
+          Worker script fetch or Cloudflare deployment failed. When the worker was deployed
+          but its API key secret could not be set, the body includes `partial: true`.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                scriptName:
+                  type: string
+                accountId:
+                  type: string
+                partial:
+                  type: boolean
+                  description: True when the worker is live but its API key secret was not set
+    security:
+      - ims_key: [ ]
+
+site-llmo-cloudflare-zone-routes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: zoneId
+      in: path
+      required: true
+      description: Cloudflare zone ID (32-character lowercase hex)
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
+    - name: x-cloudflare-token
+      in: header
+      required: true
+      description: Cloudflare API token obtained from the browser PKCE flow.
+      schema:
+        type: string
+  post:
+    operationId: addLlmoCloudflareRoute
+    summary: Add a Cloudflare worker route to a zone
+    description: |
+      Creates a Cloudflare worker route in the given zone, targeting the service-owned worker
+      derived from the site's base URL (`edge-optimize-router-<canonical-host>`) — the worker
+      name is not client-supplied. Before creating the route the service fetches the zone's
+      existing routes and rejects the request with `409` if a route for the same `pattern`
+      already exists, so a deploy can never silently override an existing route.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - pattern
+            properties:
+              pattern:
+                type: string
+                description: >-
+                  Cloudflare route pattern. Its host must belong to the site's domain — the
+                  host portion (after stripping any leading wildcard) has to equal the site's
+                  canonical host (base URL host minus a leading `www.`) or be a subdomain of it.
+                example: 'www.example.com/*'
+    responses:
+      '200':
+        description: Route created
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              properties:
+                id:
+                  type: string
+                  description: Cloudflare route ID
+                pattern:
+                  type: string
+                script:
+                  type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: A route for the requested pattern already exists in this zone
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                existingRoute:
+                  type: object
+                  additionalProperties: true
+                  description: The pre-existing Cloudflare route that conflicts
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
