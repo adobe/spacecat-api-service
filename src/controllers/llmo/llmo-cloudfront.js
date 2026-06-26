@@ -20,17 +20,17 @@ import yaml from 'js-yaml';
 import TokowakaClient, {
   calculateForwardedHost,
   assumeConnectorRole,
-  listCloudFrontDistributions,
+  listDistributions as listAwsDistributions,
   getDistributionConfig,
-  createEdgeOptimizeOrigin,
-  createEdgeOptimizeRoutingFunction,
-  applyEdgeOptimizeCacheHeaders,
-  createEdgeOptimizeLambda,
-  getEdgeOptimizeLambdaStatus,
-  applyEdgeOptimizeAssociations,
-  verifyEdgeOptimizeRouting,
-  runEdgeOptimizeDeployStep,
-  planEdgeOptimizeDeploy,
+  createOrigin as createAwsOrigin,
+  createCloudFrontFunction as createAwsCloudFrontFunction,
+  updateCacheSettings as updateAwsCacheSettings,
+  createLambdaAtEdge as createAwsLambdaAtEdge,
+  getLambdaAtEdgeStatus as getAwsLambdaAtEdgeStatus,
+  applyAssociations as applyAwsAssociations,
+  verifyRouting as verifyAwsRouting,
+  runDeployStep as runAwsDeployStep,
+  planDeploy as planAwsDeploy,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 
@@ -247,7 +247,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const distributions = await listCloudFrontDistributions(credentials);
+      const distributions = await listAwsDistributions(credentials);
       return ok({ distributions });
     } catch (error) {
       log.error(`Failed to list CloudFront distributions for site ${siteId}:`, error);
@@ -281,7 +281,7 @@ function LlmoCloudFrontController(ctx) {
       try {
         const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
         try {
-          await listCloudFrontDistributions(credentials);
+          await listAwsDistributions(credentials);
         } catch (listError) {
           cloudFrontReadCheck.ok = false;
           cloudFrontReadCheck.detail = cleanupHeaderValue(listError.message);
@@ -468,7 +468,7 @@ function LlmoCloudFrontController(ctx) {
       const { apiKey, forwardedHost } = target;
 
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const result = await createEdgeOptimizeOrigin(
+      const result = await createAwsOrigin(
         credentials,
         distributionId,
         originDomain,
@@ -520,7 +520,7 @@ function LlmoCloudFrontController(ctx) {
         return badRequest('Could not determine the default cache behavior target origin');
       }
 
-      const result = await createEdgeOptimizeRoutingFunction(
+      const result = await createAwsCloudFrontFunction(
         credentials,
         defaultOriginId,
         distributionId,
@@ -557,7 +557,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const result = await applyEdgeOptimizeCacheHeaders(credentials, distributionId, pathPattern);
+      const result = await updateAwsCacheSettings(credentials, distributionId, pathPattern);
       log.info(`[edge-optimize-cache] Applied cache headers for site ${siteId}, behavior ${pathPattern}`);
       return ok(result);
     } catch (error) {
@@ -590,7 +590,7 @@ function LlmoCloudFrontController(ctx) {
       const { credentials, accountId: resolvedAccountId } = await assumeConnectorRole({
         accountId, externalId, roleName,
       });
-      const result = await createEdgeOptimizeLambda(
+      const result = await createAwsLambdaAtEdge(
         credentials,
         resolvedAccountId,
         { distributionId },
@@ -625,7 +625,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const status = await getEdgeOptimizeLambdaStatus(credentials, distributionId);
+      const status = await getAwsLambdaAtEdgeStatus(credentials, distributionId);
       return ok(status);
     } catch (error) {
       log.error(`Failed to read Lambda@Edge status for site ${siteId}:`, error);
@@ -667,7 +667,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-      const result = await applyEdgeOptimizeAssociations(
+      const result = await applyAwsAssociations(
         credentials,
         distributionId,
         pathPattern,
@@ -716,7 +716,7 @@ function LlmoCloudFrontController(ctx) {
       }
       if (!hasText(domain)) {
         const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
-        const distributions = await listCloudFrontDistributions(credentials);
+        const distributions = await listAwsDistributions(credentials);
         const match = distributions.find((d) => d.id === distributionId);
         domain = match?.domainName || '';
       }
@@ -725,7 +725,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const url = /^https?:\/\//.test(domain) ? domain : `https://${domain}/`;
-      const result = await verifyEdgeOptimizeRouting(url);
+      const result = await verifyAwsRouting(url);
       log.info(`[edge-optimize-verify] Verified routing for site ${siteId}: passed=${result.passed}`);
       return ok(result);
     } catch (error) {
@@ -787,7 +787,7 @@ function LlmoCloudFrontController(ctx) {
         accountId, externalId, roleName,
       });
 
-      const result = await runEdgeOptimizeDeployStep(credentials, {
+      const result = await runAwsDeployStep(credentials, {
         distributionId,
         originId,
         behavior,
@@ -807,7 +807,7 @@ function LlmoCloudFrontController(ctx) {
 
   // Read-only "preview" for the wizard's "Review & Deploy" screen. Mirrors the deploy handler (same
   // validation + gate + role assumption + server-derived EO origin headers), but calls the
-  // NON-mutating planEdgeOptimizeDeploy and returns the per-step plan + canProceed/blocker so the
+  // NON-mutating planDeploy and returns the per-step plan + canProceed/blocker so the
   // FE can show exactly what will happen before the customer commits.
   const plan = async (context) => {
     const { log, dataAccess, env } = context;
@@ -854,7 +854,7 @@ function LlmoCloudFrontController(ctx) {
         accountId, externalId, roleName,
       });
 
-      const result = await planEdgeOptimizeDeploy(credentials, {
+      const result = await planAwsDeploy(credentials, {
         distributionId,
         originId,
         behavior,

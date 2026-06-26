@@ -92,17 +92,17 @@ describe('LlmoCloudFrontController', () => {
   // the wrappers read the mutable outer stubs so each test can reassign them in beforeEach.
   const getEdgeOptimizeStubs = () => ({
     assumeConnectorRole: (...args) => assumeConnectorRoleStub(...args),
-    listCloudFrontDistributions: (...args) => listCloudFrontDistributionsStub(...args),
+    listDistributions: (...args) => listCloudFrontDistributionsStub(...args),
     getDistributionConfig: (...args) => getDistributionConfigStub(...args),
-    createEdgeOptimizeOrigin: (...args) => createEdgeOptimizeOriginStub(...args),
-    createEdgeOptimizeRoutingFunction: (...args) => createEdgeOptimizeRoutingFunctionStub(...args),
-    applyEdgeOptimizeCacheHeaders: (...args) => applyEdgeOptimizeCacheHeadersStub(...args),
-    createEdgeOptimizeLambda: (...args) => createEdgeOptimizeLambdaStub(...args),
-    getEdgeOptimizeLambdaStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
-    applyEdgeOptimizeAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
-    verifyEdgeOptimizeRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
-    runEdgeOptimizeDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
-    planEdgeOptimizeDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
+    createOrigin: (...args) => createEdgeOptimizeOriginStub(...args),
+    createCloudFrontFunction: (...args) => createEdgeOptimizeRoutingFunctionStub(...args),
+    updateCacheSettings: (...args) => applyEdgeOptimizeCacheHeadersStub(...args),
+    createLambdaAtEdge: (...args) => createEdgeOptimizeLambdaStub(...args),
+    getLambdaAtEdgeStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
+    applyAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
+    verifyRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
+    runDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
+    planDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
   });
 
   const calculateForwardedHostMock = (url) => {
