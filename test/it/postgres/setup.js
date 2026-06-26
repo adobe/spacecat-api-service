@@ -168,11 +168,13 @@ async function ensureMinIoBucket() {
 }
 
 /**
- * Starts PostgreSQL + PostgREST + MinIO via docker compose and waits for readiness.
+ * Starts the full IT container stack via docker compose — PostgreSQL + PostgREST
+ * (data-service), MinIO, and the Semrush Project Engine / User Manager mocks —
+ * and waits for all of them to become ready.
  *
  * @returns {Promise<string>} The PostgREST base URL
  */
-export async function startPostgres() {
+export async function startContainers() {
   // Pin each Semrush mock image to the version of the typed client we actually
   // depend on (the mock is published from that same package). Drift here would
   // silently test a different contract than production ships. A bumped client
@@ -198,9 +200,9 @@ export async function startPostgres() {
 }
 
 /**
- * Tears down docker compose services and removes volumes.
+ * Tears down all IT containers (data-service, MinIO, Semrush mocks) and removes volumes.
  */
-export async function stopPostgres() {
+export async function stopContainers() {
   try {
     execSync(
       `docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans`,
