@@ -1,3 +1,10 @@
+## [1.604.1](https://github.com/adobe/spacecat-api-service/compare/v1.604.0...v1.604.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-cloudflare-client to 1.1.1 ([#2704](https://github.com/adobe/spacecat-api-service/issues/2704)) ([8333039](https://github.com/adobe/spacecat-api-service/commit/8333039341b5f89b2ff6dc6d615fb03a8fa640d7))
+
 # [1.604.0](https://github.com/adobe/spacecat-api-service/compare/v1.603.0...v1.604.0) (2026-06-26)
 
 
