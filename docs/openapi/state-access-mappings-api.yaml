@@ -179,10 +179,11 @@ state-access-mapping-by-id:
     summary: Replace the granted capabilities on a mapping
     description: |
       Single-field mutation: replaces the row's `grantedCapabilities` array.
-      An empty array is permitted — it leaves the binding active but granting
-      nothing (the effective-capability evaluation treats it as no grant), which
-      is the supported way to remove access. 404 when the row does not exist, has
-      been revoked, or belongs to a different org / product.
+      The array must be **non-empty** — to remove access (empty the set) use
+      `DELETE` on this resource. The product's `<product>/can_view` is always
+      included: if the request omits it, it is added automatically. 404 when the
+      row does not exist, has been revoked, or belongs to a different
+      org / product.
     operationId: patchStateAccessMapping
     requestBody:
       required: true
@@ -193,6 +194,38 @@ state-access-mapping-by-id:
     responses:
       '200':
         description: Updated mapping.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StateAccessMapping'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
+  delete:
+    tags:
+      - state-access-mappings
+    summary: Remove access (empty the granted capabilities)
+    description: |
+      Empties the row's `grantedCapabilities` (sets it to `[]`), leaving the
+      binding active but granting nothing — the supported way to remove access.
+      The row is **not** tombstoned/revoked; capabilities can be re-added later
+      via `PATCH`. 404 when the row does not exist, has been revoked, or belongs
+      to a different org / product.
+    operationId: deleteStateAccessMapping
+    responses:
+      '200':
+        description: The mapping with its capabilities emptied.
         content:
           application/json:
             schema:

@@ -163,11 +163,17 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items[0].grantedCapabilities).to.have.members(LLMO_CAPS_UPDATED);
       });
 
-      it('PATCH to an empty array removes access (binding stays active, grants nothing)', async () => {
+      it('PATCH with an empty array is rejected (400) — emptying is done via DELETE', async () => {
         const http = getHttpClient();
         const res = await http.admin.patch(`${BASE}/${created.id}`, {
           grantedCapabilities: [],
         });
+        expect(res.status).to.equal(400);
+      });
+
+      it('DELETE empties the granted capabilities (binding stays active, grants nothing)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.delete(`${BASE}/${created.id}`);
         expect(res.status).to.equal(200);
         expect(res.body.id).to.equal(created.id);
         expect(res.body.grantedCapabilities).to.be.an('array').with.lengthOf(0);

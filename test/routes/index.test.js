@@ -532,6 +532,7 @@ describe('getRouteHandlers', () => {
     listHistory: sinon.stub(),
     createMapping: sinon.stub(),
     patchMapping: sinon.stub(),
+    deleteMapping: sinon.stub(),
     getProductCapabilities: sinon.stub(),
     getUserCapabilities: sinon.stub(),
     getAuditLogs: sinon.stub(),
@@ -801,6 +802,7 @@ describe('getRouteHandlers', () => {
 
     const expectedDynamicRouteKeys = [
       'PATCH /state/access-mappings/:id',
+      'DELETE /state/access-mappings/:id',
       'GET /user/capabilities/:resourceId',
       'GET /organizations/:organizationId/permission/audit-logs',
       'GET /audits/latest/:auditType',

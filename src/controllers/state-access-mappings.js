@@ -284,6 +284,21 @@ function StateAccessMappingsController(context) {
     return null;
   }
 
+  /**
+   * Returns `capabilities` with the product's baseline `<product>/can_view`
+   * guaranteed present. `can_view` is the read capability implied by every
+   * other grant (you cannot manage/configure/deploy a resource you cannot
+   * view), so create/patch always persist it even when the caller omits it.
+   *
+   * @param {string[]} capabilities - Already validated, deduped capabilities.
+   * @param {string} product - Uppercase product code.
+   * @returns {string[]}
+   */
+  function ensureBaselineCanView(capabilities, product) {
+    const canView = `${product.toLowerCase()}/can_view`;
+    return capabilities.includes(canView) ? capabilities : [...capabilities, canView];
+  }
+
   function buildListFilters(ctx, imsOrgId, product) {
     const queryParams = getQueryParams(ctx);
     return {
@@ -689,9 +704,13 @@ function StateAccessMappingsController(context) {
     if (grantGuard) {
       return grantGuard;
     }
-    // De-duplicate so a payload like ['llmo/can_view', 'llmo/can_view'] is not
-    // stored verbatim.
-    const dedupedCapabilities = [...new Set(grantedCapabilities)];
+    // De-duplicate, then guarantee the baseline `<product>/can_view`: it is the
+    // read capability implied by any other grant, so it is always stored even
+    // when the request omits it.
+    const capabilitiesToStore = ensureBaselineCanView(
+      [...new Set(grantedCapabilities)],
+      product,
+    );
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
@@ -700,7 +719,7 @@ function StateAccessMappingsController(context) {
         product,
         resourceType,
         resourceId,
-        grantedCapabilities: dedupedCapabilities,
+        grantedCapabilities: capabilitiesToStore,
         subjects: [{ type: subjectType, id: subjectId }],
         createdBy,
       });
@@ -776,9 +795,9 @@ function StateAccessMappingsController(context) {
       return badRequest('request body is required');
     }
     const { grantedCapabilities } = data;
-    // PATCH may empty the capability set (active row that grants nothing =
-    // remove access); create still requires at least one capability.
-    const capErr = validateGrantedCapabilities(grantedCapabilities, product, { allowEmpty: true });
+    // PATCH requires a non-empty capability set: removing access is done via
+    // DELETE (which empties the set), not by PATCHing an empty array.
+    const capErr = validateGrantedCapabilities(grantedCapabilities, product);
     if (capErr) {
       return badRequest(capErr);
     }
@@ -786,7 +805,11 @@ function StateAccessMappingsController(context) {
     if (grantGuard) {
       return grantGuard;
     }
-    const dedupedCapabilities = [...new Set(grantedCapabilities)];
+    // De-dupe, then guarantee the baseline `<product>/can_view` (see create).
+    const capabilitiesToStore = ensureBaselineCanView(
+      [...new Set(grantedCapabilities)],
+      product,
+    );
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
@@ -811,7 +834,7 @@ function StateAccessMappingsController(context) {
         id,
         imsOrgId,
         product,
-        grantedCapabilities: dedupedCapabilities,
+        grantedCapabilities: capabilitiesToStore,
         updatedBy: resolveCallerUserIdent(ctx),
       });
       if (!updated) {
@@ -837,6 +860,81 @@ function StateAccessMappingsController(context) {
         'Failed to patch state-layer access mapping',
       );
       return internalServerError('Failed to update access mapping');
+    }
+  }
+
+  /**
+   * DELETE /state/access-mappings/:id — empties the row's `granted_capabilities`
+   * (sets it to `[]`), leaving the row active but granting nothing. This is the
+   * only path to an empty capability set (POST/PATCH require non-empty). It does
+   * NOT tombstone / soft-revoke the row — capabilities can be re-added later via
+   * PATCH. Audited as an `update_capabilities` to the empty set.
+   *
+   * 404 when the row does not exist, is revoked, or belongs to a different
+   * org / product. Same manager + per-resource scoping as PATCH (§8.3).
+   */
+  async function deleteMapping(ctx) {
+    const pre = preamble(ctx);
+    if (pre.error) {
+      return pre.error;
+    }
+    const { product, imsOrgId } = pre;
+    const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
+    if (gateErr) {
+      return gateErr;
+    }
+
+    const { id } = ctx.params || {};
+    if (!hasText(id) || !isValidUUID(id)) {
+      return badRequest('id must be a valid UUID');
+    }
+
+    try {
+      const { postgrestClient } = ctx.dataAccess.services;
+      // Resource-scope check (§8.3): a state-layer manager may only act on
+      // resources they manage; org-wide managers skip the fetch.
+      if (!authority.orgWide) {
+        const existing = await getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product });
+        if (!existing) {
+          return notFound('Mapping not found');
+        }
+        if (!canActOnResource(authority, existing.resource_id)) {
+          return forbidden(
+            `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
+          );
+        }
+      }
+      // Empty the capability set via the capability-edit RPC (no tombstone).
+      const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
+        id,
+        imsOrgId,
+        product,
+        grantedCapabilities: [],
+        updatedBy: resolveCallerUserIdent(ctx),
+      });
+      if (!updated) {
+        return notFound('Mapping not found');
+      }
+      await emitAuditEvent(ctx, {
+        imsOrgId,
+        product,
+        operation: 'update_capabilities',
+        outcome: 'allow',
+        statusCode: 200,
+        mappingId: updated.id,
+        bindingSubjectType: updated.subject_type,
+        bindingSubjectId: updated.subject_id,
+        resourceType: updated.resource_type,
+        resourceId: updated.resource_id,
+        grantedCapabilities: [],
+      });
+      return ok(toMappingDto(updated));
+    } catch (error) {
+      log.error(
+        { tag: 'state-access-mappings', err: error.message, id },
+        'Failed to delete (empty) state-layer access mapping',
+      );
+      return internalServerError('Failed to delete access mapping');
     }
   }
 
@@ -1102,6 +1200,7 @@ function StateAccessMappingsController(context) {
     listHistory: devOnly(listHistory),
     createMapping: devOnly(createMapping),
     patchMapping: devOnly(patchMapping),
+    deleteMapping: devOnly(deleteMapping),
     getProductCapabilities: devOnly(getProductCapabilities),
     getUserCapabilities: devOnly(getUserCapabilities),
     getAuditLogs: devOnly(getAuditLogs),
