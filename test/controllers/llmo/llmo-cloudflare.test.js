@@ -184,6 +184,14 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('falls back to the cloudflareToken in query/body when the header is absent', async () => {
+      mockContext.pathInfo.headers = {};
+      mockContext.data = { cloudflareToken: CF_TOKEN };
+      mockCfClient.listAccounts.resolves([{ id: ACCOUNT_ID, name: 'Test Account' }]);
+      const res = await controller.listAccounts(mockContext);
+      expect(res.status).to.equal(200);
+    });
+
     it('returns 404 when site is not found', async () => {
       mockContext.dataAccess.Site.findById.resolves(null);
       const res = await controller.listAccounts(mockContext);
@@ -311,6 +319,17 @@ describe('LlmoCloudflareController', () => {
       expect(body).to.deep.equal({
         scriptName: DERIVED_SCRIPT_NAME, accountId: ACCOUNT_ID, targetHost: TARGET_HOST,
       });
+    });
+
+    it('accepts the cloudflareToken from the body when the header is absent', async () => {
+      mockContext.pathInfo.headers = {};
+      mockContext.data = {
+        accountId: ACCOUNT_ID, targetHost: TARGET_HOST, cloudflareToken: CF_TOKEN,
+      };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
     });
 
     it('fetches the worker script from a pinned commit SHA with a timeout', async () => {

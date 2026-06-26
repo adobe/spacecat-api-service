@@ -20,6 +20,10 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { deriveWorkerName, hostInSiteDomain, routePatternHost } from './llmo-cloudflare-utils.js';
 
 const CF_TOKEN_HEADER = 'x-cloudflare-token';
+// TEMPORARY: body/query fallback field for the CF token, used only until the
+// x-cloudflare-token header is allowlisted in the CDN/network config (for e2e verification).
+// Intentionally undocumented in the OpenAPI spec. Remove once the header passes through.
+const CF_TOKEN_BODY_FIELD = 'cloudflareToken';
 const CF_TOKEN_MISSING = 'Missing x-cloudflare-token header';
 const EDGE_OPTIMIZE_API_KEY_SECRET = 'EDGE_OPTIMIZE_API_KEY';
 const EDGE_OPTIMIZE_TARGET_HOST_BINDING = 'EDGE_OPTIMIZE_TARGET_HOST';
@@ -61,8 +65,14 @@ function LlmoCloudflareController(ctx) {
   };
 
   const getCfToken = (context) => {
-    const token = context.pathInfo?.headers?.[CF_TOKEN_HEADER];
-    return hasText(token) ? token : null;
+    const headerToken = context.pathInfo?.headers?.[CF_TOKEN_HEADER];
+    if (hasText(headerToken)) {
+      return headerToken;
+    }
+    // TEMPORARY fallback (see CF_TOKEN_BODY_FIELD): accept the token from the request
+    // body/query while the header is not yet allowlisted in the network config.
+    const fallbackToken = context.data?.[CF_TOKEN_BODY_FIELD];
+    return hasText(fallbackToken) ? fallbackToken : null;
   };
 
   /**
