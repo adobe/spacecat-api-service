@@ -113,6 +113,7 @@ function serializeTicket(ticket, suggestions) {
     ticketProvider: ticket.getTicketProvider(),
     opportunityId: ticket.getOpportunityId?.() ?? null,
     createdBy: ticket.getCreatedBy(),
+    createdAt: ticket.getCreatedAt?.() ?? null,
     statusSyncedAt: null, // v1: always null; populated by v2 webhook sync
   };
 
@@ -151,13 +152,7 @@ function serializeTicket(ticket, suggestions) {
  *   - Idempotency-Key header is enforced in v1 (not deferred). The idempotency_keys
  *     table (DB PR #720) is used with a 24-hour TTL. Status machine: processing →
  *     completed | failed. Duplicate requests return the cached response.
- *   - connectionId in POST body: accepted as an optional field. When provided, the
- *     specified connection is used directly. When absent, the single active connection
- *     for the org+provider is resolved automatically. The spec's mandatory 400 guard
- *     for multiple active connections is not needed in v1: the DB partial unique index
- *     on (org, provider, external_instance_id) WHERE status != 'disconnected' ensures
- *     at most one active connection per cloudId. Multi-workspace disambiguation (+ 400)
- *     is deferred to v2.
+ *   - connectionId in POST body: required. Caller must specify which connection to use.
  *   - Ticket summary and description come from the request body (client-provided).
  *     Spec §7 step 5 shows the server building the ADF description server-side from
  *     Suggestion/Opportunity data. In v1, the ASO UI sends summary + description
@@ -669,37 +664,27 @@ function TaskManagementController(context) {
     }
 
     // --- Resolve the active connection ----------------------------------------
-    // See controller-level JSDoc for the v1 rationale on optional connectionId.
 
-    const { connectionId: requestedConnectionId } = data;
+    const { connectionId } = data;
 
-    if (requestedConnectionId && !isValidUUID(requestedConnectionId)) {
+    if (!connectionId) {
+      return createResponse({ message: 'connectionId is required' }, STATUS_BAD_REQUEST);
+    }
+
+    if (!isValidUUID(connectionId)) {
       return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
     }
 
     let connection;
     try {
-      if (requestedConnectionId) {
-        // Explicit connection selection — caller knows exactly which workspace to use.
-        const conn = await loadConnectionForOrg(organizationId, requestedConnectionId);
-        if (!conn || conn.getProvider() !== provider || conn.getStatus() !== 'active') {
-          return createResponse(
-            { message: `Active ${provider} connection ${requestedConnectionId} not found for organization ${organizationId}` },
-            STATUS_NOT_FOUND,
-          );
-        }
-        connection = conn;
-      } else {
-        // Implicit resolution — find the single active connection for this org+provider.
-        connection = await TaskManagementConnection
-          .findActiveByOrganizationAndProvider(organizationId, provider);
-        if (!connection) {
-          return createResponse(
-            { message: `No active ${provider} connection found for organization ${organizationId}` },
-            STATUS_NOT_FOUND,
-          );
-        }
+      const conn = await loadConnectionForOrg(organizationId, connectionId);
+      if (!conn || conn.getProvider() !== provider || conn.getStatus() !== 'active') {
+        return createResponse(
+          { message: `Active ${provider} connection ${connectionId} not found for organization ${organizationId}` },
+          STATUS_NOT_FOUND,
+        );
       }
+      connection = conn;
     } catch (err) {
       log.error({ organizationId, provider, err }, 'Failed to load task-management connection');
       return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
