@@ -23,6 +23,13 @@ import { ErrorWithStatusCode } from '../utils.js';
 //    (create child / status / family / resources transfer / delete). A DIFFERENT
 //    gateway than project ops (verified live 2026-06-15: the project prefix 404s
 //    these routes); the typed client appends the prefix internally.
+//
+// v1/v2 read-layer choice: each read method below picks its API version by which
+// project layer it must observe (v1 = draft-faithful settings; v2 prompts = live
+// layer; init_status = v2-only). When ADDING a read endpoint, see
+// docs/decisions/006-serenity-v1-v2-read-drift.md before defaulting to v2 — a
+// draft-settings read on the v2 list returns a wrong-location/null-brand live
+// view. The per-method JSDoc on each method states which layer it reads and why.
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.

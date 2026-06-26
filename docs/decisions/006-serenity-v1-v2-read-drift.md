@@ -41,7 +41,17 @@ by a blanket "use the newest version" rule:
 | `getProject` (`GET /projects/{id}?draft=true&type=ai`) | **v1** | draft | single-project draft settings; `draft` query is required upstream |
 | `listPromptsByTags` (`POST /aio/prompts/by_tags`) | **v2** | live | no v1 variant exists; prompt layer is live-only |
 | `getInitStatus` (`GET /aio/init_status`) | **v2** | n/a | readiness boolean; v1 route removed in client 1.2.0 |
-| writes that need to go live (`addAiModel`, `createTaggedPrompts`, …) | mixed | draft → publish | mutations stage in draft; `publishProject` commits them |
+| writes that need to go live (`addAiModel`, `createTaggedPrompts`, …) | per-op¹ | draft → publish | mutations stage in draft; `publishProject` commits them |
+
+¹ Writes are out of this ADR's scope (it is about which layer each *read*
+observes). For a write, the API **version does not affect draft-faithfulness** —
+every mutation stages in the draft layer regardless of v1/v2 and only reaches
+live on `publishProject`, so picking the version is a pure contract question, not
+a layer question. The authoritative per-method v1/v2 map for writes lives in the
+transport method JSDoc (`src/support/serenity/rest-transport.js`) and the
+serenity transport-endpoint audit (rule: prefer v2 where a compatible v2 variant
+exists). A developer adding a write picks the version from that map; this ADR
+governs only the read side, where the version determines the layer.
 
 Consequences for **migration-verification / UI-enrichment reads**:
 
