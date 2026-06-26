@@ -394,6 +394,47 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.opportunities[0].siteBaseURL).to.equal('https://example.com');
     });
 
+    it('returns 400 for malformed locale', async () => {
+      mockContext.params.brandId = 'all';
+      mockContext.data = { locale: 'fr-FR' };
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body).to.have.property('message', 'Invalid locale format');
+    });
+
+    it('applies locale to opportunity title and description', async () => {
+      mockContext.params.brandId = 'all';
+      mockContext.data = { locale: 'fr_fr' };
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://example.com' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site]);
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+
+      const opp = {
+        ...createMockOpportunity({ id: 'opp-1', siteId: 'site-1' }),
+        getTitle: () => 'English title',
+        getDescription: () => 'English description',
+        getData: () => ({
+          i18n: {
+            fr_fr: { title: 'Titre français', description: 'Description française' },
+          },
+        }),
+      };
+      mockContext.dataAccess.Opportunity.allBySiteId.withArgs('site-1').resolves([opp]);
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.opportunities[0].title).to.equal('Titre français');
+      expect(body.opportunities[0].description).to.equal('Description française');
+      expect(body.opportunities[0].data).to.not.have.property('i18n');
+    });
+
     it('returns empty when org has no sites for brandId "all"', async () => {
       mockContext.params.brandId = 'all';
       mockContext.dataAccess.Site.allByOrganizationId.resolves([]);
