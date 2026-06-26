@@ -13,9 +13,12 @@
 import { expect } from 'chai';
 import { PreflightDto } from '../../src/dto/preflight.js';
 
+const CREATED_FIELDS = [
+  'preflightId', 'siteId', 'status', 'url', 'createdAt', 'createdBy',
+];
+
 const LIST_FIELDS = [
-  'preflightId', 'siteId', 'status', 'url',
-  'createdAt', 'updatedAt', 'endedAt', 'createdBy',
+  ...CREATED_FIELDS, 'updatedAt', 'endedAt',
 ];
 
 const DETAIL_FIELDS = [
@@ -64,6 +67,31 @@ function makeAsyncJob(overrides = {}) {
 }
 
 describe('PreflightDto', () => {
+  describe('toCreatedJSON (POST 202 body)', () => {
+    it('returns just-created shape: identity + state, no updatedAt/endedAt', () => {
+      const out = PreflightDto.toCreatedJSON(makePreflight());
+      expect(out).to.deep.equal({
+        preflightId: 'pf-1',
+        siteId: 'site-1',
+        status: 'IN_PROGRESS',
+        url: 'https://example.com/page',
+        createdAt: '2026-06-26T12:00:00Z',
+        createdBy: { email: 'alice@example.com' },
+      });
+    });
+
+    it('omits updatedAt and endedAt — they carry no info at creation time', () => {
+      const out = PreflightDto.toCreatedJSON(makePreflight());
+      expect(out).to.not.have.property('updatedAt');
+      expect(out).to.not.have.property('endedAt');
+    });
+
+    it('returns exactly the documented just-created keys — no leakage, no drift', () => {
+      const out = PreflightDto.toCreatedJSON(makePreflight());
+      expect(Object.keys(out).sort()).to.deep.equal([...CREATED_FIELDS].sort());
+    });
+  });
+
   describe('toJSON (list)', () => {
     it('maps an in-progress Preflight entity to the wire contract', () => {
       const out = PreflightDto.toJSON(makePreflight());

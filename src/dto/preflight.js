@@ -21,6 +21,14 @@
  *
  * @typedef {{ email: string, displayName?: string }} PreflightActor
  *
+ * @typedef {Object} PreflightCreated
+ * @property {string} preflightId
+ * @property {string} siteId
+ * @property {PreflightStatus} status
+ * @property {string} url
+ * @property {string} createdAt              ISO 8601
+ * @property {PreflightActor} createdBy
+ *
  * @typedef {Object} PreflightListItem
  * @property {string} preflightId
  * @property {string} siteId
@@ -47,6 +55,24 @@
  */
 
 export const PreflightDto = {
+  /**
+   * Just-created DTO for the 202 response on POST. Omits `updatedAt` and
+   * `endedAt` because they carry no information at creation time
+   * (updatedAt === createdAt; endedAt is always null for IN_PROGRESS).
+   * The full shape returns on subsequent GETs.
+   *
+   * @param {import('@adobe/spacecat-shared-data-access').Preflight} preflight
+   * @returns {PreflightCreated}
+   */
+  toCreatedJSON: (preflight) => ({
+    preflightId: preflight.getId(),
+    siteId: preflight.getSiteId(),
+    status: /** @type {PreflightStatus} */ (preflight.getStatus()),
+    url: preflight.getUrl(),
+    createdAt: preflight.getCreatedAt(),
+    createdBy: preflight.getCreatedBy(),
+  }),
+
   /**
    * List-view DTO. Sources entirely from the Preflight entity — `status` and
    * `endedAt` are denormalized on the row (kept in sync by the projector) so

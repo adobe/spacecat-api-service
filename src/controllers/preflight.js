@@ -674,7 +674,7 @@ function PreflightController(ctx, log, env) {
     const locationUrl = `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
       + `/sites/${siteId}/preflights/${preflight.getId()}`;
 
-    return createResponse(PreflightDto.toJSON(preflight), 202, { Location: locationUrl });
+    return createResponse(PreflightDto.toCreatedJSON(preflight), 202, { Location: locationUrl });
   };
 
   /**

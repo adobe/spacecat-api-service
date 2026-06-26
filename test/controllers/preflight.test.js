@@ -1546,6 +1546,12 @@ describe('Preflight Controller', () => {
       expect(result.preflightId).to.equal(preflightId);
       expect(result.status).to.equal('IN_PROGRESS');
       expect(result.url).to.equal('https://main--example-site.aem.page/test.html');
+      expect(result.siteId).to.equal('test-site-123');
+      expect(result.createdAt).to.equal('2024-03-20T10:00:00Z');
+      expect(result.createdBy).to.deep.equal({ email: 'user@example.com', displayName: 'Test User' });
+      // SITES-47254: just-created body omits updatedAt/endedAt (no info at creation time)
+      expect(result).to.not.have.property('updatedAt');
+      expect(result).to.not.have.property('endedAt');
 
       const locationHeader = response.headers.get('Location');
       expect(locationHeader).to.equal(
