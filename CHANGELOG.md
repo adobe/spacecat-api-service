@@ -1,3 +1,10 @@
+# [1.602.0](https://github.com/adobe/spacecat-api-service/compare/v1.601.3...v1.602.0) (2026-06-26)
+
+
+### Features
+
+* **llmo:** pass Cloudflare account/zone IDs in body; scope zone listing by account ([#2697](https://github.com/adobe/spacecat-api-service/issues/2697)) ([88a23f8](https://github.com/adobe/spacecat-api-service/commit/88a23f88689b8e6fbb82a9a4e9f7080016a1f813)), closes [#2681](https://github.com/adobe/spacecat-api-service/issues/2681)
+
 ## [1.601.3](https://github.com/adobe/spacecat-api-service/compare/v1.601.2...v1.601.3) (2026-06-26)
 
 
