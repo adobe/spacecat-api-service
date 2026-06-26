@@ -50,7 +50,10 @@ async function probeWithUndici(baseUrl, headers, log, fetchFn) {
     const headersObj = Object.fromEntries(response.headers);
     let html = '';
     const contentLength = parseInt(headersObj['content-length'] || '0', 10);
-    if (contentLength <= BODY_READ_MAX_BYTES) {
+    // Only read the body when a bounded Content-Length is advertised. A chunked or
+    // absent Content-Length (parsed as 0) is skipped, so an unbounded chunked response
+    // can never balloon memory — status + headers still drive the verdict in that case.
+    if (contentLength > 0 && contentLength <= BODY_READ_MAX_BYTES) {
       try {
         let timer;
         html = await Promise.race([
@@ -128,14 +131,20 @@ export async function detectBotBlockerMultiClient(
     blocker = undici;
   }
 
+  // Forward only the fields consumers rely on — no blanket spread, so a future field
+  // added to a probe result can't leak onto the response with wrong-client provenance.
+  // `reason` always reflects the blocking client; allowlist hints come from the
+  // @adobe/fetch probe (the shared detectBotBlocker is what surfaces them).
   return {
-    ...adobe,
     crawlable,
     type: blocker.type,
     confidence: blocker.confidence,
-    // Always reflect the blocking client's reason (overriding any reason the
-    // ...adobe spread carried), so the reason never describes the wrong client.
     reason: blocker.reason || undefined,
+    userAgent: adobe.userAgent,
+    // Normalize to the inclusive name, falling back to the legacy field for older
+    // shared-util shapes (member access of the legacy name is fine; only declaring it
+    // as a key is disallowed).
+    ipsToAllowlist: adobe.ipsToAllowlist || adobe.ipsToWhitelist,
     perClient,
   };
 }

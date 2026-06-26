@@ -99,7 +99,7 @@ describe('detectBotBlockerMultiClient', () => {
     const detectBotBlockerFn = sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 1 });
     const fetchFn = sinon.stub().resolves({
       status: 200,
-      headers: new Map(),
+      headers: new Map([['content-length', '100']]),
       text: async () => { throw new Error('stream error'); },
     });
 
@@ -186,7 +186,7 @@ describe('detectBotBlockerMultiClient', () => {
       const detectBotBlockerFn = sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 1 });
       const fetchFn = sinon.stub().resolves({
         status: 200,
-        headers: new Map(),
+        headers: new Map([['content-length', '100']]),
         text: () => new Promise(() => {}), // never resolves
       });
 
@@ -202,5 +202,35 @@ describe('detectBotBlockerMultiClient', () => {
     } finally {
       clock.restore();
     }
+  });
+
+  it('skips the body read for chunked responses (no Content-Length)', async () => {
+    const detectBotBlockerFn = sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 1 });
+    const textStub = sinon.stub().resolves('<html>');
+    const fetchFn = sinon.stub().resolves({ status: 200, headers: new Map(), text: textStub });
+
+    const result = await detectBotBlockerMultiClient(
+      { baseUrl: 'https://chunked.com' },
+      { log, detectBotBlockerFn, fetchFn },
+    );
+
+    expect(textStub.called).to.be.false; // chunked body never read (unbounded-read guard)
+    expect(result.perClient.undici.crawlable).to.be.true;
+  });
+
+  it('does not leak the @adobe/fetch reason when only undici is the blocker', async () => {
+    const detectBotBlockerFn = sinon.stub().resolves({
+      crawlable: true, type: 'cloudflare-allowed', confidence: 1, reason: 'infra present',
+    });
+    const fetchFn = sinon.stub().resolves(resp(403, [['server', 'cloudflare'], ['cf-ray', 'r']]));
+
+    const result = await detectBotBlockerMultiClient(
+      { baseUrl: 'https://datacom.com' },
+      { log, detectBotBlockerFn, fetchFn },
+    );
+
+    expect(result.crawlable).to.be.false;
+    expect(result.type).to.equal('cloudflare');
+    expect(result.reason).to.equal(undefined); // not 'infra present' from the allowed adobe probe
   });
 });
