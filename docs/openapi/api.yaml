@@ -664,6 +664,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-deploy'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/plan:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:

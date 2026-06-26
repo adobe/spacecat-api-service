@@ -3383,6 +3383,74 @@ site-llmo-cloudfront-plan:
     security:
       - api_key: [ ]
 
+site-llmo-cloudfront-permissions:
+  get:
+    tags:
+      - llmo
+    summary: Read the CloudFront connector role permissions manifest
+    description: |
+      Returns the Adobe principal ARN and the human-friendly AWS permission groups requested by
+      the CloudFront connector role. Powers the wizard's permissions review panel before opening
+      the AWS CloudFormation quick-create flow. Read-only — no cross-account customer AWS calls.
+    operationId: getLlmoCloudFrontPermissions
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: The CloudFront connector role permissions manifest.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - adobeAccount
+                - manifest
+              properties:
+                adobeAccount:
+                  type: string
+                  description: Adobe principal ARN allowed to assume the customer's connector role.
+                  example: arn:aws:iam::120569600543:root
+                manifest:
+                  type: object
+                  required:
+                    - appName
+                    - groups
+                  properties:
+                    appName:
+                      type: string
+                      example: Adobe LLM Optimizer
+                    groups:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - name
+                          - items
+                        properties:
+                          name:
+                            type: string
+                          items:
+                            type: array
+                            items:
+                              type: string
+                      example:
+                        - name: CloudFront
+                          items:
+                            - Scoped to All distributions
+                            - Add the Edge Optimize origin and routing function.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 cloudfront-connector-request:
   type: object
   required:
