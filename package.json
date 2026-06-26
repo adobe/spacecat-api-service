@@ -98,7 +98,7 @@
     "@adobe/spacecat-shared-scrape-client": "2.6.3",
     "@adobe/spacecat-shared-slack-client": "1.6.7",
     "@adobe/spacecat-shared-tier-client": "1.5.1",
-    "@adobe/spacecat-shared-tokowaka-client": "https://gist.githubusercontent.com/ABHA61/85486e1ccf4882e6b09800f629daed1f/raw/91aeea2c3815c51503394f8487f426da801337e0/adobe-spacecat-shared-tokowaka-client-1.19.1.tgz",
+    "@adobe/spacecat-shared-tokowaka-client": "https://gist.githubusercontent.com/ABHA61/85486e1ccf4882e6b09800f629daed1f/raw/5bea2af4e4f3456dd70063738620c0e2a47dc2f9/adobe-spacecat-shared-tokowaka-client-1.19.1.tgz",
     "@adobe/spacecat-shared-user-manager-client": "1.1.0",
     "@adobe/spacecat-shared-utils": "1.119.2",
     "@adobe/spacecat-shared-vault-secrets": "1.3.5",
