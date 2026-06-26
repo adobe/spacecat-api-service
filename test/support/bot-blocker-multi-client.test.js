@@ -161,4 +161,46 @@ describe('detectBotBlockerMultiClient', () => {
     expect(result.perClient['adobe-fetch'].type).to.equal('unknown');
     expect(result.perClient['adobe-fetch'].confidence).to.equal(0.3);
   });
+
+  it('skips the body read when Content-Length exceeds the cap', async () => {
+    const detectBotBlockerFn = sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 1 });
+    const textStub = sinon.stub().rejects(new Error('body should not be read'));
+    const fetchFn = sinon.stub().resolves({
+      status: 200,
+      headers: new Map([['content-length', '70000']]),
+      text: textStub,
+    });
+
+    const result = await detectBotBlockerMultiClient(
+      { baseUrl: 'https://big.com' },
+      { log, detectBotBlockerFn, fetchFn },
+    );
+
+    expect(textStub.called).to.be.false; // oversized body never read
+    expect(result.perClient.undici.crawlable).to.be.true;
+  });
+
+  it('bounds a hanging body read via timeout (verdict still resolves)', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const detectBotBlockerFn = sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 1 });
+      const fetchFn = sinon.stub().resolves({
+        status: 200,
+        headers: new Map(),
+        text: () => new Promise(() => {}), // never resolves
+      });
+
+      const promise = detectBotBlockerMultiClient(
+        { baseUrl: 'https://slow.com' },
+        { log, detectBotBlockerFn, fetchFn },
+      );
+      await clock.tickAsync(3001); // fire the body-read-timeout
+      const result = await promise;
+
+      expect(result.crawlable).to.be.true;
+      expect(result.perClient.undici.crawlable).to.be.true;
+    } finally {
+      clock.restore();
+    }
+  });
 });

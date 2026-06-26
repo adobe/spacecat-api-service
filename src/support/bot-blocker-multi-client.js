@@ -15,6 +15,11 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 const PROBE_TIMEOUT_MS = 10000;
+// Bound the body read the same way the shared detectBotBlocker does: skip the body
+// when Content-Length is large, and race the read against a short timeout so a slow
+// (or unbounded chunked) response can never hang or balloon memory.
+const BODY_READ_MAX_BYTES = 65536; // 64 KB — challenge markers appear in the first KB
+const BODY_READ_TIMEOUT_MS = 3000;
 
 /**
  * Probes a URL with Node's native fetch (undici) and classifies the response.
@@ -44,10 +49,19 @@ async function probeWithUndici(baseUrl, headers, log, fetchFn) {
     });
     const headersObj = Object.fromEntries(response.headers);
     let html = '';
-    try {
-      html = await response.text();
-    } catch {
-      html = '';
+    const contentLength = parseInt(headersObj['content-length'] || '0', 10);
+    if (contentLength <= BODY_READ_MAX_BYTES) {
+      try {
+        let timer;
+        html = await Promise.race([
+          response.text().finally(() => clearTimeout(timer)),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('body-read-timeout')), BODY_READ_TIMEOUT_MS);
+          }),
+        ]);
+      } catch {
+        html = '';
+      }
     }
     return analyzeBotProtection({ status: response.status, headers: headersObj, html });
   } catch (err) {
