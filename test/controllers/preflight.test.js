@@ -63,6 +63,8 @@ describe('Preflight Controller', () => {
     }),
     remove: sandbox.stub().resolves(),
     setStatus: sandbox.stub(),
+    setError: sandbox.stub(),
+    setEndedAt: sandbox.stub(),
     save: sandbox.stub().resolves(),
   };
 
@@ -1519,19 +1521,22 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(502);
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_UPSTREAM_ERROR');
-      expect(mockPreflight.setStatus).to.have.been.calledWith('FAILED');
-      // Stored error mirrors the external 502 message — the raw upstream
-      // body could leak via GET detail and is sanitized server-side.
-      expect(mockPreflight.setError).to.have.been.calledWithMatch({
+      // SITES-47254: error lives on AsyncJob (source of truth); Preflight
+      // carries only the status + endedAt cache. The sanitized message
+      // mirrors the external 502 — the raw upstream body could leak
+      // internal hostnames/stack traces via the detail endpoint.
+      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockJob.setError).to.have.been.calledWithMatch({
         code: 'MYSTICAT_ERROR',
         message: 'Upstream analyze service failed',
       });
+      expect(mockJob.setEndedAt).to.have.been.calledOnce;
+      expect(mockJob.save).to.have.been.calledOnce;
+      // Preflight cache flipped with no error payload (error lives only on AsyncJob).
+      expect(mockPreflight.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockPreflight.setEndedAt).to.have.been.calledOnce;
+      expect(mockPreflight.setError).to.not.have.been.called;
       expect(mockPreflight.save).to.have.been.calledOnce;
-      // AsyncJob row must also be flipped to FAILED; the controller updates
-      // both records so a future refactor that drops the AsyncJob update is
-      // caught here.
-      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
-      expect(mockJob.save).to.have.been.called;
     });
 
     it('creates preflight successfully and returns 202 with Location header (prod)', async () => {
@@ -2638,6 +2643,21 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result.result).to.deep.equal([{ pageUrl: 'https://example.com/page', audits: [] }]);
       expect(result.error).to.deep.equal(errorPayload);
+    });
+
+    it('degrades result/error to null when getAsyncJob resolves to null (no linked job yet)', async () => {
+      mockPreflight.getAsyncJob.resolves(null);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+      const nullResult = await response.json();
+      expect(nullResult.result).to.be.null;
+      expect(nullResult.error).to.be.null;
+      // Preflight-sourced fields still populated
+      expect(nullResult.preflightId).to.equal(preflightId);
+      expect(nullResult.status).to.equal('IN_PROGRESS');
     });
 
     it('degrades result/error to null when getAsyncJob throws', async () => {

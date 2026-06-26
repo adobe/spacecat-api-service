@@ -638,7 +638,8 @@ function PreflightController(ctx, log, env) {
         url,
         status: AsyncJob.Status.IN_PROGRESS,
         createdBy,
-        startedAt: new Date().toISOString(),
+        // SITES-47254: startedAt is an AsyncJob concern (set automatically on
+        // AsyncJob.create); the Preflight row no longer carries it.
       });
     } catch (e) {
       log.error(`Failed to create Preflight: ${e.message}`);
@@ -657,16 +658,20 @@ function PreflightController(ctx, log, env) {
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
-      preflight.setStatus(AsyncJob.Status.FAILED);
-      // Stored error message mirrors the external 502 response — the raw
-      // upstream body could carry internal hostnames / stack traces and is
-      // exposed via GET /sites/:siteId/preflights/:preflightId. Full detail
-      // is in the log.error above for ops visibility.
-      preflight.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
-      preflight.setEndedAt(new Date().toISOString());
-      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
+      const endedAt = new Date().toISOString();
+      // SITES-47254: error lives on AsyncJob only (source of truth); the
+      // Preflight row holds status + ended_at as a cache. Stored message
+      // mirrors the external 502 response — the raw upstream body could
+      // carry internal hostnames / stack traces and is exposed via
+      // GET /sites/:siteId/preflights/:preflightId. Full detail is in the
+      // log.error above for ops visibility.
       asyncJob.setStatus(AsyncJob.Status.FAILED);
+      asyncJob.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
+      asyncJob.setEndedAt(endedAt);
       await asyncJob.save().catch((e) => log.warn(`Failed to persist FAILED state on AsyncJob ${asyncJob.getId()}: ${e.message}`));
+      preflight.setStatus(AsyncJob.Status.FAILED);
+      preflight.setEndedAt(endedAt);
+      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
       return preflightError('PREFLIGHT_UPSTREAM_ERROR', 'Upstream analyze service failed', 502);
     }
 
