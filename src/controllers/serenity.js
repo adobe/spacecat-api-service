@@ -181,12 +181,21 @@ function mapError(e, log) {
  * upstream gateway only understands IMS user tokens; we refuse to forward
  * anything else.
  *
+ * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
+ * we forward is validated AGAIN by the real Semrush gateway on every upstream
+ * call (it rejects an invalid/expired/forged token with 401/403, which the
+ * transport surfaces as a SerenityTransportError). This local check is only a
+ * fail-fast + shape guard so we do not forward a token Semrush will obviously
+ * reject; it never substitutes for the upstream's own validation.
+ *
  * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` the
  * IMS-type check is skipped so an authenticated NON-IMS caller (e.g. the
  * locally-signed JWT the integration-test harness mints) can reach the
- * handlers. This is sound ONLY against the Semrush vendor MOCKS, which do not
- * validate the forwarded bearer — the token's value never matters, only that
- * an authenticated identity is present. Mirrors `SERENITY_ALLOW_WORKSPACE_DELETE`
+ * handlers. This is sound because (a) production auth is unaffected — Semrush
+ * still validates the forwarded token end to end — and (b) the integration
+ * tests run against the Semrush vendor MOCKS, which intentionally do not
+ * validate the bearer, so the token's value never matters there, only that an
+ * authenticated identity is present. Mirrors `SERENITY_ALLOW_WORKSPACE_DELETE`
  * in rest-transport.js: an explicit opt-in flag that NO deployed environment
  * sets (it is never written to Vault `dx_mysticat/<env>/api-service`); it is
  * for local + automated E2E only. The Authorization-header requirement still

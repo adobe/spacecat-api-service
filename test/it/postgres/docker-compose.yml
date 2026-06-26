@@ -74,13 +74,16 @@ services:
   # Image tag == the installed client dependency version. The mock is published
   # from the SAME package as the typed client (@adobe/spacecat-shared-*-client),
   # so testing against a different mock version than the client we ship would be
-  # an unsound contract test. setup.js reads the installed client version and
-  # exports SERENITY_PE_MOCK_TAG / SERENITY_UM_MOCK_TAG; the `:-` default keeps a
-  # manual `docker compose up` working. If a client is bumped to a version whose
-  # mock image is not yet published, the pull fails loudly — by design, it forces
-  # the mock to be released in lockstep.
+  # an unsound contract test. setup.js (startContainers) reads the installed
+  # client version and exports SERENITY_PE_MOCK_TAG / SERENITY_UM_MOCK_TAG.
+  # The `:?` form FAILS HARD when the tag is unset — there is deliberately NO
+  # default: a hardcoded fallback would silently run a different version than the
+  # client we ship (chaos). If a client is bumped to a version whose mock image
+  # is not yet published, the pull also fails loudly, forcing the mock to be
+  # released in lockstep. Always launch via `mise run`/the harness, never a bare
+  # `docker compose up` (which would have no tag set).
   project-engine-mock:
-    image: ghcr.io/adobe/spacecat-shared-project-engine-client-mock:${SERENITY_PE_MOCK_TAG:-1.3.0}
+    image: ghcr.io/adobe/spacecat-shared-project-engine-client-mock:${SERENITY_PE_MOCK_TAG:?must be set to the installed @adobe/spacecat-shared-project-engine-client version (exported by test/it/postgres/setup.js)}
     container_name: spacecat-it-pe-mock
     environment:
       MOCK_SEED: workspace-with-data
@@ -94,7 +97,7 @@ services:
       start_period: 20s
 
   user-manager-mock:
-    image: ghcr.io/adobe/spacecat-shared-user-manager-client-mock:${SERENITY_UM_MOCK_TAG:-1.3.0}
+    image: ghcr.io/adobe/spacecat-shared-user-manager-client-mock:${SERENITY_UM_MOCK_TAG:?must be set to the installed @adobe/spacecat-shared-user-manager-client version (exported by test/it/postgres/setup.js)}
     container_name: spacecat-it-um-mock
     environment:
       MOCK_SEED: parent-with-child

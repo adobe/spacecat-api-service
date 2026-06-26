@@ -33,7 +33,13 @@ const REPO_ROOT = path.join(__dirname, '..', '..', '..');
  */
 function installedVersion(pkg) {
   const pkgJson = path.join(REPO_ROOT, 'node_modules', pkg, 'package.json');
-  return JSON.parse(readFileSync(pkgJson, 'utf8')).version;
+  // Let a missing package throw (ENOENT) — fail hard rather than fall back to a
+  // hardcoded tag, which would silently test a different version than we ship.
+  const { version } = JSON.parse(readFileSync(pkgJson, 'utf8'));
+  if (!version || typeof version !== 'string') {
+    throw new Error(`Could not resolve installed version of ${pkg} for the Semrush mock image tag`);
+  }
+  return version;
 }
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
