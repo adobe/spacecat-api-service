@@ -39,6 +39,25 @@ const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
 const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
+/**
+ * Whether a deployWorkerScript failure indicates the target worker name is already taken.
+ * CloudflareClient 1.1.x probed existence via GET /workers/scripts/:name, which returns
+ * script source (not JSON) when the worker exists — that surfaced as a generic 502 upstream.
+ */
+const isWorkerDeployConflictError = (error) => {
+  const message = error?.message || String(error);
+  if (/already exists/i.test(message)) {
+    return true;
+  }
+  return /non-JSON response on \/accounts\/[^/]+\/workers\/scripts\//i.test(message);
+};
+
+const workerAlreadyExistsResponse = (scriptName, accountId) => createResponse({
+  message: `A worker named '${scriptName}' already exists in this Cloudflare account`,
+  scriptName,
+  accountId,
+}, 409);
+
 function LlmoCloudflareController(ctx) {
   const { log, env } = ctx;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -285,13 +304,9 @@ function LlmoCloudflareController(ctx) {
       // preventing an onboarding deploy from silently replacing one.
       await cfClient.deployWorkerScript(accountId, scriptName, workerScript, bindings);
     } catch (e) {
-      if (/already exists/i.test(e.message)) {
+      if (isWorkerDeployConflictError(e)) {
         log.info(`Worker '${scriptName}' already exists in account ${accountId}; refusing to overwrite`);
-        return createResponse({
-          message: `A worker named '${scriptName}' already exists in this Cloudflare account`,
-          scriptName,
-          accountId,
-        }, 409);
+        return workerAlreadyExistsResponse(scriptName, accountId);
       }
       return cfErrorResponse(e, 'worker deployment');
     }

@@ -24,6 +24,7 @@
     "src/support/serenity/**/*.js",
     "src/support/url-utils.js",
     "src/controllers/serenity.js",
-    "src/controllers/brands.js"
+    "src/controllers/brands.js",
+    "src/dto/preflight.js"
   ]
 }
