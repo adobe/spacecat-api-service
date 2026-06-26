@@ -218,18 +218,50 @@ describe('LlmoCloudflareController', () => {
   // ── listZones ────────────────────────────────────────────────────────────
 
   describe('listZones', () => {
-    it('returns zones list', async () => {
-      const zones = [{ id: ZONE_ID, name: 'example.com' }];
+    beforeEach(() => {
+      mockContext.data = { accountId: ACCOUNT_ID };
+    });
+
+    it('passes the accountId to the client and returns the account-scoped zones', async () => {
+      const zones = [{ id: ZONE_ID, name: 'example.com', account: { id: ACCOUNT_ID } }];
       mockCfClient.listZones.resolves(zones);
 
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(200);
+      expect(mockCfClient.listZones).to.have.been.calledWith({ accountId: ACCOUNT_ID });
       const body = await res.json();
       expect(body).to.deep.equal(zones);
     });
 
+    it('treats a null zone list as empty', async () => {
+      mockCfClient.listZones.resolves(null);
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([]);
+    });
+
     it('returns 400 when CF token is missing', async () => {
       mockContext.pathInfo.headers = {};
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the request has no query data', async () => {
+      mockContext.data = undefined;
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when accountId is missing', async () => {
+      mockContext.data = {};
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.listZones).to.not.have.been.called;
+    });
+
+    it('returns 400 when accountId is not a 32-char hex id', async () => {
+      mockContext.data = { accountId: 'acc-123' };
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(400);
     });
@@ -402,6 +434,17 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
     });
 
+    it('returns 409 when a worker with the derived name already exists', async () => {
+      mockCfClient.deployWorkerScript.rejects(
+        new Error(`Worker script '${DERIVED_SCRIPT_NAME}' already exists in account ${ACCOUNT_ID}. Set overwrite: true to replace it.`),
+      );
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
     it('returns 502 with partial flag when secret set fails after deploy', async () => {
       mockCfClient.deployWorkerScript.resolves();
       mockCfClient.setWorkerSecret.rejects(new Error('Cloudflare API returned 500 on /secrets: boom'));
@@ -418,8 +461,8 @@ describe('LlmoCloudflareController', () => {
 
   describe('addRoute', () => {
     beforeEach(() => {
-      mockContext.params = { siteId: SITE_ID, zoneId: ZONE_ID };
-      mockContext.data = { pattern: 'example.com/*' };
+      mockContext.params = { siteId: SITE_ID };
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/*' };
       mockCfClient.listRoutes.resolves([]);
     });
 
@@ -464,13 +507,13 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 400 when pattern is missing', async () => {
-      mockContext.data = {};
+      mockContext.data = { zoneId: ZONE_ID };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when the pattern does not target the site domain', async () => {
-      mockContext.data = { pattern: 'evil.com/*' };
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'evil.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
       expect(mockCfClient.listRoutes).to.not.have.been.called;
@@ -478,7 +521,7 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('accepts a wildcard subdomain pattern within the site domain', async () => {
-      mockContext.data = { pattern: '*.example.com/*' };
+      mockContext.data = { zoneId: ZONE_ID, pattern: '*.example.com/*' };
       const route = { id: ROUTE_ID, pattern: '*.example.com/*', script: DERIVED_SCRIPT_NAME };
       mockCfClient.addRoute.resolves(route);
       const res = await controller.addRoute(mockContext);
@@ -500,13 +543,13 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 400 when zoneId is missing', async () => {
-      mockContext.params = { siteId: SITE_ID, zoneId: '' };
+      mockContext.data = { pattern: 'example.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when zoneId is not a 32-char hex id', async () => {
-      mockContext.params = { siteId: SITE_ID, zoneId: 'zone-456' };
+      mockContext.data = { zoneId: 'zone-456', pattern: 'example.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });

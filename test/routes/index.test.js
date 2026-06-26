@@ -1122,7 +1122,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
-      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',

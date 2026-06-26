@@ -138,7 +138,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
-  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
