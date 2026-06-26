@@ -132,4 +132,33 @@ describe('detectBotBlockerMultiClient', () => {
       fetchStub.restore();
     }
   });
+
+  it('keeps the @adobe/fetch classification when BOTH clients are blocked', async () => {
+    const detectBotBlockerFn = sinon.stub().resolves({ crawlable: false, type: 'akamai', confidence: 0.99 });
+    const fetchFn = sinon.stub().resolves(resp(403, [['server', 'cloudflare'], ['cf-ray', 'z']]));
+
+    const result = await detectBotBlockerMultiClient(
+      { baseUrl: 'https://both-blocked.com' },
+      { log, detectBotBlockerFn, fetchFn },
+    );
+
+    expect(result.crawlable).to.be.false;
+    expect(result.type).to.equal('akamai'); // @adobe/fetch block preferred when both are blocked
+    expect(result.perClient['adobe-fetch'].crawlable).to.be.false;
+    expect(result.perClient.undici.crawlable).to.be.false;
+  });
+
+  it('treats an @adobe/fetch probe failure as inconclusive (not a block)', async () => {
+    const detectBotBlockerFn = sinon.stub().rejects(new Error('DNS failure'));
+    const fetchFn = sinon.stub().resolves(resp(200));
+
+    const result = await detectBotBlockerMultiClient(
+      { baseUrl: 'https://ok.com' },
+      { log, detectBotBlockerFn, fetchFn },
+    );
+
+    expect(result.crawlable).to.be.true;
+    expect(result.perClient['adobe-fetch'].type).to.equal('unknown');
+    expect(result.perClient['adobe-fetch'].confidence).to.equal(0.3);
+  });
 });

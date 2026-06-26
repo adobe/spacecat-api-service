@@ -88,7 +88,14 @@ export async function detectBotBlockerMultiClient(
   { log = console, detectBotBlockerFn = detectBotBlocker, fetchFn = fetch } = {},
 ) {
   const [adobe, undici] = await Promise.all([
-    detectBotBlockerFn({ baseUrl, headers }),
+    // Match probeWithUndici's behaviour: a probe failure (timeout/DNS/network) is
+    // inconclusive, not a block — so neither probe can reject the whole call.
+    Promise.resolve()
+      .then(() => detectBotBlockerFn({ baseUrl, headers }))
+      .catch((err) => {
+        log?.debug?.(`[bot-blocker] @adobe/fetch probe inconclusive for ${baseUrl}: ${err.message}`);
+        return { crawlable: true, type: 'unknown', confidence: 0.3 };
+      }),
     probeWithUndici(baseUrl, headers, log, fetchFn),
   ]);
 
@@ -112,7 +119,9 @@ export async function detectBotBlockerMultiClient(
     crawlable,
     type: blocker.type,
     confidence: blocker.confidence,
-    ...(blocker.reason ? { reason: blocker.reason } : {}),
+    // Always reflect the blocking client's reason (overriding any reason the
+    // ...adobe spread carried), so the reason never describes the wrong client.
+    reason: blocker.reason || undefined,
     perClient,
   };
 }
