@@ -1,3 +1,10 @@
+## [1.602.1](https://github.com/adobe/spacecat-api-service/compare/v1.602.0...v1.602.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **deps:** re-bump spacecat-shared-http-utils 1.30.0 → 1.31.0 (after LD flag fix) ([#2698](https://github.com/adobe/spacecat-api-service/issues/2698)) ([3753f68](https://github.com/adobe/spacecat-api-service/commit/3753f68903c05b048a1afaf5c13d813ab35c22c2))
+
 # [1.602.0](https://github.com/adobe/spacecat-api-service/compare/v1.601.3...v1.602.0) (2026-06-26)
 
 
