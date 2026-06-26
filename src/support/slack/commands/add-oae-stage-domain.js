@@ -12,7 +12,7 @@
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import { hasSamePathname } from '../../../utils/url-utils.js';
+import { hasSamePathname } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import {
   extractURLFromSlackInput,

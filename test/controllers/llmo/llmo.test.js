@@ -7284,19 +7284,19 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('site scope');
+      expect(responseBody.message).to.include('pathname scope');
     });
 
     it('should accept staging domain which has same path as that of prod site', async () => {
       mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
-      stageConfigContext.data = { stagingDomains: ['https://www.lovesac.com/docs/preview'] };
+      stageConfigContext.data = { stagingDomains: ['https://staging.lovesac.com/docs'] };
 
       const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.be.an('array').with.lengthOf(1);
-      expect(responseBody[0].domain).to.equal('https://www.lovesac.com/docs/preview');
+      expect(responseBody[0].domain).to.equal('https://staging.lovesac.com/docs');
     });
 
     it('should return 403 when not LLMO administrator', async () => {
