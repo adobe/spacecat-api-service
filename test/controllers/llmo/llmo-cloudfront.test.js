@@ -91,19 +91,19 @@ describe('LlmoCloudFrontController', () => {
   // The control-plane functions are imported from '@adobe/spacecat-shared-tokowaka-client';
   // the wrappers read the mutable outer stubs so each test can reassign them in beforeEach.
   const getEdgeOptimizeStubs = () => {
-    function CloudFrontEdgeOptimizeClient({ credentials, region } = {}) {
+    function CloudFrontEdgeClient({ credentials, region } = {}) {
       this.credentials = credentials;
       this.region = region;
     }
-    CloudFrontEdgeOptimizeClient.prototype.listDistributions = function listDistributions() {
+    CloudFrontEdgeClient.prototype.listDistributions = function listDistributions() {
       return listCloudFrontDistributionsStub(this.credentials, this.region);
     };
-    CloudFrontEdgeOptimizeClient.prototype.getDistributionConfig = function getDistributionConfig(
+    CloudFrontEdgeClient.prototype.getDistributionConfig = function getDistributionConfig(
       distributionId,
     ) {
       return getDistributionConfigStub(this.credentials, distributionId, this.region);
     };
-    CloudFrontEdgeOptimizeClient.prototype.createOrigin = function createOrigin(
+    CloudFrontEdgeClient.prototype.createOrigin = function createOrigin(
       distributionId,
       originDomain,
       headers,
@@ -116,7 +116,7 @@ describe('LlmoCloudFrontController', () => {
         this.region,
       );
     };
-    CloudFrontEdgeOptimizeClient.prototype.createCloudFrontFunction = function createFunction(
+    CloudFrontEdgeClient.prototype.createCloudFrontFunction = function createFunction(
       defaultOriginId,
       distributionId,
       targetedPaths,
@@ -129,7 +129,7 @@ describe('LlmoCloudFrontController', () => {
         this.region,
       );
     };
-    CloudFrontEdgeOptimizeClient.prototype.updateCacheSettings = function updateCacheSettings(
+    CloudFrontEdgeClient.prototype.updateCacheSettings = function updateCacheSettings(
       distributionId,
       pathPattern,
       opts,
@@ -141,18 +141,18 @@ describe('LlmoCloudFrontController', () => {
         opts,
       );
     };
-    CloudFrontEdgeOptimizeClient.prototype.createLambdaAtEdge = function createLambdaAtEdge(
+    CloudFrontEdgeClient.prototype.createLambdaAtEdge = function createLambdaAtEdge(
       accountId,
       opts,
     ) {
       return createEdgeOptimizeLambdaStub(this.credentials, accountId, opts);
     };
-    CloudFrontEdgeOptimizeClient.prototype.getLambdaAtEdgeStatus = function getLambdaStatus(
+    CloudFrontEdgeClient.prototype.getLambdaAtEdgeStatus = function getLambdaStatus(
       distributionId,
     ) {
       return getEdgeOptimizeLambdaStatusStub(this.credentials, distributionId, this.region);
     };
-    CloudFrontEdgeOptimizeClient.prototype.applyAssociations = function applyAssociations(
+    CloudFrontEdgeClient.prototype.applyAssociations = function applyAssociations(
       distributionId,
       pathPattern,
       lambdaVersionArn,
@@ -165,10 +165,10 @@ describe('LlmoCloudFrontController', () => {
         this.region,
       );
     };
-    CloudFrontEdgeOptimizeClient.prototype.runDeployStep = function runDeployStep(params) {
+    CloudFrontEdgeClient.prototype.runDeployStep = function runDeployStep(params) {
       return runEdgeOptimizeDeployStepStub(this.credentials, params, this.region);
     };
-    CloudFrontEdgeOptimizeClient.prototype.planDeploy = function planDeploy(params) {
+    CloudFrontEdgeClient.prototype.planDeploy = function planDeploy(params) {
       return planEdgeOptimizeDeployStub(this.credentials, params, this.region);
     };
 
@@ -185,7 +185,7 @@ describe('LlmoCloudFrontController', () => {
       verifyRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
       runDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
       planDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
-      CloudFrontEdgeOptimizeClient,
+      CloudFrontEdgeClient,
     };
   };
 

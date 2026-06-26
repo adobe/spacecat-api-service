@@ -21,7 +21,7 @@ import TokowakaClient, {
   calculateForwardedHost,
   assumeConnectorRole,
   verifyRouting as verifyAwsRouting,
-  CloudFrontEdgeOptimizeClient,
+  CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 
@@ -187,7 +187,7 @@ function LlmoCloudFrontController(ctx) {
     const assumed = await assumeConnectorRole({ accountId, externalId, roleName });
     return {
       ...assumed,
-      cloudFrontClient: new CloudFrontEdgeOptimizeClient({ credentials: assumed.credentials }),
+      cloudFrontClient: new CloudFrontEdgeClient({ credentials: assumed.credentials }),
     };
   };
 

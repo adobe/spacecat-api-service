@@ -86,18 +86,6 @@ describe('LlmoController', () => {
   let llmoConfigSchemaStub;
   let triggerBrandProfileAgentStub;
   let updateModifiedByDetailsStub;
-  let assumeConnectorRoleStub;
-  let listCloudFrontDistributionsStub;
-  let getDistributionConfigStub;
-  let createEdgeOptimizeOriginStub;
-  let createEdgeOptimizeRoutingFunctionStub;
-  let applyEdgeOptimizeCacheHeadersStub;
-  let createEdgeOptimizeLambdaStub;
-  let getEdgeOptimizeLambdaStatusStub;
-  let applyEdgeOptimizeAssociationsStub;
-  let verifyEdgeOptimizeRoutingStub;
-  let runEdgeOptimizeDeployStepStub;
-  let planEdgeOptimizeDeployStub;
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
@@ -200,44 +188,13 @@ describe('LlmoController', () => {
       },
       getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
       // eslint-disable-next-line no-use-before-define
-      ...getEdgeOptimizeStubs(),
     },
-  });
-
-  // Edge-optimize control-plane functions are now imported from
-  // '@adobe/spacecat-shared-tokowaka-client' (moved out of the local controller support copy).
-  // Spread these into the tokowaka-client mock for any esmock block that needs them.
-  const getEdgeOptimizeStubs = () => ({
-    assumeConnectorRole: (...args) => assumeConnectorRoleStub(...args),
-    listCloudFrontDistributions: (...args) => listCloudFrontDistributionsStub(...args),
-    getDistributionConfig: (...args) => getDistributionConfigStub(...args),
-    createEdgeOptimizeOrigin: (...args) => createEdgeOptimizeOriginStub(...args),
-    createEdgeOptimizeRoutingFunction: (...args) => createEdgeOptimizeRoutingFunctionStub(...args),
-    applyEdgeOptimizeCacheHeaders: (...args) => applyEdgeOptimizeCacheHeadersStub(...args),
-    createEdgeOptimizeLambda: (...args) => createEdgeOptimizeLambdaStub(...args),
-    getEdgeOptimizeLambdaStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
-    applyEdgeOptimizeAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
-    verifyEdgeOptimizeRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
-    runEdgeOptimizeDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
-    planEdgeOptimizeDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
   });
 
   before(async function () {
     this.timeout(120000);
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     updateModifiedByDetailsStub = sinon.stub();
-    assumeConnectorRoleStub = sinon.stub();
-    listCloudFrontDistributionsStub = sinon.stub();
-    getDistributionConfigStub = sinon.stub();
-    createEdgeOptimizeOriginStub = sinon.stub();
-    createEdgeOptimizeRoutingFunctionStub = sinon.stub();
-    applyEdgeOptimizeCacheHeadersStub = sinon.stub();
-    createEdgeOptimizeLambdaStub = sinon.stub();
-    getEdgeOptimizeLambdaStatusStub = sinon.stub();
-    applyEdgeOptimizeAssociationsStub = sinon.stub();
-    verifyEdgeOptimizeRoutingStub = sinon.stub();
-    runEdgeOptimizeDeployStepStub = sinon.stub();
-    planEdgeOptimizeDeployStub = sinon.stub();
 
     // Initialize mock TokowakaClient
     mockTokowakaClient = {
@@ -358,7 +315,6 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-        ...getEdgeOptimizeStubs(),
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -433,7 +389,6 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-        ...getEdgeOptimizeStubs(),
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -478,7 +433,6 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-        ...getEdgeOptimizeStubs(),
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -520,7 +474,6 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-        ...getEdgeOptimizeStubs(),
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -5771,7 +5724,6 @@ describe('LlmoController', () => {
             }
           },
           getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -5881,7 +5833,6 @@ describe('LlmoController', () => {
             }
           },
           getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -5977,7 +5928,6 @@ describe('LlmoController', () => {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
           getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({}),
@@ -6049,7 +5999,6 @@ describe('LlmoController', () => {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
           getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({}),
@@ -6118,7 +6067,6 @@ describe('LlmoController', () => {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
           getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({}),
@@ -6879,7 +6827,6 @@ describe('LlmoController', () => {
               throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
             }
           },
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -6986,7 +6933,6 @@ describe('LlmoController', () => {
               throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
             }
           },
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -7088,7 +7034,6 @@ describe('LlmoController', () => {
               throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
             }
           },
-          ...getEdgeOptimizeStubs(),
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -8277,7 +8222,6 @@ describe('LlmoController', () => {
             default: { createFrom: () => mockTokowakaClient },
             calculateForwardedHost: () => 'www.example.com',
             getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-            ...getEdgeOptimizeStubs(),
           },
           '../../../src/utils/slack/base.js': {
             postSlackMessage: sinon.stub(),
@@ -8334,7 +8278,6 @@ describe('LlmoController', () => {
             default: { createFrom: () => mockTokowakaClient },
             calculateForwardedHost: () => 'www.example.com',
             getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
-            ...getEdgeOptimizeStubs(),
           },
           '../../../src/utils/slack/base.js': {
             postSlackMessage: sinon.stub(),
