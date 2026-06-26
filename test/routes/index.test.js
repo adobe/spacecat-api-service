@@ -1280,7 +1280,6 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/agentic-page-types/:name',
       'GET /organizations/:organizationId/task-management/connections',
       'GET /organizations/:organizationId/task-management/connections/:connectionId',
-      'DELETE /organizations/:organizationId/task-management/connections/:connectionId',
       'GET /organizations/:organizationId/task-management/tickets',
       'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
       'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
