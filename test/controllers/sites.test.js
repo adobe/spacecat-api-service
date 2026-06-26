@@ -1769,8 +1769,6 @@ describe('Sites Controller', () => {
     const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
       '@adobe/spacecat-shared-utils': {
         getStoredMetrics,
-      },
-      '../../src/support/utils.js': {
         getBaseURLPathPrefix,
       },
     });

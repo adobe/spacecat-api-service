@@ -31,6 +31,7 @@ import {
   isNonEmptyObject,
   canonicalizeUrl,
   composeBaseURL,
+  getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -43,8 +44,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import {
-  wwwUrlResolver, resolveWwwUrl, getBaseURLPathPrefix, getIsSummitPlgEnabled,
-  CUSTOMER_VISIBLE_TIERS, isInternalOrg,
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';

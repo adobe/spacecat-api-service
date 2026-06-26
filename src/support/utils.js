@@ -607,42 +607,6 @@ export async function resolveWwwUrl(site, context) {
 }
 
 /**
- * Extracts the locale/section path prefix from a site's baseURL so RUM results
- * fetched for the main domain can be narrowed to the locale subtree
- * (e.g. https://example.com/de -> '/de'). Returns null at the domain root.
- *
- * When the baseURL points at a file (last path segment has an extension, e.g.
- * https://example.com/us/en.html), the locale directory cannot be reliably
- * inferred ('en.html' is a locale but 'home.html' in '/en/home.html' is a page),
- * so this returns null and the caller falls back to whole-domain metrics rather
- * than over-filtering RUM to a single page.
- *
- * NOTE: local copy of `getBaseURLPathPrefix` from spacecat-shared-utils
- * (adobe/spacecat-shared#1707). Inlined to keep this change on the current
- * published dependency; replace with the shared import once that release ships
- * and the spacecat-shared-utils dependency is bumped.
- *
- * @param {string} baseURL - The site's baseURL (always scheme-qualified).
- * @returns {string|null} The normalized path prefix, or null.
- */
-export function getBaseURLPathPrefix(baseURL) {
-  try {
-    const { pathname } = new URL(baseURL);
-    const normalized = pathname !== '/' ? pathname.replace(/\/+$/, '') : '/';
-    if (normalized === '/') {
-      return null;
-    }
-    const lastSegment = normalized.slice(normalized.lastIndexOf('/') + 1);
-    if (/\.[a-z0-9]+$/i.test(lastSegment)) {
-      return null;
-    }
-    return normalized;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Returns true when the request originates from the sites-optimizer-ui client
  * and carries the x-view-as-trial header, indicating the user has enabled
  * trial-mode simulation. Used to apply PLG-style suggestion filtering
