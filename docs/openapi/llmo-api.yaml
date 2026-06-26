@@ -2397,7 +2397,7 @@ llmo-edge-optimize-status:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-bootstrap-url:
+site-llmo-cloudfront-bootstrap-url:
   post:
     tags:
       - llmo
@@ -2408,7 +2408,7 @@ site-llmo-edge-optimize-bootstrap-url:
       connector role in their own AWS account. The template bucket stays private —
       presigning is done with the service execution role — so no public S3 endpoint
       is required and the customer needs no S3 access of their own.
-    operationId: createEdgeOptimizeBootstrapUrl
+    operationId: createLlmoCloudFrontBootstrapUrl
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2474,7 +2474,7 @@ site-llmo-edge-optimize-bootstrap-url:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-connect:
+site-llmo-cloudfront-connect:
   post:
     tags:
       - llmo
@@ -2485,7 +2485,7 @@ site-llmo-edge-optimize-connect:
       the per-session external ID. Returns `connected: true` when the role is assumable; otherwise
       returns `connected: false` with a `reason` so the wizard can keep polling while the customer
       finishes creating the role.
-    operationId: connectEdgeOptimize
+    operationId: connectLlmoCloudFront
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2493,7 +2493,7 @@ site-llmo-edge-optimize-connect:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-connector-request'
+            $ref: '#/cloudfront-connector-request'
     responses:
       '200':
         description: Connection probe result (inspect the `connected` field).
@@ -2533,7 +2533,7 @@ site-llmo-edge-optimize-connect:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-distributions:
+site-llmo-cloudfront-distributions:
   post:
     tags:
       - llmo
@@ -2542,7 +2542,7 @@ site-llmo-edge-optimize-distributions:
       Used by the CloudFront "Deploy routing" wizard's "Choose distribution" step. Assumes the
       cross-account connector role and lists the customer's CloudFront distributions (read-only)
       so the wizard can let the customer pick one to configure.
-    operationId: listEdgeOptimizeDistributions
+    operationId: listLlmoCloudFrontDistributions
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2550,7 +2550,7 @@ site-llmo-edge-optimize-distributions:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-connector-request'
+            $ref: '#/cloudfront-connector-request'
     responses:
       '200':
         description: CloudFront distributions in the customer account.
@@ -2602,7 +2602,7 @@ site-llmo-edge-optimize-distributions:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-prerequisites:
+site-llmo-cloudfront-prerequisites:
   post:
     tags:
       - llmo
@@ -2612,7 +2612,7 @@ site-llmo-edge-optimize-prerequisites:
       and grants CloudFront read access. Each check reports its `ok` status individually (with a
       `detail` message on failure) so the wizard can show a per-check status rather than failing
       the whole step. Always returns HTTP 200 — inspect each check's `ok` field.
-    operationId: checkEdgeOptimizePrerequisites
+    operationId: checkLlmoCloudFrontPrerequisites
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2620,7 +2620,7 @@ site-llmo-edge-optimize-prerequisites:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-connector-request'
+            $ref: '#/cloudfront-connector-request'
     responses:
       '200':
         description: Prerequisite check results (inspect each check's `ok` field).
@@ -2665,7 +2665,7 @@ site-llmo-edge-optimize-prerequisites:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-origins:
+site-llmo-cloudfront-origins:
   post:
     tags:
       - llmo
@@ -2674,7 +2674,7 @@ site-llmo-edge-optimize-origins:
       Used by the CloudFront "Deploy routing" wizard's "Review origins" step. Assumes the connector
       role, reads the distribution config (read-only), and returns its origins plus a flag
       indicating whether an Edge Optimize origin already exists.
-    operationId: fetchEdgeOptimizeOrigins
+    operationId: fetchLlmoCloudFrontOrigins
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2682,7 +2682,7 @@ site-llmo-edge-optimize-origins:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-distribution-request'
+            $ref: '#/cloudfront-distribution-request'
     responses:
       '200':
         description: The distribution's origins.
@@ -2727,7 +2727,7 @@ site-llmo-edge-optimize-origins:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-behaviors:
+site-llmo-cloudfront-behaviors:
   post:
     tags:
       - llmo
@@ -2737,7 +2737,7 @@ site-llmo-edge-optimize-behaviors:
       role, reads the distribution config (read-only), and returns the default cache behavior
       followed by each ordered cache behavior so the wizard can show how traffic is currently
       routed.
-    operationId: fetchEdgeOptimizeBehaviors
+    operationId: fetchLlmoCloudFrontBehaviors
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2745,7 +2745,7 @@ site-llmo-edge-optimize-behaviors:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-distribution-request'
+            $ref: '#/cloudfront-distribution-request'
     responses:
       '200':
         description: The distribution's cache behaviors.
@@ -2788,7 +2788,7 @@ site-llmo-edge-optimize-behaviors:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-create-origin:
+site-llmo-cloudfront-create-origin:
   post:
     tags:
       - llmo
@@ -2799,7 +2799,7 @@ site-llmo-edge-optimize-create-origin:
       pointing at the Edge Optimize target domain via UpdateDistribution. Idempotent — returns
       `created: false, alreadyExisted: true` when the origin is already present. (CloudFront deploy
       propagates in the background; this call does not block on it.)
-    operationId: createEdgeOptimizeOrigin
+    operationId: createLlmoCloudFrontOrigin
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2807,7 +2807,7 @@ site-llmo-edge-optimize-create-origin:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-distribution-request'
+            $ref: '#/cloudfront-distribution-request'
     responses:
       '200':
         description: Whether the Edge Optimize origin was created or already existed.
@@ -2843,7 +2843,7 @@ site-llmo-edge-optimize-create-origin:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-create-function:
+site-llmo-cloudfront-create-function:
   post:
     tags:
       - llmo
@@ -2852,7 +2852,7 @@ site-llmo-edge-optimize-create-function:
       Used by the CloudFront "Deploy routing" wizard's "Create routing function" step. Assumes the
       connector role, derives the distribution's default-behavior target origin, and creates (or
       updates) the `edgeoptimize-routing` CloudFront Function, then publishes it to LIVE. Idempotent.
-    operationId: createEdgeOptimizeRoutingFunction
+    operationId: createLlmoCloudFrontRoutingFunction
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2860,7 +2860,7 @@ site-llmo-edge-optimize-create-function:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-distribution-request'
+            $ref: '#/cloudfront-distribution-request'
     responses:
       '200':
         description: The published routing function.
@@ -2896,7 +2896,7 @@ site-llmo-edge-optimize-create-function:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-apply-cache:
+site-llmo-cloudfront-apply-cache:
   post:
     tags:
       - llmo
@@ -2906,7 +2906,7 @@ site-llmo-edge-optimize-apply-cache:
       connector role and ensures the Edge Optimize routing headers
       (`x-edgeoptimize-config`, `x-edgeoptimize-url`) are forwarded by the target behavior's
       (custom) cache policy, setting the policy MinTTL to 0. Idempotent.
-    operationId: applyEdgeOptimizeCache
+    operationId: applyLlmoCloudFrontCache
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2914,7 +2914,7 @@ site-llmo-edge-optimize-apply-cache:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-behavior-request'
+            $ref: '#/cloudfront-behavior-request'
     responses:
       '200':
         description: Whether the cache policy was updated.
@@ -2950,7 +2950,7 @@ site-llmo-edge-optimize-apply-cache:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-create-lambda:
+site-llmo-cloudfront-create-lambda:
   post:
     tags:
       - llmo
@@ -2961,7 +2961,7 @@ site-llmo-edge-optimize-create-lambda:
       bounded propagation wait), creates (or updates) the `edgeoptimize-origin` Lambda function, and
       publishes a numbered version (required for Lambda@Edge). Returns the versioned ARN the
       "Associate" step needs. Idempotent.
-    operationId: createEdgeOptimizeLambda
+    operationId: createLlmoCloudFrontLambda
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2969,7 +2969,7 @@ site-llmo-edge-optimize-create-lambda:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-connector-request'
+            $ref: '#/cloudfront-connector-request'
     responses:
       '200':
         description: The published Lambda@Edge function version.
@@ -3014,7 +3014,7 @@ site-llmo-edge-optimize-create-lambda:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-lambda-status:
+site-llmo-cloudfront-lambda-status:
   post:
     tags:
       - llmo
@@ -3024,7 +3024,7 @@ site-llmo-edge-optimize-lambda-status:
       timed-out create) whether the `edgeoptimize-origin` Lambda@Edge function already exists and
       has a published numbered version. Read-only — assumes the connector role and inspects the
       function configuration + versions.
-    operationId: fetchEdgeOptimizeLambdaStatus
+    operationId: fetchLlmoCloudFrontLambdaStatus
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -3032,7 +3032,7 @@ site-llmo-edge-optimize-lambda-status:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-connector-request'
+            $ref: '#/cloudfront-connector-request'
     responses:
       '200':
         description: The Lambda@Edge function status.
@@ -3077,7 +3077,7 @@ site-llmo-edge-optimize-lambda-status:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-apply-associations:
+site-llmo-cloudfront-apply-associations:
   post:
     tags:
       - llmo
@@ -3088,7 +3088,7 @@ site-llmo-edge-optimize-apply-associations:
       `edgeoptimize-origin` Lambda@Edge (origin-request and origin-response, versioned ARN) onto the
       user-selected cache behavior via UpdateDistribution. Surfaces a clear error if a conflicting
       viewer-request function is already associated.
-    operationId: applyEdgeOptimizeAssociations
+    operationId: applyLlmoCloudFrontAssociations
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -3096,7 +3096,7 @@ site-llmo-edge-optimize-apply-associations:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-associate-request'
+            $ref: '#/cloudfront-associate-request'
     responses:
       '200':
         description: The applied associations.
@@ -3128,7 +3128,7 @@ site-llmo-edge-optimize-apply-associations:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-verify:
+site-llmo-cloudfront-verify:
   post:
     tags:
       - llmo
@@ -3139,7 +3139,7 @@ site-llmo-edge-optimize-verify:
       `x-edgeoptimize-*` response headers. `passed` is true only when the bot response carries
       `x-edgeoptimize-request-id` (page served from the Edge Optimize prerender cache) and the human
       response is not optimized. `x-edgeoptimize-fo` means failover to origin — NOT success.
-    operationId: verifyEdgeOptimizeRouting
+    operationId: verifyLlmoCloudFrontRouting
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -3147,7 +3147,7 @@ site-llmo-edge-optimize-verify:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-distribution-request'
+            $ref: '#/cloudfront-distribution-request'
     responses:
       '200':
         description: The verification result (inspect `passed`).
@@ -3189,7 +3189,7 @@ site-llmo-edge-optimize-verify:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-deploy:
+site-llmo-cloudfront-deploy:
   post:
     tags:
       - llmo
@@ -3206,7 +3206,7 @@ site-llmo-edge-optimize-deploy:
       explicitly; the Edge Optimize API key and forwarded host are derived server-side from the site.
       Always returns HTTP 200 unless validation or the access gate fails; a step that errors is
       surfaced on its own row with `status: error` rather than failing the whole response.
-    operationId: deployEdgeOptimize
+    operationId: deployLlmoCloudFront
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -3214,7 +3214,7 @@ site-llmo-edge-optimize-deploy:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-deploy-request'
+            $ref: '#/cloudfront-deploy-request'
     responses:
       '200':
         description: The current per-step deploy status.
@@ -3298,7 +3298,7 @@ site-llmo-edge-optimize-deploy:
     security:
       - api_key: [ ]
 
-site-llmo-edge-optimize-plan:
+site-llmo-cloudfront-plan:
   post:
     tags:
       - llmo
@@ -3312,7 +3312,7 @@ site-llmo-edge-optimize-plan:
       Optimize API key and forwarded host are derived server-side from the site (env-aware via the
       optional `environment` flag). The response also includes `targetDomain` — the resolved host
       the backend will route to for the chosen environment.
-    operationId: planEdgeOptimize
+    operationId: planLlmoCloudFront
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -3320,7 +3320,7 @@ site-llmo-edge-optimize-plan:
       content:
         application/json:
           schema:
-            $ref: '#/edge-optimize-plan-request'
+            $ref: '#/cloudfront-plan-request'
     responses:
       '200':
         description: The per-step plan plus whether the deploy can proceed.
@@ -3383,7 +3383,7 @@ site-llmo-edge-optimize-plan:
     security:
       - api_key: [ ]
 
-edge-optimize-connector-request:
+cloudfront-connector-request:
   type: object
   required:
     - accountId
@@ -3399,7 +3399,7 @@ edge-optimize-connector-request:
       description: Per-session external ID baked into the connector role's trust policy.
       example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
 
-edge-optimize-distribution-request:
+cloudfront-distribution-request:
   type: object
   required:
     - accountId
@@ -3420,7 +3420,7 @@ edge-optimize-distribution-request:
       description: The CloudFront distribution ID to inspect.
       example: E2EXAMPLE123
 
-edge-optimize-behavior-request:
+cloudfront-behavior-request:
   type: object
   required:
     - accountId
@@ -3446,7 +3446,7 @@ edge-optimize-behavior-request:
       default: default
       example: /api/*
 
-edge-optimize-associate-request:
+cloudfront-associate-request:
   type: object
   required:
     - accountId
@@ -3477,7 +3477,7 @@ edge-optimize-associate-request:
       description: The published, versioned Lambda@Edge ARN from the create-lambda step.
       example: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin:1
 
-edge-optimize-deploy-request:
+cloudfront-deploy-request:
   type: object
   required:
     - accountId
@@ -3521,7 +3521,7 @@ edge-optimize-deploy-request:
       default: production
       example: production
 
-edge-optimize-plan-request:
+cloudfront-plan-request:
   type: object
   required:
     - accountId
