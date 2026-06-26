@@ -19,6 +19,7 @@ import {
   badRequest,
   notFound,
   ok,
+  noContent,
   createResponse,
   forbidden,
   internalServerError,
@@ -271,7 +272,7 @@ function BrandsController(ctx, log, env) {
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
       const brands = await brandClient.getBrandsForOrganization(imsOrgId, `Bearer ${imsUserToken}`);
-      return ok(brands);
+      return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
       return createErrorResponse(error);
@@ -359,7 +360,7 @@ function BrandsController(ctx, log, env) {
             govConfig,
           );
           if (brandGovGuidelines) {
-            return ok(brandGovGuidelines);
+            return createResponse(brandGovGuidelines, 200);
           }
         } catch (govError) {
           log.warn(`Brand Governance Agent failed for site ${siteId}, falling back to Brand Publish: ${govError.message}`);
@@ -379,7 +380,7 @@ function BrandsController(ctx, log, env) {
         imsOrgId,
         imsConfig,
       );
-      return ok(brandGuidelines);
+      return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
       return createErrorResponse(error);
@@ -447,7 +448,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -678,7 +679,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Prompt not found: ${promptId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
       return createErrorResponse(error);
@@ -737,7 +738,7 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -793,7 +794,7 @@ function BrandsController(ctx, log, env) {
       }
 
       const results = await checkPromptsExist({ brandUuid, prompts, postgrestClient });
-      return ok({ results });
+      return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
       return createErrorResponse(error);
@@ -840,7 +841,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(stats);
+      return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
       return createErrorResponse(error);
@@ -993,7 +994,7 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const brands = await listBrands(spaceCatId, postgrestClient, { status });
-      return ok({ brands });
+      return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1028,7 +1029,7 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       // eslint-disable-next-line max-len
       const categories = await listCategories({ organizationId: spaceCatId, postgrestClient, status });
-      return ok({ categories });
+      return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1209,7 +1210,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Category not found: ${categoryId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1247,7 +1248,7 @@ function BrandsController(ctx, log, env) {
       const topics = await listTopics({
         organizationId: spaceCatId, postgrestClient, status, brandId,
       });
-      return ok({ topics });
+      return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1399,7 +1400,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Topic not found: ${topicId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1999,7 +2000,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Brand not found: ${brandId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);

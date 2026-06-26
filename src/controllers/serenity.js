@@ -13,7 +13,7 @@
 // @ts-check
 
 import {
-  createResponse, forbidden, internalServerError, notFound, ok,
+  createResponse, forbidden, internalServerError, noContent, notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -353,7 +353,7 @@ function SerenityController(context, log, env) {
           auth.workspaceId,
           parsedQuery(ctx),
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -377,7 +377,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -441,7 +441,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -463,7 +463,7 @@ function SerenityController(context, log, env) {
           auth.brandUuid,
           auth.workspaceId,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -494,7 +494,7 @@ function SerenityController(context, log, env) {
           log,
         )
         : await handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode);
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -594,15 +594,18 @@ function SerenityController(context, log, env) {
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
       const languageCode = pLang ? String(pLang).toLowerCase() : null;
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'subworkspace'
-        ? await handleDeleteMarketSubworkspace(
+      // Both delete handlers resolve to { status: 204 } on success (errors throw
+      // → mapError); the response is an empty 204 either way, so await for the
+      // upstream delete side effect and discard the result.
+      await (auth.mode === 'subworkspace'
+        ? handleDeleteMarketSubworkspace(
           transport,
           auth.workspaceId,
           geoTargetId,
           languageCode,
           log,
         )
-        : await handleDeleteMarket(
+        : handleDeleteMarket(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
@@ -610,8 +613,8 @@ function SerenityController(context, log, env) {
           geoTargetId,
           languageCode,
           log,
-        );
-      return createResponse(null, result.status);
+        ));
+      return noContent();
     } catch (e) {
       return mapError(e, log);
     }
@@ -635,7 +638,7 @@ function SerenityController(context, log, env) {
           parsedQuery(ctx),
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -658,7 +661,7 @@ function SerenityController(context, log, env) {
           auth.workspaceId,
           parsedQuery(ctx),
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -695,7 +698,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const result = await listGlobalModelCatalog(transport);
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -731,7 +734,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const result = await listLanguageCatalog(transport);
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -755,7 +758,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -1205,7 +1208,7 @@ function SerenityController(context, log, env) {
         decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
         status: 'pending',
       });
-      return ok({ brandId: auth.brandUuid, status: 'pending' });
+      return createResponse({ brandId: auth.brandUuid, status: 'pending' }, 200);
     } catch (e) {
       return mapError(e, log);
     }
