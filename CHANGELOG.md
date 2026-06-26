@@ -1,3 +1,10 @@
+# [1.605.0](https://github.com/adobe/spacecat-api-service/compare/v1.604.1...v1.605.0) (2026-06-26)
+
+
+### Features
+
+* **sites:** scope latest-metrics RUM to locale path prefix ([#2670](https://github.com/adobe/spacecat-api-service/issues/2670)) ([06342bf](https://github.com/adobe/spacecat-api-service/commit/06342bf2ab925b8357b4e330a04921c96c0eaf53)), closes [#1707](https://github.com/adobe/spacecat-api-service/issues/1707) [#1707](https://github.com/adobe/spacecat-api-service/issues/1707)
+
 ## [1.604.1](https://github.com/adobe/spacecat-api-service/compare/v1.604.0...v1.604.1) (2026-06-26)
 
 
