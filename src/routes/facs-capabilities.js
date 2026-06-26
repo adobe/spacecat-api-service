@@ -140,7 +140,7 @@ const routeFacsCapabilities = {
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
     // LLMO CloudFront "Optimize at Edge" onboarding wizard — admin-only
-    // (gateLlmoCloudFrontWizard requires LLMO admin); cross-account control-plane, not a
+    // (gateEdgeOptimizeWizard requires LLMO admin); cross-account control-plane, not a
     // customer FACS surface.
     'POST /sites/:siteId/llmo/onboarding/cloudfront/bootstrap-url',
     'POST /sites/:siteId/llmo/onboarding/cloudfront/connect',

@@ -633,35 +633,35 @@ paths:
   /sites/{siteId}/llmo/edge-optimize-config/stage:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
   /sites/{siteId}/llmo/onboarding/cloudfront/bootstrap-url:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-bootstrap-url'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-bootstrap-url'
   /sites/{siteId}/llmo/onboarding/cloudfront/connect:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-connect'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-connect'
   /sites/{siteId}/llmo/onboarding/cloudfront/distributions:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-distributions'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-distributions'
   /sites/{siteId}/llmo/onboarding/cloudfront/prerequisites:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-prerequisites'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-prerequisites'
   /sites/{siteId}/llmo/onboarding/cloudfront/origins:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-origins'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-origins'
   /sites/{siteId}/llmo/onboarding/cloudfront/behaviors:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-behaviors'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-behaviors'
   /sites/{siteId}/llmo/onboarding/cloudfront/create-origin:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-origin'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-create-origin'
   /sites/{siteId}/llmo/onboarding/cloudfront/create-function:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-function'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-create-function'
   /sites/{siteId}/llmo/onboarding/cloudfront/apply-cache:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-cache'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-apply-cache'
   /sites/{siteId}/llmo/onboarding/cloudfront/create-lambda:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-lambda'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-create-lambda'
   /sites/{siteId}/llmo/onboarding/cloudfront/lambda-status:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-lambda-status'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-lambda-status'
   /sites/{siteId}/llmo/onboarding/cloudfront/apply-associations:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-associations'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-apply-associations'
   /sites/{siteId}/llmo/onboarding/cloudfront/verify:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-verify'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-verify'
   /sites/{siteId}/llmo/onboarding/cloudfront/deploy:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-deploy'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-deploy'
   /sites/{siteId}/llmo/onboarding/cloudfront/plan:
-    $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-plan'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
