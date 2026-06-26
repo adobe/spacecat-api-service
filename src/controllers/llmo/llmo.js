@@ -2243,7 +2243,7 @@ function LlmoController(ctx) {
   };
 
   /**
-   * POST /sites/{siteId}/llmo/edge-optimize-bootstrap-url
+   * POST /sites/{siteId}/llmo/onboarding/cloudfront/bootstrap-url
    * Builds a one-click CloudFormation quick-create URL (with a server-side
    * presigned template URL) the customer uses to create the cross-account
    * connector role in their own AWS account. Presigning runs with the service
@@ -2252,7 +2252,7 @@ function LlmoController(ctx) {
    * @param {object} context - Request context
    * @returns {Promise<Response>} Bootstrap details + CloudFormation quick-create URL
    */
-  const getEdgeOptimizeBootstrapUrl = async (context) => {
+  const createEdgeOptimizeBootstrapUrl = async (context) => {
     const {
       log, dataAccess, env, s3,
     } = context;
@@ -2333,7 +2333,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Failed to generate edge optimize bootstrap URL for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to generate the edge optimize bootstrap URL, please try again');
     }
   };
 
@@ -2354,21 +2354,40 @@ function LlmoController(ctx) {
     return { site };
   };
 
+  // Shared input validation for the CloudFront wizard endpoints that act through the
+  // cross-account connector role. Parses + validates the caller-supplied AWS account id and
+  // per-session external id (and optionally the CloudFront distribution id). Returns
+  // `{ accountId, externalId, distributionId, error }` where `error` is a badRequest Response
+  // when validation fails (undefined otherwise) — keeping the messages/status identical to the
+  // previously inlined checks.
+  const parseEoCredentials = (context, { requireDistribution = false } = {}) => {
+    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const externalId = String(context.data?.externalId || '').trim();
+    const distributionId = String(context.data?.distributionId || '').trim();
+
+    if (accountId.length !== 12) {
+      return { error: badRequest('accountId must be a 12-digit AWS account ID') };
+    }
+    if (!hasText(externalId)) {
+      return { error: badRequest('externalId is required') };
+    }
+    if (requireDistribution && !hasText(distributionId)) {
+      return { error: badRequest('distributionId is required') };
+    }
+    return { accountId, externalId, distributionId };
+  };
+
   // Verify the customer's cross-account connector role is assumable. Used by the wizard's
   // "Allow access" step, which polls this after the customer creates the role via CloudFormation.
   const connectEdgeOptimize = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
+    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2395,19 +2414,15 @@ function LlmoController(ctx) {
 
   // List the customer's CloudFront distributions (read-only) via the connector role, so the
   // wizard's "Choose distribution" step can let the customer pick one to configure.
-  const getEdgeOptimizeDistributions = async (context) => {
+  const listEdgeOptimizeDistributions = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
+    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2421,7 +2436,7 @@ function LlmoController(ctx) {
       return ok({ distributions });
     } catch (error) {
       log.error(`Failed to list CloudFront distributions for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to list CloudFront distributions, please try again');
     }
   };
 
@@ -2432,15 +2447,11 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
+    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2472,29 +2483,23 @@ function LlmoController(ctx) {
       return ok({ checks: [connectorRoleCheck, cloudFrontReadCheck] });
     } catch (error) {
       log.error(`Failed to check edge optimize prerequisites for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to check edge optimize prerequisites, please try again');
     }
   };
 
   // Read the origins configured on a customer's CloudFront distribution so the wizard's
   // "Review origins" step can show them and flag whether an Edge Optimize origin already exists.
-  const getEdgeOptimizeOrigins = async (context) => {
+  const fetchEdgeOptimizeOrigins = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2510,29 +2515,23 @@ function LlmoController(ctx) {
       return ok({ origins, hasEdgeOptimizeOrigin });
     } catch (error) {
       log.error(`Failed to read CloudFront origins for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to read CloudFront origins, please try again');
     }
   };
 
   // Read the cache behaviors (default + ordered) configured on a customer's CloudFront
   // distribution so the wizard's "Review routing" step can show how traffic is currently routed.
-  const getEdgeOptimizeBehaviors = async (context) => {
+  const fetchEdgeOptimizeBehaviors = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2554,7 +2553,7 @@ function LlmoController(ctx) {
       return ok({ behaviors });
     } catch (error) {
       log.error(`Failed to read CloudFront behaviors for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to read CloudFront behaviors, please try again');
     }
   };
 
@@ -2623,21 +2622,15 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
     if (environment !== 'production' && environment !== 'stage') {
       return badRequest("environment must be 'production' or 'stage'");
@@ -2676,7 +2669,7 @@ function LlmoController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(`Failed to create CloudFront Edge Optimize origin for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to create the edge optimize origin, please try again');
     }
   };
 
@@ -2686,22 +2679,16 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const targetedPaths = Array.isArray(context.data?.targetedPaths)
       ? context.data.targetedPaths
       : null;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2728,7 +2715,7 @@ function LlmoController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(`Failed to create CloudFront routing function for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to create the edge optimize routing function, please try again');
     }
   };
 
@@ -2738,20 +2725,14 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const pathPattern = String(context.data?.pathPattern || '').trim() || 'default';
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2766,7 +2747,7 @@ function LlmoController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(`Failed to apply CloudFront cache headers for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to apply edge optimize cache headers, please try again');
     }
   };
 
@@ -2776,20 +2757,13 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-
-    const distributionId = String(context.data?.distributionId || '').trim();
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2810,30 +2784,23 @@ function LlmoController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(`Failed to create Lambda@Edge function for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to create the edge optimize Lambda@Edge function, please try again');
     }
   };
 
   // Read-only status for the Lambda@Edge function so the wizard can detect on entry (and poll
   // after a slow/timed-out create) whether it already exists with a published version.
-  const getEdgeOptimizeLambdaStatusHandler = async (context) => {
+  const fetchEdgeOptimizeLambdaStatusHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-
-    const distributionId = String(context.data?.distributionId || '').trim();
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2847,7 +2814,7 @@ function LlmoController(ctx) {
       return ok(status);
     } catch (error) {
       log.error(`Failed to read Lambda@Edge status for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to read the edge optimize Lambda@Edge status, please try again');
     }
   };
 
@@ -2857,24 +2824,25 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const pathPattern = String(context.data?.pathPattern || '').trim() || 'default';
     const lambdaVersionArn = String(context.data?.lambdaVersionArn || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
     if (!hasText(lambdaVersionArn)) {
       return badRequest('lambdaVersionArn is required');
+    }
+    // Lambda@Edge requires a published, versioned function ARN in us-east-1; the account segment
+    // must also match the caller's AWS account so we never associate a function from elsewhere.
+    const lambdaEdgeArnPattern = /^arn:aws:lambda:us-east-1:\d{12}:function:[A-Za-z0-9_-]+:\d+$/;
+    if (!lambdaEdgeArnPattern.test(lambdaVersionArn)
+      || lambdaVersionArn.split(':')[4] !== accountId) {
+      return badRequest('lambdaVersionArn must be a versioned us-east-1 Lambda ARN');
     }
 
     try {
@@ -2894,7 +2862,7 @@ function LlmoController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(`Failed to associate CloudFront routing for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to associate edge optimize routing, please try again');
     }
   };
 
@@ -2904,19 +2872,13 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
 
     try {
@@ -2953,7 +2915,7 @@ function LlmoController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(`Failed to verify CloudFront routing for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to verify edge optimize routing, please try again');
     }
   };
 
@@ -2967,23 +2929,17 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const originId = String(context.data?.originId || '').trim();
     const behavior = String(context.data?.behavior || '').trim();
     const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
     if (!hasText(originId)) {
       return badRequest('originId is required');
@@ -3030,7 +2986,7 @@ function LlmoController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(`[edge-optimize-deploy] Failed for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to deploy edge optimize routing, please try again');
     }
   };
 
@@ -3042,23 +2998,17 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
-    const distributionId = String(context.data?.distributionId || '').trim();
     const originId = String(context.data?.originId || '').trim();
     const behavior = String(context.data?.behavior || '').trim();
     const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
 
-    if (accountId.length !== 12) {
-      return badRequest('accountId must be a 12-digit AWS account ID');
-    }
-    if (!hasText(externalId)) {
-      return badRequest('externalId is required');
-    }
-    if (!hasText(distributionId)) {
-      return badRequest('distributionId is required');
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = parseEoCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
     }
     if (!hasText(originId)) {
       return badRequest('originId is required');
@@ -3105,16 +3055,16 @@ function LlmoController(ctx) {
       return ok({ ...result, targetDomain: forwardedHost });
     } catch (error) {
       log.error(`[edge-optimize-plan] Failed for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to preview edge optimize routing, please try again');
     }
   };
 
   /**
-   * GET /sites/{siteId}/llmo/edge-optimize/permissions
+   * GET /sites/{siteId}/llmo/onboarding/cloudfront/permissions
    * Powers the wizard's "View Permissions" panel. Returns a curated, human-friendly manifest of the
    * AWS permissions the connector role grants (read from a static JSON object in the template S3
    * bucket) plus the Adobe principal ARN that will assume the role. Read-only — gated on site
-   * access + LLMO admin (like getEdgeOptimizeBootstrapUrl). No cross-account calls.
+   * access + LLMO admin (like createEdgeOptimizeBootstrapUrl). No cross-account calls.
    * @param {object} context - Request context
    * @returns {Promise<Response>} { adobeAccount, manifest } or a 400 on a config/read failure.
    */
@@ -3176,22 +3126,22 @@ function LlmoController(ctx) {
       return ok({ adobeAccount, manifest });
     } catch (error) {
       log.error(`Failed to read edge optimize permissions for site ${siteId}:`, error);
-      return badRequest(cleanupHeaderValue(error.message));
+      return internalServerError('Failed to read edge optimize permissions, please try again');
     }
   };
 
   return {
-    getEdgeOptimizeBootstrapUrl,
+    createEdgeOptimizeBootstrapUrl,
     connectEdgeOptimize,
-    getEdgeOptimizeDistributions,
+    listEdgeOptimizeDistributions,
     checkEdgeOptimizePrerequisites,
-    getEdgeOptimizeOrigins,
-    getEdgeOptimizeBehaviors,
+    fetchEdgeOptimizeOrigins,
+    fetchEdgeOptimizeBehaviors,
     createEdgeOptimizeOrigin: createEdgeOptimizeOriginHandler,
     createEdgeOptimizeRoutingFunction: createEdgeOptimizeRoutingFunctionHandler,
     applyEdgeOptimizeCache: applyEdgeOptimizeCacheHandler,
     createEdgeOptimizeLambda: createEdgeOptimizeLambdaHandler,
-    getEdgeOptimizeLambdaStatus: getEdgeOptimizeLambdaStatusHandler,
+    fetchEdgeOptimizeLambdaStatus: fetchEdgeOptimizeLambdaStatusHandler,
     applyEdgeOptimizeAssociations: applyEdgeOptimizeAssociationsHandler,
     verifyEdgeOptimizeRouting: verifyEdgeOptimizeRoutingHandler,
     deployEdgeOptimize: deployEdgeOptimizeHandler,

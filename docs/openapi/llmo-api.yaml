@@ -2408,7 +2408,7 @@ site-llmo-edge-optimize-bootstrap-url:
       connector role in their own AWS account. The template bucket stays private —
       presigning is done with the service execution role — so no public S3 endpoint
       is required and the customer needs no S3 access of their own.
-    operationId: getEdgeOptimizeBootstrapUrl
+    operationId: createEdgeOptimizeBootstrapUrl
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2542,7 +2542,7 @@ site-llmo-edge-optimize-distributions:
       Used by the CloudFront "Deploy routing" wizard's "Choose distribution" step. Assumes the
       cross-account connector role and lists the customer's CloudFront distributions (read-only)
       so the wizard can let the customer pick one to configure.
-    operationId: getEdgeOptimizeDistributions
+    operationId: listEdgeOptimizeDistributions
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2674,7 +2674,7 @@ site-llmo-edge-optimize-origins:
       Used by the CloudFront "Deploy routing" wizard's "Review origins" step. Assumes the connector
       role, reads the distribution config (read-only), and returns its origins plus a flag
       indicating whether an Edge Optimize origin already exists.
-    operationId: getEdgeOptimizeOrigins
+    operationId: fetchEdgeOptimizeOrigins
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -2737,7 +2737,7 @@ site-llmo-edge-optimize-behaviors:
       role, reads the distribution config (read-only), and returns the default cache behavior
       followed by each ordered cache behavior so the wizard can show how traffic is currently
       routed.
-    operationId: getEdgeOptimizeBehaviors
+    operationId: fetchEdgeOptimizeBehaviors
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:
@@ -3024,7 +3024,7 @@ site-llmo-edge-optimize-lambda-status:
       timed-out create) whether the `edgeoptimize-origin` Lambda@Edge function already exists and
       has a published numbered version. Read-only — assumes the connector role and inspects the
       function configuration + versions.
-    operationId: getEdgeOptimizeLambdaStatus
+    operationId: fetchEdgeOptimizeLambdaStatus
     parameters:
       - $ref: './parameters.yaml#/siteId'
     requestBody:

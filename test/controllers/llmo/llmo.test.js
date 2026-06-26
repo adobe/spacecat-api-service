@@ -7610,7 +7610,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('getEdgeOptimizeBootstrapUrl', () => {
+  describe('createEdgeOptimizeBootstrapUrl', () => {
     let bootstrapContext;
     let getSignedUrlStub;
 
@@ -7633,7 +7633,7 @@ describe('LlmoController', () => {
     });
 
     it('returns a quick-create URL with a presigned template for a valid account', async () => {
-      const result = await controller.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await controller.createEdgeOptimizeBootstrapUrl(bootstrapContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7646,7 +7646,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.getEdgeOptimizeBootstrapUrl({ ...bootstrapContext, data: { accountId: '123' } });
+      const result = await controller.createEdgeOptimizeBootstrapUrl({ ...bootstrapContext, data: { accountId: '123' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -7657,7 +7657,10 @@ describe('LlmoController', () => {
       // While the TEMPORARY hardcoded bucket default is in place the bucket is always
       // set, so the "not configured" guard is exercised via the missing S3 client.
       // TODO: restore the `env: {}` (empty-bucket) variant once the temp default is removed.
-      const result = await controller.getEdgeOptimizeBootstrapUrl({ ...bootstrapContext, s3: {} });
+      const result = await controller.createEdgeOptimizeBootstrapUrl({
+        ...bootstrapContext,
+        s3: {},
+      });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -7667,7 +7670,7 @@ describe('LlmoController', () => {
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await controller.createEdgeOptimizeBootstrapUrl(bootstrapContext);
 
       expect(result.status).to.equal(404);
     });
@@ -7675,7 +7678,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await deniedController.createEdgeOptimizeBootstrapUrl(bootstrapContext);
 
       expect(result.status).to.equal(403);
     });
@@ -7688,12 +7691,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .getEdgeOptimizeBootstrapUrl(bootstrapContext);
+        .createEdgeOptimizeBootstrapUrl(bootstrapContext);
       expect(result.status).to.equal(403);
     });
 
     it('returns 400 when the trusted principal is not configured', async () => {
-      const result = await controller.getEdgeOptimizeBootstrapUrl({
+      const result = await controller.createEdgeOptimizeBootstrapUrl({
         ...bootstrapContext,
         env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage' },
       });
@@ -7703,14 +7706,15 @@ describe('LlmoController', () => {
       expect(body.message).to.include('missing trusted principal');
     });
 
-    it('returns 400 when presigning the template fails', async () => {
+    it('returns 500 with a generic message when presigning the template fails', async () => {
       getSignedUrlStub.rejects(new Error('presign boom'));
 
-      const result = await controller.getEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await controller.createEdgeOptimizeBootstrapUrl(bootstrapContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('presign boom');
+      expect(body.message).to.not.include('presign boom');
+      expect(body.message).to.include('Failed to generate the edge optimize bootstrap URL');
     });
   });
 
@@ -7809,7 +7813,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('getEdgeOptimizeDistributions', () => {
+  describe('listEdgeOptimizeDistributions', () => {
     let distributionsContext;
 
     beforeEach(() => {
@@ -7837,7 +7841,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the list of CloudFront distributions', async () => {
-      const result = await controller.getEdgeOptimizeDistributions(distributionsContext);
+      const result = await controller.listEdgeOptimizeDistributions(distributionsContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7848,31 +7852,32 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.getEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.listEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '123', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.getEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '120569600543' } });
+      const result = await controller.listEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '120569600543' } });
 
       expect(result.status).to.equal(400);
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       listCloudFrontDistributionsStub = sinon.stub().rejects(new Error('ListDistributions failed'));
 
-      const result = await controller.getEdgeOptimizeDistributions(distributionsContext);
+      const result = await controller.listEdgeOptimizeDistributions(distributionsContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('ListDistributions failed');
+      expect(body.message).to.not.include('ListDistributions failed');
+      expect(body.message).to.include('Failed to list CloudFront distributions');
     });
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.getEdgeOptimizeDistributions(distributionsContext);
+      const result = await controller.listEdgeOptimizeDistributions(distributionsContext);
 
       expect(result.status).to.equal(404);
     });
@@ -7880,7 +7885,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.getEdgeOptimizeDistributions(distributionsContext);
+      const result = await deniedController.listEdgeOptimizeDistributions(distributionsContext);
 
       expect(result.status).to.equal(403);
     });
@@ -7983,18 +7988,19 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('returns 400 when an unexpected error occurs', async () => {
+    it('returns 500 with a generic message when an unexpected error occurs', async () => {
       mockDataAccess.Site.findById.rejects(new Error('db boom'));
 
       const result = await controller.checkEdgeOptimizePrerequisites(prereqContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('db boom');
+      expect(body.message).to.not.include('db boom');
+      expect(body.message).to.include('Failed to check edge optimize prerequisites');
     });
   });
 
-  describe('getEdgeOptimizeOrigins', () => {
+  describe('fetchEdgeOptimizeOrigins', () => {
     let originsContext;
 
     beforeEach(() => {
@@ -8023,7 +8029,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the origins and hasEdgeOptimizeOrigin false when none match', async () => {
-      const result = await controller.getEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8043,7 +8049,7 @@ describe('LlmoController', () => {
         cacheBehaviors: [],
       });
 
-      const result = await controller.getEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
 
       const body = await result.json();
       expect(body.hasEdgeOptimizeOrigin).to.equal(true);
@@ -8058,46 +8064,47 @@ describe('LlmoController', () => {
         cacheBehaviors: [],
       });
 
-      const result = await controller.getEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
 
       const body = await result.json();
       expect(body.hasEdgeOptimizeOrigin).to.equal(true);
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.getEdgeOptimizeOrigins({ ...originsContext, data: { ...originsContext.data, accountId: '123' } });
+      const result = await controller.fetchEdgeOptimizeOrigins({ ...originsContext, data: { ...originsContext.data, accountId: '123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.getEdgeOptimizeOrigins({ ...originsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.fetchEdgeOptimizeOrigins({ ...originsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.getEdgeOptimizeOrigins({ ...originsContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.fetchEdgeOptimizeOrigins({ ...originsContext, data: { accountId: '120569600543', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('distributionId');
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       getDistributionConfigStub = sinon.stub().rejects(new Error('GetDistributionConfig failed'));
 
-      const result = await controller.getEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('GetDistributionConfig failed');
+      expect(body.message).to.not.include('GetDistributionConfig failed');
+      expect(body.message).to.include('Failed to read CloudFront origins');
     });
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.getEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
 
       expect(result.status).to.equal(404);
     });
@@ -8105,7 +8112,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.getEdgeOptimizeOrigins(originsContext);
+      const result = await deniedController.fetchEdgeOptimizeOrigins(originsContext);
 
       expect(result.status).to.equal(403);
     });
@@ -8119,13 +8126,13 @@ describe('LlmoController', () => {
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.getEdgeOptimizeOrigins(originsContext);
+      const result = await controllerNoAdmin.fetchEdgeOptimizeOrigins(originsContext);
 
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('getEdgeOptimizeBehaviors', () => {
+  describe('fetchEdgeOptimizeBehaviors', () => {
     let behaviorsContext;
 
     beforeEach(() => {
@@ -8154,7 +8161,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the default behavior plus ordered cache behaviors', async () => {
-      const result = await controller.getEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8172,7 +8179,7 @@ describe('LlmoController', () => {
         cacheBehaviors: [{ pathPattern: '/api/*', targetOriginId: 'origin-api' }],
       });
 
-      const result = await controller.getEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
 
       const body = await result.json();
       expect(body.behaviors).to.deep.equal([
@@ -8181,39 +8188,40 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.getEdgeOptimizeBehaviors({ ...behaviorsContext, data: { ...behaviorsContext.data, accountId: '123' } });
+      const result = await controller.fetchEdgeOptimizeBehaviors({ ...behaviorsContext, data: { ...behaviorsContext.data, accountId: '123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.getEdgeOptimizeBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.fetchEdgeOptimizeBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.getEdgeOptimizeBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.fetchEdgeOptimizeBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('distributionId');
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       getDistributionConfigStub = sinon.stub().rejects(new Error('GetDistributionConfig failed'));
 
-      const result = await controller.getEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('GetDistributionConfig failed');
+      expect(body.message).to.not.include('GetDistributionConfig failed');
+      expect(body.message).to.include('Failed to read CloudFront behaviors');
     });
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.getEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(404);
     });
@@ -8221,7 +8229,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.getEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await deniedController.fetchEdgeOptimizeBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(403);
     });
@@ -8235,7 +8243,7 @@ describe('LlmoController', () => {
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.getEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controllerNoAdmin.fetchEdgeOptimizeBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(403);
     });
@@ -8354,12 +8362,13 @@ describe('LlmoController', () => {
       expect(body.message).to.include('distributionId');
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       createEdgeOptimizeOriginStub = sinon.stub().rejects(new Error('UpdateDistribution failed'));
       const result = await controller.createEdgeOptimizeOrigin(originContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('UpdateDistribution failed');
+      expect(body.message).to.not.include('UpdateDistribution failed');
+      expect(body.message).to.include('Failed to create the edge optimize origin');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -8450,12 +8459,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       createEdgeOptimizeRoutingFunctionStub = sinon.stub().rejects(new Error('CreateFunction failed'));
       const result = await controller.createEdgeOptimizeRoutingFunction(functionContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('CreateFunction failed');
+      expect(body.message).to.not.include('CreateFunction failed');
+      expect(body.message).to.include('Failed to create the edge optimize routing function');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -8540,12 +8550,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       applyEdgeOptimizeCacheHeadersStub = sinon.stub().rejects(new Error('UpdateCachePolicy failed'));
       const result = await controller.applyEdgeOptimizeCache(cacheContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('UpdateCachePolicy failed');
+      expect(body.message).to.not.include('UpdateCachePolicy failed');
+      expect(body.message).to.include('Failed to apply edge optimize cache headers');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -8626,12 +8637,13 @@ describe('LlmoController', () => {
       expect(body.message).to.include('distributionId is required');
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       createEdgeOptimizeLambdaStub = sinon.stub().rejects(new Error('CreateRole failed'));
       const result = await controller.createEdgeOptimizeLambda(lambdaContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('CreateRole failed');
+      expect(body.message).to.not.include('CreateRole failed');
+      expect(body.message).to.include('Failed to create the edge optimize Lambda@Edge function');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -8659,7 +8671,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('getEdgeOptimizeLambdaStatus', () => {
+  describe('fetchEdgeOptimizeLambdaStatus', () => {
     let statusContext;
 
     beforeEach(() => {
@@ -8680,7 +8692,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the Lambda@Edge status with the versioned ARN', async () => {
-      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
+      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8691,7 +8703,7 @@ describe('LlmoController', () => {
 
     it('returns exists:false when the function is absent', async () => {
       getEdgeOptimizeLambdaStatusStub = sinon.stub().resolves({ exists: false, versionArn: null });
-      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
+      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.exists).to.equal(false);
@@ -8699,17 +8711,17 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.getEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.fetchEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '123', externalId: 'ext' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.getEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '120569600543' } });
+      const result = await controller.fetchEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distribution id is missing', async () => {
-      const result = await controller.getEdgeOptimizeLambdaStatus({
+      const result = await controller.fetchEdgeOptimizeLambdaStatus({
         ...statusContext,
         data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
       });
@@ -8718,21 +8730,24 @@ describe('LlmoController', () => {
       expect(body.message).to.include('distributionId is required');
     });
 
-    it('returns 400 when the AWS call fails', async () => {
+    it('returns 500 with a generic message when the AWS call fails', async () => {
       getEdgeOptimizeLambdaStatusStub = sinon.stub().rejects(new Error('ListVersions failed'));
-      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
-      expect(result.status).to.equal(400);
+      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.not.include('ListVersions failed');
+      expect(body.message).to.include('Failed to read the edge optimize Lambda@Edge status');
     });
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.getEdgeOptimizeLambdaStatus(statusContext);
+      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.getEdgeOptimizeLambdaStatus(statusContext);
+      const result = await deniedController.fetchEdgeOptimizeLambdaStatus(statusContext);
       expect(result.status).to.equal(403);
     });
   });
@@ -8803,12 +8818,43 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns 400 when the AWS call fails (conflict)', async () => {
-      applyEdgeOptimizeAssociationsStub = sinon.stub().rejects(new Error('already has a different viewer-request function'));
-      const result = await controller.applyEdgeOptimizeAssociations(associateContext);
+    it('returns 400 when the lambdaVersionArn is not a versioned us-east-1 Lambda ARN', async () => {
+      const result = await controller.applyEdgeOptimizeAssociations({
+        ...associateContext,
+        data: { ...associateContext.data, lambdaVersionArn: 'arn:aws:lambda:us-west-2:120569600543:function:edgeoptimize-origin:1' },
+      });
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.include('viewer-request');
+      expect(body.message).to.include('lambdaVersionArn must be a versioned us-east-1 Lambda ARN');
+    });
+
+    it('returns 400 when the lambdaVersionArn is unversioned (no trailing version)', async () => {
+      const result = await controller.applyEdgeOptimizeAssociations({
+        ...associateContext,
+        data: { ...associateContext.data, lambdaVersionArn: 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin' },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('lambdaVersionArn must be a versioned us-east-1 Lambda ARN');
+    });
+
+    it('returns 400 when the lambdaVersionArn account segment does not match the request account', async () => {
+      const result = await controller.applyEdgeOptimizeAssociations({
+        ...associateContext,
+        data: { ...associateContext.data, lambdaVersionArn: 'arn:aws:lambda:us-east-1:999999999999:function:edgeoptimize-origin:1' },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('lambdaVersionArn must be a versioned us-east-1 Lambda ARN');
+    });
+
+    it('returns 500 with a generic message when the AWS call fails (conflict)', async () => {
+      applyEdgeOptimizeAssociationsStub = sinon.stub().rejects(new Error('already has a different viewer-request function'));
+      const result = await controller.applyEdgeOptimizeAssociations(associateContext);
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.not.include('viewer-request');
+      expect(body.message).to.include('Failed to associate edge optimize routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -8916,12 +8962,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns 400 when the verify call fails', async () => {
+    it('returns 500 with a generic message when the verify call fails', async () => {
       verifyEdgeOptimizeRoutingStub = sinon.stub().rejects(new Error('fetch failed'));
       const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('fetch failed');
+      expect(body.message).to.not.include('fetch failed');
+      expect(body.message).to.include('Failed to verify edge optimize routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -9058,12 +9105,13 @@ describe('LlmoController', () => {
       expect(body.message).to.include('behavior');
     });
 
-    it('returns 400 when the orchestrator throws', async () => {
+    it('returns 500 with a generic message when the orchestrator throws', async () => {
       runEdgeOptimizeDeployStepStub = sinon.stub().rejects(new Error('assume failed'));
       const result = await controller.deployEdgeOptimize(deployContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('assume failed');
+      expect(body.message).to.not.include('assume failed');
+      expect(body.message).to.include('Failed to deploy edge optimize routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -9300,12 +9348,13 @@ describe('LlmoController', () => {
       expect(planEdgeOptimizeDeployStub.called).to.equal(false);
     });
 
-    it('returns 400 when the planner throws', async () => {
+    it('returns 500 with a generic message when the planner throws', async () => {
       planEdgeOptimizeDeployStub = sinon.stub().rejects(new Error('plan failed'));
       const result = await controller.planEdgeOptimize(planContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('plan failed');
+      expect(body.message).to.not.include('plan failed');
+      expect(body.message).to.include('Failed to preview edge optimize routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -9501,12 +9550,13 @@ describe('LlmoController', () => {
       expect(body.message).to.include('missing trusted principal');
     });
 
-    it('returns 400 when an unexpected error is thrown', async () => {
+    it('returns 500 with a generic message when an unexpected error is thrown', async () => {
       mockDataAccess.Site.findById.rejects(new Error('db down'));
       const result = await controller.getEdgeOptimizePermissions(permissionsContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('db down');
+      expect(body.message).to.not.include('db down');
+      expect(body.message).to.include('Failed to read edge optimize permissions');
     });
 
     it('returns 400 when the manifest read fails', async () => {
