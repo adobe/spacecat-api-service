@@ -804,6 +804,7 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/brands',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/activate',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts',
