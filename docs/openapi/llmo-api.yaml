@@ -4458,6 +4458,15 @@ site-llmo-cloudflare-accounts:
 site-llmo-cloudflare-zones:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - name: accountId
+      in: query
+      required: true
+      description: >-
+        Cloudflare account ID (32-character lowercase hex) to scope the listing to — only
+        zones belonging to this account are returned.
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
     - name: x-cloudflare-token
       in: header
       required: true
@@ -4466,10 +4475,11 @@ site-llmo-cloudflare-zones:
         type: string
   get:
     operationId: listLlmoCloudflareZones
-    summary: List the Cloudflare zones accessible to the supplied token
+    summary: List the Cloudflare zones for the selected account
     description: |
-      Lists the Cloudflare zones the supplied `x-cloudflare-token` can access. Used by the
-      onboarding UI to let the user pick the zone to attach the Edge Optimize worker route to.
+      Lists the Cloudflare zones belonging to the account given by `accountId` that the supplied
+      `x-cloudflare-token` can access. Used by the onboarding UI to let the user pick the zone to
+      attach the Edge Optimize worker route to.
 
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:
@@ -4576,6 +4586,19 @@ site-llmo-cloudflare-deploy:
         $ref: './responses.yaml#/403'
       '404':
         $ref: './responses.yaml#/404'
+      '409':
+        description: A worker with the derived name already exists in the account.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                scriptName:
+                  type: string
+                accountId:
+                  type: string
       '429':
         $ref: './responses.yaml#/429'
       '500':
@@ -4603,16 +4626,9 @@ site-llmo-cloudflare-deploy:
     security:
       - ims_key: [ ]
 
-site-llmo-cloudflare-zone-routes:
+site-llmo-cloudflare-routes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
-    - name: zoneId
-      in: path
-      required: true
-      description: Cloudflare zone ID (32-character lowercase hex)
-      schema:
-        type: string
-        pattern: '^[0-9a-f]{32}$'
     - name: x-cloudflare-token
       in: header
       required: true
@@ -4625,9 +4641,10 @@ site-llmo-cloudflare-zone-routes:
     description: |
       Creates a Cloudflare worker route in the given zone, targeting the service-owned worker
       derived from the site's base URL (`edge-optimize-router-<canonical-host>`) — the worker
-      name is not client-supplied. Before creating the route the service fetches the zone's
-      existing routes and rejects the request with `409` if a route for the same `pattern`
-      already exists, so a deploy can never silently override an existing route.
+      name is not client-supplied. `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
+      so it is supplied in the request body. Before creating the route the service fetches the
+      zone's existing routes and rejects the request with `409` if a route for the same
+      `pattern` already exists, so a deploy can never silently override an existing route.
 
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:
@@ -4639,8 +4656,14 @@ site-llmo-cloudflare-zone-routes:
           schema:
             type: object
             required:
+              - zoneId
               - pattern
             properties:
+              zoneId:
+                type: string
+                description: Cloudflare zone ID (32-character lowercase hex)
+                pattern: '^[0-9a-f]{32}$'
+                example: '0123456789abcdef0123456789abcdef'
               pattern:
                 type: string
                 description: >-

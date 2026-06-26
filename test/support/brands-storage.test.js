@@ -2450,6 +2450,96 @@ describe('brands-storage', () => {
       expect(result).to.not.be.null;
     });
 
+    it('clears site_id when a pending brand passes baseSiteId: null (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — pending brand currently holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: null, status: 'pending' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: null },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal(null);
+    });
+
+    it('ignores baseSiteId: null on a non-pending (active) brand — never strips a live anchor (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — active brand holds a site
+          { data: { site_id: 'existing-site-id', status: 'active' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: 'existing-site-id', status: 'active' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: null },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row).to.not.have.property('site_id');
+    });
+
+    it('re-points site_id when a pending brand passes a different baseSiteId (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — pending brand already holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: 'different-site-id', status: 'pending' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'different-site-id' },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal('different-site-id');
+    });
+
+    it('throws 409 when a pending brand re-points onto a site held by another brand (LLMO-5870)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // 1st call: select current row — pending brand already holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update fails with unique constraint
+          { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'taken-site-id' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('This site is already the primary URL for another brand');
+      expect(err.status).to.equal(409);
+    });
+
     it('fails closed by throwing when the current baseSiteId read errors (LLMO-5556)', async () => {
       // PostgREST returns { data: null, error } instead of throwing. Without the
       // guard, `current` is null so the block would treat the brand as having no

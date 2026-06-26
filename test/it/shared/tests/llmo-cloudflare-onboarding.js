@@ -24,9 +24,9 @@ import {
  * Endpoints under test (src/controllers/llmo/llmo-cloudflare.js):
  *   GET  /sites/:siteId/llmo/cdn-onboard/cloudflare/config
  *   GET  /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
- *   GET  /sites/:siteId/llmo/cdn-onboard/cloudflare/zones
+ *   GET  /sites/:siteId/llmo/cdn-onboard/cloudflare/zones?accountId=<id>
  *   POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
- *   POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes
+ *   POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes
  *
  * SCOPE — IT only exercises code paths that short-circuit BEFORE any external call.
  * The accounts/zones/deploy/route-create handlers ultimately call the external Cloudflare
@@ -120,7 +120,16 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('llmoAdmin: returns 400 when x-cloudflare-token header is missing', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.get(
+          `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/zones?accountId=${VALID_ACCOUNT_ID}`,
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('llmoAdmin: returns 400 when accountId query param is missing', async () => {
+        const http = getHttpClient();
+        const res = await http.llmoAdmin.get(
           `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/zones`,
+          CF_TOKEN_HEADERS,
         );
         expect(res.status).to.equal(400);
       });
@@ -180,24 +189,34 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       });
     });
 
-    // ── POST route create — token, zoneId and body validation precede external calls ─
+    // ── POST route create — token + body validation precede external calls ─────────
 
-    describe('POST .../cloudflare/zones/:zoneId/routes', () => {
-      const routesPath = (zoneId) => `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/zones/${zoneId}/routes`;
+    describe('POST .../cloudflare/routes', () => {
+      const routesPath = `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/routes`;
 
       it('returns 400 when x-cloudflare-token header is missing', async () => {
         const http = getHttpClient();
-        const res = await http.llmoAdmin.post(routesPath(VALID_ZONE_ID), {
-          pattern: 'example.com/*',
+        const res = await http.llmoAdmin.post(routesPath, {
+          zoneId: VALID_ZONE_ID, pattern: 'example.com/*',
         });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 when zoneId is missing from the body', async () => {
+        const http = getHttpClient();
+        const res = await http.llmoAdmin.post(
+          routesPath,
+          { pattern: 'example.com/*' },
+          CF_TOKEN_HEADERS,
+        );
         expect(res.status).to.equal(400);
       });
 
       it('returns 400 when zoneId is not a 32-char hex id', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.post(
-          routesPath('zone-456'),
-          { pattern: 'example.com/*' },
+          routesPath,
+          { zoneId: 'zone-456', pattern: 'example.com/*' },
           CF_TOKEN_HEADERS,
         );
         expect(res.status).to.equal(400);
@@ -206,8 +225,8 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('returns 400 when pattern is missing', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.post(
-          routesPath(VALID_ZONE_ID),
-          {},
+          routesPath,
+          { zoneId: VALID_ZONE_ID },
           CF_TOKEN_HEADERS,
         );
         expect(res.status).to.equal(400);
@@ -216,8 +235,8 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('returns 400 when the pattern targets a domain outside the site', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.post(
-          routesPath(VALID_ZONE_ID),
-          { pattern: 'evil.com/*' },
+          routesPath,
+          { zoneId: VALID_ZONE_ID, pattern: 'evil.com/*' },
           CF_TOKEN_HEADERS,
         );
         expect(res.status).to.equal(400);
