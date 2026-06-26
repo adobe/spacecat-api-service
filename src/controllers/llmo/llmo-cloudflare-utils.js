@@ -16,6 +16,8 @@
  * unit-tested in isolation.
  */
 
+import { getDomain } from 'tldts';
+
 const WORKER_NAME_PREFIX = 'edge-optimize-router';
 const CF_MAX_SCRIPT_NAME_LEN = 63; // Cloudflare worker script name max length
 
@@ -35,6 +37,23 @@ export const deriveWorkerName = (baseURL) => {
   return `${WORKER_NAME_PREFIX}-${slug}`.slice(0, CF_MAX_SCRIPT_NAME_LEN).replace(/-+$/g, '');
 };
 
+/** Canonical hostname (no leading www, lowercased). */
+export const canonicalHostname = (host) => host.replace(/^www\./i, '').toLowerCase();
+
+/**
+ * Base URL used to derive the worker name and resolve the Edge Optimize API key for deploy.
+ * Production target hosts reuse the site base URL; staging / other subdomains use https://{targetHost}/.
+ */
+export const deployWorkerBaseURL = (siteBaseURL, targetHost) => {
+  const siteHost = canonicalHostname(new URL(siteBaseURL).hostname);
+  const targetHostOnly = targetHost.trim().replace(/^https?:\/\//i, '').split('/')[0];
+  const targetCanon = canonicalHostname(targetHostOnly);
+  if (targetCanon === siteHost) {
+    return siteBaseURL;
+  }
+  return `https://${targetHostOnly}/`;
+};
+
 /**
  * Whether `host` belongs to the onboarded site's domain: it must equal the site's canonical
  * host (base URL host minus leading "www.") or be a subdomain of it. Prevents pointing the
@@ -45,6 +64,26 @@ export const hostInSiteDomain = (host, baseURL) => {
   const h = host.toLowerCase();
   return h === siteHost || h.endsWith(`.${siteHost}`);
 };
+
+/**
+ * Whether `host` shares the same registrable domain as the production site (matches stage
+ * domain onboarding rules — sibling subdomains on the same zone).
+ */
+export const hostSharesSiteRegistrableDomain = (host, baseURL) => {
+  try {
+    const prodDomain = getDomain(new URL(baseURL).hostname);
+    const hostOnly = host.replace(/^https?:\/\//i, '').split('/')[0];
+    const targetDomain = getDomain(hostOnly);
+    return Boolean(prodDomain && targetDomain && prodDomain === targetDomain);
+  } catch {
+    return false;
+  }
+};
+
+/** Accept production subdomains or registrable-domain siblings (stage hosts). */
+export const isCloudflareTargetHostAllowed = (host, baseURL) => (
+  hostInSiteDomain(host, baseURL) || hostSharesSiteRegistrableDomain(host, baseURL)
+);
 
 /**
  * Extracts the host from a Cloudflare route pattern (e.g. "*.example.com/path*" -> "example.com",

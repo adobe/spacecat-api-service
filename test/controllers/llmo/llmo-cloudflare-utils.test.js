@@ -14,7 +14,10 @@ import { expect } from 'chai';
 
 import {
   deriveWorkerName,
+  deployWorkerBaseURL,
   hostInSiteDomain,
+  hostSharesSiteRegistrableDomain,
+  isCloudflareTargetHostAllowed,
   routePatternHost,
 } from '../../../src/controllers/llmo/llmo-cloudflare-utils.js';
 
@@ -73,6 +76,36 @@ describe('llmo-cloudflare-utils', () => {
 
     it('strips a scheme when present', () => {
       expect(routePatternHost('https://www.example.com/*')).to.equal('www.example.com');
+    });
+  });
+
+  describe('deployWorkerBaseURL', () => {
+    it('reuses the site base URL for the production host', () => {
+      expect(deployWorkerBaseURL('https://www.example.com', 'www.example.com')).to.equal('https://www.example.com');
+    });
+
+    it('uses https://{targetHost}/ for staging subdomains', () => {
+      expect(deployWorkerBaseURL('https://www.example.com', 'staging.example.com')).to.equal('https://staging.example.com/');
+    });
+  });
+
+  describe('hostSharesSiteRegistrableDomain', () => {
+    it('accepts sibling subdomains on the same registrable domain', () => {
+      expect(hostSharesSiteRegistrableDomain('tokowaka.aem-screens.net', 'https://frescopa.aem-screens.net')).to.equal(true);
+    });
+
+    it('rejects unrelated domains', () => {
+      expect(hostSharesSiteRegistrableDomain('evil.com', 'https://frescopa.aem-screens.net')).to.equal(false);
+    });
+  });
+
+  describe('isCloudflareTargetHostAllowed', () => {
+    it('accepts production subdomains', () => {
+      expect(isCloudflareTargetHostAllowed('cdn.example.com', 'https://www.example.com')).to.equal(true);
+    });
+
+    it('accepts registrable-domain siblings for stage-style hosts', () => {
+      expect(isCloudflareTargetHostAllowed('tokowaka.aem-screens.net', 'https://frescopa.aem-screens.net')).to.equal(true);
     });
   });
 });

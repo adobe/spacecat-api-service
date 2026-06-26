@@ -414,6 +414,27 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(200);
     });
 
+    it('uses staging metaconfig and a stage-specific worker name for stage subdomains', async () => {
+      const STAGE_HOST = 'staging.example.com';
+      const STAGE_SCRIPT = 'edge-optimize-router-staging-example-com';
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: STAGE_HOST };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      expect(mockTokowakaClient.fetchMetaconfig).to.have.been.calledWith('https://staging.example.com/');
+      expect(mockCfClient.deployWorkerScript).to.have.been.calledWith(
+        ACCOUNT_ID,
+        STAGE_SCRIPT,
+        WORKER_SCRIPT_TEXT,
+        [{ name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: STAGE_HOST }],
+      );
+      const body = await res.json();
+      expect(body.scriptName).to.equal(STAGE_SCRIPT);
+    });
+
     it('returns 400 when CF token is missing', async () => {
       mockContext.pathInfo.headers = {};
       const res = await controller.deployWorker(mockContext);
