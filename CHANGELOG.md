@@ -1,3 +1,25 @@
+# [1.605.0](https://github.com/adobe/spacecat-api-service/compare/v1.604.1...v1.605.0) (2026-06-26)
+
+
+### Features
+
+* **sites:** scope latest-metrics RUM to locale path prefix ([#2670](https://github.com/adobe/spacecat-api-service/issues/2670)) ([06342bf](https://github.com/adobe/spacecat-api-service/commit/06342bf2ab925b8357b4e330a04921c96c0eaf53)), closes [#1707](https://github.com/adobe/spacecat-api-service/issues/1707) [#1707](https://github.com/adobe/spacecat-api-service/issues/1707)
+
+## [1.604.1](https://github.com/adobe/spacecat-api-service/compare/v1.604.0...v1.604.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-cloudflare-client to 1.1.1 ([#2704](https://github.com/adobe/spacecat-api-service/issues/2704)) ([8333039](https://github.com/adobe/spacecat-api-service/commit/8333039341b5f89b2ff6dc6d615fb03a8fa640d7))
+
+# [1.604.0](https://github.com/adobe/spacecat-api-service/compare/v1.603.0...v1.604.0) (2026-06-26)
+
+
+### Features
+
+* **brands:** allow pending brands to unset/repoint primary URL (LLMO-5870) ([#2700](https://github.com/adobe/spacecat-api-service/issues/2700)) ([05a9d6b](https://github.com/adobe/spacecat-api-service/commit/05a9d6b0e18d9355b21b9f5d5c1f0745c770723d))
+* **serenity:** extend opt-in type-checking to the serenity controllers (ADR-005 ratchet) ([#2702](https://github.com/adobe/spacecat-api-service/issues/2702)) ([47f1ffd](https://github.com/adobe/spacecat-api-service/commit/47f1ffda5c8d0eb6a4717bd06a0271ae8877b759)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.603.0](https://github.com/adobe/spacecat-api-service/compare/v1.602.1...v1.603.0) (2026-06-26)
 
 
