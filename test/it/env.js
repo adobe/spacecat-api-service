@@ -100,6 +100,8 @@ export function buildEnv(publicKeyB64) {
     POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
 
     // ── Serenity E2E: Semrush vendor mocks ──────────────────────────────────
+    // NONE of the vars below require Vault / deployed-env config: SEMRUSH_USERS_BASE_URL
+    // falls back to SEMRUSH_PROJECTS_BASE_URL when unset, and the rest are IT-only.
     // Point the two serenity transport gateways at the mock containers. The
     // User Manager origin is split out via SEMRUSH_USERS_BASE_URL (api-service#2656)
     // so the two mocks need no path-routing reverse proxy. Both serve self-signed
