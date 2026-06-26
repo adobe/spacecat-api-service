@@ -585,18 +585,28 @@ function TaskManagementController(context) {
       );
     }
 
-    // --- Optional attachment validation (spec §30) ----------------------------
-    // attachment: { content: base64 string, mimeType: string, filename: string }
+    // --- Optional attachments validation (spec §Attachment Validation) ---------
+    // attachments: [{ content: base64 string, mimeType: string, filename: string }]
+    // Max 1 attachment per request (Lambda 6 MB sync payload limit).
     // Decoded content is held in memory; all MIME/size/magic-byte checks happen
     // inside ticketClient.uploadAttachment — we only pre-validate shape + size here
     // so the caller gets a clear 400 before any downstream work is done.
 
+    const attachments = Array.isArray(data.attachments) ? data.attachments : [];
+    if (attachments.length > 1) {
+      return createResponse(
+        { message: 'attachments may contain at most 1 item per request' },
+        STATUS_BAD_REQUEST,
+      );
+    }
+
     let attachmentBuffer;
-    if (data.attachment) {
-      const att = data.attachment;
+    let attachmentMeta;
+    if (attachments.length === 1) {
+      const att = attachments[0];
       if (!hasText(att.content) || !hasText(att.mimeType) || !hasText(att.filename)) {
         return createResponse(
-          { message: 'attachment must have content (base64), mimeType, and filename' },
+          { message: 'Each attachment must have content (base64), mimeType, and filename' },
           STATUS_BAD_REQUEST,
         );
       }
@@ -604,10 +614,10 @@ function TaskManagementController(context) {
       try {
         decoded = Buffer.from(att.content, 'base64');
       } catch {
-        return createResponse({ message: 'attachment.content must be valid base64' }, STATUS_BAD_REQUEST);
+        return createResponse({ message: 'attachment content must be valid base64' }, STATUS_BAD_REQUEST);
       }
       if (decoded.length === 0) {
-        return createResponse({ message: 'attachment.content must not be empty' }, STATUS_BAD_REQUEST);
+        return createResponse({ message: 'attachment content must not be empty' }, STATUS_BAD_REQUEST);
       }
       if (decoded.length > ATTACHMENT_MAX_BYTES) {
         return createResponse(
@@ -616,6 +626,7 @@ function TaskManagementController(context) {
         );
       }
       attachmentBuffer = decoded;
+      attachmentMeta = { mimeType: att.mimeType, filename: att.filename };
     }
 
     // Attachment in individual batch mode (N>1 suggestions) is not supported — each ticket
@@ -1038,8 +1049,7 @@ function TaskManagementController(context) {
         try {
           await ticketClient.uploadAttachment(groupedTicketResult.ticketKey, {
             content: attachmentBuffer,
-            mimeType: data.attachment.mimeType,
-            filename: data.attachment.filename,
+            ...attachmentMeta,
           });
         } catch (err) {
           log.warn({ ticketKey: groupedTicketResult.ticketKey, err }, 'Grouped ticket created but attachment upload failed');
@@ -1186,8 +1196,7 @@ function TaskManagementController(context) {
       try {
         await ticketClient.uploadAttachment(ticketResult.ticketKey, {
           content: attachmentBuffer,
-          mimeType: data.attachment.mimeType,
-          filename: data.attachment.filename,
+          ...attachmentMeta,
         });
       } catch (err) {
         // Spec §Attachment failure handling: "partial success acceptable; retry via
