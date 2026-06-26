@@ -20,5 +20,11 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["src/support/serenity/**/*.js", "src/support/url-utils.js"]
+  "include": [
+    "src/types/**/*.d.ts",
+    "src/support/serenity/**/*.js",
+    "src/support/url-utils.js",
+    "src/controllers/serenity.js",
+    "src/controllers/brands.js"
+  ]
 }

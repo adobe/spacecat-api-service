@@ -9,6 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
+// @ts-check
+
 import { randomUUID } from 'crypto';
 
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
@@ -553,7 +556,7 @@ function BrandsController(ctx, log, env) {
         prompts,
         postgrestClient,
         updatedBy,
-        classifyIntent,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
@@ -613,7 +616,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
-        classifyIntent,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       if (!prompt) {
@@ -1542,7 +1545,7 @@ function BrandsController(ctx, log, env) {
           };
         } else {
           const brandDomain = brandDomainFromPayload(brandData);
-          if (!hasText(brandDomain)) {
+          if (!brandDomain || !hasText(brandDomain)) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
           provisionedBrandDomain = brandDomain;
@@ -1636,12 +1639,12 @@ function BrandsController(ctx, log, env) {
       // whose catch releases the just-provisioned workspace; a throw here would
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
       // contract (its own catch-all swallows + logs), so this holds.
-      if (hasText(provisionedWorkspaceId)) {
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
         await ensureMarketSite(context, {
           organizationId: spaceCatId,
-          brandId: provisionedBrandId,
+          brandId: provisionedBrandId ?? undefined,
           // The initial market's domain, resolved during provisioning above.
-          domain: provisionedBrandDomain,
+          domain: provisionedBrandDomain ?? undefined,
           updatedBy,
           log,
         });
@@ -1657,7 +1660,7 @@ function BrandsController(ctx, log, env) {
       // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
       // error). Nothing references that workspace, so release its allocation back
       // to the parent pool (best-effort) rather than leaking it.
-      if (hasText(provisionedWorkspaceId)) {
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
         log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
