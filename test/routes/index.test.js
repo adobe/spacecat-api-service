@@ -599,6 +599,7 @@ describe('getRouteHandlers', () => {
     getTicketBySuggestion: sinon.stub(),
     listTicketsByOpportunity: sinon.stub(),
     createTicket: sinon.stub(),
+    listProjects: sinon.stub(),
   };
 
   const mockRedirectsController = {

@@ -849,7 +849,14 @@ function TaskManagementController(context) {
               await connection.markRequiresReauth().catch((updateErr) => {
                 log.warn({ updateErr }, 'Failed to mark connection as requires_reauth in batch');
               });
-              results.push({ suggestionId: suggId, status: STATUS_CONFLICT, error: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' });
+              results.push({ suggestionId: suggId, status: STATUS_CONFLICT, error: 'connection_reauth_required' });
+              // Short-circuit: token is invalid, remaining suggestions will also fail.
+              // Mark them all as connection_reauth_required without calling Jira.
+              const remainingIds = suggestionIds.slice(suggestionIds.indexOf(suggId) + 1);
+              for (const remainingId of remainingIds) {
+                results.push({ suggestionId: remainingId, status: STATUS_CONFLICT, error: 'connection_reauth_required' });
+              }
+              break;
             } else {
               log.error({ suggId, err: batchTicketErr }, 'Failed to create ticket in batch');
               results.push({ suggestionId: suggId, status: STATUS_INTERNAL_SERVER_ERROR, error: 'Failed to create ticket' });
@@ -930,7 +937,11 @@ function TaskManagementController(context) {
       });
 
       const batchResponseBody = { results };
-      await markIdempotencyDone(207, batchResponseBody);
+      if (hasSuccess) {
+        await markIdempotencyDone(207, batchResponseBody);
+      } else {
+        await markIdempotencyFailed(207, batchResponseBody);
+      }
       return createResponse(batchResponseBody, 207);
     }
 
