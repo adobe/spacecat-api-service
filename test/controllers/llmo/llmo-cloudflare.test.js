@@ -435,6 +435,42 @@ describe('LlmoCloudflareController', () => {
       expect(body.scriptName).to.equal(STAGE_SCRIPT);
     });
 
+    it('accepts a sibling subdomain and uses its own worker name and metaconfig URL', async () => {
+      const SIBLING_HOST = 'tokowaka.aem-screens.net';
+      const SIBLING_SCRIPT = 'edge-optimize-router-tokowaka-aem-screens-net';
+      mockSite.getBaseURL = () => 'https://frescopa.aem-screens.net';
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: SIBLING_HOST };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      expect(mockTokowakaClient.fetchMetaconfig).to.have.been.calledWith('https://tokowaka.aem-screens.net/');
+      expect(mockCfClient.deployWorkerScript).to.have.been.calledWith(
+        ACCOUNT_ID,
+        SIBLING_SCRIPT,
+        WORKER_SCRIPT_TEXT,
+        [{ name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: SIBLING_HOST }],
+      );
+      const body = await res.json();
+      expect(body.scriptName).to.equal(SIBLING_SCRIPT);
+    });
+
+    it('uses the site base URL for metaconfig when targetHost is the canonical production host', async () => {
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'example.com' };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      // Canonical host matches www.example.com → site base URL is reused for metaconfig.
+      expect(mockTokowakaClient.fetchMetaconfig).to.have.been.calledWith('https://www.example.com');
+      const body = await res.json();
+      expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
+    });
+
     it('returns 400 when CF token is missing', async () => {
       mockContext.pathInfo.headers = {};
       const res = await controller.deployWorker(mockContext);
@@ -566,6 +602,20 @@ describe('LlmoCloudflareController', () => {
       mockCfClient.addRoute.resolves(route);
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(200);
+    });
+
+    it('accepts a sibling-subdomain pattern and targets a stage-specific worker', async () => {
+      const SIBLING_PATTERN = 'tokowaka.aem-screens.net/*';
+      const SIBLING_SCRIPT = 'edge-optimize-router-tokowaka-aem-screens-net';
+      mockSite.getBaseURL = () => 'https://frescopa.aem-screens.net';
+      mockContext.data = { zoneId: ZONE_ID, pattern: SIBLING_PATTERN };
+      const route = { id: ROUTE_ID, pattern: SIBLING_PATTERN, script: SIBLING_SCRIPT };
+      mockCfClient.addRoute.resolves(route);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      // eslint-disable-next-line max-len
+      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, SIBLING_PATTERN, SIBLING_SCRIPT);
     });
 
     it('returns 400 when a worker name cannot be derived from the site base URL', async () => {

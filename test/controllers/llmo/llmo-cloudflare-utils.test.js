@@ -13,6 +13,7 @@
 import { expect } from 'chai';
 
 import {
+  canonicalHostname,
   deriveWorkerName,
   deployWorkerBaseURL,
   hostInSiteDomain,
@@ -22,6 +23,24 @@ import {
 } from '../../../src/controllers/llmo/llmo-cloudflare-utils.js';
 
 describe('llmo-cloudflare-utils', () => {
+  describe('canonicalHostname', () => {
+    it('strips a leading www.', () => {
+      expect(canonicalHostname('www.example.com')).to.equal('example.com');
+    });
+
+    it('lowercases the result', () => {
+      expect(canonicalHostname('CDN.EXAMPLE.COM')).to.equal('cdn.example.com');
+    });
+
+    it('leaves an already-canonical hostname unchanged', () => {
+      expect(canonicalHostname('example.com')).to.equal('example.com');
+    });
+
+    it('strips www case-insensitively', () => {
+      expect(canonicalHostname('WWW.Example.Com')).to.equal('example.com');
+    });
+  });
+
   describe('deriveWorkerName', () => {
     it('strips leading www and maps dots to hyphens', () => {
       expect(deriveWorkerName('https://www.example.com')).to.equal('edge-optimize-router-example-com');
@@ -80,12 +99,28 @@ describe('llmo-cloudflare-utils', () => {
   });
 
   describe('deployWorkerBaseURL', () => {
-    it('reuses the site base URL for the production host', () => {
+    it('reuses the site base URL for the production host (with www)', () => {
       expect(deployWorkerBaseURL('https://www.example.com', 'www.example.com')).to.equal('https://www.example.com');
     });
 
-    it('uses https://{targetHost}/ for staging subdomains', () => {
+    it('reuses the site base URL for the canonical production host (no www)', () => {
+      expect(deployWorkerBaseURL('https://www.example.com', 'example.com')).to.equal('https://www.example.com');
+    });
+
+    it('uses https://{targetHost}/ for a subdomain that is not the production host', () => {
       expect(deployWorkerBaseURL('https://www.example.com', 'staging.example.com')).to.equal('https://staging.example.com/');
+    });
+
+    it('uses https://{targetHost}/ for a sibling subdomain on the same registrable domain', () => {
+      expect(deployWorkerBaseURL('https://frescopa.aem-screens.net', 'tokowaka.aem-screens.net')).to.equal('https://tokowaka.aem-screens.net/');
+    });
+
+    it('strips a scheme prefix from targetHost before comparison', () => {
+      expect(deployWorkerBaseURL('https://www.example.com', 'https://www.example.com')).to.equal('https://www.example.com');
+    });
+
+    it('strips a path suffix from targetHost before comparison', () => {
+      expect(deployWorkerBaseURL('https://www.example.com', 'www.example.com/some/path')).to.equal('https://www.example.com');
     });
   });
 
@@ -94,18 +129,46 @@ describe('llmo-cloudflare-utils', () => {
       expect(hostSharesSiteRegistrableDomain('tokowaka.aem-screens.net', 'https://frescopa.aem-screens.net')).to.equal(true);
     });
 
+    it('accepts the exact same host as the site', () => {
+      expect(hostSharesSiteRegistrableDomain('frescopa.aem-screens.net', 'https://frescopa.aem-screens.net')).to.equal(true);
+    });
+
     it('rejects unrelated domains', () => {
       expect(hostSharesSiteRegistrableDomain('evil.com', 'https://frescopa.aem-screens.net')).to.equal(false);
+    });
+
+    it('rejects a look-alike suffix that is not the same registrable domain', () => {
+      expect(hostSharesSiteRegistrableDomain('notaem-screens.net', 'https://frescopa.aem-screens.net')).to.equal(false);
+    });
+
+    it('strips a scheme prefix from host before parsing', () => {
+      expect(hostSharesSiteRegistrableDomain('https://tokowaka.aem-screens.net', 'https://frescopa.aem-screens.net')).to.equal(true);
+    });
+
+    it('returns false when baseURL is not a valid URL', () => {
+      expect(hostSharesSiteRegistrableDomain('tokowaka.aem-screens.net', 'not-a-url')).to.equal(false);
     });
   });
 
   describe('isCloudflareTargetHostAllowed', () => {
+    it('accepts the exact canonical site host', () => {
+      expect(isCloudflareTargetHostAllowed('example.com', 'https://www.example.com')).to.equal(true);
+    });
+
     it('accepts production subdomains', () => {
       expect(isCloudflareTargetHostAllowed('cdn.example.com', 'https://www.example.com')).to.equal(true);
     });
 
     it('accepts registrable-domain siblings for stage-style hosts', () => {
       expect(isCloudflareTargetHostAllowed('tokowaka.aem-screens.net', 'https://frescopa.aem-screens.net')).to.equal(true);
+    });
+
+    it('rejects a completely unrelated domain', () => {
+      expect(isCloudflareTargetHostAllowed('evil.com', 'https://www.example.com')).to.equal(false);
+    });
+
+    it('rejects a look-alike suffix that shares neither the site domain nor registrable domain', () => {
+      expect(isCloudflareTargetHostAllowed('notexample.com', 'https://www.example.com')).to.equal(false);
     });
   });
 });
