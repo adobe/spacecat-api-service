@@ -270,7 +270,6 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
     'GET /organizations/:organizationId/task-management/connections': taskManagementController.listConnections,
     'GET /organizations/:organizationId/task-management/connections/:connectionId': taskManagementController.getConnection,
-    'DELETE /organizations/:organizationId/task-management/connections/:connectionId': taskManagementController.deleteConnection,
     'GET /organizations/:organizationId/task-management/tickets': taskManagementController.listTickets,
     'GET /organizations/:organizationId/suggestions/:suggestionId/ticket': taskManagementController.getTicketBySuggestion,
     'GET /organizations/:organizationId/opportunities/:opportunityId/tickets': taskManagementController.listTicketsByOpportunity,

@@ -1178,6 +1178,9 @@ const routeFacsCapabilities = {
     // agentic-categories and agentic-page-types routes. It is a label, not
     // a standalone FACS resource.
     'name',
+    // Task-management connection and provider — sub-resource ids, not
+    // independently ReBAC-controlled.
+    'connectionId', 'provider',
     'fixId', 'geoExperimentId', 'guidelineId', 'intentKey',
     'jobId', 'jobType', 'onboardingId', 'opportunityId', 'plgOnboardingId',
     'promptId', 'questionKey', 'reportId', 'suggestionId', 'tokenId',
