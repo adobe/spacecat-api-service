@@ -9,6 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
+// @ts-check
+
 import { randomUUID } from 'crypto';
 
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
@@ -16,6 +19,7 @@ import {
   badRequest,
   notFound,
   ok,
+  noContent,
   createResponse,
   forbidden,
   internalServerError,
@@ -268,7 +272,7 @@ function BrandsController(ctx, log, env) {
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
       const brands = await brandClient.getBrandsForOrganization(imsOrgId, `Bearer ${imsUserToken}`);
-      return ok(brands);
+      return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
       return createErrorResponse(error);
@@ -356,7 +360,7 @@ function BrandsController(ctx, log, env) {
             govConfig,
           );
           if (brandGovGuidelines) {
-            return ok(brandGovGuidelines);
+            return createResponse(brandGovGuidelines, 200);
           }
         } catch (govError) {
           log.warn(`Brand Governance Agent failed for site ${siteId}, falling back to Brand Publish: ${govError.message}`);
@@ -376,7 +380,7 @@ function BrandsController(ctx, log, env) {
         imsOrgId,
         imsConfig,
       );
-      return ok(brandGuidelines);
+      return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
       return createErrorResponse(error);
@@ -444,7 +448,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -553,7 +557,7 @@ function BrandsController(ctx, log, env) {
         prompts,
         postgrestClient,
         updatedBy,
-        classifyIntent,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
@@ -613,7 +617,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
-        classifyIntent,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       if (!prompt) {
@@ -675,7 +679,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Prompt not found: ${promptId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
       return createErrorResponse(error);
@@ -734,7 +738,7 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -790,7 +794,7 @@ function BrandsController(ctx, log, env) {
       }
 
       const results = await checkPromptsExist({ brandUuid, prompts, postgrestClient });
-      return ok({ results });
+      return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
       return createErrorResponse(error);
@@ -837,7 +841,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(stats);
+      return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
       return createErrorResponse(error);
@@ -990,7 +994,7 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const brands = await listBrands(spaceCatId, postgrestClient, { status });
-      return ok({ brands });
+      return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1025,7 +1029,7 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       // eslint-disable-next-line max-len
       const categories = await listCategories({ organizationId: spaceCatId, postgrestClient, status });
-      return ok({ categories });
+      return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1206,7 +1210,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Category not found: ${categoryId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1244,7 +1248,7 @@ function BrandsController(ctx, log, env) {
       const topics = await listTopics({
         organizationId: spaceCatId, postgrestClient, status, brandId,
       });
-      return ok({ topics });
+      return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1396,7 +1400,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Topic not found: ${topicId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1542,7 +1546,7 @@ function BrandsController(ctx, log, env) {
           };
         } else {
           const brandDomain = brandDomainFromPayload(brandData);
-          if (!hasText(brandDomain)) {
+          if (!brandDomain || !hasText(brandDomain)) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
           provisionedBrandDomain = brandDomain;
@@ -1636,12 +1640,12 @@ function BrandsController(ctx, log, env) {
       // whose catch releases the just-provisioned workspace; a throw here would
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
       // contract (its own catch-all swallows + logs), so this holds.
-      if (hasText(provisionedWorkspaceId)) {
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
         await ensureMarketSite(context, {
           organizationId: spaceCatId,
-          brandId: provisionedBrandId,
+          brandId: provisionedBrandId ?? undefined,
           // The initial market's domain, resolved during provisioning above.
-          domain: provisionedBrandDomain,
+          domain: provisionedBrandDomain ?? undefined,
           updatedBy,
           log,
         });
@@ -1657,7 +1661,7 @@ function BrandsController(ctx, log, env) {
       // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
       // error). Nothing references that workspace, so release its allocation back
       // to the parent pool (best-effort) rather than leaking it.
-      if (hasText(provisionedWorkspaceId)) {
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
         log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
@@ -1996,7 +2000,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Brand not found: ${brandId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);

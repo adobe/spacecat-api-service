@@ -803,6 +803,11 @@ export async function isSemrushMarketMirrorSite(organizationId, siteId, postgres
  * @param {object} params.brand - Brand data in V2 config shape
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
+ * @param {object} [params.log] - Logger (defaults to console).
+ * @param {string|null} [params.forceBrandId] - Pre-generated brand id to persist
+ *   (serenity-first provisioning); null lets the DB generate it.
+ * @param {string|null} [params.semrushWorkspaceId] - Provisioned sub-workspace
+ *   pointer to persist atomically with the row; null keeps the brand in flat mode.
  * @returns {Promise<object>} Created/updated brand in V2 config shape
  */
 export async function upsertBrand({
