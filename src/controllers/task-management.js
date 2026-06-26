@@ -11,7 +11,6 @@
  */
 
 import {
-  DeleteSecretCommand,
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
@@ -22,7 +21,6 @@ import {
   STATUS_CREATED,
   STATUS_INTERNAL_SERVER_ERROR,
   STATUS_NOT_FOUND,
-  STATUS_NO_CONTENT,
   STATUS_OK,
 } from '../utils/constants.js';
 import { getHeader } from '../support/http-headers.js';
@@ -63,17 +61,6 @@ const TICKET_MODE_GROUPED = 'grouped';
 const SUGGESTION_IDS_MAX_INDIVIDUAL = 10;
 const SUGGESTION_IDS_MAX_GROUPED = 400;
 const ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024; // 3 MB per spec §30
-
-// Secret path mirrors TicketClientFactory.buildSecretPath — both IDs UUID-validated
-// before interpolation to prevent path traversal.
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function buildSecretPath(organizationId, connectionId) {
-  if (!UUID_REGEX.test(organizationId) || !UUID_REGEX.test(connectionId)) {
-    throw new Error('Invalid path segment: organizationId and connectionId must be UUIDs');
-  }
-  return `/mysticat/task-management/${organizationId}/${connectionId}`;
-}
 
 /**
  * Serializes a TaskManagementConnection entity to a plain response object.
@@ -132,7 +119,6 @@ function serializeTicket(ticket, suggestions) {
  * Routes:
  *   GET    /organizations/:organizationId/task-management/connections
  *   GET    /organizations/:organizationId/task-management/connections/:connectionId
- *   DELETE /organizations/:organizationId/task-management/connections/:connectionId
  *   GET    /organizations/:organizationId/task-management/tickets
  *   GET    /organizations/:organizationId/suggestions/:suggestionId/ticket
  *   GET    /organizations/:organizationId/opportunities/:opportunityId/tickets
@@ -158,7 +144,6 @@ function serializeTicket(ticket, suggestions) {
  *     Suggestion/Opportunity data. In v1, the ASO UI sends summary + description
  *     directly; the server wraps them in ADF via JiraCloudClient.buildAdfDescription.
  *     Server-side description templating from Suggestion data is deferred to v2.
- *   - DELETE does not revoke the Atlassian-side OAuth token in v1.
  *   - List endpoints have no pagination in v1 (volume negligible at current scale).
  *
  * @param {object} context - Universal serverless function context.
@@ -281,73 +266,6 @@ function TaskManagementController(context) {
     }
 
     return createResponse(serializeConnection(connection), STATUS_OK);
-  }
-
-  /**
-   * Deletes a task-management connection and its OAuth secret from AWS Secrets Manager.
-   *
-   * DELETE /organizations/:organizationId/task-management/connections/:connectionId
-   *
-   * v1 accepted risk: does not revoke the Atlassian-side OAuth token.
-   * Secret uses a 7-day recovery window so ops can restore accidentally deleted connections.
-   */
-  async function deleteConnection(requestContext) {
-    const { params } = requestContext;
-    const { organizationId, connectionId } = params;
-
-    if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
-    }
-
-    if (!isValidUUID(connectionId)) {
-      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
-    }
-
-    let connection;
-    try {
-      connection = await loadConnectionForOrg(organizationId, connectionId);
-    } catch (err) {
-      log.error({ organizationId, connectionId, err }, 'Failed to load connection for deletion');
-      return createResponse({ message: 'Failed to load connection' }, STATUS_INTERNAL_SERVER_ERROR);
-    }
-
-    if (!connection) {
-      return createResponse({ message: `Connection ${connectionId} not found` }, STATUS_NOT_FOUND);
-    }
-
-    try {
-      const secretId = buildSecretPath(organizationId, connectionId);
-      await smClient.send(new DeleteSecretCommand({
-        SecretId: secretId,
-        RecoveryWindowInDays: 7,
-      }));
-    } catch (err) {
-      if (err.name !== 'ResourceNotFoundException') {
-        log.error({ organizationId, connectionId, err }, 'Failed to delete OAuth secret');
-        return createResponse({ message: 'Failed to delete connection secret' }, STATUS_INTERNAL_SERVER_ERROR);
-      }
-      log.warn({ organizationId, connectionId }, 'OAuth secret already absent — proceeding with DB deletion');
-    }
-
-    try {
-      // Soft-delete (design spec said hard row deletion; PR #1702 chose soft-delete instead).
-      // Rationale: tickets.task_management_connection_id is a FK to this row — hard
-      // delete would cascade-delete all associated tickets, destroying audit history.
-      // `disconnected` status preserves the FK target while making the connection
-      // ineligible for new ticket creation. The partial unique index on (org, provider,
-      // external_instance_id) WHERE status != 'disconnected' allows re-connecting the
-      // same Jira workspace after disconnection. GC job to tombstone old rows is a
-      // spacecat-infrastructure backlog item (no Jira ticket yet).
-      await connection.markDisconnected();
-    } catch (err) {
-      log.error({ organizationId, connectionId, err }, 'OAuth secret deleted but DB record soft-delete failed');
-      return createResponse(
-        { message: 'Connection secret deleted but DB record could not be updated' },
-        STATUS_INTERNAL_SERVER_ERROR,
-      );
-    }
-
-    return createResponse({}, STATUS_NO_CONTENT);
   }
 
   // ─── Ticket read handlers ──────────────────────────────────────────────────
@@ -1289,7 +1207,6 @@ function TaskManagementController(context) {
   return {
     listConnections,
     getConnection,
-    deleteConnection,
     listTickets,
     getTicketBySuggestion,
     listTicketsByOpportunity,

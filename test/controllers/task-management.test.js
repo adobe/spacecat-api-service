@@ -172,9 +172,6 @@ describe('TaskManagementController', () => {
           // eslint-disable-next-line class-methods-use-this
           send(...args) { return mockSmSend(...args); }
         },
-        DeleteSecretCommand: class {
-          constructor(input) { this.input = input; }
-        },
       },
       '@adobe/spacecat-shared-ticket-client': {
         TicketClientFactory: {
@@ -241,7 +238,6 @@ describe('TaskManagementController', () => {
       expect(ctrl).to.have.all.keys(
         'listConnections',
         'getConnection',
-        'deleteConnection',
         'listTickets',
         'getTicketBySuggestion',
         'listTicketsByOpportunity',
@@ -357,86 +353,6 @@ describe('TaskManagementController', () => {
       const body = await res.json();
       expect(body.id).to.equal(CONN_ID);
       expect(body.instanceUrl).to.equal('https://mysiteurl.atlassian.net');
-    });
-  });
-
-  // ─── deleteConnection ────────────────────────────────────────────────────────
-
-  describe('deleteConnection', () => {
-    it('returns 400 for invalid organizationId', async () => {
-      const { deleteConnection } = TaskManagementController(makeContext());
-      const res = await deleteConnection({ params: { organizationId: 'bad', connectionId: CONN_ID } });
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 for invalid connectionId', async () => {
-      const { deleteConnection } = TaskManagementController(makeContext());
-      const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: 'bad' } });
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 404 when not found', async () => {
-      const { deleteConnection } = TaskManagementController(makeContext());
-      const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
-      expect(res.status).to.equal(404);
-    });
-
-    it('returns 500 when SM delete fails (non-ResourceNotFoundException)', async () => {
-      const err = Object.assign(new Error('access denied'), { name: 'AccessDeniedException' });
-      mockSmSend.rejects(err);
-      const conn = makeConnection();
-      const ctx = makeContext({
-        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
-      });
-      const { deleteConnection } = TaskManagementController(ctx);
-      const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
-      expect(res.status).to.equal(500);
-    });
-
-    it('proceeds when SM secret already absent (ResourceNotFoundException)', async () => {
-      const err = Object.assign(new Error('not found'), { name: 'ResourceNotFoundException' });
-      mockSmSend.rejects(err);
-      const conn = makeConnection();
-      const ctx = makeContext({
-        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
-      });
-      const { deleteConnection } = TaskManagementController(ctx);
-      const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
-      expect(res.status).to.equal(204);
-      expect(conn.markDisconnected).to.have.been.calledOnce;
-    });
-
-    it('returns 500 when DB soft-delete fails after SM delete', async () => {
-      const conn = makeConnection({ markDisconnected: sinon.stub().rejects(new Error('db error')) });
-      const ctx = makeContext({
-        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
-      });
-      const { deleteConnection } = TaskManagementController(ctx);
-      const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
-      expect(res.status).to.equal(500);
-    });
-
-    it('deletes secret and DB record, returns 204', async () => {
-      const conn = makeConnection();
-      const ctx = makeContext({
-        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
-      });
-      const { deleteConnection } = TaskManagementController(ctx);
-      const res = await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
-      expect(res.status).to.equal(204);
-      expect(mockSmSend).to.have.been.calledOnce;
-      expect(conn.markDisconnected).to.have.been.calledOnce;
-    });
-
-    it('secret path uses no env segment', async () => {
-      const conn = makeConnection();
-      const ctx = makeContext({
-        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
-      });
-      const { deleteConnection } = TaskManagementController(ctx);
-      await deleteConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
-      const [cmd] = mockSmSend.firstCall.args;
-      expect(cmd.input.SecretId).to.equal(`/mysticat/task-management/${ORG_ID}/${CONN_ID}`);
     });
   });
 
@@ -802,7 +718,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns(ticketClientStub) },
@@ -833,7 +749,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns(ticketClientStub) },
@@ -855,7 +771,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -894,7 +810,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
@@ -943,7 +859,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
@@ -994,7 +910,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
@@ -1039,7 +955,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: sinon.stub().rejects(err) }) },
@@ -1077,7 +993,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1121,7 +1037,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1168,7 +1084,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1213,7 +1129,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1255,7 +1171,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1594,7 +1510,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1647,7 +1563,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1706,7 +1622,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1782,7 +1698,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1868,7 +1784,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1903,7 +1819,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
@@ -1934,7 +1850,7 @@ describe('TaskManagementController', () => {
             // eslint-disable-next-line class-methods-use-this
             send() { return Promise.resolve({}); }
           },
-          DeleteSecretCommand: class { constructor(i) { this.input = i; } },
+
         },
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: {
