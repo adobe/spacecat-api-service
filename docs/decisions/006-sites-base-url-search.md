@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-The Experience Success Studio back-office UbI ("Backoffice") Sites page let operators find a site
+The Experience Success Studio back-office UI ("Backoffice") Sites page let operators find a site
 to manage. Its only mechanism was to **load every site** (`GET /sites`, cursor-paginated at 500/page)
 into the browser and filter client-side. With ~18k sites that meant ~36 **sequential** cursor
 requests (each page's cursor is only known after the previous response resolves) — a 15–22s blank
@@ -29,13 +29,17 @@ Add an optional **`baseUrlLike`** query parameter to `GET /sites`:
 
 `GET /sites?baseUrlLike=<substring>&limit=<N>`
 
-- Maps to `Site.all({}, { where: (s) => s.ilike('baseURL', '%<escaped>%'), limit: N+1, order: 'asc' })`.
-  No `spacecat-shared-data-access` change was required — the `ilike` `where` path already exists.
+- Maps to `Site.all({}, { where: (attr, op) => op.ilike(attr.baseURL, '%<escaped>%'), limit: N+1, order: 'asc' })`.
+  The data-access `where` builder passes `(attrs, op)`: `attrs` maps model fields to DB columns and
+  `op` carries the operators. No `spacecat-shared-data-access` change was required — the `ilike`
+  operator already exists. (`order: 'asc'` sorts by the index's order fields with the primary key as a
+  deterministic tiebreaker — see `base.collection`'s `#getOrderFields`.)
 - **Validation:** `baseUrlLike` must be ≥ 3 characters (trimmed); LIKE wildcards (`%`, `_`, `\`) in
   user input are escaped so callers cannot inject wildcards.
 - **Top-N + "more exists":** `limit` defaults to 50, capped at `MAX_LIMIT` (500). We fetch `N+1` rows
   and trim to `N`; the extra row drives `pagination.hasMore`, which the UI surfaces as a
-  "refine your search" hint. Response shape: `{ sites: [...], pagination: { limit, hasMore } }`.
+  "refine your search" hint. Response shape: `{ sites: [...], pagination: { limit, hasMore, baseUrlLike } }`
+  — the `baseUrlLike` echo is the deploy-ordering discriminator (see Consequences).
 - **Authorization is unchanged** — the new branch runs after the existing admin / S2S `site:readAll`
   check. Non-admin (org-scoped) callers continue to receive `403` on `GET /sites`; the Backoffice
   client falls back to the org-scoped sites endpoint (a small, bounded set) and filters it
