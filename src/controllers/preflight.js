@@ -750,16 +750,24 @@ function PreflightController(ctx, log, env) {
         return preflightError('PREFLIGHT_NOT_FOUND', `Preflight with ID ${preflightId} not found`, 404);
       }
 
-      // Lifecycle truth (startedAt, result, error) lives on async_jobs.
-      // Fetch the joined row; on a missing/fetch-failed join, surface the
-      // three fields as null rather than 404'ing — the rest of the preflight
-      // is still a valid response, and the MFE polls Preflight.status which
-      // is sourced from the preflight row itself.
-      let asyncJob = null;
+      // Lifecycle truth (status, endedAt, result, error) lives on async_jobs;
+      // toDetailJSON sources those from the joined row so a polling client
+      // sees terminal status alongside terminal result (no split-brain across
+      // the projector's two-write window).
+      //
+      // On a transient fetch failure (PostgREST 5xx / network blip) return
+      // 503 rather than 200-with-nulls: a 200 + `result: null` is
+      // indistinguishable on the wire from a legitimately empty completed
+      // scan, and a polling client would cache the wrong terminal answer.
+      // A null AsyncJob (no row yet — transitional/legacy flow) is NOT an
+      // error; lifecycle fields fall back to the Preflight cache.
+      let asyncJob;
       try {
         asyncJob = await preflight.getAsyncJob();
       } catch (e) {
-        log.warn(`Failed to fetch AsyncJob for preflight ${preflightId}: ${e.message}`);
+        const msg = e?.message ?? String(e);
+        log.warn(`Failed to fetch AsyncJob for preflight ${preflightId}: ${msg}`);
+        return preflightError('PREFLIGHT_LIFECYCLE_UNAVAILABLE', 'Failed to load preflight lifecycle data', 503);
       }
 
       return ok(PreflightDto.toDetailJSON(preflight, asyncJob));

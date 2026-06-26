@@ -52,6 +52,7 @@ function makePreflight(overrides = {}) {
 
 function makeAsyncJob(overrides = {}) {
   const defaults = {
+    status: 'COMPLETED',
     startedAt: '2026-06-26T12:00:01Z',
     endedAt: '2026-06-26T12:00:30Z',
     result: { audits: [{ name: 'canonical', status: 'ok' }] },
@@ -59,6 +60,7 @@ function makeAsyncJob(overrides = {}) {
     ...overrides,
   };
   return {
+    getStatus: () => defaults.status,
     getStartedAt: () => defaults.startedAt,
     getEndedAt: () => defaults.endedAt,
     getResult: () => defaults.result,
@@ -123,10 +125,10 @@ describe('PreflightDto', () => {
   });
 
   describe('toDetailJSON (detail)', () => {
-    it('merges Preflight + AsyncJob into the detail contract', () => {
+    it('merges Preflight + AsyncJob into the detail contract; lifecycle from AsyncJob (truth)', () => {
       const out = PreflightDto.toDetailJSON(
         makePreflight({ status: 'COMPLETED', endedAt: '2026-06-26T12:00:30Z' }),
-        makeAsyncJob(),
+        makeAsyncJob({ endedAt: '2026-06-26T12:00:30Z' }),
       );
       expect(out).to.deep.equal({
         preflightId: 'pf-1',
@@ -142,11 +144,25 @@ describe('PreflightDto', () => {
       });
     });
 
+    it('AsyncJob.status wins over Preflight.status when they disagree (projector two-write window)', () => {
+      // Projector writes async_jobs first (terminal), then preflights cache.
+      // During the gap, AsyncJob = COMPLETED + Preflight = IN_PROGRESS.
+      // Detail must report COMPLETED so polling clients can stop on terminal
+      // state — otherwise they'd spin indefinitely on a scan that's done.
+      const out = PreflightDto.toDetailJSON(
+        makePreflight({ status: 'IN_PROGRESS', endedAt: null }),
+        makeAsyncJob({ endedAt: '2026-06-26T12:00:30Z' }),
+      );
+      expect(out.status).to.equal('COMPLETED');
+      expect(out.endedAt).to.equal('2026-06-26T12:00:30Z');
+      expect(out.result).to.not.equal(null);
+    });
+
     it('surfaces error structure when the AsyncJob reports FAILED', () => {
       const errorPayload = { code: 'DA_FETCH_ERROR', message: 'Document Authoring 502', details: { url: 'x' } };
       const out = PreflightDto.toDetailJSON(
         makePreflight({ status: 'FAILED', endedAt: '2026-06-26T12:00:30Z' }),
-        makeAsyncJob({ result: null, error: errorPayload }),
+        makeAsyncJob({ status: 'FAILED', result: null, error: errorPayload }),
       );
       expect(out.status).to.equal('FAILED');
       expect(out.error).to.deep.equal(errorPayload);

@@ -2660,20 +2660,41 @@ describe('Preflight Controller', () => {
       expect(nullResult.status).to.equal('IN_PROGRESS');
     });
 
-    it('degrades result/error to null when getAsyncJob throws', async () => {
+    it('returns 503 when getAsyncJob throws (do not silently 200 with null lifecycle)', async () => {
+      // A 200 with result: null is indistinguishable on the wire from a
+      // legitimately empty completed scan; polling clients would cache the
+      // wrong terminal answer. 503 surfaces "transient infra failure, retry."
       mockPreflight.getAsyncJob.rejects(new Error('async_jobs unreachable'));
 
       const response = await preflightController.getPreflightById({
         params: { siteId: 'test-site-123', preflightId },
       });
-      expect(response.status).to.equal(200);
+      expect(response.status).to.equal(503);
       const result = await response.json();
-      expect(result.result).to.be.null;
-      expect(result.error).to.be.null;
-      // Rest of the detail is still populated from Preflight
-      expect(result.preflightId).to.equal(preflightId);
-      expect(result.status).to.equal('IN_PROGRESS');
+      expect(result.errorCode).to.equal('PREFLIGHT_LIFECYCLE_UNAVAILABLE');
       expect(loggerStub.warn).to.have.been.called;
+    });
+
+    it('hardens warn log against non-Error throws (e.message would be undefined)', async () => {
+      // PostgREST/transport layers can throw non-Error values; `e.message`
+      // alone would log "...preflight <id>: undefined" and lose the reason.
+      // `callsFake` + raw `Promise.reject` is required because `.rejects(x)`
+      // wraps non-Error values into Error instances — defeating the test.
+      mockPreflight.getAsyncJob = sandbox.stub().callsFake(
+        // eslint-disable-next-line prefer-promise-reject-errors
+        () => Promise.reject({ statusCode: 503 }),
+      );
+
+      await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      const asyncJobWarn = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes(`preflight ${preflightId}`));
+      expect(asyncJobWarn, 'expected an AsyncJob-fetch warn for the test preflight').to.exist;
+      // Regression guard: the warn must NOT end with "...: undefined" (which
+      // is what `e.message` alone would produce for non-Error rejections).
+      expect(asyncJobWarn.args[0]).to.not.include('undefined');
+      expect(asyncJobWarn.args[0]).to.match(/preflight \S+: \S+/);
     });
 
     it('returns 500 when Site.findById throws', async () => {

@@ -10,6 +10,10 @@
  * governing permissions and limitations under the License.
  */
 // @ts-check
+// Per ADR-005, this file opts into JSDoc type checking; tsconfig.json `include`
+// must list it so tsc actually validates the annotations (otherwise the pragma
+// is editor-only). Type-check is a blocking gate in CI — see package.json
+// `type-check` script.
 
 /**
  * Wire-contract typedefs for the site-scoped Preflight GET endpoints. The
@@ -17,9 +21,34 @@
  * (esp. the shape of `result`) is the deeper exercise tracked in
  * SITES-47180; passthrough `object` is intentional for now.
  *
+ * Entity getters are typed locally rather than imported from
+ * `@adobe/spacecat-shared-data-access` because that package's main type
+ * entry does not re-export `Preflight` / `AsyncJob` (the per-entity
+ * `index.d.ts` exists but isn't in `src/models/index.d.ts`'s barrel as
+ * of v3.79.1). Capturing only the methods we consume keeps the contract
+ * narrow and decouples this file from upstream typing gaps.
+ *
  * @typedef {'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELLED'} PreflightStatus
  *
  * @typedef {{ email: string, displayName?: string }} PreflightActor
+ *
+ * @typedef {{ code: string, message: string, details?: object }} PreflightError
+ *
+ * @typedef {Object} PreflightEntity
+ * @property {() => string} getId
+ * @property {() => string} getSiteId
+ * @property {() => string} getStatus
+ * @property {() => string} getUrl
+ * @property {() => string} getCreatedAt
+ * @property {() => string} getUpdatedAt
+ * @property {() => (string | null)} getEndedAt
+ * @property {() => PreflightActor} getCreatedBy
+ *
+ * @typedef {Object} AsyncJobEntity
+ * @property {() => string} getStatus
+ * @property {() => (string | null)} getEndedAt
+ * @property {() => (object | null)} getResult
+ * @property {() => (PreflightError | null)} getError
  *
  * @typedef {Object} PreflightCreated
  * @property {string} preflightId
@@ -29,29 +58,15 @@
  * @property {string} createdAt              ISO 8601
  * @property {PreflightActor} createdBy
  *
- * @typedef {Object} PreflightListItem
- * @property {string} preflightId
- * @property {string} siteId
- * @property {PreflightStatus} status
- * @property {string} url
- * @property {string} createdAt              ISO 8601
- * @property {string} updatedAt              ISO 8601
- * @property {string | null} endedAt         ISO 8601, null while not terminal
- * @property {PreflightActor} createdBy
+ * @typedef {PreflightCreated & {
+ *   updatedAt: string,
+ *   endedAt: string | null,
+ * }} PreflightListItem
  *
- * @typedef {Object} PreflightDetail
- * @property {string} preflightId
- * @property {string} siteId
- * @property {PreflightStatus} status
- * @property {string} url
- * @property {string} createdAt              ISO 8601
- * @property {string} updatedAt              ISO 8601
- * @property {string | null} endedAt         ISO 8601
- * @property {PreflightActor} createdBy
- * @property {object | null} result          Sourced from AsyncJob; null while not terminal
- * @property {PreflightError | null} error   Sourced from AsyncJob
- *
- * @typedef {{ code: string, message: string, details?: object }} PreflightError
+ * @typedef {PreflightListItem & {
+ *   result: object | null,
+ *   error: PreflightError | null,
+ * }} PreflightDetail
  */
 
 export const PreflightDto = {
@@ -61,7 +76,7 @@ export const PreflightDto = {
    * (updatedAt === createdAt; endedAt is always null for IN_PROGRESS).
    * The full shape returns on subsequent GETs.
    *
-   * @param {import('@adobe/spacecat-shared-data-access').Preflight} preflight
+   * @param {PreflightEntity} preflight
    * @returns {PreflightCreated}
    */
   toCreatedJSON: (preflight) => ({
@@ -76,46 +91,49 @@ export const PreflightDto = {
   /**
    * List-view DTO. Sources entirely from the Preflight entity — `status` and
    * `endedAt` are denormalized on the row (kept in sync by the projector) so
-   * the list path stays index-only without joining `async_jobs`.
+   * the list path stays index-only without joining `async_jobs`. The detail
+   * view (`toDetailJSON`) re-reads these two fields from the AsyncJob row
+   * (truth) to avoid the projector-window split-brain (see ADR-003
+   * amendment, SITES-47254).
    *
-   * @param {import('@adobe/spacecat-shared-data-access').Preflight} preflight
+   * @param {PreflightEntity} preflight
    * @returns {PreflightListItem}
    */
   toJSON: (preflight) => ({
-    preflightId: preflight.getId(),
-    siteId: preflight.getSiteId(),
-    status: /** @type {PreflightStatus} */ (preflight.getStatus()),
-    url: preflight.getUrl(),
-    createdAt: preflight.getCreatedAt(),
+    ...PreflightDto.toCreatedJSON(preflight),
     updatedAt: preflight.getUpdatedAt(),
     endedAt: preflight.getEndedAt(),
-    createdBy: preflight.getCreatedBy(),
   }),
 
   /**
-   * Detail-view DTO. `result` and `error` are AsyncJob-owned (the projector
-   * writes them there, not on the Preflight row), so the caller fetches the
-   * joined AsyncJob and passes it in. When `asyncJob` is null (defensive
-   * degrade — caller logs the gap), the two fields surface as null rather
-   * than 404'ing the whole response.
+   * Detail-view DTO. Lifecycle fields (`status`, `endedAt`, `result`,
+   * `error`) source from the joined AsyncJob row — that's where the
+   * projector writes terminal state first, so reading them together
+   * eliminates the split-brain window where Preflight.status could lag
+   * AsyncJob.result by the time between the projector's two writes.
    *
-   * `startedAt` is intentionally not surfaced — it's an AsyncJob concern,
+   * `startedAt` is intentionally not on the wire — it's an AsyncJob concern,
    * not a Preflight attribute. Consumers that need timing internals can
    * read them out of `result`.
    *
-   * @param {import('@adobe/spacecat-shared-data-access').Preflight} preflight
-   * @param {import('@adobe/spacecat-shared-data-access').AsyncJob | null} asyncJob
+   * The caller MUST pass a valid AsyncJob. The controller returns 503 on
+   * a transient fetch failure rather than degrading silently to nulls
+   * (that path would be indistinguishable from a legitimate empty scan
+   * on the wire). `asyncJob` may legitimately be `null` only when no
+   * AsyncJob row exists for the preflight yet (transitional / legacy
+   * flow) — in that case lifecycle fields fall back to the Preflight
+   * cache and `result`/`error` surface as `null`.
+   *
+   * @param {PreflightEntity} preflight
+   * @param {AsyncJobEntity | null} asyncJob
    * @returns {PreflightDetail}
    */
   toDetailJSON: (preflight, asyncJob) => ({
-    preflightId: preflight.getId(),
-    siteId: preflight.getSiteId(),
-    status: /** @type {PreflightStatus} */ (preflight.getStatus()),
-    url: preflight.getUrl(),
-    createdAt: preflight.getCreatedAt(),
-    updatedAt: preflight.getUpdatedAt(),
-    endedAt: preflight.getEndedAt(),
-    createdBy: preflight.getCreatedBy(),
+    ...PreflightDto.toJSON(preflight),
+    ...(asyncJob && {
+      status: /** @type {PreflightStatus} */ (asyncJob.getStatus()),
+      endedAt: asyncJob.getEndedAt(),
+    }),
     result: asyncJob ? asyncJob.getResult() : null,
     error: asyncJob ? asyncJob.getError() : null,
   }),
