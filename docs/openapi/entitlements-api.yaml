@@ -28,4 +28,48 @@ entitlements-by-organization:
     security:
       - ims_key: [ ]
 
+ensure-entitlement-for-site:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - entitlements
+    summary: Ensure entitlement and site enrollment for a site
+    description: |
+      Admin-only. Ensures the site's owning organization has an active
+      entitlement for the requested product code, and creates a site enrollment
+      linking the site to that entitlement.
 
+      Mirrors the Slack `ensure entitlement site` command: if the organization
+      already has an entitlement for the product, the existing entitlement is
+      reused (its tier is upgraded from a non-PAID tier when the request
+      specifies a different tier). If no entitlement exists, one is created with
+      default free-trial quotas, then the site enrollment is created. The
+      operation is idempotent — repeating the call returns the existing
+      entitlement and enrollment without creating duplicates.
+    operationId: ensureSiteEntitlement
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/EnsureSiteEntitlementRequest'
+    responses:
+      '201':
+        description: Entitlement and site enrollment ensured successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/EnsureSiteEntitlementResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]

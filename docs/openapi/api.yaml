@@ -259,6 +259,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/bot-blocker:
     $ref: './bot-blocker-api.yaml#/bot-blocker'
+  /sites/{siteId}/entitlements:
+    $ref: './entitlements-api.yaml#/ensure-entitlement-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
@@ -676,8 +678,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-zones'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/deploy:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
-  /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones/{zoneId}/routes:
-    $ref: './llmo-api.yaml#/site-llmo-cloudflare-zone-routes'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:

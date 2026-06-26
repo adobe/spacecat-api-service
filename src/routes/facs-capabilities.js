@@ -164,12 +164,13 @@ const routeFacsCapabilities = {
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
     'POST /sites/:siteId/site-enrollments', // hasAdminAccess
+    'POST /sites/:siteId/entitlements', // hasAdminAccess
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
@@ -1165,9 +1166,6 @@ const routeFacsCapabilities = {
     // External / shared identifiers:
     'accessId', 'batchId', 'clientId', 'consumerId', 'contactSalesLeadId',
     'externalUserId', 'imsOrgId', 'grantId', 'userId',
-    // Cloudflare zone identifier (LLMO Cloudflare onboarding route-create endpoint) —
-    // an upstream Cloudflare ID, not a SpaceCat ReBAC entity.
-    'zoneId',
     // ASO dispatcher-overlay service name (GET /config/:service/redirects.txt) —
     // an X-ASO-API-Key-authenticated internal route, not a FACS resource.
     'service',

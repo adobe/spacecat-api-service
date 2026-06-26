@@ -20,6 +20,10 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { deriveWorkerName, hostInSiteDomain, routePatternHost } from './llmo-cloudflare-utils.js';
 
 const CF_TOKEN_HEADER = 'x-cloudflare-token';
+// TEMPORARY: body/query fallback field for the CF token, used only until the
+// x-cloudflare-token header is allowlisted in the CDN/network config (for e2e verification).
+// Intentionally undocumented in the OpenAPI spec. Remove once the header passes through.
+const CF_TOKEN_BODY_FIELD = 'cloudflareToken';
 const CF_TOKEN_MISSING = 'Missing x-cloudflare-token header';
 const EDGE_OPTIMIZE_API_KEY_SECRET = 'EDGE_OPTIMIZE_API_KEY';
 const EDGE_OPTIMIZE_TARGET_HOST_BINDING = 'EDGE_OPTIMIZE_TARGET_HOST';
@@ -61,8 +65,14 @@ function LlmoCloudflareController(ctx) {
   };
 
   const getCfToken = (context) => {
-    const token = context.pathInfo?.headers?.[CF_TOKEN_HEADER];
-    return hasText(token) ? token : null;
+    const headerToken = context.pathInfo?.headers?.[CF_TOKEN_HEADER];
+    if (hasText(headerToken)) {
+      return headerToken;
+    }
+    // TEMPORARY fallback (see CF_TOKEN_BODY_FIELD): accept the token from the request
+    // body/query while the header is not yet allowlisted in the network config.
+    const fallbackToken = context.data?.[CF_TOKEN_BODY_FIELD];
+    return hasText(fallbackToken) ? fallbackToken : null;
   };
 
   /**
@@ -170,15 +180,46 @@ function LlmoCloudflareController(ctx) {
   // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
   const listAccounts = cfListProxy('listAccounts', 'account listing');
 
-  // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones
-  const listZones = cfListProxy('listZones', 'zone listing');
+  /**
+   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones?accountId=<id>
+   * Lists only the zones belonging to the selected Cloudflare account. `accountId` is a
+   * Cloudflare identifier (not a SpaceCat entity), supplied as a query parameter.
+   */
+  const listZones = async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+
+    const { client, error } = requireCfClient(context);
+    if (error) {
+      return error;
+    }
+
+    const { accountId } = context.data || {};
+    if (!hasText(accountId)) {
+      return badRequest('Missing accountId query parameter');
+    }
+    if (!CF_ID_RE.test(accountId)) {
+      return badRequest('accountId must be a 32-character hexadecimal Cloudflare account ID');
+    }
+
+    try {
+      // The client pushes account.id to the Cloudflare API, so filtering happens server-side.
+      const zones = await client.listZones({ accountId });
+      return ok(zones || []);
+    } catch (e) {
+      return cfErrorResponse(e, 'zone listing');
+    }
+  };
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
    * Body: { accountId, targetHost }
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), then sets the LLMO API key as the
-   * EDGE_OPTIMIZE_API_KEY secret on the worker.
+   * EDGE_OPTIMIZE_API_KEY secret on the worker. Returns 409 if a worker with the derived name
+   * already exists in the account (the client refuses to overwrite).
    */
   const deployWorker = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -240,8 +281,18 @@ function LlmoCloudflareController(ctx) {
     ];
 
     try {
+      // overwrite defaults to false, so the client rejects if the worker already exists,
+      // preventing an onboarding deploy from silently replacing one.
       await cfClient.deployWorkerScript(accountId, scriptName, workerScript, bindings);
     } catch (e) {
+      if (/already exists/i.test(e.message)) {
+        log.info(`Worker '${scriptName}' already exists in account ${accountId}; refusing to overwrite`);
+        return createResponse({
+          message: `A worker named '${scriptName}' already exists in this Cloudflare account`,
+          scriptName,
+          accountId,
+        }, 409);
+      }
       return cfErrorResponse(e, 'worker deployment');
     }
 
@@ -276,11 +327,12 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes
-   * Body: { pattern }
+   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes
+   * Body: { zoneId, pattern }
    * Verifies server-side that the pattern targets the site's own domain and does not collide
    * with an existing route in the zone before creating it, so a deploy cannot silently override
-   * a route the customer already has.
+   * a route the customer already has. `zoneId` is a Cloudflare identifier (not a SpaceCat
+   * entity), so it is supplied in the body rather than the path.
    */
   const addRoute = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -300,16 +352,14 @@ function LlmoCloudflareController(ctx) {
       return nameError;
     }
 
-    const { zoneId } = context.params;
+    const { zoneId, pattern } = context.data || {};
+
     if (!hasText(zoneId)) {
-      return badRequest('Missing zoneId');
+      return badRequest('Missing zoneId in request body');
     }
     if (!CF_ID_RE.test(zoneId)) {
       return badRequest('zoneId must be a 32-character hexadecimal Cloudflare zone ID');
     }
-
-    const { pattern } = context.data || {};
-
     if (!hasText(pattern)) {
       return badRequest('Missing pattern in request body');
     }

@@ -154,7 +154,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
-  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
@@ -178,6 +178,7 @@ export const INTERNAL_ROUTES = [
   // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
   'POST /sites/:siteId/site-enrollments',
+  'POST /sites/:siteId/entitlements',
   // Feature flags write - admin only, mysticat-backed org config
   'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
   'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
