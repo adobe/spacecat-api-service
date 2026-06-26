@@ -258,6 +258,28 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(401);
     });
 
+    // Test-only escape hatch (SERENITY_ALLOW_NON_IMS_AUTH). The integration-test
+    // harness mints a non-IMS (JWT) token; with the flag set, the IMS-type gate
+    // is skipped so the handler runs (the Semrush mock ignores the forwarded
+    // bearer). The Authorization header is still required (asserted below).
+    it('lets a non-IMS caller through when SERENITY_ALLOW_NON_IMS_AUTH is set (reaches the handler, not 401)', async () => {
+      handlers.handleListPrompts.resolves({ items: [], total: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
+    });
+
+    it('still 401s a non-IMS caller with the flag set but NO Authorization header', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: null, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
     it('400s when :brandId is not a UUID (the new guard)', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({ brandId: 'adobe-brand-name' });

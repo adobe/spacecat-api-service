@@ -11,6 +11,7 @@
  */
 
 import { ctx } from './harness.js';
+import { resetPostgres } from './seed.js';
 import serenityTests from '../shared/tests/serenity.js';
 
-serenityTests(() => ctx.httpClient);
+serenityTests(() => ctx.httpClient, resetPostgres);

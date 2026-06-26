@@ -98,5 +98,21 @@ export function buildEnv(publicKeyB64) {
     POSTGREST_URL: `http://localhost:${process.env.IT_POSTGREST_PORT || '3300'}`,
     POSTGREST_SCHEMA: 'public',
     POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
+
+    // ── Serenity E2E: Semrush vendor mocks ──────────────────────────────────
+    // Point the two serenity transport gateways at the mock containers. The
+    // User Manager origin is split out via SEMRUSH_USERS_BASE_URL (api-service#2656)
+    // so the two mocks need no path-routing reverse proxy. Both serve self-signed
+    // HTTPS, so the dev server trusts them via NODE_TLS_REJECT_UNAUTHORIZED=0
+    // (scoped to this IT process — never a deployed setting).
+    SEMRUSH_PROJECTS_BASE_URL: `https://localhost:${process.env.IT_PE_MOCK_PORT || '8443'}`,
+    SEMRUSH_USERS_BASE_URL: `https://localhost:${process.env.IT_UM_MOCK_PORT || '8444'}`,
+    NODE_TLS_REJECT_UNAUTHORIZED: '0',
+    // Test-only escape hatch: accept the harness's non-IMS JWT on /serenity/*.
+    // Sound only against the mocks, which ignore the forwarded bearer. No
+    // deployed environment sets this (it is never written to Vault).
+    SERENITY_ALLOW_NON_IMS_AUTH: 'true',
+    // Lets the net-zero cleanup delete a sub-workspace it created in the mock.
+    SERENITY_ALLOW_WORKSPACE_DELETE: 'true',
   };
 }

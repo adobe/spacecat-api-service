@@ -14,155 +14,91 @@ import { expect } from 'chai';
 import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
 
 /**
- * Integration tests for the /serenity/* surface (LLMO-5190).
+ * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
+ * Semrush vendor MOCKS (Counterfact images from adobe/spacecat-shared, started
+ * by the IT docker-compose). Two things make these reachable where the prior
+ * IT suite could only assert 400/401:
  *
- * Scope and limitation
- * ────────────────────
- * The serenity controller enforces IMS-only authentication
- * (`requireImsBearer`) on every handler dispatch. The shared IT harness mints
- * JWT tokens via `test/it/shared/auth.js` — those are not IMS-typed, so any
- * authenticated GET against `/serenity/*` deterministically returns 401 from
- * the controller before reaching the handler. Until the harness grows the
- * ability to mint IMS-shaped tokens (and the local dev server is configured
- * to trust them), the IT-testable surface is restricted to:
+ *   1. Auth: the harness mints a NON-IMS (local JWT) token, which the serenity
+ *      controller's `requireImsBearer` normally rejects (it forwards only IMS
+ *      tokens upstream). The IT env sets `SERENITY_ALLOW_NON_IMS_AUTH=true`,
+ *      which skips the IMS-type gate — sound ONLY because the Semrush mock does
+ *      not validate the forwarded bearer (the token value never matters). No
+ *      deployed environment sets that flag.
+ *   2. Vendor: `SEMRUSH_PROJECTS_BASE_URL` / `SEMRUSH_USERS_BASE_URL` point at
+ *      the two mock containers (api-service#2656 splits the User Manager origin
+ *      so no path-routing proxy is needed); `NODE_TLS_REJECT_UNAUTHORIZED=0`
+ *      trusts their self-signed certs.
  *
- *   1. Route-gate validation (`src/index.js:349-352`) which fires BEFORE auth:
- *      non-UUID spaceCatId / brandId → 400 with a deterministic message.
- *   2. The controller's 401 contract itself: JWT-authenticated requests must
- *      not be silently accepted by the IMS-required serenity proxy.
- *
- * The end-to-end "list/create/delete market" and "required-filter 400 on
- * prompts/tags/models" paths are covered by the unit suites
- * (`test/support/serenity/handlers/*.test.js` — 100% line + branch coverage)
- * and the OpenAPI contract suite (`test/openapi-contract/serenity-api.test.js`).
- * The `tagIds` multi-value query param added in feat/serenity-tag-filter is
- * verified at IT level by the test below (repeated params reach extractQuery
- * without a 500, then 401 from requireImsBearer as expected).
- * The remaining IT gap is structural (auth-token shape) and is filed for
- * follow-up — the workaround alternatives (stubbing requireImsBearer at IT
- * time; injecting a fake IMS token-mint) would either ship test-only code
- * into production paths or duplicate the auth harness in a way that drifts
- * independently.
+ * This increment covers the route gate, the IMS-only relaxation, and the
+ * brand-INDEPENDENT catalog reads that flow all the way to the Project Engine
+ * mock. The sub-workspace lifecycle (activate/deactivate, market create/delete)
+ * mutates mock state and is the next increment — `resetSemrushMocks()` in
+ * setup.js is wired for it.
  */
-export default function serenityTests(getHttpClient) {
-  describe('Serenity API — route-gate + auth contract (LLMO-5190)', () => {
-    it('400s on non-UUID spaceCatId (route gate, before auth)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(`/v2/orgs/not-a-uuid/brands/${BRAND_1_ID}/serenity/markets`);
+export default function serenityTests(getHttpClient, resetData) {
+  // Seed the baseline org/brand rows the catalog + brand-resolution tests read.
+  // (The route-gate cases fire before any DB access, but the org-level reads
+  // need ORG_1 present.) Mirrors every other postgres factory.
+  before(() => resetData());
+
+  describe('Serenity API — route gate (fires before auth)', () => {
+    it('400s on non-UUID spaceCatId', async () => {
+      const res = await getHttpClient().admin.get(
+        `/v2/orgs/not-a-uuid/brands/${BRAND_1_ID}/serenity/markets`,
+      );
       expect(res.status).to.equal(400);
-      // The 400 message is owned by src/index.js — we assert the substring
-      // that downstream callers grep for in their own error mapping.
       expect(res.body.message || res.body).to.match(/Organization Id.*invalid/i);
     });
 
-    it('400s on non-UUID brandId (route gate, before auth)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/not-a-uuid/serenity/markets`);
+    it('400s on non-UUID brandId', async () => {
+      const res = await getHttpClient().admin.get(
+        `/v2/orgs/${ORG_1_ID}/brands/not-a-uuid/serenity/markets`,
+      );
       expect(res.status).to.equal(400);
     });
 
-    // Locks the contract: the serenity proxy refuses anything that isn't an
-    // IMS-typed token. JWT-authenticated callers (which the harness mints by
-    // default) get a 401 before the handler ever runs — this prevents
-    // accidentally widening the proxy's accepted auth shape later.
-    it('401s when the caller is authenticated but not via IMS', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/markets`);
-      expect(res.status).to.equal(401);
-    });
-
-    it('401s on prompts endpoint with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/prompts?geoTargetId=2840&languageCode=en`,
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    // Verifies that repeated tagIds query params (the new filter feature) are
-    // accepted by extractQuery / parsedQuery without a 500 and that auth still
-    // fires — i.e. the multi-value param handling does not crash the controller
-    // before it reaches requireImsBearer.
-    it('401s on prompts endpoint with tagIds params (multi-value param does not crash controller)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/prompts?geoTargetId=2840&languageCode=en&tagIds=uuid-1&tagIds=uuid-2`,
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    it('401s on tags endpoint with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/tags?geoTargetId=2840&languageCode=en`,
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    it('401s on models endpoint with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/models?geoTargetId=2840&languageCode=en`,
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    it('401s on DELETE market with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.delete(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/markets/2840/en`,
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    it('401s on GET market detail with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.get(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/markets/2840/en`,
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    // ── Dual-mode (sub-workspace) routes — same route-gate + IMS-only contract ──
-    // The subworkspace dispatch + activate/deactivate handler behaviour needs
-    // an IMS token AND the live Semrush gateway, so (like the rest of this suite)
-    // it is covered by the unit + contract suites and the live through-api e2e.
-    // Here we only lock that the NEW routes are registered and enforce the same
-    // pre-handler contract as the rest of the surface.
-    it('401s on PUT models with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.put(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/models`,
-        { geoTargetId: 2840, languageCode: 'en', modelIds: [] },
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    it('401s on POST activate with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.post(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/activate`,
-        { brandDomain: 'example.com', brandNames: ['Example'], markets: [{ market: 'US', languageCode: 'en' }] },
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    it('401s on POST deactivate with JWT auth (same IMS-only contract)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.post(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/deactivate`,
-        {},
-      );
-      expect(res.status).to.equal(401);
-    });
-
-    it('400s on non-UUID brandId for activate (route gate, before auth)', async () => {
-      const http = getHttpClient();
-      const res = await http.admin.post(
+    it('400s on non-UUID brandId for activate', async () => {
+      const res = await getHttpClient().admin.post(
         `/v2/orgs/${ORG_1_ID}/brands/not-a-uuid/serenity/activate`,
         { brandDomain: 'example.com', brandNames: ['Example'], markets: [{ market: 'US', languageCode: 'en' }] },
       );
       expect(res.status).to.equal(400);
+    });
+  });
+
+  describe('Serenity API — org-level catalog (live via Project Engine mock)', () => {
+    // GET /v2/orgs/:org/serenity/models is brand/workspace-INDEPENDENT: it
+    // authorizes at the org level and reads the global `GET /v1/ai_models`
+    // catalog from the Project Engine mock. A 200 here proves the full chain:
+    // relaxed auth → org access → typed transport → HTTPS to the mock → parse.
+    it('GET /serenity/models returns 200 with the global AI model catalog', async () => {
+      const res = await getHttpClient().admin.get(`/v2/orgs/${ORG_1_ID}/serenity/models`);
+      expect(res.status).to.equal(200);
+      // The global catalog comes back as { items: [...] }; the mock's
+      // workspace-with-data seed ships a non-empty model list.
+      expect(res.body).to.be.an('object');
+      expect(res.body.items).to.be.an('array').that.is.not.empty;
+    });
+
+    it('GET /serenity/languages returns 200 with the language catalog', async () => {
+      const res = await getHttpClient().admin.get(`/v2/orgs/${ORG_1_ID}/serenity/languages`);
+      expect(res.status).to.equal(200);
+      expect(res.body).to.be.an('object');
+    });
+  });
+
+  describe('Serenity API — relaxed auth reaches the handler', () => {
+    // Before SERENITY_ALLOW_NON_IMS_AUTH the harness's JWT deterministically
+    // 401'd at requireImsBearer. With the flag, the same call now passes auth
+    // and proceeds to brand resolution: an unknown brand under an accessible org
+    // resolves to 404 (NOT 401), proving the relaxed path reaches the handler.
+    it('brand-level GET markets returns 404 for an unknown brand (not 401)', async () => {
+      const unknownBrand = '99999999-9999-4999-b999-999999999999';
+      const res = await getHttpClient().admin.get(
+        `/v2/orgs/${ORG_1_ID}/brands/${unknownBrand}/serenity/markets`,
+      );
+      expect(res.status).to.equal(404);
     });
   });
 }

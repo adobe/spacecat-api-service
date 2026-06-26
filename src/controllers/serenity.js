@@ -180,10 +180,22 @@ function mapError(e, log) {
  * missing OR if the caller authenticated by some other mechanism. The
  * upstream gateway only understands IMS user tokens; we refuse to forward
  * anything else.
+ *
+ * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` the
+ * IMS-type check is skipped so an authenticated NON-IMS caller (e.g. the
+ * locally-signed JWT the integration-test harness mints) can reach the
+ * handlers. This is sound ONLY against the Semrush vendor MOCKS, which do not
+ * validate the forwarded bearer — the token's value never matters, only that
+ * an authenticated identity is present. Mirrors `SERENITY_ALLOW_WORKSPACE_DELETE`
+ * in rest-transport.js: an explicit opt-in flag that NO deployed environment
+ * sets (it is never written to Vault `dx_mysticat/<env>/api-service`); it is
+ * for local + automated E2E only. The Authorization-header requirement still
+ * holds — a bearer must be present to forward upstream.
  */
 function requireImsBearer(ctx) {
   const authInfo = ctx?.attributes?.authInfo;
-  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+  const allowNonIms = ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  if (!allowNonIms && authInfo?.getType && authInfo.getType() !== 'ims') {
     throw new ErrorWithStatusCode(
       'Serenity proxy requires IMS authentication',
       401,
