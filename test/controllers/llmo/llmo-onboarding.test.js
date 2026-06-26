@@ -319,6 +319,29 @@ describe('LLMO Onboarding Functions', () => {
     });
   };
 
+  describe('settleWithin', () => {
+    let settleWithin;
+
+    before(async () => {
+      ({ settleWithin } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {}));
+    });
+
+    it('resolves to the value when the promise settles within the timeout', async () => {
+      expect(await settleWithin(Promise.resolve('detected'), 1000, null)).to.equal('detected');
+    });
+
+    it('resolves to the fallback when the promise rejects (non-fatal)', async () => {
+      expect(await settleWithin(Promise.reject(new Error('boom')), 1000, null)).to.equal(null);
+    });
+
+    it('resolves to the fallback when the promise exceeds the timeout', async () => {
+      const slow = new Promise((resolve) => {
+        setTimeout(() => resolve('late'), 200);
+      });
+      expect(await settleWithin(slow, 20, 'fallback')).to.equal('fallback');
+    });
+  });
+
   describe('generateDataFolder', () => {
     let generateDataFolder;
 
@@ -3902,7 +3925,9 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // NB: do NOT mock setTimeout to fire immediately here — override detection is
+      // now timeboxed via settleWithin(), and an immediate-firing timer would trip
+      // the timeout before the (instant, mocked) detection wins the race.
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,

@@ -270,7 +270,6 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const lines = [
         `*Agentic Traffic Projection Status — ${dateStr}*`,
-        `Outcome: *${outcome}*`,
         `:white_check_mark: Dashboard-ready: *${dashboardReady.length}/${enabledSites.length}*`,
         `:hourglass_flowing_sand: Missing raw projection: *${rawMissing.length}*`,
         `:arrows_counterclockwise: Missing daily refresh: *${dailyMissing.length}*`,

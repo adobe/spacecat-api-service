@@ -21,7 +21,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import esmock from 'esmock';
 
 import * as utils from '../../src/support/utils.js';
-import PreflightController from '../../src/controllers/preflight.js';
+import PreflightController, { countIssuesForAudit } from '../../src/controllers/preflight.js';
 
 // Make fetch available globally
 global.fetch = fetch;
@@ -1575,7 +1575,7 @@ describe('Preflight Controller', () => {
     });
 
     it('calls Mysticat with correct parameters', async () => {
-      await preflightController.createPreflight({
+      const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
         attributes: { authInfo: mockAuthInfo },
@@ -1587,6 +1587,17 @@ describe('Preflight Controller', () => {
       expect(body.url).to.equal('https://main--example-site.aem.page/test.html');
       expect(body.mode).to.be.undefined;
       expect(body.audits).to.be.undefined;
+      // SITES-47173: wire field is `async_job_id` (the AsyncJob id spacecat
+      // owns); mystique mints its own scan_id internally. The deprecated
+      // `scan_id` body field must NOT be sent.
+      expect(body.async_job_id).to.be.a('string').and.not.empty;
+      expect(body.scan_id).to.be.undefined;
+      // The async_job_id carries the AsyncJob row id that createPreflight
+      // creates — pulled from the response's Preflight DTO via its
+      // back-reference, but easier to assert it matches what's on the wire.
+      const preflightBody = await response.json();
+      expect(body.async_job_id).to.not.be.undefined;
+      expect(preflightBody.preflightId).to.be.a('string');
     });
 
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
@@ -2201,6 +2212,145 @@ describe('Preflight Controller', () => {
       });
     });
 
+    it('logs a compact summary with issue counts (all three counting modes)', async () => {
+      loggerStub.info.resetHistory();
+      const resultJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'suggest',
+            audits: [
+              // empty audit -> 0
+              { name: 'body-size', type: 'seo', opportunities: [] },
+              // single-issue-per-opportunity -> 2
+              {
+                name: 'metatags',
+                type: 'seo',
+                opportunities: [{ issue: 'Title too short' }, { issue: 'Description too short' }],
+              },
+              // issue-is-an-array (links) -> 3 + 1 = 4
+              {
+                name: 'links',
+                type: 'seo',
+                opportunities: [
+                  { check: 'broken-internal-links', issue: [{}, {}, {}] },
+                  { check: 'broken-external-links', issue: [{}] },
+                ],
+              },
+              // accessibility -> sum of occurrences = 5 + 40 = 45
+              {
+                name: 'accessibility',
+                type: 'a11y',
+                opportunities: [
+                  { type: 'aria-allowed-attr', occurrences: 5 },
+                  { type: 'color-contrast', occurrences: 40 },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(resultJob);
+
+      const context = { params: { jobId } };
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
+      expect(logged).to.deep.equal([
+        {
+          pageUrl: 'https://main--example-site.aem.page/test.html',
+          step: 'suggest',
+          audits: [
+            {
+              name: 'body-size', type: 'seo', opportunities: 0, issues: 0,
+            },
+            {
+              name: 'metatags', type: 'seo', opportunities: 2, issues: 2,
+            },
+            {
+              name: 'links', type: 'seo', opportunities: 2, issues: 4,
+            },
+            {
+              name: 'accessibility', type: 'a11y', opportunities: 2, issues: 45,
+            },
+          ],
+        },
+      ]);
+    });
+
+    it('handles malformed result entries (non-array audits / opportunities)', async () => {
+      loggerStub.info.resetHistory();
+      const resultJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          // audits is not an array -> falls back to []
+          { pageUrl: 'https://main--example-site.aem.page/a.html', step: 'identify', audits: undefined },
+          // audit present but opportunities is not an array -> opportunities count falls back to 0
+          {
+            pageUrl: 'https://main--example-site.aem.page/b.html',
+            step: 'identify',
+            audits: [{ name: 'metatags', type: 'seo', opportunities: undefined }],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(resultJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
+      expect(logged).to.deep.equal([
+        { pageUrl: 'https://main--example-site.aem.page/a.html', step: 'identify', audits: [] },
+        {
+          pageUrl: 'https://main--example-site.aem.page/b.html',
+          step: 'identify',
+          audits: [{
+            name: 'metatags', type: 'seo', opportunities: 0, issues: 0,
+          }],
+        },
+      ]);
+    });
+
+    it('does not log results while the job is still IN_PROGRESS', async () => {
+      loggerStub.info.resetHistory();
+      const inProgressJob = {
+        ...mockJob,
+        getStatus: () => 'IN_PROGRESS',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'identify',
+            audits: [{ name: 'Meta Tags', type: 'meta-tags', opportunities: [{}] }],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(inProgressJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`));
+      expect(infoCall, 'expected no [Preflight] jobId info log while IN_PROGRESS').to.be.undefined;
+    });
+
     it('returns 400 Bad Request for invalid job ID', async () => {
       const context = {
         params: {
@@ -2467,5 +2617,57 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
     });
+  });
+});
+
+describe('countIssuesForAudit', () => {
+  it('returns 0 for an audit with no opportunities', () => {
+    expect(countIssuesForAudit({ name: 'body-size', opportunities: [] })).to.equal(0);
+  });
+
+  it('returns 0 when opportunities is missing or not an array', () => {
+    expect(countIssuesForAudit({ name: 'h1-count' })).to.equal(0);
+    expect(countIssuesForAudit({ name: 'h1-count', opportunities: null })).to.equal(0);
+    expect(countIssuesForAudit(undefined)).to.equal(0);
+  });
+
+  it('counts one issue per opportunity with a scalar issue (metatags/headings)', () => {
+    const audit = {
+      name: 'metatags',
+      opportunities: [{ issue: 'Title too short' }, { issue: 'Description too short' }],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(2);
+  });
+
+  it('ignores opportunities without an issue in the default mode', () => {
+    const audit = {
+      name: 'headings',
+      opportunities: [{ issue: 'Empty Heading' }, { check: 'no-issue-field' }],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(1);
+  });
+
+  it('sums issue-array lengths for links audits', () => {
+    const audit = {
+      name: 'links',
+      opportunities: [
+        { check: 'broken-internal-links', issue: [{}, {}, {}] },
+        { check: 'broken-external-links', issue: [{}] },
+        { check: 'bad-links', issue: [{}] },
+      ],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(5);
+  });
+
+  it('sums occurrences for accessibility audits (not htmlWithIssues length)', () => {
+    const audit = {
+      name: 'accessibility',
+      opportunities: [
+        { type: 'aria-allowed-attr', occurrences: 5, htmlWithIssues: [{}, {}] },
+        { type: 'color-contrast', occurrences: 40 },
+        { type: 'missing-occurrences' },
+      ],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(45);
   });
 });

@@ -32,6 +32,35 @@ import {
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
+const ACCESSIBILITY_AUDIT_NAME = 'accessibility';
+
+/**
+ * Counts the number of issues for a single preflight audit. Three counting modes:
+ *  - accessibility: sum of the integer `occurrences` across opportunities
+ *    (each opportunity is an issue "type" with N occurrences).
+ *  - opportunities whose `issue` is an array (e.g. links): sum of the issue-array
+ *    lengths (each entry is one issue).
+ *  - all others: one issue per opportunity that has a truthy `issue` (exactly one
+ *    issue per opportunity).
+ * @param {Object} audit - A PreflightAudit: { name, type, opportunities }
+ * @returns {number} Total issue count for the audit
+ */
+export function countIssuesForAudit(audit) {
+  const opportunities = Array.isArray(audit?.opportunities) ? audit.opportunities : [];
+  if (audit?.name === ACCESSIBILITY_AUDIT_NAME) {
+    return opportunities.reduce((sum, opp) => sum + (opp?.occurrences ?? 0), 0);
+  }
+  return opportunities.reduce((count, opp) => {
+    if (Array.isArray(opp?.issue)) {
+      return count + opp.issue.length;
+    }
+    if (opp?.issue) {
+      return count + 1;
+    }
+    return count;
+  }, 0);
+}
+
 /**
  * Creates a preflight controller instance
  * @param {Object} ctx - The context object containing dataAccess and sqs
@@ -280,9 +309,27 @@ function PreflightController(ctx, log, env) {
 
       log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
 
+      const result = job.getResult();
+      const status = job.getStatus();
+
+      // Log a compact summary of the audit-worker results once the job is completed.
+      if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
+        const summary = result.map((r) => ({
+          pageUrl: r?.pageUrl,
+          step: r?.step,
+          audits: (Array.isArray(r?.audits) ? r.audits : []).map((a) => ({
+            name: a?.name,
+            type: a?.type,
+            opportunities: Array.isArray(a?.opportunities) ? a.opportunities.length : 0,
+            issues: countIssuesForAudit(a),
+          })),
+        }));
+        log.info(`[Preflight] Run complete. jobId=${jobId} status=${status} results=${JSON.stringify(summary)}`);
+      }
+
       return ok({
         jobId: job.getId(),
-        status: job.getStatus(),
+        status,
         createdAt: job.getCreatedAt(),
         updatedAt: job.getUpdatedAt(),
         startedAt: job.getStartedAt(),
@@ -290,7 +337,7 @@ function PreflightController(ctx, log, env) {
         recordExpiresAt: job.getRecordExpiresAt(),
         resultLocation: job.getResultLocation(),
         resultType: job.getResultType(),
-        result: job.getResult(),
+        result,
         error: job.getError(),
         metadata: job.getMetadata(),
       });
@@ -306,8 +353,16 @@ function PreflightController(ctx, log, env) {
 
   /**
    * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
-   * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
-   * identified by scanId.
+   * Mysticat processes the analysis asynchronously and writes results back to the
+   * AsyncJob identified by asyncJobId.
+   *
+   * SITES-47173: mystique owns the scan_id concept end-to-end (mints its own
+   * scan_id, registers `control_scan`, tags `async_jobs.metadata.scan_id` at
+   * scan-start). Spacecat passes the AsyncJob id under its real name; the
+   * scan_id concept is internal to mystique. After this call returns, the
+   * AsyncJob's `metadata.scan_id` is populated (best-effort by mystique) for
+   * any downstream consumer that needs to discover the scan_id without
+   * round-tripping back to mystique.
    *
    * Two distinct auth headers are sent (SITES-46967 — header layout swap):
    *  - `Authorization`: spacecat-api-service's own IMS service token,
@@ -322,7 +377,8 @@ function PreflightController(ctx, log, env) {
    *    rode `Authorization`, the IMS token rode `x-ims-authorization`).
    *
    * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
-   * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
+   * @param {string} asyncJobId - The AsyncJob id; mystique tags its minted
+   *   scan_id onto async_jobs.metadata for the projector lookup.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
    * @param {string} [pageAuthHeader] - Optional customer-site page-auth header.
@@ -330,7 +386,7 @@ function PreflightController(ctx, log, env) {
    */
   async function callMysticatAnalyze(
     mysticatBaseUrl,
-    scanId,
+    asyncJobId,
     siteId,
     url,
     pageAuthHeader,
@@ -351,7 +407,7 @@ function PreflightController(ctx, log, env) {
         body: JSON.stringify({
           site_id: siteId,
           url,
-          scan_id: scanId,
+          async_job_id: asyncJobId,
           persist: true,
         }),
       });

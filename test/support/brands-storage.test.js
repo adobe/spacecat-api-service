@@ -18,13 +18,15 @@ import chaiAsPromised from 'chai-as-promised';
 import {
   listBrands,
   getBrandById,
-  getBrandAliasNames,
+  getBrandAliases,
   getBrandUrlSources,
   getBrandCompetitors,
   getBrandBySite,
+  isSemrushMarketMirrorSite,
   upsertBrand,
   updateBrand,
   deleteBrand,
+  setBrandStatus,
   listRegions,
 } from '../../src/support/brands-storage.js';
 
@@ -111,7 +113,9 @@ describe('brands-storage', () => {
       expect(result[0].brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
       expect(result[0].socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
       expect(result[0].earnedContent).to.deep.equal([{ name: 'TechCrunch', url: 'https://techcrunch.com', regions: [] }]);
-      expect(result[0].competitors).to.deep.equal([{ name: 'Rival', url: 'https://rival.com', regions: ['US'] }]);
+      expect(result[0].competitors).to.deep.equal([{
+        name: 'Rival', url: 'https://rival.com', aliases: [], regions: ['US'],
+      }]);
       expect(result[0].urls).to.deep.equal([
         { value: 'https://test.com', onboarded: true, siteId: 'site-uuid-1' },
       ]);
@@ -275,13 +279,64 @@ describe('brands-storage', () => {
 
       expect(result).to.include({ id: BRAND_ID, name: 'TestBrand', status: 'active' });
       expect(result.brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
-      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'Rival', url: null, aliases: [], regions: [],
+      }]);
       expect(result.siteIds).to.deep.equal(['site-uuid-1']);
       expect(result.urls).to.deep.equal([
         { value: 'https://example.com', onboarded: true, siteId: 'site-uuid-1' },
       ]);
       expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
       expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.example.com', regions: [] }]);
+    });
+
+    it('excludes Serenity market-site rows (type=serenity) from urls[] and siteIds', async () => {
+      // A brand is a shell with no domain of its own; each market has its own
+      // domain → its own site, linked via a type=serenity brand_sites row. Those
+      // rows are a pure backend linkage and must not surface in the brand response.
+      const dbRow = makeBrandRow({
+        brand_sites: [
+          {
+            site_id: 'own-site', paths: ['/'], type: 'base', sites: { base_url: 'https://acme.com' },
+          },
+          {
+            site_id: 'market-site', paths: ['/'], type: 'serenity', sites: { base_url: 'https://acme.fr' },
+          },
+        ],
+      });
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const result = await getBrandById(ORG_ID, BRAND_ID, { from: sinon.stub().returns(query) });
+
+      // market-site excluded from siteIds; its domain absent from urls[].
+      expect(result.siteIds).to.deep.equal(['own-site']);
+      const urlValues = result.urls.map((u) => u.value);
+      expect(urlValues).to.include('https://acme.com');
+      expect(urlValues).to.not.include('https://acme.fr');
+    });
+
+    it('surfaces a Serenity row when its domain is ALSO an explicit brand URL', async () => {
+      // A market domain that the brand also lists as a brand URL IS a brand URL —
+      // it must keep onboarded/siteId status rather than vanishing behind the
+      // serenity exclusion. syncBrandSites collapses the overlap into one
+      // serenity-typed row (one per (brand, site)); mapDbBrandToV2 surfaces it
+      // because brand_urls references the same base.
+      const dbRow = makeBrandRow({
+        brand_urls: [{ url: 'https://acme.com' }],
+        brand_sites: [
+          {
+            site_id: 'shared-site', paths: ['/'], type: 'serenity', sites: { base_url: 'https://acme.com' },
+          },
+        ],
+      });
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const result = await getBrandById(ORG_ID, BRAND_ID, { from: sinon.stub().returns(query) });
+
+      // The brand URL stays onboarded and the site appears in siteIds.
+      expect(result.siteIds).to.deep.equal(['shared-site']);
+      const acme = result.urls.find((u) => u.value === 'https://acme.com');
+      expect(acme).to.exist;
+      expect(acme.onboarded).to.equal(true);
+      expect(acme.siteId).to.equal('shared-site');
     });
 
     it('maps semrush_workspace_id to semrushWorkspaceId (sub-workspace), null when absent', async () => {
@@ -334,7 +389,9 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
-      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'Rival', url: null, aliases: [], regions: [],
+      }]);
     });
 
     it('applies || fallbacks for null origin, null regions on child rows, null base_url and null paths on brand_sites', async () => {
@@ -393,42 +450,45 @@ describe('brands-storage', () => {
     });
   });
 
-  describe('getBrandAliasNames', () => {
+  describe('getBrandAliases', () => {
     it('returns [] when postgrestClient is missing', async () => {
-      expect(await getBrandAliasNames(BRAND_ID, null)).to.deep.equal([]);
+      expect(await getBrandAliases(BRAND_ID, null)).to.deep.equal([]);
     });
 
     it('returns [] when brandId is empty', async () => {
-      expect(await getBrandAliasNames('', { from: () => {} })).to.deep.equal([]);
+      expect(await getBrandAliases('', { from: () => {} })).to.deep.equal([]);
     });
 
-    it('returns de-duplicated, non-empty alias names', async () => {
+    it('returns de-duplicated { name, regions }, dropping blank aliases', async () => {
       const query = createChainableQuery({
         data: [
-          { alias: 'Acme Inc' },
-          { alias: 'ACME' },
-          { alias: 'Acme Inc' }, // exact duplicate dropped
+          { alias: 'Acme Inc', regions: ['us'] },
+          { alias: 'ACME', regions: null }, // null regions → []
+          { alias: 'acme inc', regions: ['de'] }, // case-insensitive dup → dropped
           { alias: '' }, // empty dropped (hasText)
           { alias: null }, // null dropped
         ],
         error: null,
       });
       const postgrestClient = { from: sinon.stub().returns(query) };
-      const result = await getBrandAliasNames(BRAND_ID, postgrestClient);
+      const result = await getBrandAliases(BRAND_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledOnceWith('brand_aliases');
-      expect(result).to.deep.equal(['Acme Inc', 'ACME']);
+      expect(result).to.deep.equal([
+        { name: 'Acme Inc', regions: ['us'] },
+        { name: 'ACME', regions: [] },
+      ]);
     });
 
     it('returns [] when the brand has no aliases (null data)', async () => {
       const query = createChainableQuery({ data: null, error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
-      expect(await getBrandAliasNames(BRAND_ID, postgrestClient)).to.deep.equal([]);
+      expect(await getBrandAliases(BRAND_ID, postgrestClient)).to.deep.equal([]);
     });
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
       const postgrestClient = { from: sinon.stub().returns(query) };
-      await expect(getBrandAliasNames(BRAND_ID, postgrestClient))
+      await expect(getBrandAliases(BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand aliases');
     });
   });
@@ -463,6 +523,22 @@ describe('brands-storage', () => {
       });
     });
 
+    it('defaults a social account with no regions to an empty array', async () => {
+      // brand_social_accounts row with falsy regions exercises the `s.regions || []`
+      // fallback (distinct from the earnedContent fallback already covered above).
+      const query = createChainableQuery({
+        data: {
+          brand_urls: [],
+          brand_social_accounts: [{ url: 'https://x.com/acme', regions: null }],
+          brand_earned_sources: [],
+        },
+        error: null,
+      });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      const result = await getBrandUrlSources(BRAND_ID, postgrestClient);
+      expect(result.socialAccounts).to.deep.equal([{ url: 'https://x.com/acme', regions: [] }]);
+    });
+
     it('returns empty collections when the brand row is not found (null data)', async () => {
       const query = createChainableQuery({ data: null, error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -492,11 +568,15 @@ describe('brands-storage', () => {
       expect(await getBrandCompetitors('', { from: () => {} })).to.deep.equal([]);
     });
 
-    it('returns url + regions, skipping url-less competitors', async () => {
+    it('returns name + url + aliases + regions, skipping url-less competitors', async () => {
       const query = createChainableQuery({
         data: [
-          { url: 'https://a.com', regions: ['us'] },
-          { url: 'https://b.com', regions: null },
+          {
+            name: 'A', url: 'https://a.com', aliases: ['Ay'], regions: ['us'],
+          },
+          {
+            name: 'B', url: 'https://b.com', aliases: null, regions: null,
+          },
           { url: '', regions: [] }, // skipped (no url)
           { name: 'no-url', regions: [] }, // skipped (no url)
         ],
@@ -506,8 +586,12 @@ describe('brands-storage', () => {
       const result = await getBrandCompetitors(BRAND_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledOnceWith('competitors');
       expect(result).to.deep.equal([
-        { url: 'https://a.com', regions: ['us'] },
-        { url: 'https://b.com', regions: [] },
+        {
+          name: 'A', url: 'https://a.com', aliases: ['Ay'], regions: ['us'],
+        },
+        {
+          name: 'B', url: 'https://b.com', aliases: [], regions: [],
+        },
       ]);
     });
 
@@ -597,6 +681,37 @@ describe('brands-storage', () => {
     });
   });
 
+  describe('isSemrushMarketMirrorSite', () => {
+    const SITE_ID = '33333333-3333-4333-8333-333333333333';
+
+    it('returns false on missing client / org / site', async () => {
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, null)).to.equal(false);
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, {})).to.equal(false);
+      expect(await isSemrushMarketMirrorSite('', SITE_ID, { from: () => {} })).to.equal(false);
+      expect(await isSemrushMarketMirrorSite(ORG_ID, '', { from: () => {} })).to.equal(false);
+    });
+
+    it('returns true when a serenity-typed brand_sites row exists for the site', async () => {
+      const query = createChainableQuery({ data: [{ site_id: SITE_ID }], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient)).to.equal(true);
+      expect(postgrestClient.from).to.have.been.calledOnceWith('brand_sites');
+    });
+
+    it('returns false when no serenity brand_sites row matches', async () => {
+      const query = createChainableQuery({ data: [], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient)).to.equal(false);
+    });
+
+    it('throws on database error (so the caller can fail closed)', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to resolve market-mirror link for site');
+    });
+  });
+
   describe('listBrands (status filtering)', () => {
     it('filters by status when status option is provided', async () => {
       const dbRow = makeBrandRow({ status: 'pending' });
@@ -677,7 +792,9 @@ describe('brands-storage', () => {
   // Like createTableMockClient, but records rows passed to write methods so
   // tests can assert exactly what was written.
   function createCapturingClient(tableMap) {
-    const calls = { upsert: [], update: [] };
+    const calls = {
+      upsert: [], update: [], delete: [], or: [],
+    };
     const callCounts = {};
     const makeQuery = (table) => {
       const responses = tableMap[table] || [{ data: null, error: null }];
@@ -700,6 +817,18 @@ describe('brands-storage', () => {
           if (prop === 'update') {
             return (row) => {
               calls.update.push({ table, row });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'delete') {
+            return () => {
+              calls.delete.push({ table });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'or') {
+            return (filter) => {
+              calls.or.push({ table, filter });
               return new Proxy({}, handler);
             };
           }
@@ -965,6 +1094,73 @@ describe('brands-storage', () => {
       });
     });
 
+    it('preserves per-market modelIds (trimmed, non-empty) and omits the key when empty', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          pendingSemrushProvisioning: {
+            primaryUrl: 'https://acme.com',
+            markets: [
+              { market: 'US', languageCode: 'en', modelIds: [' chatgpt ', '', 'perplexity'] },
+              { market: 'DE', languageCode: 'de', modelIds: ['  '] },
+              { market: 'FR', languageCode: 'fr' },
+            ],
+          },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
+        primaryUrl: 'https://acme.com',
+        markets: [
+          { market: 'US', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] },
+          { market: 'DE', languageCode: 'de' },
+          { market: 'FR', languageCode: 'fr' },
+        ],
+      });
+    });
+
+    it('preserves an explicit generatePrompts flag, keeping a bare stash (no URL, no market) alive', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          // A bare no-prompt draft: no primary URL, no market — yet the explicit
+          // generatePrompts flag must keep the stash from collapsing to null so
+          // activation knows to provision a sub-workspace-only brand.
+          pendingSemrushProvisioning: { generatePrompts: false, markets: [] },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
+        primaryUrl: null,
+        markets: [],
+        generatePrompts: false,
+      });
+    });
+
     it('drops invalid markets and a blank primaryUrl from pending_semrush_provisioning, nulling it when empty', async () => {
       const client = createCapturingClient({
         brands: [
@@ -989,6 +1185,77 @@ describe('brands-storage', () => {
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.pending_semrush_provisioning).to.equal(null);
+    });
+
+    it('treats a non-array markets value as an empty market list (keeps primaryUrl)', async () => {
+      // `value.markets` is a non-array (a string here): the normalizer must coerce
+      // it to [] rather than iterating it, and the surviving primaryUrl keeps the
+      // stash from collapsing to null.
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          pendingSemrushProvisioning: {
+            primaryUrl: 'https://acme.com',
+            markets: 'not-an-array',
+          },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
+        primaryUrl: 'https://acme.com',
+        markets: [],
+      });
+    });
+
+    it('coerces non-string market/languageCode and non-string modelIds to empty strings', async () => {
+      // Per-market `market`/`languageCode` that are not strings normalize to '' (then
+      // get dropped by the hasText filter), and non-string modelIds normalize to ''
+      // (dropped by the hasText filter), leaving only the valid entries.
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          status: 'pending',
+          pendingSemrushProvisioning: {
+            primaryUrl: 'https://acme.com',
+            markets: [
+              // non-string market and languageCode -> '' -> dropped by hasText filter
+              { market: 123, languageCode: 456 },
+              // valid market with a mix of string and non-string modelIds
+              { market: 'US', languageCode: 'en', modelIds: ['chatgpt', 42, null] },
+            ],
+          },
+        },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
+        primaryUrl: 'https://acme.com',
+        markets: [
+          { market: 'US', languageCode: 'en', modelIds: ['chatgpt'] },
+        ],
+      });
     });
 
     it('omits pending_semrush_provisioning from the row when not supplied', async () => {
@@ -1207,7 +1474,9 @@ describe('brands-storage', () => {
         { name: 'TB', regions: ['US'] },
         { name: 'T', regions: [] },
       ]);
-      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'Rival', url: null, aliases: [], regions: [],
+      }]);
     });
 
     it('handles object-only competitors with url and regions', async () => {
@@ -1232,7 +1501,40 @@ describe('brands-storage', () => {
         postgrestClient,
       });
 
-      expect(result.competitors).to.deep.equal([{ name: 'ObjRival', url: 'https://rival.com', regions: ['US'] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'ObjRival', url: 'https://rival.com', aliases: [], regions: ['US'],
+      }]);
+    });
+
+    it('preserves a competitor aliases array when provided', async () => {
+      // Competitor carries an aliases array: syncCompetitors keeps it verbatim
+      // rather than falling back to [].
+      const fullBrandRow = makeBrandRow({
+        competitors: [{
+          name: 'AliasRival', url: null, aliases: ['AR', 'A.R.'], regions: [],
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        competitors: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          competitors: [{ name: 'AliasRival', aliases: ['AR', 'A.R.'] }],
+        },
+        postgrestClient,
+      });
+
+      expect(result.competitors).to.deep.equal([{
+        name: 'AliasRival', url: null, aliases: ['AR', 'A.R.'], regions: [],
+      }]);
     });
 
     it('throws when alias delete fails', async () => {
@@ -1393,6 +1695,41 @@ describe('brands-storage', () => {
       ]);
     });
 
+    it('preserves a Serenity market-site link (type=serenity) through syncBrandSites instead of downgrading it', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        // The protected-rows SELECT returns this market site; reused for the
+        // delete/upsert calls too (single-object response).
+        brand_sites: { data: [{ site_id: 'site-uuid-1' }], error: null },
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        // The submitted brand URL resolves to the SAME site as the preserved
+        // market row, so the re-upsert would otherwise downgrade type to 'base'.
+        brand: { name: 'Test', urls: [{ value: 'https://adobe.com', type: 'base' }] },
+        postgrestClient: client,
+      });
+
+      // The delete must spare serenity rows via the type filter — assert the actual
+      // filter string, otherwise this test would still pass if the carve-out were
+      // dropped and the delete wiped every row (including the serenity link).
+      const bsDelete = client.capturedCalls.or.find((c) => c.table === 'brand_sites');
+      expect(bsDelete, 'a brand_sites delete filter was issued').to.exist;
+      expect(bsDelete.filter).to.include('type.neq.serenity');
+      expect(bsDelete.filter).to.include('type.is.null');
+
+      const bsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_sites');
+      expect(bsUpsert, 'a brand_sites upsert was issued').to.exist;
+      const row = (bsUpsert.row || []).find((r) => r.site_id === 'site-uuid-1');
+      // type stays 'serenity' (preserved), NOT downgraded to the URL's 'base'.
+      expect(row.type).to.equal('serenity');
+    });
+
     it('uses first type when multiple URLs share same base with different types', async () => {
       const fullBrandRow = makeBrandRow({
         brand_sites: [{
@@ -1453,7 +1790,12 @@ describe('brands-storage', () => {
     it('throws when brand_sites delete fails during syncBrandSites', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
-        brand_sites: { data: null, error: { message: 'delete error' } },
+        brand_sites: [
+          // call 0 = protected-rows SELECT (succeeds), call 1 = DELETE (fails). The
+          // SELECT is now prepended, so the error must be on the DELETE specifically.
+          { data: [], error: null },
+          { data: null, error: { message: 'delete error' } },
+        ],
       });
 
       await expect(upsertBrand({
@@ -1461,6 +1803,45 @@ describe('brands-storage', () => {
         brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
         postgrestClient,
       })).to.be.rejectedWith('Failed to sync brand_sites: delete error');
+    });
+
+    it('throws (fails closed) when the protected-rows SELECT fails during syncBrandSites', async () => {
+      // A swallowed SELECT error would leave protectedSiteIds empty and let the
+      // re-upsert downgrade a serenity row's type, silently unprotecting a
+      // market-mirror link. Fail closed instead (consistent with delete/upsert).
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        brand_sites: { data: null, error: { message: 'select error' } }, // SELECT fails first
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_sites: cannot read protected rows: select error');
+    });
+
+    it('throws (fails closed) when the sites lookup fails during syncBrandSites', async () => {
+      // A swallowed sites-read error would null out `sites`, making the
+      // `if (!sites || ...) return;` silently no-op the entire brand_sites sync
+      // (URLs never linked). Fail closed instead (consistent with the
+      // protected-rows SELECT / delete / upsert error handling).
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        // protected-rows SELECT succeeds, delete succeeds (both on brand_sites),
+        // then the sites lookup fails.
+        brand_sites: [
+          { data: [], error: null },
+          { data: null, error: null },
+        ],
+        sites: { data: null, error: { message: 'sites read error' } },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_sites: cannot read sites: sites read error');
     });
 
     it('falls back to base URL when URL string is invalid in syncBrandSites', async () => {
@@ -1841,7 +2222,9 @@ describe('brands-storage', () => {
         postgrestClient,
       });
 
-      expect(result.competitors).to.deep.equal([{ name: 'StringRival', url: null, regions: [] }]);
+      expect(result.competitors).to.deep.equal([{
+        name: 'StringRival', url: null, aliases: [], regions: [],
+      }]);
     });
 
     it('uses empty paths array when site base_url is not in pathsByBase map', async () => {
@@ -1927,6 +2310,30 @@ describe('brands-storage', () => {
         brand: { name: 'Test', brandAliases: [{ name: 'TB' }] },
         postgrestClient,
       })).to.be.rejectedWith('Failed to sync brand_aliases: insert failed');
+    });
+
+    it('throws when the brand_sites upsert fails', async () => {
+      // brand_sites is touched three times in order: protected-row select, delete,
+      // then the upsert. Only the final upsert errors, exercising the throw at the
+      // tail of syncBrandSites.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: [
+          { data: [], error: null }, // protected-rows select
+          { data: null, error: null }, // delete
+          { data: null, error: { message: 'upsert failed' } }, // upsert fails
+        ],
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: ['https://test.com'] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_sites: upsert failed');
     });
   });
 
@@ -2041,6 +2448,118 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.not.be.null;
+    });
+
+    it('clears site_id when a pending brand passes baseSiteId: null (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — pending brand currently holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: null, status: 'pending' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: null },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal(null);
+    });
+
+    it('ignores baseSiteId: null on a non-pending (active) brand — never strips a live anchor (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — active brand holds a site
+          { data: { site_id: 'existing-site-id', status: 'active' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: 'existing-site-id', status: 'active' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: null },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row).to.not.have.property('site_id');
+    });
+
+    it('re-points site_id when a pending brand passes a different baseSiteId (LLMO-5870)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — pending brand already holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch
+          { data: makeBrandRow({ site_id: 'different-site-id', status: 'pending' }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'different-site-id' },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal('different-site-id');
+    });
+
+    it('throws 409 when a pending brand re-points onto a site held by another brand (LLMO-5870)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // 1st call: select current row — pending brand already holds a site
+          { data: { site_id: 'existing-site-id', status: 'pending' }, error: null },
+          // 2nd call: update fails with unique constraint
+          { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'taken-site-id' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('This site is already the primary URL for another brand');
+      expect(err.status).to.equal(409);
+    });
+
+    it('fails closed by throwing when the current baseSiteId read errors (LLMO-5556)', async () => {
+      // PostgREST returns { data: null, error } instead of throwing. Without the
+      // guard, `current` is null so the block would treat the brand as having no
+      // site_id and re-point the immutable site_id on a transient read failure.
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current site_id fails
+          { data: null, error: { message: 'connection reset' } },
+        ],
+      });
+
+      await expect(updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'some-site-id' },
+        postgrestClient: client,
+      })).to.be.rejectedWith('Failed to read current baseSiteId for brand: connection reset');
+
+      // The update must not run — site_id must never be patched on a read failure.
+      expect(client.capturedCalls.update).to.have.lengthOf(0);
     });
 
     it('successfully updates scalar fields (name, status, origin, description, vertical)', async () => {
@@ -2375,6 +2894,212 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
+    });
+  });
+  describe('active->pending demotion guard (LLMO-5587)', () => {
+    it('updateBrand rejects an active->pending demotion with a typed 409', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: { site_id: 'site-1', status: 'active' }, error: null }],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'pending' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_status_demotion_not_allowed');
+    });
+
+    it('updateBrand allows a pending->active promotion when a site is present', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: 'site-1', status: 'pending' }, error: null }, // existing fetch
+          { data: { id: BRAND_ID }, error: null }, // update
+          { data: makeBrandRow({ status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.status).to.equal('active');
+    });
+
+    it('updateBrand does not false-positive on a routine edit that omits status', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null }, // update (no existing fetch — status absent)
+          { data: makeBrandRow({ name: 'Renamed', status: 'active' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { name: 'Renamed' }, postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.status).to.equal('active');
+    });
+
+    it('updateBrand rejects a promote-to-active without a site_id with a 400 (re-land of #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: { site_id: null, status: 'pending' }, error: null }],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(400);
+    });
+
+    it('updateBrand maps a 23514 chk_active_brand_has_site_id violation to a 400 (re-land of #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { site_id: 'site-1', status: 'pending' }, error: null }, // existing fetch (guard passes)
+          {
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+            },
+          },
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+    });
+
+    it('upsertBrand rejects a by-name demotion of an active brand with a typed 409', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: { id: BRAND_ID, site_id: 'site-1', status: 'active' }, error: null }],
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Express', status: 'pending' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_status_demotion_not_allowed');
+      expect(err.message).to.contain(BRAND_ID);
+    });
+
+    it('upsertBrand maps a 23514 chk_active_brand_has_site_id violation to a 400 (re-land of #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: null }, // existing fetch (new brand)
+          {
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+            },
+          },
+        ],
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'New', status: 'active', baseSiteId: 'site-1' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+    });
+  });
+
+  describe('setBrandStatus', () => {
+    it('throws when postgrestClient is missing', async () => {
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'pending', postgrestClient: null,
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('updates status and returns the mapped brand (LLMO-5587 intentful path)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // 1st call: status update
+          { data: { id: BRAND_ID }, error: null },
+          // 2nd call: getBrandById re-fetch
+          { data: makeBrandRow({ status: 'pending' }), error: null },
+        ],
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        status: 'pending',
+        postgrestClient,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.status).to.equal('pending');
+    });
+
+    it('returns null when the brand is not found', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: null, error: null },
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result).to.be.null;
+    });
+
+    it('maps chk_active_brand_has_site_id violation to a 400 (lifted from #2504)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{
+          data: null,
+          error: {
+            code: '23514',
+            message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+          },
+        }],
+      });
+
+      const err = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('Cannot activate a brand without a base site URL');
+      expect(err.status).to.equal(400);
+    });
+
+    it('throws a generic error on other database failures', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [{ data: null, error: { message: 'boom' } }],
+      });
+
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'pending', postgrestClient,
+      })).to.be.rejectedWith('Failed to set brand status: boom');
+    });
+
+    it('does not resurrect a soft-deleted brand (the .neq filter matches no row → null)', async () => {
+      // A deleted brand is excluded by .neq('status','deleted'), so the update
+      // affects no row and the function returns null (controller → 404).
+      const postgrestClient = createTableMockClient({
+        brands: { data: null, error: null },
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result).to.be.null;
     });
   });
 });

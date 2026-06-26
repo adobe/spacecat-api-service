@@ -34,7 +34,8 @@ import {
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { TYPE_TAG, topicTag } from '../prompt-tags.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
-import { syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import { collectAliasNames } from '../brand-aliases.js';
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -265,12 +266,14 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   search volume (0 = keep all).
  * @param {string[]} [options.standardTags=[]] - tags added to every generated
  *   prompt in addition to its `topic:<NAME>` and branded `type:` tag.
- * @param {string[]} [options.brandAliases=[]] - brand aliases; brand-level names
- *   the brand is also known by. Added to the project's `brand_names` (alongside
- *   the primary name) so every market/project in the brand carries them, and —
- *   together with the brand name(s) — used to classify each generated prompt as
- *   `type:branded` (text contains a name/alias, case-insensitive) or
- *   `type:non-branded`.
+ * @param {Array<string|{name: string, regions?: string[]}>} [options.brandAliases=[]]
+ *   - brand aliases; brand-level names the brand is also known by. Region-clamped
+ *   to THIS market (a region-scoped alias only applies to the markets it lists;
+ *   region-less / 'ww' apply everywhere; a bare string is treated as region-less).
+ *   The market-applicable names are added to the project's `brand_names`
+ *   (alongside the primary name) so the project carries them, and — together with
+ *   the brand name(s) — used to classify each generated prompt as `type:branded`
+ *   (text contains a name/alias, case-insensitive) or `type:non-branded`.
  * @param {string[]} [options.projectTags=[]] - project-level tag taxonomy to
  *   register on the project (via createProjectTags) independent of any prompt.
  * @param {object} [options.brandUrlSources=null] - the brand's URL sources
@@ -319,6 +322,14 @@ export async function handleCreateMarketSubworkspace(
   }
   const languageCode = normalizeLanguageCode(body.languageCode);
 
+  // Region-clamp the brand aliases to THIS market: a region-scoped alias only
+  // lands on the markets it lists (region-less / 'ww' apply everywhere). The same
+  // filtered name set feeds the project's brand_names, the prompt-classification
+  // needles, and the own-brand benchmark's brand_aliases. `brandAliases` may be
+  // the persisted `{ name, regions }` shape or bare strings (collectAliasNames
+  // treats a string as region-less).
+  const aliasNames = collectAliasNames(brandAliases, body.market);
+
   // activate() ensures the sub-workspace once for the whole batch (sized to the
   // real market count) and passes it in here. The single-market POST /markets
   // path passes nothing, so we ensure on the spot, sized for one market.
@@ -350,7 +361,7 @@ export async function handleCreateMarketSubworkspace(
     }
     const createResp = await transport.createProject(
       workspaceId,
-      buildCreateProjectBody(body, location, languageId, brandAliases),
+      buildCreateProjectBody(body, location, languageId, aliasNames),
     );
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
@@ -393,10 +404,11 @@ export async function handleCreateMarketSubworkspace(
         country: body.market,
         topicCap,
         standardTags,
-        // Branded classification needles: the brand's own name(s) + caller aliases.
+        // Branded classification needles: the brand's own name(s) + the
+        // market-applicable aliases.
         brandNames: [
           ...(Array.isArray(body.brandNames) ? body.brandNames : []),
-          ...brandAliases,
+          ...aliasNames,
         ],
       },
       log,
@@ -415,11 +427,15 @@ export async function handleCreateMarketSubworkspace(
       workspaceId,
       projectId,
       brandUrlEntries,
-      { name: body.brandDisplayName, domain: body.brandDomain, aliases: brandAliases },
+      { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
       log,
     );
   } catch (e) {
-    log?.warn?.('handleCreateMarketSubworkspace: brand-URL attach failed (non-fatal)', {
+    // Best-effort, but DELIBERATELY non-self-healing: the brand is left live with
+    // its URLs not propagated, and the next edit only re-syncs if urls/competitors
+    // are touched. Emit a DISTINCT, greppable token so this divergence is
+    // alertable rather than lost in generic warn noise.
+    log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_URL_ATTACH_DIVERGENCE — brand-URL attach failed (non-fatal); market live without propagated URLs', {
       workspaceId, projectId, error: e?.message,
     });
   }
@@ -431,6 +447,12 @@ export async function handleCreateMarketSubworkspace(
   // ours to remove yet). Best-effort: a competitor-sync hiccup must not abort the
   // brand create.
   try {
+    // Reserve the brand's own domains (this market's project domain + the brand's
+    // own website URLs) so a competitor can't be one of the brand's own properties.
+    const reservedDomains = buildReservedDomains(
+      [body.brandDomain],
+      brandUrlSources?.urls,
+    );
     await syncCompetitorBenchmarksForProject(
       transport,
       workspaceId,
@@ -439,9 +461,12 @@ export async function handleCreateMarketSubworkspace(
       [],
       body.market,
       log,
+      reservedDomains,
     );
   } catch (e) {
-    log?.warn?.('handleCreateMarketSubworkspace: competitor benchmark sync failed (non-fatal)', {
+    // Same non-self-healing best-effort seam as the URL attach above — distinct
+    // greppable token so a competitor-sync divergence on a live market is alertable.
+    log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_COMPETITOR_SYNC_DIVERGENCE — competitor benchmark sync failed (non-fatal); market live without competitor benchmarks', {
       workspaceId, projectId, error: e?.message,
     });
   }
