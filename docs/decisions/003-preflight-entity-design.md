@@ -115,11 +115,20 @@ on the second of two writes, silent `IN_PROGRESS` for failed scans).
 
 ### Revised field placement
 
-| Field | Lives on | Notes |
-|---|---|---|
-| `id`, `siteId`, `asyncJobId`, `url`, `createdBy`, `createdAt`, `updatedAt` | `Preflight` | Preflight-native; unchanged from original design. |
-| `status`, `endedAt` | `Preflight` (denormalized cache) | Mirrors the joined `async_jobs` row. Kept here for hot list-view reads without a join. Projector keeps them in sync. |
-| `startedAt`, `result`, `error` | **`AsyncJob` only** | Lifecycle truth. Removed from the `preflights` table and from the `Preflight` schema in spacecat-shared. Consumers fetch via `preflight.getAsyncJob()`. |
+| Field | Storage | Truth read | Cache read |
+|---|---|---|---|
+| `id`, `siteId`, `asyncJobId`, `url`, `createdBy`, `createdAt`, `updatedAt` | `Preflight` | `Preflight` | n/a — preflight-native |
+| `status` | both | `AsyncJob` (detail) | `Preflight` (list) |
+| `endedAt` | both | `AsyncJob` (detail) | `Preflight` (list) |
+| `startedAt`, `result`, `error` | `AsyncJob` only | `AsyncJob` (detail) | n/a — not on list |
+
+`status` and `endedAt` are denormalized onto the `Preflight` row solely as a
+list-view cache (the projector keeps them in sync). The detail view sources
+them from the joined `AsyncJob` instead, eliminating the split-brain window
+where `Preflight.status` could lag `AsyncJob.result` between the projector's
+two writes (terminal `async_jobs` row + cache update) — a polling client
+keying off `status` would otherwise spin indefinitely on a scan that's
+actually done.
 
 ### Wire contract (three DTOs)
 
@@ -145,10 +154,12 @@ Internal fields `asyncJobId`, `scanId`, `startedAt`, `resultType`, `resultLocati
 
 - List — no change in shape of the underlying query; new fields all live on `Preflight`.
 - Detail — `getPreflightById` calls `preflight.getAsyncJob()` after the access checks and
-  passes the joined row into the DTO. On a thrown fetch (replica lag, transient DB blip) the
-  controller logs a warn and surfaces `result: null` / `error: null` rather than 404'ing the
-  whole response. The MFE's poll target (`status`) is sourced from `Preflight`, so degraded
-  join paths never block termination signals.
+  passes the joined row into the DTO. A thrown fetch (PostgREST 5xx / transport failure)
+  returns **503 `PREFLIGHT_LIFECYCLE_UNAVAILABLE`** rather than 200 with `result: null` —
+  a 200 with null lifecycle is indistinguishable on the wire from a legitimately empty
+  completed scan, and a polling client would cache the wrong terminal answer. A null
+  AsyncJob (no row yet — legitimate transitional / legacy flow) is not a failure: lifecycle
+  fields fall back to the `Preflight` cache and `result`/`error` surface as `null`.
 
 ### Write path
 
