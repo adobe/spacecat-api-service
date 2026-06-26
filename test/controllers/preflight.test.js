@@ -2609,20 +2609,18 @@ describe('Preflight Controller', () => {
       expect(result.result).to.be.null;
       expect(result.error).to.be.null;
       expect(result.updatedAt).to.equal('2024-03-20T10:01:00Z');
-      // SITES-47254: detail carries siteId + sources lifecycle truth from AsyncJob
+      // SITES-47254: detail carries siteId; result/error join AsyncJob
       expect(result.siteId).to.equal('test-site-123');
-      expect(result.startedAt).to.equal('2024-03-20T10:00:00Z');
-      // Internal correlation fields stay off the wire
+      // Internal correlation fields and AsyncJob-owned timing stay off the wire
       expect(result).to.not.have.property('asyncJobId');
       expect(result).to.not.have.property('scanId');
+      expect(result).to.not.have.property('startedAt');
     });
 
-    it('sources startedAt/result/error from the joined AsyncJob, not from Preflight', async () => {
+    it('sources result/error from the joined AsyncJob, not from Preflight', async () => {
       const errorPayload = { code: 'DA_FETCH_ERROR', message: 'Document Authoring 502' };
       const completedJob = {
         ...mockJob,
-        getStartedAt: () => '2024-03-20T11:00:00Z',
-        getEndedAt: () => '2024-03-20T11:00:42Z',
         getResult: () => [{ pageUrl: 'https://example.com/page', audits: [] }],
         getError: () => errorPayload,
       };
@@ -2632,12 +2630,11 @@ describe('Preflight Controller', () => {
         params: { siteId: 'test-site-123', preflightId },
       });
       const result = await response.json();
-      expect(result.startedAt).to.equal('2024-03-20T11:00:00Z');
       expect(result.result).to.deep.equal([{ pageUrl: 'https://example.com/page', audits: [] }]);
       expect(result.error).to.deep.equal(errorPayload);
     });
 
-    it('degrades startedAt/result/error to null when getAsyncJob throws', async () => {
+    it('degrades result/error to null when getAsyncJob throws', async () => {
       mockPreflight.getAsyncJob.rejects(new Error('async_jobs unreachable'));
 
       const response = await preflightController.getPreflightById({
@@ -2645,7 +2642,6 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(200);
       const result = await response.json();
-      expect(result.startedAt).to.be.null;
       expect(result.result).to.be.null;
       expect(result.error).to.be.null;
       // Rest of the detail is still populated from Preflight

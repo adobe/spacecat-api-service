@@ -20,7 +20,7 @@ const LIST_FIELDS = [
 
 const DETAIL_FIELDS = [
   ...LIST_FIELDS,
-  'startedAt', 'result', 'error',
+  'result', 'error',
 ];
 
 function makePreflight(overrides = {}) {
@@ -107,7 +107,6 @@ describe('PreflightDto', () => {
         url: 'https://example.com/page',
         createdAt: '2026-06-26T12:00:00Z',
         updatedAt: '2026-06-26T12:00:00Z',
-        startedAt: '2026-06-26T12:00:01Z',
         endedAt: '2026-06-26T12:00:30Z',
         createdBy: { email: 'alice@example.com' },
         result: { audits: [{ name: 'canonical', status: 'ok' }] },
@@ -126,9 +125,8 @@ describe('PreflightDto', () => {
       expect(out.result).to.equal(null);
     });
 
-    it('degrades startedAt/result/error to null when AsyncJob is missing', () => {
+    it('degrades result/error to null when AsyncJob is missing', () => {
       const out = PreflightDto.toDetailJSON(makePreflight(), null);
-      expect(out.startedAt).to.equal(null);
       expect(out.result).to.equal(null);
       expect(out.error).to.equal(null);
       // Preflight-sourced fields remain populated
@@ -142,10 +140,13 @@ describe('PreflightDto', () => {
       expect(Object.keys(out).sort()).to.deep.equal([...DETAIL_FIELDS].sort());
     });
 
-    it('does not surface asyncJobId or scanId on the wire', () => {
+    it('does not surface asyncJobId, scanId, or startedAt on the wire', () => {
       const out = PreflightDto.toDetailJSON(makePreflight(), makeAsyncJob());
       expect(out).to.not.have.property('asyncJobId');
       expect(out).to.not.have.property('scanId');
+      // startedAt is an AsyncJob concern, not a Preflight attribute — consumers
+      // that need timing internals read them from `result`.
+      expect(out).to.not.have.property('startedAt');
     });
   });
 });

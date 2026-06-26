@@ -38,7 +38,6 @@
  * @property {string} url
  * @property {string} createdAt              ISO 8601
  * @property {string} updatedAt              ISO 8601
- * @property {string | null} startedAt       ISO 8601, sourced from AsyncJob
  * @property {string | null} endedAt         ISO 8601
  * @property {PreflightActor} createdBy
  * @property {object | null} result          Sourced from AsyncJob; null while not terminal
@@ -68,10 +67,15 @@ export const PreflightDto = {
   }),
 
   /**
-   * Detail-view DTO. Lifecycle truth (`startedAt`, `result`, `error`) lives
-   * on `async_jobs`; the caller fetches the joined AsyncJob and passes it in.
-   * When `asyncJob` is null (defensive degrade — caller logs the gap), those
-   * three fields surface as null rather than 404'ing the whole response.
+   * Detail-view DTO. `result` and `error` are AsyncJob-owned (the projector
+   * writes them there, not on the Preflight row), so the caller fetches the
+   * joined AsyncJob and passes it in. When `asyncJob` is null (defensive
+   * degrade — caller logs the gap), the two fields surface as null rather
+   * than 404'ing the whole response.
+   *
+   * `startedAt` is intentionally not surfaced — it's an AsyncJob concern,
+   * not a Preflight attribute. Consumers that need timing internals can
+   * read them out of `result`.
    *
    * @param {import('@adobe/spacecat-shared-data-access').Preflight} preflight
    * @param {import('@adobe/spacecat-shared-data-access').AsyncJob | null} asyncJob
@@ -84,7 +88,6 @@ export const PreflightDto = {
     url: preflight.getUrl(),
     createdAt: preflight.getCreatedAt(),
     updatedAt: preflight.getUpdatedAt(),
-    startedAt: asyncJob ? asyncJob.getStartedAt() : null,
     endedAt: preflight.getEndedAt(),
     createdBy: preflight.getCreatedBy(),
     result: asyncJob ? asyncJob.getResult() : null,
