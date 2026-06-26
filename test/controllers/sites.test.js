@@ -1471,6 +1471,23 @@ describe('Sites Controller', () => {
       );
     });
 
+    it('grants access to S2S consumer with site:readAll on the baseUrlLike search path', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-s2s-baseurllike-1' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.pagination).to.include({ baseUrlLike: 'site' });
+      expect(body.pagination).to.not.have.property('cursor');
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites \(baseUrlLike\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurllike-1/,
+      );
+    });
+
     it('logs clientId=unknown-s2s on the legacy path when a granted consumer has no clientId', async () => {
       // Granted S2S consumer (non-admin) reaching the legacy flat-array path with a
       // falsy clientId: the log marker falls back to `unknown-s2s` (not `admin-bypass`).
