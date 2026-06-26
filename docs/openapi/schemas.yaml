@@ -7703,6 +7703,64 @@ V2BrandListResponse:
       items:
         $ref: '#/V2Brand'
 
+V2BrandActivateInput:
+  type: object
+  description: |
+    Request body for activating a brand. Promotes an existing pending brand to
+    active (sets baseSiteId from the brand's onboarded primary site and flips
+    status to active), optionally generates AI prompts, and ensures a
+    brand-presence schedule.
+  required:
+    - generatePrompts
+  properties:
+    generatePrompts:
+      type: boolean
+      description: |
+        When `true`, asynchronous AI prompt generation is triggered for the
+        brand and the response includes a `promptGenerationJobId`.
+  example:
+    generatePrompts: true
+
+V2BrandActivateResponse:
+  type: object
+  description: |
+    Result of activating a brand: the brand is now active with its base site
+    resolved. Includes a `promptGenerationJobId` when prompt generation was
+    triggered and a `scheduleId` when a brand-presence schedule was ensured.
+  required:
+    - brandId
+    - status
+    - baseSiteId
+  properties:
+    brandId:
+      type: string
+      format: uuid
+      description: Brand UUID
+    status:
+      type: string
+      enum: [active]
+      description: Brand status after activation (always `active`)
+    baseSiteId:
+      type: string
+      format: uuid
+      description: ID of the brand's onboarded primary site, now set as its base site
+    promptGenerationJobId:
+      type: string
+      description: |
+        Identifier of the asynchronous AI prompt-generation job. Present only
+        when `generatePrompts` was `true`.
+    scheduleId:
+      type: string
+      description: |
+        Identifier of the brand-presence schedule that was created or ensured.
+        Present only when a schedule was created or already existed.
+  example:
+    brandId: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    status: 'active'
+    baseSiteId: 'b2c3d4e5-6789-01ab-cdef-2345678901ab'
+    promptGenerationJobId: 'c3d4e5f6-7890-12ab-cdef-3456789012ab'
+    scheduleId: 'd4e5f6a7-8901-23ab-cdef-4567890123ab'
+
 V2Category:
   type: object
   description: A category in the normalized categories table

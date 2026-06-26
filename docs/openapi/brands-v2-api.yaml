@@ -196,6 +196,76 @@ v2-brand-for-org:
       '503':
         description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
 
+v2-brand-for-org-activate:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags:
+      - brands
+      - customer-config
+    summary: Activate a brand (v2)
+    description: |
+      Explicit, customer-triggered "activate brand". Promotes an existing
+      `pending` brand to `active` by setting its `baseSiteId` (from the brand's
+      onboarded primary site) and flipping `status` to `active`. Optionally
+      generates AI prompts for the brand and ensures a brand-presence schedule
+      exists for the brand's primary site.
+
+      Activation requires the brand to already have an onboarded primary site —
+      a request against a brand with no onboarded primary site returns 400.
+
+      Set `generatePrompts` to `true` to trigger asynchronous AI prompt
+      generation; the response then includes a `promptGenerationJobId`. When a
+      brand-presence schedule is created or ensured, the response includes a
+      `scheduleId`.
+    operationId: activateBrandForOrg
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2BrandActivateInput'
+    responses:
+      '200':
+        description: Brand activated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2BrandActivateResponse'
+      '400':
+        description: Brand has no onboarded primary site
+      '403':
+        description: |
+          User is not a member of the organization, or the organization is not on a
+          PAID tier.
+      '404':
+        description: Organization or brand not found
+      '409':
+        description: |
+          The brand's primary URL is already another brand's base site
+          (violates the `brands_base_site_unique` constraint).
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
 v2-brand-for-org-site:
   parameters:
     - name: spaceCatId

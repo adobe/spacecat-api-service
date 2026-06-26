@@ -12,6 +12,9 @@
 import { randomUUID } from 'crypto';
 
 import BrandClient from '@adobe/spacecat-shared-brand-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import {
   badRequest,
   notFound,
@@ -21,6 +24,7 @@ import {
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
+  composeBaseURL,
   hasText,
   isNonEmptyObject,
   isValidUUID,
@@ -64,6 +68,7 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
+import { postLlmoAlert } from './llmo/llmo-onboarding.js';
 import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
 import {
   listCategories,
@@ -1711,6 +1716,196 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Activates a brand: sets it `active` with a resolved `baseSiteId` in the SAME
+   * write, optionally generates AI prompts (a direct `prompt_generation_base_url`
+   * DRS job with `source: 'brand-activation'` — never Brandalf, never the
+   * `llmo-customer-analysis` cascade), and ensures the recurring brand-presence
+   * schedule when prompts exist. Explicit, customer-triggered (LLMO-5605).
+   *
+   * The brand must already exist (create it first via POST .../brands). Returns
+   * `200` quickly: the brand is `active` synchronously; prompts generate
+   * asynchronously (the `200` carries `promptGenerationJobId`, not finished prompts).
+   *
+   * @param {object} context - The request context (`params`, `data.generatePrompts`).
+   * @returns {Promise<Response>} 200 `{ brandId, status, baseSiteId,
+   *   promptGenerationJobId?, scheduleId? }`; 400/403/404/409 per the contract.
+   */
+  const activateBrandForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const { generatePrompts } = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (typeof generatePrompts !== 'boolean') {
+        return badRequest('generatePrompts is required and must be a boolean');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+
+      // Auth — same gate as Piece 1: membership + explicit PAID. PAID is stricter
+      // than the platform's any-tier "LLMO-enabled" bar; entitlements have no status
+      // column (getStatus() is an unbacked stub; revocation = row delete), so a PAID
+      // row is the "paying" signal. No separate admin requirement — mirrors Piece 1,
+      // which omits it so paying non-admin members aren't 403'd.
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      const tierClient = TierClient.createForOrg(
+        context,
+        organization,
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+      const { entitlement } = await tierClient.checkValidEntitlement();
+      if (!entitlement || entitlement.getTier() !== EntitlementModel.TIERS.PAID) {
+        return forbidden('A paid LLMO entitlement is required to activate a brand');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      const brand = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      // 1) Resolve the brand's onboarded primary site — the prompt-gen base URL and
+      // the baseSiteId to anchor on. An already-sited brand carries baseSiteId +
+      // baseUrl; a pending brand resolves from its stashed primary URL (or urls[]).
+      let { baseSiteId, baseUrl } = brand;
+      if (!hasText(baseSiteId)) {
+        const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl
+          || (brand.urls || [])
+            .map((u) => (typeof u === 'string' ? u : (u?.value || u?.url)))
+            .find(hasText);
+        const site = hasText(primaryUrl)
+          ? await Site.findByBaseURL(composeBaseURL(primaryUrl))
+          : null;
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
+        baseSiteId = site.getId();
+        baseUrl = site.getBaseURL();
+      }
+
+      // 2) Activate — status=active + baseSiteId in the SAME write. baseSiteId is
+      // immutable-from-null in storage; a brands_base_site_unique violation throws
+      // with status 409 (mapped by createErrorResponse).
+      const updated = await updateBrand({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        updates: { status: 'active', baseSiteId },
+        postgrestClient,
+        updatedBy,
+      });
+      if (!updated) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      // 3) Optional prompt generation (async). Idempotent: reuse any in-flight
+      // brand-activation prompt-gen job for this site rather than submitting a dup.
+      const drsClient = DrsClient.createFrom(context);
+      const drsConfigured = drsClient.isConfigured();
+      let promptGenerationJobId;
+      if (generatePrompts) {
+        if (drsConfigured) {
+          const inFlight = await drsClient.listJobs({
+            siteId: baseSiteId,
+            providerId: 'prompt_generation_base_url',
+            source: 'brand-activation',
+          });
+          const existing = (inFlight || []).find(
+            (job) => job.status === 'QUEUED' || job.status === 'RUNNING',
+          );
+          if (existing) {
+            promptGenerationJobId = existing.job_id;
+            log.info(`Reusing in-flight prompt-gen job ${existing.job_id} (brand ${brandUuid})`);
+          } else {
+            const region = Array.isArray(brand.region) ? brand.region[0] : undefined;
+            const job = await drsClient.submitPromptGenerationJob({
+              baseUrl,
+              brandName: brand.name,
+              siteId: baseSiteId,
+              imsOrgId: organization.getImsOrgId(),
+              ...(hasText(region) ? { region } : {}),
+              source: 'brand-activation',
+            });
+            promptGenerationJobId = job?.job_id;
+          }
+        } else {
+          log.warn('DRS client not configured; skipping prompt generation');
+        }
+      }
+
+      // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
+      // when prompts were generated now or the brand already has prompts (a
+      // promptless schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule
+      // POSTs and tolerates a 409 dedup.
+      let scheduleId;
+      let hasExistingPrompts = false;
+      if (!generatePrompts) {
+        const stats = await getPromptStats({
+          organizationId: spaceCatId,
+          brandUuid,
+          postgrestClient,
+        });
+        hasExistingPrompts = (stats.branded + stats.unbranded) > 0;
+      }
+      if ((generatePrompts || hasExistingPrompts) && drsConfigured) {
+        const schedule = await drsClient.createBrandPresenceSchedule({
+          siteId: baseSiteId,
+          brandId: brandUuid,
+          orgId: spaceCatId,
+        });
+        scheduleId = schedule?.scheduleId;
+      }
+
+      const responseBody = {
+        brandId: brandUuid,
+        status: 'active',
+        baseSiteId,
+        ...(hasText(promptGenerationJobId) ? { promptGenerationJobId } : {}),
+        ...(hasText(scheduleId) ? { scheduleId } : {}),
+      };
+
+      await postLlmoAlert(
+        `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
+        + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
+        + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
+        context,
+      );
+
+      return ok(responseBody);
+    } catch (error) {
+      log.error(`Error activating brand ${brandId} for organization ${spaceCatId}:`, error);
+      await postLlmoAlert(
+        `:x: Brand activation failed — brand ${brandId} in org ${spaceCatId}: ${error.message}`,
+        context,
+      );
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
@@ -1728,6 +1923,7 @@ function BrandsController(ctx, log, env) {
     createBrandForOrg,
     updateBrandForOrg,
     deleteBrandForOrg,
+    activateBrandForOrg,
     listPromptsByBrand,
     getPromptByBrandAndId,
     getPromptStatsByBrand,

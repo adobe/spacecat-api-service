@@ -5367,6 +5367,609 @@ describe('Brands Controller', () => {
     });
   });
 
+  describe('activateBrandForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    // ---------------------------------------------------------------------------
+    // Shared helpers
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Builds a controller with all dependencies mocked. Every option can be
+     * overridden; sensible defaults are provided so individual tests only have
+     * to vary the one thing they care about.
+     */
+    async function buildActivateController({
+      hasAccess = async () => true,
+      hasAdminAccess = () => true,
+      isLLMOAdministrator = () => true,
+      entitlement = { getTier: () => 'PAID' },
+      resolveBrandUuidResult = BRAND_UUID,
+      getBrandByIdResult = {
+        name: 'Acme',
+        baseSiteId: SITE_ID,
+        baseUrl: 'https://site1.com',
+        region: ['us'],
+        status: 'pending',
+        urls: [],
+      },
+      updateBrandResult = { id: BRAND_UUID },
+      getPromptStatsResult = { branded: 0, unbranded: 0, intents: {} },
+      fakeDrsClient = {
+        isConfigured: () => true,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-1' }),
+        createBrandPresenceSchedule: sinon.stub().resolves({ scheduleId: 'sch-1' }),
+      },
+    } = {}) {
+      const getBrandByIdStub = typeof getBrandByIdResult === 'function'
+        ? getBrandByIdResult
+        : sinon.stub().resolves(getBrandByIdResult);
+      const updateBrandStub = typeof updateBrandResult === 'function'
+        ? updateBrandResult
+        : sinon.stub().resolves(updateBrandResult);
+      const getPromptStatsStub = typeof getPromptStatsResult === 'function'
+        ? getPromptStatsResult
+        : sinon.stub().resolves(getPromptStatsResult);
+      const resolveBrandUuidStub = sinon.stub().resolves(resolveBrandUuidResult);
+
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess,
+              hasAdminAccess,
+              isLLMOAdministrator,
+            }),
+          },
+        },
+        '../../src/support/prompts-storage.js': {
+          resolveBrandUuid: resolveBrandUuidStub,
+          getPromptStats: getPromptStatsStub,
+          // other prompts-storage exports needed by the controller at module level
+          listPrompts: sinon.stub().resolves({ data: [], count: 0 }),
+          getPromptById: sinon.stub().resolves(null),
+          upsertPrompts: sinon.stub().resolves({}),
+          updatePromptById: sinon.stub().resolves(null),
+          deletePromptById: sinon.stub().resolves(false),
+          bulkDeletePrompts: sinon.stub().resolves({}),
+          checkPromptsExist: sinon.stub().resolves([]),
+          findPromptsBlockingRegionRemoval: sinon.stub().resolves({}),
+        },
+        '../../src/support/brands-storage.js': {
+          getBrandById: getBrandByIdStub,
+          updateBrand: updateBrandStub,
+          getBrandCompetitors: sinon.stub().resolves([]),
+          listBrands: sinon.stub().resolves([]),
+          upsertBrand: sinon.stub().resolves({}),
+          deleteBrand: sinon.stub().resolves(true),
+          getBrandBySite: sinon.stub().resolves(null),
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForOrg: () => ({
+              checkValidEntitlement: async () => ({ entitlement }),
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-drs-client': {
+          default: {
+            createFrom: () => fakeDrsClient,
+          },
+        },
+        '../../src/controllers/llmo/llmo-onboarding.js': {
+          postLlmoAlert: sinon.stub().resolves(),
+        },
+      });
+
+      return {
+        controller: Mocked.default(context, loggerStub, mockEnv),
+        getBrandByIdStub,
+        updateBrandStub,
+        getPromptStatsStub,
+        resolveBrandUuidStub,
+        fakeDrsClient,
+      };
+    }
+
+    /** Builds a minimal valid request context for activateBrandForOrg. */
+    function buildActivateRequest({
+      spaceCatId = ORGANIZATION_ID,
+      brandId = BRAND_UUID,
+      generatePrompts = true,
+      dataAccessOverride,
+    } = {}) {
+      return {
+        ...context,
+        params: { spaceCatId, brandId },
+        data: { generatePrompts },
+        dataAccess: dataAccessOverride || mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      };
+    }
+
+    // -------------------------------------------------------------------------
+    // 1. Input validation — 400s
+    // -------------------------------------------------------------------------
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const { controller } = await buildActivateController();
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ spaceCatId: '' }),
+      );
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Organization ID required');
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const { controller } = await buildActivateController();
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ spaceCatId: 'not-a-uuid' }),
+      );
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Organization ID must be a valid UUID');
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const { controller } = await buildActivateController();
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ brandId: '' }),
+      );
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Brand ID required');
+    });
+
+    it('returns 400 when generatePrompts is omitted (undefined)', async () => {
+      const { controller } = await buildActivateController();
+      const req = buildActivateRequest();
+      req.data = {}; // omit generatePrompts entirely
+      const response = await controller.activateBrandForOrg(req);
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('generatePrompts is required and must be a boolean');
+    });
+
+    it('returns 400 when generatePrompts is a string', async () => {
+      const { controller } = await buildActivateController();
+      const req = buildActivateRequest();
+      req.data = { generatePrompts: 'true' };
+      const response = await controller.activateBrandForOrg(req);
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('generatePrompts is required and must be a boolean');
+    });
+
+    // -------------------------------------------------------------------------
+    // 2. Not-found paths — 404
+    // -------------------------------------------------------------------------
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      const { controller } = await buildActivateController();
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(404);
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+    });
+
+    it('returns 404 when resolveBrandUuid returns null', async () => {
+      const { controller } = await buildActivateController({ resolveBrandUuidResult: null });
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when getBrandById returns null', async () => {
+      const { controller } = await buildActivateController({ getBrandByIdResult: null });
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(404);
+    });
+
+    // -------------------------------------------------------------------------
+    // 3. Auth failures — 403
+    // -------------------------------------------------------------------------
+
+    it('returns 403 when hasAccess is false', async () => {
+      const { controller } = await buildActivateController({
+        hasAccess: async () => false,
+      });
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 403 when entitlement is null', async () => {
+      const { controller } = await buildActivateController({ entitlement: null });
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 403 when entitlement tier is FREE_TRIAL', async () => {
+      const { controller } = await buildActivateController({
+        entitlement: { getTier: () => 'FREE_TRIAL' },
+      });
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(403);
+    });
+
+    // -------------------------------------------------------------------------
+    // 4. Service unavailability — 503
+    // -------------------------------------------------------------------------
+
+    it('returns 503 when postgrestClient.from is missing', async () => {
+      const { controller } = await buildActivateController();
+      const brokenDataAccess = {
+        ...mockDataAccess,
+        services: { postgrestClient: {} }, // no `from`
+      };
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ dataAccessOverride: brokenDataAccess }),
+      );
+      expect(response.status).to.equal(503);
+    });
+
+    // -------------------------------------------------------------------------
+    // 5. Happy path — already-sited brand, generatePrompts:true
+    // -------------------------------------------------------------------------
+
+    it('returns 200 with promptGenerationJobId and scheduleId for already-sited brand with generatePrompts:true', async () => {
+      const listJobsStub = sinon.stub().resolves([]);
+      const submitJobStub = sinon.stub().resolves({ job_id: 'pg-1' });
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-1' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: listJobsStub,
+        submitPromptGenerationJob: submitJobStub,
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller, updateBrandStub } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme',
+          baseSiteId: SITE_ID,
+          baseUrl: 'https://site1.com',
+          region: ['us'],
+          status: 'pending',
+          urls: [],
+        },
+        updateBrandResult: { id: BRAND_UUID },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        brandId: BRAND_UUID,
+        status: 'active',
+        baseSiteId: SITE_ID,
+        promptGenerationJobId: 'pg-1',
+        scheduleId: 'sch-1',
+      });
+
+      // updateBrand must be called with status:active + baseSiteId
+      expect(updateBrandStub).to.have.been.calledOnce;
+      const updateArg = updateBrandStub.firstCall.args[0];
+      expect(updateArg.updates).to.deep.include({ status: 'active', baseSiteId: SITE_ID });
+
+      // submitPromptGenerationJob must carry source:'brand-activation', region, siteId, imsOrgId
+      expect(submitJobStub).to.have.been.calledOnce;
+      const submitArg = submitJobStub.firstCall.args[0];
+      expect(submitArg.source).to.equal('brand-activation');
+      expect(submitArg.region).to.equal('us');
+      expect(submitArg.siteId).to.equal(SITE_ID);
+      expect(submitArg.imsOrgId).to.equal(IMS_ORG_ID);
+
+      // createBrandPresenceSchedule must be called with correct ids
+      expect(scheduleStub).to.have.been.calledOnceWith({
+        siteId: SITE_ID,
+        brandId: BRAND_UUID,
+        orgId: ORGANIZATION_ID,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // 6. Idempotency — reuse in-flight prompt-gen job
+    // -------------------------------------------------------------------------
+
+    it('reuses an in-flight RUNNING job instead of submitting a new one', async () => {
+      const listJobsStub = sinon.stub().resolves([{ job_id: 'existing-1', status: 'RUNNING' }]);
+      const submitJobStub = sinon.stub().resolves({ job_id: 'new-job' });
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-1' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: listJobsStub,
+        submitPromptGenerationJob: submitJobStub,
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme', baseSiteId: SITE_ID, baseUrl: 'https://site1.com', region: ['us'], status: 'pending', urls: [],
+        },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.promptGenerationJobId).to.equal('existing-1');
+      expect(submitJobStub).to.not.have.been.called;
+      expect(scheduleStub).to.have.been.calledOnce;
+    });
+
+    // -------------------------------------------------------------------------
+    // 7. generatePrompts:false + brand has existing prompts → schedule is created
+    // -------------------------------------------------------------------------
+
+    it('creates schedule but skips prompt-gen when generatePrompts:false and brand has prompts', async () => {
+      const listJobsStub = sinon.stub().resolves([]);
+      const submitJobStub = sinon.stub().resolves({ job_id: 'pg-1' });
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-2' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: listJobsStub,
+        submitPromptGenerationJob: submitJobStub,
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme', baseSiteId: SITE_ID, baseUrl: 'https://site1.com', region: ['us'], status: 'pending', urls: [],
+        },
+        getPromptStatsResult: { branded: 2, unbranded: 1, intents: {} },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('scheduleId', 'sch-2');
+      expect(body).to.not.have.property('promptGenerationJobId');
+      expect(listJobsStub).to.not.have.been.called;
+      expect(submitJobStub).to.not.have.been.called;
+      expect(scheduleStub).to.have.been.calledOnce;
+    });
+
+    // -------------------------------------------------------------------------
+    // 8. generatePrompts:false + no existing prompts → no schedule
+    // -------------------------------------------------------------------------
+
+    it('skips both prompt-gen and schedule when generatePrompts:false and no prompts exist', async () => {
+      const listJobsStub = sinon.stub().resolves([]);
+      const submitJobStub = sinon.stub().resolves({ job_id: 'pg-1' });
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-3' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: listJobsStub,
+        submitPromptGenerationJob: submitJobStub,
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme', baseSiteId: SITE_ID, baseUrl: 'https://site1.com', region: ['us'], status: 'pending', urls: [],
+        },
+        getPromptStatsResult: { branded: 0, unbranded: 0, intents: {} },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        brandId: BRAND_UUID,
+        status: 'active',
+        baseSiteId: SITE_ID,
+      });
+      expect(submitJobStub).to.not.have.been.called;
+      expect(scheduleStub).to.not.have.been.called;
+    });
+
+    // -------------------------------------------------------------------------
+    // 9. Pending brand with primaryUrl that resolves to null site → 400
+    // -------------------------------------------------------------------------
+
+    it('returns 400 when brand has no baseSiteId and primary URL does not resolve to an onboarded site', async () => {
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
+      const { controller, updateBrandStub } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme',
+          baseSiteId: null,
+          baseUrl: null,
+          pendingSemrushProvisioning: { primaryUrl: 'https://site1.com' },
+          region: [],
+          status: 'pending',
+          urls: [],
+        },
+      });
+
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Brand has no onboarded primary site');
+      expect(updateBrandStub).to.not.have.been.called;
+
+      delete mockDataAccess.Site.findByBaseURL;
+    });
+
+    // -------------------------------------------------------------------------
+    // 10. Pending brand resolves via stash primaryUrl
+    // -------------------------------------------------------------------------
+
+    it('resolves site via pendingSemrushProvisioning.primaryUrl and activates when generatePrompts:false + no prompts', async () => {
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(sites[0]);
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-x' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: sinon.stub().resolves({}),
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller, updateBrandStub } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme',
+          baseSiteId: null,
+          baseUrl: null,
+          pendingSemrushProvisioning: { primaryUrl: 'https://site1.com' },
+          region: [],
+          status: 'pending',
+          urls: [],
+        },
+        getPromptStatsResult: { branded: 0, unbranded: 0, intents: {} },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      const updateArg = updateBrandStub.firstCall.args[0];
+      expect(updateArg.updates.baseSiteId).to.equal(SITE_ID);
+      expect(scheduleStub).to.not.have.been.called;
+
+      delete mockDataAccess.Site.findByBaseURL;
+    });
+
+    // -------------------------------------------------------------------------
+    // 11. Pending brand resolves via urls[] (no stash)
+    // -------------------------------------------------------------------------
+
+    it('resolves site via brand.urls[] when pendingSemrushProvisioning is absent', async () => {
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(sites[0]);
+      const { controller, updateBrandStub } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme',
+          baseSiteId: null,
+          baseUrl: null,
+          pendingSemrushProvisioning: null,
+          region: [],
+          status: 'pending',
+          urls: [{ value: 'https://site1.com', type: 'base' }],
+        },
+        getPromptStatsResult: { branded: 0, unbranded: 0, intents: {} },
+        fakeDrsClient: {
+          isConfigured: () => true,
+          listJobs: sinon.stub().resolves([]),
+          submitPromptGenerationJob: sinon.stub().resolves({}),
+          createBrandPresenceSchedule: sinon.stub().resolves({}),
+        },
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      const updateArg = updateBrandStub.firstCall.args[0];
+      expect(updateArg.updates.baseSiteId).to.equal(SITE_ID);
+
+      delete mockDataAccess.Site.findByBaseURL;
+    });
+
+    // -------------------------------------------------------------------------
+    // 12. updateBrand throws with .status = 409 → 409 response
+    // -------------------------------------------------------------------------
+
+    it('returns 409 when updateBrand throws a conflict error', async () => {
+      const conflictError = new Error('brands_base_site_unique constraint');
+      conflictError.status = 409;
+      const { controller } = await buildActivateController({
+        updateBrandResult: sinon.stub().rejects(conflictError),
+      });
+
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(409);
+    });
+
+    // -------------------------------------------------------------------------
+    // 13. updateBrand returns null → 404
+    // -------------------------------------------------------------------------
+
+    it('returns 404 when updateBrand resolves null (concurrent delete)', async () => {
+      const { controller } = await buildActivateController({ updateBrandResult: null });
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(404);
+    });
+
+    // -------------------------------------------------------------------------
+    // 14. DRS not configured → 200 with no job/schedule
+    // -------------------------------------------------------------------------
+
+    it('returns 200 with no job or schedule when DRS client is not configured', async () => {
+      const fakeDrs = {
+        isConfigured: () => false,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-x' }),
+        createBrandPresenceSchedule: sinon.stub().resolves({ scheduleId: 'sch-x' }),
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme', baseSiteId: SITE_ID, baseUrl: 'https://site1.com', region: ['us'], status: 'pending', urls: [],
+        },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        brandId: BRAND_UUID,
+        status: 'active',
+        baseSiteId: SITE_ID,
+      });
+      expect(fakeDrs.listJobs).to.not.have.been.called;
+      expect(fakeDrs.submitPromptGenerationJob).to.not.have.been.called;
+      expect(fakeDrs.createBrandPresenceSchedule).to.not.have.been.called;
+    });
+
+    // -------------------------------------------------------------------------
+    // 15. Region absent → submitPromptGenerationJob called without region key
+    // -------------------------------------------------------------------------
+
+    it('calls submitPromptGenerationJob without region when brand.region is empty', async () => {
+      const submitJobStub = sinon.stub().resolves({ job_id: 'pg-nr' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: submitJobStub,
+        createBrandPresenceSchedule: sinon.stub().resolves({ scheduleId: 'sch-nr' }),
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          name: 'Acme',
+          baseSiteId: SITE_ID,
+          baseUrl: 'https://site1.com',
+          region: [], // empty → region is undefined
+          status: 'pending',
+          urls: [],
+        },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(submitJobStub).to.have.been.calledOnce;
+      const submitArg = submitJobStub.firstCall.args[0];
+      expect(submitArg).to.not.have.property('region');
+    });
+  });
+
   describe('deleteBrandForOrg', () => {
     const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
 
