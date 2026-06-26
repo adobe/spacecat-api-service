@@ -1188,17 +1188,19 @@ describe('Sites Controller', () => {
     });
   });
 
-  describe('GET /sites - baseUrlLike substring search', () => {
+  describe('GET /sites - baseUrlContains substring search', () => {
     it('queries Site.all with an ilike where clause, order asc, and limit N+1', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '10' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site', limit: '10' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       expect(body).to.have.all.keys('sites', 'pagination');
       expect(body.sites).to.be.an('array').with.lengthOf(2);
-      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false, baseUrlLike: 'site' });
+      expect(body.pagination).to.deep.equal({
+        limit: 10, offset: 0, hasMore: false, baseUrlContains: 'site',
+      });
 
       expect(mockDataAccess.Site.all).to.have.been.calledOnce;
       const [firstArg, opts] = mockDataAccess.Site.all.firstCall.args;
@@ -1217,31 +1219,76 @@ describe('Sites Controller', () => {
     it('uses default limit of 50 when no limit param is provided', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false, baseUrlLike: 'site' });
+      expect(body.pagination).to.deep.equal({
+        limit: 50, offset: 0, hasMore: false, baseUrlContains: 'site',
+      });
       const [, opts] = mockDataAccess.Site.all.firstCall.args;
       expect(opts.limit).to.equal(51); // 50 + 1
+    });
+
+    it('defaults offset to 0 and passes an offset-encoded cursor when offset is omitted', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination.offset).to.equal(0);
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.cursor).to.equal(Buffer.from(JSON.stringify({ offset: 0 })).toString('base64'));
+    });
+
+    it('translates offset into an offset-encoded cursor and echoes offset in pagination', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site', limit: '10', offset: '50' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.deep.equal({
+        limit: 10, offset: 50, hasMore: false, baseUrlContains: 'site',
+      });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      // The data-access layer paginates by an offset-encoded cursor; the controller
+      // builds base64(JSON.stringify({ offset })) to reach that offset.
+      expect(opts.cursor).to.equal(Buffer.from(JSON.stringify({ offset: 50 })).toString('base64'));
+    });
+
+    ['-1', 'abc'].forEach((badOffset) => {
+      it(`returns 400 when offset is negative or non-integer ("${badOffset}")`, async () => {
+        mockDataAccess.Site.all.resolves(sites);
+
+        const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site', offset: badOffset } });
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'offset must be a non-negative integer');
+        expect(mockDataAccess.Site.all).to.not.have.been.called;
+      });
     });
 
     it('sets hasMore:true and trims the body to the limit when N+1 rows are returned', async () => {
       // effectiveLimit = 1, so fetching limit+1 = 2 rows means "more exists".
       mockDataAccess.Site.all.resolves(sites); // 2 rows
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '1' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site', limit: '1' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       expect(body.sites).to.be.an('array').with.lengthOf(1); // trimmed to limit
-      expect(body.pagination).to.deep.equal({ limit: 1, hasMore: true, baseUrlLike: 'site' });
+      expect(body.pagination).to.deep.equal({
+        limit: 1, offset: 0, hasMore: true, baseUrlContains: 'site',
+      });
     });
 
     it('escapes LIKE wildcards in the user input', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
-      await sitesController.getAll({ ...context, data: { baseUrlLike: 'a%b_c\\d' } });
+      await sitesController.getAll({ ...context, data: { baseUrlContains: 'a%b_c\\d' } });
 
       const [, opts] = mockDataAccess.Site.all.firstCall.args;
       const attrs = { baseURL: 'base_url' };
@@ -1253,7 +1300,7 @@ describe('Sites Controller', () => {
     it('returns the slim DTO shape for matched sites', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } });
       const body = await result.json();
 
       expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
@@ -1264,34 +1311,38 @@ describe('Sites Controller', () => {
     it('accepts a non-array (cursor-shaped) result by reading rows.data', async () => {
       mockDataAccess.Site.all.resolves({ data: sites });
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '10' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site', limit: '10' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       expect(body.sites).to.be.an('array').with.lengthOf(2);
-      expect(body.pagination).to.deep.equal({ limit: 10, hasMore: false, baseUrlLike: 'site' });
+      expect(body.pagination).to.deep.equal({
+        limit: 10, offset: 0, hasMore: false, baseUrlContains: 'site',
+      });
     });
 
-    it('returns an empty list with hasMore:false and the baseUrlLike echo when Site.all resolves []', async () => {
+    it('returns an empty list with hasMore:false and the baseUrlContains echo when Site.all resolves []', async () => {
       mockDataAccess.Site.all.resolves([]);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'nomatch' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'nomatch' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       expect(body.sites).to.be.an('array').that.is.empty;
-      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false, baseUrlLike: 'nomatch' });
+      expect(body.pagination).to.deep.equal({
+        limit: 50, offset: 0, hasMore: false, baseUrlContains: 'nomatch',
+      });
     });
 
-    it('echoes the trimmed query in pagination.baseUrlLike', async () => {
+    it('echoes the trimmed query in pagination.baseUrlContains', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: '  Adobe  ', limit: '10' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: '  Adobe  ', limit: '10' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       // The echo is the trimmed query, not the raw padded input.
-      expect(body.pagination.baseUrlLike).to.equal('Adobe');
+      expect(body.pagination.baseUrlContains).to.equal('Adobe');
       const [, opts] = mockDataAccess.Site.all.firstCall.args;
       const attrs = { baseURL: 'base_url' };
       const op = { ilike: sinon.stub().returnsThis() };
@@ -1302,32 +1353,35 @@ describe('Sites Controller', () => {
     it('accepts an exactly-3-char query (inclusive lower boundary) and calls Site.all', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'abc' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'abc' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       expect(mockDataAccess.Site.all).to.have.been.calledOnce;
-      expect(body.pagination.baseUrlLike).to.equal('abc');
+      expect(body.pagination.baseUrlContains).to.equal('abc');
     });
 
-    it('returns 400 when baseUrlLike exceeds 256 chars after trimming', async () => {
+    it('returns 400 when baseUrlContains exceeds 256 chars after trimming', async () => {
       mockDataAccess.Site.all.resolves(sites);
       const longValue = 'a'.repeat(257);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: longValue } });
+      const result = await sitesController.getAll({
+        ...context,
+        data: { baseUrlContains: longValue },
+      });
       const error = await result.json();
 
       expect(result.status).to.equal(400);
-      expect(error).to.have.property('message', 'baseUrlLike exceeds maximum length');
+      expect(error).to.have.property('message', 'baseUrlContains exceeds maximum length');
       expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
 
     ['ab', 'a', '', '  x '].forEach((shortValue) => {
-      it(`returns 400 when baseUrlLike trims to fewer than 3 chars ("${shortValue}")`, async () => {
+      it(`returns 400 when baseUrlContains trims to fewer than 3 chars ("${shortValue}")`, async () => {
         mockDataAccess.Site.all.resolves(sites);
         const result = await sitesController.getAll({
           ...context,
-          data: { baseUrlLike: shortValue },
+          data: { baseUrlContains: shortValue },
         });
 
         if (shortValue.trim() === '') {
@@ -1338,13 +1392,13 @@ describe('Sites Controller', () => {
         }
         const error = await result.json();
         expect(result.status).to.equal(400);
-        expect(error).to.have.property('message', 'baseUrlLike must be at least 3 characters');
+        expect(error).to.have.property('message', 'baseUrlContains must be at least 3 characters');
         expect(mockDataAccess.Site.all).to.not.have.been.called;
       });
     });
 
-    it('returns 400 when baseUrlLike is valid but limit is invalid', async () => {
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: 'abc' } });
+    it('returns 400 when baseUrlContains is valid but limit is invalid', async () => {
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site', limit: 'abc' } });
       const error = await result.json();
 
       expect(result.status).to.equal(400);
@@ -1355,7 +1409,7 @@ describe('Sites Controller', () => {
     it('clamps the search limit to MAX_LIMIT (500)', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site', limit: '9999' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site', limit: '9999' } });
       const body = await result.json();
 
       expect(body.pagination.limit).to.equal(500);
@@ -1363,10 +1417,10 @@ describe('Sites Controller', () => {
       expect(opts.limit).to.equal(501); // 500 + 1
     });
 
-    it('denies a non-admin/non-S2S caller with 403 even with baseUrlLike', async () => {
+    it('denies a non-admin/non-S2S caller with 403 even with baseUrlContains', async () => {
       context.attributes.authInfo.withProfile({ is_admin: false });
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } });
       const error = await result.json();
 
       expect(result.status).to.equal(403);
@@ -1374,28 +1428,30 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
 
-    it('returns 400 when baseUrlLike is combined with a cursor (cursor is not silently discarded)', async () => {
+    it('returns 400 when baseUrlContains is combined with a cursor (cursor is not silently discarded)', async () => {
       const result = await sitesController.getAll({
         ...context,
-        data: { baseUrlLike: 'site', cursor: 'abc' },
+        data: { baseUrlContains: 'site', cursor: 'abc' },
       });
       const error = await result.json();
 
       expect(result.status).to.equal(400);
-      expect(error).to.have.property('message', 'cursor is not supported with baseUrlLike');
+      expect(error).to.have.property('message', 'cursor is not supported with baseUrlContains; use offset');
       expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
 
     it('warns and returns an empty list when Site.all returns an unexpected shape', async () => {
       mockDataAccess.Site.all.resolves({ unexpected: true });
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       expect(body.sites).to.be.an('array').that.is.empty;
-      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false, baseUrlLike: 'site' });
-      expect(loggerStub.warn).to.have.been.calledWithMatch(/\[sites\]\[baseUrlLike\] unexpected Site\.all shape/);
+      expect(body.pagination).to.deep.equal({
+        limit: 50, offset: 0, hasMore: false, baseUrlContains: 'site',
+      });
+      expect(loggerStub.warn).to.have.been.calledWithMatch(/\[sites\]\[baseUrlContains\] unexpected Site\.all shape/);
     });
 
     it('logs a prefixed error and re-throws when the Site.all search query rejects', async () => {
@@ -1403,10 +1459,10 @@ describe('Sites Controller', () => {
       mockDataAccess.Site.all.rejects(boom);
 
       await expect(
-        sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } }),
+        sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } }),
       ).to.be.rejectedWith('boom');
 
-      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[baseUrlLike\] query failed/);
+      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[baseUrlContains\] query failed/);
     });
   });
 
@@ -1471,20 +1527,20 @@ describe('Sites Controller', () => {
       );
     });
 
-    it('grants access to S2S consumer with site:readAll on the baseUrlLike search path', async () => {
+    it('grants access to S2S consumer with site:readAll on the baseUrlContains search path', async () => {
       context.s2sConsumer = makeS2SConsumer();
-      context.invocation = { id: 'req-s2s-baseurllike-1' };
+      context.invocation = { id: 'req-s2s-baseurlcontains-1' };
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
         .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
 
-      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const result = await sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } });
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.pagination).to.include({ baseUrlLike: 'site' });
+      expect(body.pagination).to.include({ baseUrlContains: 'site' });
       expect(body.pagination).to.not.have.property('cursor');
       expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[s2s-readall\] GET \/sites \(baseUrlLike\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurllike-1/,
+        /\[s2s-readall\] GET \/sites \(baseUrlContains\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurlcontains-1/,
       );
     });
 

@@ -130,11 +130,12 @@ sites:
       - **Paginated (with `limit` and/or `cursor`):** returns `{ sites, pagination }` with
         the full unfiltered result set. Iterate using `pagination.cursor` until
         `pagination.hasMore` is `false` to fetch all sites.
-      - **Substring search (with `baseUrlLike`):** returns `{ sites, pagination }` where
+      - **Substring search (with `baseUrlContains`):** returns `{ sites, pagination }` where
         `sites` are those whose `baseURL` contains the (case-insensitive) substring.
-        `pagination` is `{ limit, hasMore }` (no `cursor`; this branch is not
-        cursor-iterable). Defaults to a limit of 50 (clamped to 500). The search term
-        must be at least 3 characters after trimming (otherwise 400).
+        `pagination` is `{ limit, offset, hasMore, baseUrlContains }` (no `cursor`; this
+        branch paginates by `offset`). Defaults to a limit of 50 (clamped to 500) and an
+        offset of 0. The search term must be at least 3 characters after trimming
+        (otherwise 400).
 
       Required capabilities: admin access (legacy admin path) or S2S `site:readAll`.
     operationId: getSites
@@ -165,20 +166,20 @@ sites:
           type: string
           maxLength: 256
           example: "eyJvZmZzZXQiOjEwMH0="
-      - name: baseUrlLike
+      - name: baseUrlContains
         in: query
         required: false
         description: |
           Case-insensitive substring to match against each site's `baseURL`. When
           provided, the response uses a non-cursor paginated envelope
-          (`{ sites, pagination: { limit, hasMore, baseUrlLike } }`), where
-          `pagination.baseUrlLike` echoes the trimmed query so a client can confirm
+          (`{ sites, pagination: { limit, offset, hasMore, baseUrlContains } }`), where
+          `pagination.baseUrlContains` echoes the trimmed query so a client can confirm
           the search was applied (an older deployment that ignores this param would
           omit the echo). Length is enforced **after trimming**: must be at least 3
           and at most 256 characters (otherwise 400). LIKE wildcards (`%`, `_`, `\`)
           in the value are escaped and treated literally. The `limit` parameter
-          (default 50, clamped to 500) bounds the result size; `cursor` is not used
-          on this path.
+          (default 50, clamped to 500) bounds the page size and `offset` (default 0)
+          selects the page; `cursor` is not used on this path.
         schema:
           type: string
           # Bounds are enforced server-side AFTER trimming surrounding whitespace, so
@@ -186,6 +187,18 @@ sites:
           minLength: 3
           maxLength: 256
           example: "adobe"
+      - name: offset
+        in: query
+        required: false
+        description: |
+          Zero-based offset into the `baseUrlContains` search results, used to page
+          through matches (e.g. `offset=2&limit=2` returns the second page of 2).
+          Only honored on the `baseUrlContains` search path. Defaults to 0. Negative
+          or non-integer values return 400.
+        schema:
+          type: integer
+          minimum: 0
+          example: 0
     responses:
       '200':
         description: |
@@ -198,11 +211,11 @@ sites:
                 unambiguous by JSON type/shape, so no `discriminator` is used (nor can
                 one be expressed — the legacy branch is a top-level array, which has no
                 property to discriminate on):
-                - When `baseUrlLike` is provided → **`SiteSearchResponse`**, a JSON
+                - When `baseUrlContains` is provided → **`SiteSearchResponse`**, a JSON
                   object with `sites` and a non-cursor `pagination`
-                  (`{ limit, hasMore, baseUrlLike }`). The `baseUrlLike` echo lets a
-                  client confirm the search ran on the deployment it hit.
-                - When `limit` and/or `cursor` is provided (without `baseUrlLike`) →
+                  (`{ limit, offset, hasMore, baseUrlContains }`). The `baseUrlContains`
+                  echo lets a client confirm the search ran on the deployment it hit.
+                - When `limit` and/or `cursor` is provided (without `baseUrlContains`) →
                   **`SitePagedResponse`**, a JSON object with `sites` and a
                   cursor-based `pagination`.
                 - When none are provided → **`SiteList`**, the legacy top-level

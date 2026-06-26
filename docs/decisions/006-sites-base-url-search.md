@@ -25,21 +25,27 @@ Two facts shaped the decision:
   scan (anti-pattern); on Postgres `ILIKE '%…%'` is a normal, cheap query.
 
 ## Decision
-Add an optional **`baseUrlLike`** query parameter to `GET /sites`:
+Add an optional **`baseUrlContains`** query parameter to `GET /sites`:
 
-`GET /sites?baseUrlLike=<substring>&limit=<N>`
+`GET /sites?baseUrlContains=<substring>&limit=<N>&offset=<M>`
 
-- Maps to `Site.all({}, { where: (attr, op) => op.ilike(attr.baseURL, '%<escaped>%'), limit: N+1, order: 'asc' })`.
+- Maps to `Site.all({}, { where: (attr, op) => op.ilike(attr.baseURL, '%<escaped>%'), limit: N+1, cursor: <offset-cursor>, order: 'asc' })`.
   The data-access `where` builder passes `(attrs, op)`: `attrs` maps model fields to DB columns and
   `op` carries the operators. No `spacecat-shared-data-access` change was required — the `ilike`
   operator already exists. (`order: 'asc'` sorts by the index's order fields with the primary key as a
-  deterministic tiebreaker — see `base.collection`'s `#getOrderFields`.)
-- **Validation:** `baseUrlLike` must be ≥ 3 characters (trimmed); LIKE wildcards (`%`, `_`, `\`) in
-  user input are escaped so callers cannot inject wildcards.
+  deterministic tiebreaker — see `base.collection`'s `#getOrderFields`.) The data-access layer exposes
+  no public `offset` option — it paginates via an opaque, offset-encoded cursor (`postgrest.utils`
+  `encodeCursor`, which is not exported). The controller therefore builds the same
+  `base64(JSON.stringify({ offset }))` cursor inline to reach the requested offset; if a direct
+  `offset` option is added upstream, switch to it.
+- **Validation:** `baseUrlContains` must be ≥ 3 characters (trimmed); LIKE wildcards (`%`, `_`, `\`) in
+  user input are escaped so callers cannot inject wildcards. `offset` defaults to 0 and must be a
+  non-negative integer (otherwise 400).
 - **Top-N + "more exists":** `limit` defaults to 50, capped at `MAX_LIMIT` (500). We fetch `N+1` rows
-  and trim to `N`; the extra row drives `pagination.hasMore`, which the UI surfaces as a
-  "refine your search" hint. Response shape: `{ sites: [...], pagination: { limit, hasMore, baseUrlLike } }`
-  — the `baseUrlLike` echo is the deploy-ordering discriminator (see Consequences).
+  at the requested `offset` and trim to `N`; the extra row drives `pagination.hasMore`, which the UI
+  surfaces as a "refine your search" hint / next-page affordance. Response shape:
+  `{ sites: [...], pagination: { limit, offset, hasMore, baseUrlContains } }`
+  — the `baseUrlContains` echo is the deploy-ordering discriminator (see Consequences).
 - **Authorization is unchanged** — the new branch runs after the existing admin / S2S `site:readAll`
   check. Non-admin (org-scoped) callers continue to receive `403` on `GET /sites`; the Backoffice
   client falls back to the org-scoped sites endpoint (a small, bounded set) and filters it
@@ -65,8 +71,8 @@ Add an optional **`baseUrlLike`** query parameter to `GET /sites`:
   (The legacy `getSites` bulk walk still backs `LLMOptimizerData.js` — eliminating that is tracked as a
   separate follow-up; this ADR does not address it.)
 - **Deploy ordering.** The Backoffice client always sends `limit`, so an *older* API deployment would
-  ignore `baseUrlLike` and return unfiltered cursor results. To avoid silent wrong results, the search
-  response echoes `pagination.baseUrlLike`; the client treats a missing/mismatched echo as "search
+  ignore `baseUrlContains` and return unfiltered cursor results. To avoid silent wrong results, the search
+  response echoes `pagination.baseUrlContains`; the client treats a missing/mismatched echo as "search
   unsupported" and surfaces an error. Deploy the API before (or with) the Backoffice change.
 - **No trigram index yet.** `base_url` has a UNIQUE btree but no `pg_trgm` GIN index, so a leading-wildcard
   `ILIKE '%…%'` is a sequential scan. At ~18k small rows this is single-digit-ms in Postgres and only

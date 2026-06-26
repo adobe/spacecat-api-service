@@ -836,11 +836,11 @@ SitePagedResponse:
 SiteSearchResponse:
   type: object
   description: |
-    Response for the `baseUrlLike` substring search on `GET /sites`. Unlike
+    Response for the `baseUrlContains` substring search on `GET /sites`. Unlike
     `SitePagedResponse`, this path is not cursor-iterable: `pagination` carries no
-    `cursor`, and instead echoes the trimmed `baseUrlLike` query so a client can
-    confirm the search was actually applied (an older deployment that ignores
-    `baseUrlLike` but honors `limit` would return `SitePagedResponse` with no echo).
+    `cursor`, paginates by `offset`, and echoes the trimmed `baseUrlContains` query so a
+    client can confirm the search was actually applied (an older deployment that ignores
+    `baseUrlContains` but honors `limit` would return `SitePagedResponse` with no echo).
   properties:
     sites:
       type: array
@@ -853,21 +853,26 @@ SiteSearchResponse:
           description: The maximum number of items returned (default 50, clamped to 500)
           type: integer
           example: 50
+        offset:
+          description: The zero-based offset into the search results for this page (default 0)
+          type: integer
+          example: 0
         hasMore:
           description: Indicates whether more matching sites exist beyond this result
           type: boolean
           example: false
-        baseUrlLike:
+        baseUrlContains:
           description: |
-            The trimmed `baseUrlLike` query that was applied (3-256 chars). Echoed so
+            The trimmed `baseUrlContains` query that was applied (3-256 chars). Echoed so
             clients can confirm the search ran; absent on deployments that ignore the
             param.
           type: string
           example: "adobe"
       required:
         - limit
+        - offset
         - hasMore
-        - baseUrlLike
+        - baseUrlContains
   required:
     - sites
     - pagination

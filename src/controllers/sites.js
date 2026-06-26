@@ -432,12 +432,12 @@ function SitesController(ctx, log, env) {
    * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    *
-   * Optional `baseUrlLike` query param: when provided (3-256 chars after trim),
+   * Optional `baseUrlContains` query param: when provided (3-256 chars after trim),
    * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
-   * `{ sites, pagination: { limit, hasMore, baseUrlLike } }` response. The trimmed query
-   * is echoed back in `pagination.baseUrlLike` so a client can confirm its search was
-   * applied even if it hits an older deployment that ignores the param. LIKE wildcards in
-   * the input are escaped so callers cannot inject their own wildcards.
+   * `{ sites, pagination: { limit, offset, hasMore, baseUrlContains } }` response. The
+   * trimmed query is echoed back in `pagination.baseUrlContains` so a client can confirm
+   * its search was applied even if it hits an older deployment that ignores the param.
+   * LIKE wildcards in the input are escaped so callers cannot inject their own wildcards.
    * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
@@ -458,20 +458,20 @@ function SitesController(ctx, log, env) {
 
     // Optional substring search by base URL. Runs after the authz check (so
     // unauthorized callers still get 403) and before the cursor/legacy branches.
-    const baseUrlLike = context?.data?.baseUrlLike;
-    if (hasText(baseUrlLike) && hasText(cursor)) {
-      // baseUrlLike search does not paginate via cursor; accepting both would
-      // silently discard the cursor and mislead the client into thinking
-      // cursor pagination is active. Reject the combination explicitly.
-      return badRequest('cursor is not supported with baseUrlLike');
+    const baseUrlContains = context?.data?.baseUrlContains;
+    if (hasText(baseUrlContains) && hasText(cursor)) {
+      // The public search path paginates via offset, not the client cursor;
+      // accepting both would silently discard the cursor and mislead the client
+      // into thinking cursor pagination is active. Reject the combination explicitly.
+      return badRequest('cursor is not supported with baseUrlContains; use offset');
     }
-    if (hasText(baseUrlLike)) {
-      const q = baseUrlLike.trim();
+    if (hasText(baseUrlContains)) {
+      const q = baseUrlContains.trim();
       if (q.length < 3) {
-        return badRequest('baseUrlLike must be at least 3 characters');
+        return badRequest('baseUrlContains must be at least 3 characters');
       }
       if (q.length > 256) {
-        return badRequest('baseUrlLike exceeds maximum length');
+        return badRequest('baseUrlContains exceeds maximum length');
       }
 
       const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : SEARCH_DEFAULT_LIMIT;
@@ -480,8 +480,19 @@ function SitesController(ctx, log, env) {
       }
       const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
 
+      const offsetParam = context?.data?.offset;
+      const offset = hasText(offsetParam) ? parseInt(offsetParam, 10) : 0;
+      if (!Number.isInteger(offset) || offset < 0) {
+        return badRequest('offset must be a non-negative integer');
+      }
+
       // Escape LIKE special chars so user input cannot inject its own wildcards.
       const escaped = q.replace(/([\\%_])/g, '\\$1');
+
+      // The data-access layer paginates by an offset-encoded cursor (postgrest.utils
+      // encodeCursor); it exposes no public `offset` option, so we build the same
+      // shape here. If a direct offset option is ever added upstream, switch to it.
+      const offsetCursor = Buffer.from(JSON.stringify({ offset }), 'utf-8').toString('base64');
 
       // Fetch one extra row to detect whether more results exist beyond the limit.
       // The data-access `where` builder passes (attrs, op): `attrs` maps model
@@ -491,12 +502,13 @@ function SitesController(ctx, log, env) {
         rows = await Site.all({}, {
           where: (attr, op) => op.ilike(attr.baseURL, `%${escaped}%`),
           limit: effectiveLimit + 1,
+          cursor: offsetCursor,
           order: 'asc',
         });
       } catch (e) {
         // Re-throw so the framework still returns a 500 — the point here is a
         // searchable, prefixed log line, not swallowing the error.
-        log.error(`[sites][baseUrlLike] query failed requestId=${requestId}`, e);
+        log.error(`[sites][baseUrlContains] query failed requestId=${requestId}`, e);
         throw e;
       }
       let list;
@@ -505,25 +517,30 @@ function SitesController(ctx, log, env) {
       } else if (Array.isArray(rows?.data)) {
         list = rows.data;
       } else {
-        log.warn(`[sites][baseUrlLike] unexpected Site.all shape; returning empty requestId=${requestId}`);
+        log.warn(`[sites][baseUrlContains] unexpected Site.all shape; returning empty requestId=${requestId}`);
         list = [];
       }
       const hasMore = list.length > effectiveLimit;
       const sites = list.slice(0, effectiveLimit).map((site) => SiteDto.toListJSON(site));
 
       if (s2sResult.allowed) {
-        log.info(`[s2s-readall] GET /sites (baseUrlLike) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+        log.info(`[s2s-readall] GET /sites (baseUrlContains) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
       }
 
       // Unconditional observability for both admin and S2S paths. Never log the raw
       // query value (URLs may be sensitive) — only its length and result counts.
-      log.info(`[sites][baseUrlLike] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
+      log.info(`[sites][baseUrlContains] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
 
       // Echo the trimmed query in the pagination so a new client can confirm its
-      // search was actually applied. An older deployment that ignores `baseUrlLike`
+      // search was actually applied. An older deployment that ignores `baseUrlContains`
       // but still honors `limit` would return the cursor envelope with unfiltered
-      // sites and no `baseUrlLike` echo — letting clients detect the version skew.
-      return ok({ sites, pagination: { limit: effectiveLimit, hasMore, baseUrlLike: q } });
+      // sites and no `baseUrlContains` echo — letting clients detect the version skew.
+      return ok({
+        sites,
+        pagination: {
+          limit: effectiveLimit, offset, hasMore, baseUrlContains: q,
+        },
+      });
     }
 
     const paginated = hasText(limitParam) || hasText(cursor);
