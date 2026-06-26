@@ -91,6 +91,8 @@ describe('Preflight Controller', () => {
     getCreatedAt: () => '2024-03-20T10:00:00Z',
     getCreatedBy: () => ({ email: 'user@example.com', displayName: 'Test User' }),
     getSiteId: () => 'test-site-123',
+    getAsyncJobId: () => jobId,
+    getAsyncJob: sandbox.stub().resolves(mockJob),
     getUpdatedAt: () => '2024-03-20T10:01:00Z',
     getStartedAt: () => '2024-03-20T10:00:00Z',
     getEndedAt: () => null,
@@ -168,6 +170,8 @@ describe('Preflight Controller', () => {
     mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
     mockDataAccess.Preflight.findById = sandbox.stub().resolves(mockPreflight);
     mockDataAccess.Preflight.allBySiteIdAndUrl = sandbox.stub().resolves([mockPreflight]);
+    // sandbox.restore() drops the module-level getAsyncJob stub between tests; re-attach.
+    mockPreflight.getAsyncJob = sandbox.stub().resolves(mockJob);
     mockSqs.sendMessage = sandbox.stub().resolves();
     preflightStatus = 'IN_PROGRESS';
     preflightError$ = null;
@@ -2461,6 +2465,15 @@ describe('Preflight Controller', () => {
       expect(result).to.be.an('array').with.lengthOf(1);
       expect(result[0].preflightId).to.equal(preflightId);
       expect(result[0].status).to.equal('IN_PROGRESS');
+      // SITES-47254: list items carry siteId, updatedAt, endedAt
+      expect(result[0].siteId).to.equal('test-site-123');
+      expect(result[0].updatedAt).to.equal('2024-03-20T10:01:00Z');
+      expect(result[0]).to.have.property('endedAt');
+      // List does not surface asyncJobId/scanId/result/error
+      expect(result[0]).to.not.have.property('asyncJobId');
+      expect(result[0]).to.not.have.property('scanId');
+      expect(result[0]).to.not.have.property('result');
+      expect(result[0]).to.not.have.property('error');
     });
 
     it('returns empty array when no preflights exist', async () => {
@@ -2596,6 +2609,49 @@ describe('Preflight Controller', () => {
       expect(result.result).to.be.null;
       expect(result.error).to.be.null;
       expect(result.updatedAt).to.equal('2024-03-20T10:01:00Z');
+      // SITES-47254: detail carries siteId + sources lifecycle truth from AsyncJob
+      expect(result.siteId).to.equal('test-site-123');
+      expect(result.startedAt).to.equal('2024-03-20T10:00:00Z');
+      // Internal correlation fields stay off the wire
+      expect(result).to.not.have.property('asyncJobId');
+      expect(result).to.not.have.property('scanId');
+    });
+
+    it('sources startedAt/result/error from the joined AsyncJob, not from Preflight', async () => {
+      const errorPayload = { code: 'DA_FETCH_ERROR', message: 'Document Authoring 502' };
+      const completedJob = {
+        ...mockJob,
+        getStartedAt: () => '2024-03-20T11:00:00Z',
+        getEndedAt: () => '2024-03-20T11:00:42Z',
+        getResult: () => [{ pageUrl: 'https://example.com/page', audits: [] }],
+        getError: () => errorPayload,
+      };
+      mockPreflight.getAsyncJob.resolves(completedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      const result = await response.json();
+      expect(result.startedAt).to.equal('2024-03-20T11:00:00Z');
+      expect(result.result).to.deep.equal([{ pageUrl: 'https://example.com/page', audits: [] }]);
+      expect(result.error).to.deep.equal(errorPayload);
+    });
+
+    it('degrades startedAt/result/error to null when getAsyncJob throws', async () => {
+      mockPreflight.getAsyncJob.rejects(new Error('async_jobs unreachable'));
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.startedAt).to.be.null;
+      expect(result.result).to.be.null;
+      expect(result.error).to.be.null;
+      // Rest of the detail is still populated from Preflight
+      expect(result.preflightId).to.equal(preflightId);
+      expect(result.status).to.equal('IN_PROGRESS');
+      expect(loggerStub.warn).to.have.been.called;
     });
 
     it('returns 500 when Site.findById throws', async () => {

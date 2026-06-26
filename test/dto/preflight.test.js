@@ -1,0 +1,151 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { expect } from 'chai';
+import { PreflightDto } from '../../src/dto/preflight.js';
+
+const LIST_FIELDS = [
+  'preflightId', 'siteId', 'status', 'url',
+  'createdAt', 'updatedAt', 'endedAt', 'createdBy',
+];
+
+const DETAIL_FIELDS = [
+  ...LIST_FIELDS,
+  'startedAt', 'result', 'error',
+];
+
+function makePreflight(overrides = {}) {
+  const defaults = {
+    id: 'pf-1',
+    siteId: 'site-1',
+    status: 'IN_PROGRESS',
+    url: 'https://example.com/page',
+    createdAt: '2026-06-26T12:00:00Z',
+    updatedAt: '2026-06-26T12:00:00Z',
+    endedAt: null,
+    createdBy: { email: 'alice@example.com' },
+    ...overrides,
+  };
+  return {
+    getId: () => defaults.id,
+    getSiteId: () => defaults.siteId,
+    getStatus: () => defaults.status,
+    getUrl: () => defaults.url,
+    getCreatedAt: () => defaults.createdAt,
+    getUpdatedAt: () => defaults.updatedAt,
+    getEndedAt: () => defaults.endedAt,
+    getCreatedBy: () => defaults.createdBy,
+  };
+}
+
+function makeAsyncJob(overrides = {}) {
+  const defaults = {
+    startedAt: '2026-06-26T12:00:01Z',
+    endedAt: '2026-06-26T12:00:30Z',
+    result: { audits: [{ name: 'canonical', status: 'ok' }] },
+    error: null,
+    ...overrides,
+  };
+  return {
+    getStartedAt: () => defaults.startedAt,
+    getEndedAt: () => defaults.endedAt,
+    getResult: () => defaults.result,
+    getError: () => defaults.error,
+  };
+}
+
+describe('PreflightDto', () => {
+  describe('toJSON (list)', () => {
+    it('maps an in-progress Preflight entity to the wire contract', () => {
+      const out = PreflightDto.toJSON(makePreflight());
+      expect(out).to.deep.equal({
+        preflightId: 'pf-1',
+        siteId: 'site-1',
+        status: 'IN_PROGRESS',
+        url: 'https://example.com/page',
+        createdAt: '2026-06-26T12:00:00Z',
+        updatedAt: '2026-06-26T12:00:00Z',
+        endedAt: null,
+        createdBy: { email: 'alice@example.com' },
+      });
+    });
+
+    it('surfaces endedAt when the row is terminal', () => {
+      const out = PreflightDto.toJSON(makePreflight({
+        status: 'COMPLETED',
+        endedAt: '2026-06-26T12:00:30Z',
+      }));
+      expect(out.status).to.equal('COMPLETED');
+      expect(out.endedAt).to.equal('2026-06-26T12:00:30Z');
+    });
+
+    it('returns exactly the documented list keys — no leakage, no drift', () => {
+      const out = PreflightDto.toJSON(makePreflight());
+      expect(Object.keys(out).sort()).to.deep.equal([...LIST_FIELDS].sort());
+    });
+  });
+
+  describe('toDetailJSON (detail)', () => {
+    it('merges Preflight + AsyncJob into the detail contract', () => {
+      const out = PreflightDto.toDetailJSON(
+        makePreflight({ status: 'COMPLETED', endedAt: '2026-06-26T12:00:30Z' }),
+        makeAsyncJob(),
+      );
+      expect(out).to.deep.equal({
+        preflightId: 'pf-1',
+        siteId: 'site-1',
+        status: 'COMPLETED',
+        url: 'https://example.com/page',
+        createdAt: '2026-06-26T12:00:00Z',
+        updatedAt: '2026-06-26T12:00:00Z',
+        startedAt: '2026-06-26T12:00:01Z',
+        endedAt: '2026-06-26T12:00:30Z',
+        createdBy: { email: 'alice@example.com' },
+        result: { audits: [{ name: 'canonical', status: 'ok' }] },
+        error: null,
+      });
+    });
+
+    it('surfaces error structure when the AsyncJob reports FAILED', () => {
+      const errorPayload = { code: 'DA_FETCH_ERROR', message: 'Document Authoring 502', details: { url: 'x' } };
+      const out = PreflightDto.toDetailJSON(
+        makePreflight({ status: 'FAILED', endedAt: '2026-06-26T12:00:30Z' }),
+        makeAsyncJob({ result: null, error: errorPayload }),
+      );
+      expect(out.status).to.equal('FAILED');
+      expect(out.error).to.deep.equal(errorPayload);
+      expect(out.result).to.equal(null);
+    });
+
+    it('degrades startedAt/result/error to null when AsyncJob is missing', () => {
+      const out = PreflightDto.toDetailJSON(makePreflight(), null);
+      expect(out.startedAt).to.equal(null);
+      expect(out.result).to.equal(null);
+      expect(out.error).to.equal(null);
+      // Preflight-sourced fields remain populated
+      expect(out.preflightId).to.equal('pf-1');
+      expect(out.siteId).to.equal('site-1');
+      expect(out.status).to.equal('IN_PROGRESS');
+    });
+
+    it('returns exactly the documented detail keys — no leakage, no drift', () => {
+      const out = PreflightDto.toDetailJSON(makePreflight(), makeAsyncJob());
+      expect(Object.keys(out).sort()).to.deep.equal([...DETAIL_FIELDS].sort());
+    });
+
+    it('does not surface asyncJobId or scanId on the wire', () => {
+      const out = PreflightDto.toDetailJSON(makePreflight(), makeAsyncJob());
+      expect(out).to.not.have.property('asyncJobId');
+      expect(out).to.not.have.property('scanId');
+    });
+  });
+});

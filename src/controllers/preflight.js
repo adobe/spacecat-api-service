@@ -745,7 +745,19 @@ function PreflightController(ctx, log, env) {
         return preflightError('PREFLIGHT_NOT_FOUND', `Preflight with ID ${preflightId} not found`, 404);
       }
 
-      return ok(PreflightDto.toDetailJSON(preflight));
+      // Lifecycle truth (startedAt, result, error) lives on async_jobs.
+      // Fetch the joined row; on a missing/fetch-failed join, surface the
+      // three fields as null rather than 404'ing — the rest of the preflight
+      // is still a valid response, and the MFE polls Preflight.status which
+      // is sourced from the preflight row itself.
+      let asyncJob = null;
+      try {
+        asyncJob = await preflight.getAsyncJob();
+      } catch (e) {
+        log.warn(`Failed to fetch AsyncJob for preflight ${preflightId}: ${e.message}`);
+      }
+
+      return ok(PreflightDto.toDetailJSON(preflight, asyncJob));
     } catch (e) {
       log.error(`Failed to fetch preflight ${preflightId}: ${e.message}`);
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to fetch preflight', 500);
