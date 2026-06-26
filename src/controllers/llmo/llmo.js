@@ -2252,7 +2252,7 @@ function LlmoController(ctx) {
    * @param {object} context - Request context
    * @returns {Promise<Response>} Bootstrap details + CloudFormation quick-create URL
    */
-  const createEdgeOptimizeBootstrapUrl = async (context) => {
+  const createLlmoCloudFrontBootstrapUrl = async (context) => {
     const {
       log, dataAccess, env, s3,
     } = context;
@@ -2340,7 +2340,7 @@ function LlmoController(ctx) {
   // Shared access gate for the CloudFront "Deploy routing" wizard endpoints: the caller
   // must have access to the site and be an LLMO administrator. Returns { error } (a Response)
   // when denied, or {} when allowed.
-  const gateEdgeOptimizeWizard = async (siteId, Site, action) => {
+  const gateLlmoCloudFrontWizard = async (siteId, Site, action) => {
     const site = await Site.findById(siteId);
     if (!site) {
       return { error: notFound('Site not found') };
@@ -2360,7 +2360,7 @@ function LlmoController(ctx) {
   // `{ accountId, externalId, distributionId, error }` where `error` is a badRequest Response
   // when validation fails (undefined otherwise) — keeping the messages/status identical to the
   // previously inlined checks.
-  const parseEoCredentials = (context, { requireDistribution = false } = {}) => {
+  const parseLlmoCloudFrontCredentials = (context, { requireDistribution = false } = {}) => {
     const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
     const externalId = String(context.data?.externalId || '').trim();
     const distributionId = String(context.data?.distributionId || '').trim();
@@ -2379,19 +2379,19 @@ function LlmoController(ctx) {
 
   // Verify the customer's cross-account connector role is assumable. Used by the wizard's
   // "Allow access" step, which polls this after the customer creates the role via CloudFormation.
-  const connectEdgeOptimize = async (context) => {
+  const connectLlmoCloudFront = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    const { accountId, externalId, error: credError } = parseLlmoCloudFrontCredentials(context);
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the edge optimize role');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'connect the edge optimize role');
       if (error) {
         return error;
       }
@@ -2414,19 +2414,19 @@ function LlmoController(ctx) {
 
   // List the customer's CloudFront distributions (read-only) via the connector role, so the
   // wizard's "Choose distribution" step can let the customer pick one to configure.
-  const listEdgeOptimizeDistributions = async (context) => {
+  const listLlmoCloudFrontDistributions = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    const { accountId, externalId, error: credError } = parseLlmoCloudFrontCredentials(context);
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'list CloudFront distributions');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'list CloudFront distributions');
       if (error) {
         return error;
       }
@@ -2443,19 +2443,19 @@ function LlmoController(ctx) {
   // Run the wizard's pre-flight checks: confirm the connector role is assumable and that it grants
   // CloudFront read access. Each check reports ok/false individually so the wizard can show a
   // per-check status rather than failing the whole step on a single problem.
-  const checkEdgeOptimizePrerequisites = async (context) => {
+  const checkLlmoCloudFrontPrerequisites = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    const { accountId, externalId, error: credError } = parseLlmoCloudFrontCredentials(context);
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'check edge optimize prerequisites');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'check edge optimize prerequisites');
       if (error) {
         return error;
       }
@@ -2489,7 +2489,7 @@ function LlmoController(ctx) {
 
   // Read the origins configured on a customer's CloudFront distribution so the wizard's
   // "Review origins" step can show them and flag whether an Edge Optimize origin already exists.
-  const fetchEdgeOptimizeOrigins = async (context) => {
+  const fetchLlmoCloudFrontOrigins = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2497,13 +2497,13 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront origins');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'read CloudFront origins');
       if (error) {
         return error;
       }
@@ -2521,7 +2521,7 @@ function LlmoController(ctx) {
 
   // Read the cache behaviors (default + ordered) configured on a customer's CloudFront
   // distribution so the wizard's "Review routing" step can show how traffic is currently routed.
-  const fetchEdgeOptimizeBehaviors = async (context) => {
+  const fetchLlmoCloudFrontBehaviors = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2529,13 +2529,13 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront behaviors');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'read CloudFront behaviors');
       if (error) {
         return error;
       }
@@ -2569,7 +2569,7 @@ function LlmoController(ctx) {
   //
   // Returns `{ target: { baseURL, apiKey, forwardedHost }, error }`. On any resolution failure
   // `error` is a badRequest Response the caller returns directly; otherwise `error` is undefined.
-  const resolveEoTarget = async (context, site, environment, log) => {
+  const resolveLlmoCloudFrontTarget = async (context, site, environment, log) => {
     const { Site } = context.dataAccess;
     const tokowakaClient = TokowakaClient.createFrom(context);
 
@@ -2618,7 +2618,7 @@ function LlmoController(ctx) {
   // Add the Edge Optimize origin to the selected distribution (mutation). Idempotent: returns
   // { created: false, alreadyExisted: true } when the origin is already present. Used by the
   // wizard's "Create Edge Optimize origin" step.
-  const createEdgeOptimizeOriginHandler = async (context) => {
+  const createLlmoCloudFrontOriginHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2628,7 +2628,7 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -2637,16 +2637,21 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize origin');
+      const { error, site } = await gateLlmoCloudFrontWizard(siteId, Site, 'create the edge optimize origin');
       if (error) {
         return error;
       }
 
       // The EO origin needs custom headers so the routing function's request authenticates to Edge
       // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
-      // are derived server-side from the site (env-aware via resolveEoTarget) — no UI input beyond
-      // the optional `environment` flag. Without them Verify never goes green.
-      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      // are derived server-side from the site (env-aware via resolveLlmoCloudFrontTarget) — no UI
+      // input beyond the optional `environment` flag. Without them Verify never goes green.
+      const { target, error: targetError } = await resolveLlmoCloudFrontTarget(
+        context,
+        site,
+        environment,
+        log,
+      );
       if (targetError) {
         return targetError;
       }
@@ -2675,7 +2680,7 @@ function LlmoController(ctx) {
 
   // Create/update + publish the `edgeoptimize-routing` CloudFront Function (mutation, idempotent).
   // Needs the default-behavior target origin id so the function's failover origin group is correct.
-  const createEdgeOptimizeRoutingFunctionHandler = async (context) => {
+  const createLlmoCloudFrontRoutingFunctionHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2686,13 +2691,13 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize routing function');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'create the edge optimize routing function');
       if (error) {
         return error;
       }
@@ -2721,7 +2726,7 @@ function LlmoController(ctx) {
 
   // Ensure the Edge Optimize headers are forwarded by the selected behavior's cache policy
   // (mutation, idempotent). Used by the wizard's "Apply cache headers" step.
-  const applyEdgeOptimizeCacheHandler = async (context) => {
+  const applyLlmoCloudFrontCacheHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2730,13 +2735,13 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'apply edge optimize cache headers');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'apply edge optimize cache headers');
       if (error) {
         return error;
       }
@@ -2753,7 +2758,7 @@ function LlmoController(ctx) {
 
   // Create/update + publish the `edgeoptimize-origin` Lambda@Edge function and its exec role
   // (mutation, idempotent). Returns the versioned ARN the associate step needs.
-  const createEdgeOptimizeLambdaHandler = async (context) => {
+  const createLlmoCloudFrontLambdaHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2761,13 +2766,13 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize Lambda@Edge function');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'create the edge optimize Lambda@Edge function');
       if (error) {
         return error;
       }
@@ -2790,7 +2795,7 @@ function LlmoController(ctx) {
 
   // Read-only status for the Lambda@Edge function so the wizard can detect on entry (and poll
   // after a slow/timed-out create) whether it already exists with a published version.
-  const fetchEdgeOptimizeLambdaStatusHandler = async (context) => {
+  const fetchLlmoCloudFrontLambdaStatusHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2798,13 +2803,13 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read the edge optimize Lambda@Edge status');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'read the edge optimize Lambda@Edge status');
       if (error) {
         return error;
       }
@@ -2820,7 +2825,7 @@ function LlmoController(ctx) {
 
   // Associate the routing CloudFront Function (viewer-request) and Lambda@Edge (origin-request/
   // response, versioned ARN) onto the user-selected behavior (mutation). Used by "Associate".
-  const applyEdgeOptimizeAssociationsHandler = async (context) => {
+  const applyLlmoCloudFrontAssociationsHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2830,7 +2835,7 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -2846,7 +2851,7 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'associate edge optimize routing');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'associate edge optimize routing');
       if (error) {
         return error;
       }
@@ -2868,7 +2873,7 @@ function LlmoController(ctx) {
 
   // Verify end-to-end routing by probing the distribution as a bot vs a human and inspecting the
   // x-edgeoptimize-* headers. Always returns 200 with { passed }; success requires a request-id.
-  const verifyEdgeOptimizeRoutingHandler = async (context) => {
+  const verifyLlmoCloudFrontRoutingHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2876,13 +2881,13 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'verify edge optimize routing');
+      const { error, site } = await gateLlmoCloudFrontWizard(siteId, Site, 'verify edge optimize routing');
       if (error) {
         return error;
       }
@@ -2925,7 +2930,7 @@ function LlmoController(ctx) {
   // per-step status. Safe to call repeatedly — gated steps never re-mutate completed work. The FE
   // passes the customer's selected distribution, failover origin, and behavior explicitly; the EO
   // API key + forwarded host are derived server-side from the site (no UI input).
-  const deployEdgeOptimizeHandler = async (context) => {
+  const deployLlmoCloudFrontHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -2937,7 +2942,7 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -2952,16 +2957,21 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'deploy edge optimize routing');
+      const { error, site } = await gateLlmoCloudFrontWizard(siteId, Site, 'deploy edge optimize routing');
       if (error) {
         return error;
       }
 
       // The EO origin needs custom headers so the routing function's request authenticates to Edge
       // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
-      // are derived server-side from the site (env-aware via resolveEoTarget) — no UI input beyond
-      // the optional `environment` flag. Without them Verify never goes green.
-      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      // are derived server-side from the site (env-aware via resolveLlmoCloudFrontTarget) — no UI
+      // input beyond the optional `environment` flag. Without them Verify never goes green.
+      const { target, error: targetError } = await resolveLlmoCloudFrontTarget(
+        context,
+        site,
+        environment,
+        log,
+      );
       if (targetError) {
         return targetError;
       }
@@ -2994,7 +3004,7 @@ function LlmoController(ctx) {
   // validation + gate + role assumption + server-derived EO origin headers), but calls the
   // NON-mutating planEdgeOptimizeDeploy and returns the per-step plan + canProceed/blocker so the
   // FE can show exactly what will happen before the customer commits.
-  const planEdgeOptimizeHandler = async (context) => {
+  const planLlmoCloudFrontHandler = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
@@ -3006,7 +3016,7 @@ function LlmoController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = parseLlmoCloudFrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -3021,15 +3031,20 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'preview edge optimize routing');
+      const { error, site } = await gateLlmoCloudFrontWizard(siteId, Site, 'preview edge optimize routing');
       if (error) {
         return error;
       }
 
-      // Derive the EO origin headers server-side (same as deploy, env-aware via resolveEoTarget) so
-      // the origin step of the plan reflects whether the existing origin already carries the right
-      // headers for the chosen environment.
-      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      // Derive the EO origin headers server-side (same as deploy, env-aware via
+      // resolveLlmoCloudFrontTarget) so the origin step of the plan reflects whether the existing
+      // origin already carries the right headers for the chosen environment.
+      const { target, error: targetError } = await resolveLlmoCloudFrontTarget(
+        context,
+        site,
+        environment,
+        log,
+      );
       if (targetError) {
         return targetError;
       }
@@ -3064,11 +3079,11 @@ function LlmoController(ctx) {
    * Powers the wizard's "View Permissions" panel. Returns a curated, human-friendly manifest of the
    * AWS permissions the connector role grants (read from a static JSON object in the template S3
    * bucket) plus the Adobe principal ARN that will assume the role. Read-only — gated on site
-   * access + LLMO admin (like createEdgeOptimizeBootstrapUrl). No cross-account calls.
+   * access + LLMO admin (like createLlmoCloudFrontBootstrapUrl). No cross-account calls.
    * @param {object} context - Request context
    * @returns {Promise<Response>} { adobeAccount, manifest } or a 400 on a config/read failure.
    */
-  const getEdgeOptimizePermissionsHandler = async (context) => {
+  const getLlmoCloudFrontPermissionsHandler = async (context) => {
     const {
       log, dataAccess, env, s3,
     } = context;
@@ -3076,7 +3091,7 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'view edge optimize permissions');
+      const { error } = await gateLlmoCloudFrontWizard(siteId, Site, 'view edge optimize permissions');
       if (error) {
         return error;
       }
@@ -3131,22 +3146,22 @@ function LlmoController(ctx) {
   };
 
   return {
-    createEdgeOptimizeBootstrapUrl,
-    connectEdgeOptimize,
-    listEdgeOptimizeDistributions,
-    checkEdgeOptimizePrerequisites,
-    fetchEdgeOptimizeOrigins,
-    fetchEdgeOptimizeBehaviors,
-    createEdgeOptimizeOrigin: createEdgeOptimizeOriginHandler,
-    createEdgeOptimizeRoutingFunction: createEdgeOptimizeRoutingFunctionHandler,
-    applyEdgeOptimizeCache: applyEdgeOptimizeCacheHandler,
-    createEdgeOptimizeLambda: createEdgeOptimizeLambdaHandler,
-    fetchEdgeOptimizeLambdaStatus: fetchEdgeOptimizeLambdaStatusHandler,
-    applyEdgeOptimizeAssociations: applyEdgeOptimizeAssociationsHandler,
-    verifyEdgeOptimizeRouting: verifyEdgeOptimizeRoutingHandler,
-    deployEdgeOptimize: deployEdgeOptimizeHandler,
-    planEdgeOptimize: planEdgeOptimizeHandler,
-    getEdgeOptimizePermissions: getEdgeOptimizePermissionsHandler,
+    createLlmoCloudFrontBootstrapUrl,
+    connectLlmoCloudFront,
+    listLlmoCloudFrontDistributions,
+    checkLlmoCloudFrontPrerequisites,
+    fetchLlmoCloudFrontOrigins,
+    fetchLlmoCloudFrontBehaviors,
+    createLlmoCloudFrontOrigin: createLlmoCloudFrontOriginHandler,
+    createLlmoCloudFrontRoutingFunction: createLlmoCloudFrontRoutingFunctionHandler,
+    applyLlmoCloudFrontCache: applyLlmoCloudFrontCacheHandler,
+    createLlmoCloudFrontLambda: createLlmoCloudFrontLambdaHandler,
+    fetchLlmoCloudFrontLambdaStatus: fetchLlmoCloudFrontLambdaStatusHandler,
+    applyLlmoCloudFrontAssociations: applyLlmoCloudFrontAssociationsHandler,
+    verifyLlmoCloudFrontRouting: verifyLlmoCloudFrontRoutingHandler,
+    deployLlmoCloudFront: deployLlmoCloudFrontHandler,
+    planLlmoCloudFront: planLlmoCloudFrontHandler,
+    getLlmoCloudFrontPermissions: getLlmoCloudFrontPermissionsHandler,
     getLlmoSheetData,
     queryLlmoSheetData,
     getLlmoGlobalSheetData,

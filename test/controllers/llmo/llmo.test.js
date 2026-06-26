@@ -7610,7 +7610,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('createEdgeOptimizeBootstrapUrl', () => {
+  describe('createLlmoCloudFrontBootstrapUrl', () => {
     let bootstrapContext;
     let getSignedUrlStub;
 
@@ -7633,7 +7633,7 @@ describe('LlmoController', () => {
     });
 
     it('returns a quick-create URL with a presigned template for a valid account', async () => {
-      const result = await controller.createEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await controller.createLlmoCloudFrontBootstrapUrl(bootstrapContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7646,7 +7646,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.createEdgeOptimizeBootstrapUrl({ ...bootstrapContext, data: { accountId: '123' } });
+      const result = await controller.createLlmoCloudFrontBootstrapUrl({ ...bootstrapContext, data: { accountId: '123' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -7657,7 +7657,7 @@ describe('LlmoController', () => {
       // While the TEMPORARY hardcoded bucket default is in place the bucket is always
       // set, so the "not configured" guard is exercised via the missing S3 client.
       // TODO: restore the `env: {}` (empty-bucket) variant once the temp default is removed.
-      const result = await controller.createEdgeOptimizeBootstrapUrl({
+      const result = await controller.createLlmoCloudFrontBootstrapUrl({
         ...bootstrapContext,
         s3: {},
       });
@@ -7670,7 +7670,7 @@ describe('LlmoController', () => {
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.createEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await controller.createLlmoCloudFrontBootstrapUrl(bootstrapContext);
 
       expect(result.status).to.equal(404);
     });
@@ -7678,7 +7678,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.createEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await deniedController.createLlmoCloudFrontBootstrapUrl(bootstrapContext);
 
       expect(result.status).to.equal(403);
     });
@@ -7691,12 +7691,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .createEdgeOptimizeBootstrapUrl(bootstrapContext);
+        .createLlmoCloudFrontBootstrapUrl(bootstrapContext);
       expect(result.status).to.equal(403);
     });
 
     it('returns 400 when the trusted principal is not configured', async () => {
-      const result = await controller.createEdgeOptimizeBootstrapUrl({
+      const result = await controller.createLlmoCloudFrontBootstrapUrl({
         ...bootstrapContext,
         env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage' },
       });
@@ -7709,7 +7709,7 @@ describe('LlmoController', () => {
     it('returns 500 with a generic message when presigning the template fails', async () => {
       getSignedUrlStub.rejects(new Error('presign boom'));
 
-      const result = await controller.createEdgeOptimizeBootstrapUrl(bootstrapContext);
+      const result = await controller.createLlmoCloudFrontBootstrapUrl(bootstrapContext);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -7718,7 +7718,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('connectEdgeOptimize', () => {
+  describe('connectLlmoCloudFront', () => {
     let connectContext;
 
     beforeEach(() => {
@@ -7736,7 +7736,7 @@ describe('LlmoController', () => {
     });
 
     it('returns connected true when the connector role is assumable', async () => {
-      const result = await controller.connectEdgeOptimize(connectContext);
+      const result = await controller.connectLlmoCloudFront(connectContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7749,7 +7749,7 @@ describe('LlmoController', () => {
     it('returns connected false (not erroring) when the role is not yet assumable', async () => {
       assumeConnectorRoleStub = sinon.stub().rejects(new Error('AccessDenied: not authorized to assume'));
 
-      const result = await controller.connectEdgeOptimize(connectContext);
+      const result = await controller.connectLlmoCloudFront(connectContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7758,7 +7758,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.connectEdgeOptimize({ ...connectContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.connectLlmoCloudFront({ ...connectContext, data: { accountId: '123', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -7766,7 +7766,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.connectEdgeOptimize({ ...connectContext, data: { accountId: '120569600543' } });
+      const result = await controller.connectLlmoCloudFront({ ...connectContext, data: { accountId: '120569600543' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -7776,7 +7776,7 @@ describe('LlmoController', () => {
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.connectEdgeOptimize(connectContext);
+      const result = await controller.connectLlmoCloudFront(connectContext);
 
       expect(result.status).to.equal(404);
     });
@@ -7784,7 +7784,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.connectEdgeOptimize(connectContext);
+      const result = await deniedController.connectLlmoCloudFront(connectContext);
 
       expect(result.status).to.equal(403);
     });
@@ -7797,7 +7797,7 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
 
-      const result = await LlmoControllerNoAdmin(mockContext).connectEdgeOptimize(connectContext);
+      const result = await LlmoControllerNoAdmin(mockContext).connectLlmoCloudFront(connectContext);
 
       expect(result.status).to.equal(403);
     });
@@ -7805,7 +7805,7 @@ describe('LlmoController', () => {
     it('returns 400 when an unexpected error occurs', async () => {
       mockDataAccess.Site.findById.rejects(new Error('db boom'));
 
-      const result = await controller.connectEdgeOptimize(connectContext);
+      const result = await controller.connectLlmoCloudFront(connectContext);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -7813,7 +7813,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('listEdgeOptimizeDistributions', () => {
+  describe('listLlmoCloudFrontDistributions', () => {
     let distributionsContext;
 
     beforeEach(() => {
@@ -7841,7 +7841,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the list of CloudFront distributions', async () => {
-      const result = await controller.listEdgeOptimizeDistributions(distributionsContext);
+      const result = await controller.listLlmoCloudFrontDistributions(distributionsContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7852,13 +7852,13 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.listEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.listLlmoCloudFrontDistributions({ ...distributionsContext, data: { accountId: '123', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.listEdgeOptimizeDistributions({ ...distributionsContext, data: { accountId: '120569600543' } });
+      const result = await controller.listLlmoCloudFrontDistributions({ ...distributionsContext, data: { accountId: '120569600543' } });
 
       expect(result.status).to.equal(400);
     });
@@ -7866,7 +7866,7 @@ describe('LlmoController', () => {
     it('returns 500 with a generic message when the AWS call fails', async () => {
       listCloudFrontDistributionsStub = sinon.stub().rejects(new Error('ListDistributions failed'));
 
-      const result = await controller.listEdgeOptimizeDistributions(distributionsContext);
+      const result = await controller.listLlmoCloudFrontDistributions(distributionsContext);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -7877,7 +7877,7 @@ describe('LlmoController', () => {
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.listEdgeOptimizeDistributions(distributionsContext);
+      const result = await controller.listLlmoCloudFrontDistributions(distributionsContext);
 
       expect(result.status).to.equal(404);
     });
@@ -7885,13 +7885,13 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.listEdgeOptimizeDistributions(distributionsContext);
+      const result = await deniedController.listLlmoCloudFrontDistributions(distributionsContext);
 
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('checkEdgeOptimizePrerequisites', () => {
+  describe('checkLlmoCloudFrontPrerequisites', () => {
     let prereqContext;
 
     beforeEach(() => {
@@ -7910,7 +7910,7 @@ describe('LlmoController', () => {
     });
 
     it('returns all checks ok when the role assumes and CloudFront is readable', async () => {
-      const result = await controller.checkEdgeOptimizePrerequisites(prereqContext);
+      const result = await controller.checkLlmoCloudFrontPrerequisites(prereqContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7925,7 +7925,7 @@ describe('LlmoController', () => {
     it('reports connectorRole false (not erroring) when the role is not assumable', async () => {
       assumeConnectorRoleStub = sinon.stub().rejects(new Error('AccessDenied: cannot assume'));
 
-      const result = await controller.checkEdgeOptimizePrerequisites(prereqContext);
+      const result = await controller.checkLlmoCloudFrontPrerequisites(prereqContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7937,7 +7937,7 @@ describe('LlmoController', () => {
     it('reports cloudFrontRead false (not erroring) when the list call fails', async () => {
       listCloudFrontDistributionsStub = sinon.stub().rejects(new Error('AccessDenied: cloudfront:ListDistributions'));
 
-      const result = await controller.checkEdgeOptimizePrerequisites(prereqContext);
+      const result = await controller.checkLlmoCloudFrontPrerequisites(prereqContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -7947,13 +7947,13 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.checkEdgeOptimizePrerequisites({ ...prereqContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.checkLlmoCloudFrontPrerequisites({ ...prereqContext, data: { accountId: '123', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.checkEdgeOptimizePrerequisites({ ...prereqContext, data: { accountId: '120569600543' } });
+      const result = await controller.checkLlmoCloudFrontPrerequisites({ ...prereqContext, data: { accountId: '120569600543' } });
 
       expect(result.status).to.equal(400);
     });
@@ -7961,7 +7961,7 @@ describe('LlmoController', () => {
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.checkEdgeOptimizePrerequisites(prereqContext);
+      const result = await controller.checkLlmoCloudFrontPrerequisites(prereqContext);
 
       expect(result.status).to.equal(404);
     });
@@ -7969,7 +7969,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.checkEdgeOptimizePrerequisites(prereqContext);
+      const result = await deniedController.checkLlmoCloudFrontPrerequisites(prereqContext);
 
       expect(result.status).to.equal(403);
     });
@@ -7983,7 +7983,7 @@ describe('LlmoController', () => {
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.checkEdgeOptimizePrerequisites(prereqContext);
+      const result = await controllerNoAdmin.checkLlmoCloudFrontPrerequisites(prereqContext);
 
       expect(result.status).to.equal(403);
     });
@@ -7991,7 +7991,7 @@ describe('LlmoController', () => {
     it('returns 500 with a generic message when an unexpected error occurs', async () => {
       mockDataAccess.Site.findById.rejects(new Error('db boom'));
 
-      const result = await controller.checkEdgeOptimizePrerequisites(prereqContext);
+      const result = await controller.checkLlmoCloudFrontPrerequisites(prereqContext);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -8000,7 +8000,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('fetchEdgeOptimizeOrigins', () => {
+  describe('fetchLlmoCloudFrontOrigins', () => {
     let originsContext;
 
     beforeEach(() => {
@@ -8029,7 +8029,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the origins and hasEdgeOptimizeOrigin false when none match', async () => {
-      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchLlmoCloudFrontOrigins(originsContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8049,7 +8049,7 @@ describe('LlmoController', () => {
         cacheBehaviors: [],
       });
 
-      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchLlmoCloudFrontOrigins(originsContext);
 
       const body = await result.json();
       expect(body.hasEdgeOptimizeOrigin).to.equal(true);
@@ -8064,26 +8064,26 @@ describe('LlmoController', () => {
         cacheBehaviors: [],
       });
 
-      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchLlmoCloudFrontOrigins(originsContext);
 
       const body = await result.json();
       expect(body.hasEdgeOptimizeOrigin).to.equal(true);
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.fetchEdgeOptimizeOrigins({ ...originsContext, data: { ...originsContext.data, accountId: '123' } });
+      const result = await controller.fetchLlmoCloudFrontOrigins({ ...originsContext, data: { ...originsContext.data, accountId: '123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.fetchEdgeOptimizeOrigins({ ...originsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.fetchLlmoCloudFrontOrigins({ ...originsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.fetchEdgeOptimizeOrigins({ ...originsContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.fetchLlmoCloudFrontOrigins({ ...originsContext, data: { accountId: '120569600543', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -8093,7 +8093,7 @@ describe('LlmoController', () => {
     it('returns 500 with a generic message when the AWS call fails', async () => {
       getDistributionConfigStub = sinon.stub().rejects(new Error('GetDistributionConfig failed'));
 
-      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchLlmoCloudFrontOrigins(originsContext);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -8104,7 +8104,7 @@ describe('LlmoController', () => {
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.fetchEdgeOptimizeOrigins(originsContext);
+      const result = await controller.fetchLlmoCloudFrontOrigins(originsContext);
 
       expect(result.status).to.equal(404);
     });
@@ -8112,7 +8112,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.fetchEdgeOptimizeOrigins(originsContext);
+      const result = await deniedController.fetchLlmoCloudFrontOrigins(originsContext);
 
       expect(result.status).to.equal(403);
     });
@@ -8126,13 +8126,13 @@ describe('LlmoController', () => {
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.fetchEdgeOptimizeOrigins(originsContext);
+      const result = await controllerNoAdmin.fetchLlmoCloudFrontOrigins(originsContext);
 
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('fetchEdgeOptimizeBehaviors', () => {
+  describe('fetchLlmoCloudFrontBehaviors', () => {
     let behaviorsContext;
 
     beforeEach(() => {
@@ -8161,7 +8161,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the default behavior plus ordered cache behaviors', async () => {
-      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchLlmoCloudFrontBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8179,7 +8179,7 @@ describe('LlmoController', () => {
         cacheBehaviors: [{ pathPattern: '/api/*', targetOriginId: 'origin-api' }],
       });
 
-      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchLlmoCloudFrontBehaviors(behaviorsContext);
 
       const body = await result.json();
       expect(body.behaviors).to.deep.equal([
@@ -8188,19 +8188,19 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.fetchEdgeOptimizeBehaviors({ ...behaviorsContext, data: { ...behaviorsContext.data, accountId: '123' } });
+      const result = await controller.fetchLlmoCloudFrontBehaviors({ ...behaviorsContext, data: { ...behaviorsContext.data, accountId: '123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.fetchEdgeOptimizeBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.fetchLlmoCloudFrontBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.fetchEdgeOptimizeBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.fetchLlmoCloudFrontBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', externalId: 'ext' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -8210,7 +8210,7 @@ describe('LlmoController', () => {
     it('returns 500 with a generic message when the AWS call fails', async () => {
       getDistributionConfigStub = sinon.stub().rejects(new Error('GetDistributionConfig failed'));
 
-      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchLlmoCloudFrontBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -8221,7 +8221,7 @@ describe('LlmoController', () => {
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
-      const result = await controller.fetchEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controller.fetchLlmoCloudFrontBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(404);
     });
@@ -8229,7 +8229,7 @@ describe('LlmoController', () => {
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await deniedController.fetchEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await deniedController.fetchLlmoCloudFrontBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(403);
     });
@@ -8243,13 +8243,13 @@ describe('LlmoController', () => {
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.fetchEdgeOptimizeBehaviors(behaviorsContext);
+      const result = await controllerNoAdmin.fetchLlmoCloudFrontBehaviors(behaviorsContext);
 
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('createEdgeOptimizeOrigin', () => {
+  describe('createLlmoCloudFrontOrigin', () => {
     let originContext;
 
     beforeEach(() => {
@@ -8275,7 +8275,7 @@ describe('LlmoController', () => {
     });
 
     it('creates the origin and returns the result', async () => {
-      const result = await controller.createEdgeOptimizeOrigin(originContext);
+      const result = await controller.createLlmoCloudFrontOrigin(originContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8292,7 +8292,7 @@ describe('LlmoController', () => {
     });
 
     it('passes the env-driven origin domain when set', async () => {
-      await controller.createEdgeOptimizeOrigin({
+      await controller.createLlmoCloudFrontOrigin({
         ...originContext,
         env: { EDGE_OPTIMIZE_ORIGIN_DOMAIN: 'live.edgeoptimize.net' },
       });
@@ -8303,7 +8303,7 @@ describe('LlmoController', () => {
     it('returns 400 when the site has no Edge Optimize API key', async () => {
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
 
-      const result = await controller.createEdgeOptimizeOrigin(originContext);
+      const result = await controller.createLlmoCloudFrontOrigin(originContext);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -8312,7 +8312,7 @@ describe('LlmoController', () => {
     });
 
     it("returns 400 when environment is neither 'production' nor 'stage'", async () => {
-      const result = await controller.createEdgeOptimizeOrigin({
+      const result = await controller.createLlmoCloudFrontOrigin({
         ...originContext,
         data: { ...originContext.data, environment: 'staging' },
       });
@@ -8328,7 +8328,7 @@ describe('LlmoController', () => {
         created: false, alreadyExisted: true, updated: false, originId: 'EdgeOptimize_Origin',
       });
 
-      const result = await controller.createEdgeOptimizeOrigin(originContext);
+      const result = await controller.createLlmoCloudFrontOrigin(originContext);
       const body = await result.json();
       expect(body.alreadyExisted).to.equal(true);
     });
@@ -8338,7 +8338,7 @@ describe('LlmoController', () => {
         created: false, alreadyExisted: true, updated: true, originId: 'EdgeOptimize_Origin',
       });
 
-      const result = await controller.createEdgeOptimizeOrigin(originContext);
+      const result = await controller.createLlmoCloudFrontOrigin(originContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8346,17 +8346,17 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.createEdgeOptimizeOrigin({ ...originContext, data: { ...originContext.data, accountId: '123' } });
+      const result = await controller.createLlmoCloudFrontOrigin({ ...originContext, data: { ...originContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.createEdgeOptimizeOrigin({ ...originContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.createLlmoCloudFrontOrigin({ ...originContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.createEdgeOptimizeOrigin({ ...originContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.createLlmoCloudFrontOrigin({ ...originContext, data: { accountId: '120569600543', externalId: 'ext' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('distributionId');
@@ -8364,7 +8364,7 @@ describe('LlmoController', () => {
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
       createEdgeOptimizeOriginStub = sinon.stub().rejects(new Error('UpdateDistribution failed'));
-      const result = await controller.createEdgeOptimizeOrigin(originContext);
+      const result = await controller.createLlmoCloudFrontOrigin(originContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('UpdateDistribution failed');
@@ -8373,13 +8373,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.createEdgeOptimizeOrigin(originContext);
+      const result = await controller.createLlmoCloudFrontOrigin(originContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.createEdgeOptimizeOrigin(originContext);
+      const result = await deniedController.createLlmoCloudFrontOrigin(originContext);
       expect(result.status).to.equal(403);
     });
 
@@ -8391,12 +8391,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .createEdgeOptimizeOrigin(originContext);
+        .createLlmoCloudFrontOrigin(originContext);
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('createEdgeOptimizeRoutingFunction', () => {
+  describe('createLlmoCloudFrontRoutingFunction', () => {
     let functionContext;
 
     beforeEach(() => {
@@ -8426,7 +8426,7 @@ describe('LlmoController', () => {
     });
 
     it('creates the routing function using the default origin id', async () => {
-      const result = await controller.createEdgeOptimizeRoutingFunction(functionContext);
+      const result = await controller.createLlmoCloudFrontRoutingFunction(functionContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8438,30 +8438,30 @@ describe('LlmoController', () => {
       getDistributionConfigStub = sinon.stub().resolves({
         origins: [], defaultCacheBehavior: null, cacheBehaviors: [],
       });
-      const result = await controller.createEdgeOptimizeRoutingFunction(functionContext);
+      const result = await controller.createLlmoCloudFrontRoutingFunction(functionContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('default cache behavior');
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.createEdgeOptimizeRoutingFunction({ ...functionContext, data: { ...functionContext.data, accountId: '123' } });
+      const result = await controller.createLlmoCloudFrontRoutingFunction({ ...functionContext, data: { ...functionContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.createEdgeOptimizeRoutingFunction({ ...functionContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.createLlmoCloudFrontRoutingFunction({ ...functionContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.createEdgeOptimizeRoutingFunction({ ...functionContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.createLlmoCloudFrontRoutingFunction({ ...functionContext, data: { accountId: '120569600543', externalId: 'ext' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
       createEdgeOptimizeRoutingFunctionStub = sinon.stub().rejects(new Error('CreateFunction failed'));
-      const result = await controller.createEdgeOptimizeRoutingFunction(functionContext);
+      const result = await controller.createLlmoCloudFrontRoutingFunction(functionContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('CreateFunction failed');
@@ -8470,13 +8470,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.createEdgeOptimizeRoutingFunction(functionContext);
+      const result = await controller.createLlmoCloudFrontRoutingFunction(functionContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.createEdgeOptimizeRoutingFunction(functionContext);
+      const result = await deniedController.createLlmoCloudFrontRoutingFunction(functionContext);
       expect(result.status).to.equal(403);
     });
 
@@ -8488,12 +8488,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .createEdgeOptimizeRoutingFunction(functionContext);
+        .createLlmoCloudFrontRoutingFunction(functionContext);
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('applyEdgeOptimizeCache', () => {
+  describe('applyLlmoCloudFrontCache', () => {
     let cacheContext;
 
     beforeEach(() => {
@@ -8519,7 +8519,7 @@ describe('LlmoController', () => {
     });
 
     it('applies the cache headers to the selected behavior', async () => {
-      const result = await controller.applyEdgeOptimizeCache(cacheContext);
+      const result = await controller.applyLlmoCloudFrontCache(cacheContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8528,7 +8528,7 @@ describe('LlmoController', () => {
     });
 
     it('defaults the behavior to "default" when pathPattern is omitted', async () => {
-      await controller.applyEdgeOptimizeCache({
+      await controller.applyLlmoCloudFrontCache({
         ...cacheContext,
         data: { ...cacheContext.data, pathPattern: undefined },
       });
@@ -8536,23 +8536,23 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.applyEdgeOptimizeCache({ ...cacheContext, data: { ...cacheContext.data, accountId: '123' } });
+      const result = await controller.applyLlmoCloudFrontCache({ ...cacheContext, data: { ...cacheContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.applyEdgeOptimizeCache({ ...cacheContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.applyLlmoCloudFrontCache({ ...cacheContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.applyEdgeOptimizeCache({ ...cacheContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.applyLlmoCloudFrontCache({ ...cacheContext, data: { accountId: '120569600543', externalId: 'ext' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
       applyEdgeOptimizeCacheHeadersStub = sinon.stub().rejects(new Error('UpdateCachePolicy failed'));
-      const result = await controller.applyEdgeOptimizeCache(cacheContext);
+      const result = await controller.applyLlmoCloudFrontCache(cacheContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('UpdateCachePolicy failed');
@@ -8561,13 +8561,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.applyEdgeOptimizeCache(cacheContext);
+      const result = await controller.applyLlmoCloudFrontCache(cacheContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.applyEdgeOptimizeCache(cacheContext);
+      const result = await deniedController.applyLlmoCloudFrontCache(cacheContext);
       expect(result.status).to.equal(403);
     });
 
@@ -8578,12 +8578,13 @@ describe('LlmoController', () => {
         '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
-      const result = await LlmoControllerNoAdmin(mockContext).applyEdgeOptimizeCache(cacheContext);
+      const result = await LlmoControllerNoAdmin(mockContext)
+        .applyLlmoCloudFrontCache(cacheContext);
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('createEdgeOptimizeLambda', () => {
+  describe('createLlmoCloudFrontLambda', () => {
     let lambdaContext;
 
     beforeEach(() => {
@@ -8608,7 +8609,7 @@ describe('LlmoController', () => {
     });
 
     it('creates the Lambda@Edge function and returns the versioned ARN', async () => {
-      const result = await controller.createEdgeOptimizeLambda(lambdaContext);
+      const result = await controller.createLlmoCloudFrontLambda(lambdaContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8618,17 +8619,17 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.createEdgeOptimizeLambda({ ...lambdaContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.createLlmoCloudFrontLambda({ ...lambdaContext, data: { accountId: '123', externalId: 'ext' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.createEdgeOptimizeLambda({ ...lambdaContext, data: { accountId: '120569600543' } });
+      const result = await controller.createLlmoCloudFrontLambda({ ...lambdaContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distribution id is missing', async () => {
-      const result = await controller.createEdgeOptimizeLambda({
+      const result = await controller.createLlmoCloudFrontLambda({
         ...lambdaContext,
         data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
       });
@@ -8639,7 +8640,7 @@ describe('LlmoController', () => {
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
       createEdgeOptimizeLambdaStub = sinon.stub().rejects(new Error('CreateRole failed'));
-      const result = await controller.createEdgeOptimizeLambda(lambdaContext);
+      const result = await controller.createLlmoCloudFrontLambda(lambdaContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('CreateRole failed');
@@ -8648,13 +8649,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.createEdgeOptimizeLambda(lambdaContext);
+      const result = await controller.createLlmoCloudFrontLambda(lambdaContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.createEdgeOptimizeLambda(lambdaContext);
+      const result = await deniedController.createLlmoCloudFrontLambda(lambdaContext);
       expect(result.status).to.equal(403);
     });
 
@@ -8666,12 +8667,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .createEdgeOptimizeLambda(lambdaContext);
+        .createLlmoCloudFrontLambda(lambdaContext);
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('fetchEdgeOptimizeLambdaStatus', () => {
+  describe('fetchLlmoCloudFrontLambdaStatus', () => {
     let statusContext;
 
     beforeEach(() => {
@@ -8692,7 +8693,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the Lambda@Edge status with the versioned ARN', async () => {
-      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
+      const result = await controller.fetchLlmoCloudFrontLambdaStatus(statusContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8703,7 +8704,7 @@ describe('LlmoController', () => {
 
     it('returns exists:false when the function is absent', async () => {
       getEdgeOptimizeLambdaStatusStub = sinon.stub().resolves({ exists: false, versionArn: null });
-      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
+      const result = await controller.fetchLlmoCloudFrontLambdaStatus(statusContext);
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.exists).to.equal(false);
@@ -8711,17 +8712,17 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.fetchEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.fetchLlmoCloudFrontLambdaStatus({ ...statusContext, data: { accountId: '123', externalId: 'ext' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.fetchEdgeOptimizeLambdaStatus({ ...statusContext, data: { accountId: '120569600543' } });
+      const result = await controller.fetchLlmoCloudFrontLambdaStatus({ ...statusContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distribution id is missing', async () => {
-      const result = await controller.fetchEdgeOptimizeLambdaStatus({
+      const result = await controller.fetchLlmoCloudFrontLambdaStatus({
         ...statusContext,
         data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
       });
@@ -8732,7 +8733,7 @@ describe('LlmoController', () => {
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
       getEdgeOptimizeLambdaStatusStub = sinon.stub().rejects(new Error('ListVersions failed'));
-      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
+      const result = await controller.fetchLlmoCloudFrontLambdaStatus(statusContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('ListVersions failed');
@@ -8741,18 +8742,18 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.fetchEdgeOptimizeLambdaStatus(statusContext);
+      const result = await controller.fetchLlmoCloudFrontLambdaStatus(statusContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.fetchEdgeOptimizeLambdaStatus(statusContext);
+      const result = await deniedController.fetchLlmoCloudFrontLambdaStatus(statusContext);
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('applyEdgeOptimizeAssociations', () => {
+  describe('applyLlmoCloudFrontAssociations', () => {
     let associateContext;
 
     beforeEach(() => {
@@ -8780,7 +8781,7 @@ describe('LlmoController', () => {
     });
 
     it('associates the function and lambda onto the selected behavior', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations(associateContext);
+      const result = await controller.applyLlmoCloudFrontAssociations(associateContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8794,7 +8795,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 when the lambdaVersionArn is missing', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations({
+      const result = await controller.applyLlmoCloudFrontAssociations({
         ...associateContext,
         data: { ...associateContext.data, lambdaVersionArn: undefined },
       });
@@ -8804,22 +8805,22 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations({ ...associateContext, data: { ...associateContext.data, accountId: '123' } });
+      const result = await controller.applyLlmoCloudFrontAssociations({ ...associateContext, data: { ...associateContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations({ ...associateContext, data: { ...associateContext.data, externalId: '' } });
+      const result = await controller.applyLlmoCloudFrontAssociations({ ...associateContext, data: { ...associateContext.data, externalId: '' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations({ ...associateContext, data: { ...associateContext.data, distributionId: '' } });
+      const result = await controller.applyLlmoCloudFrontAssociations({ ...associateContext, data: { ...associateContext.data, distributionId: '' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the lambdaVersionArn is not a versioned us-east-1 Lambda ARN', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations({
+      const result = await controller.applyLlmoCloudFrontAssociations({
         ...associateContext,
         data: { ...associateContext.data, lambdaVersionArn: 'arn:aws:lambda:us-west-2:120569600543:function:edgeoptimize-origin:1' },
       });
@@ -8829,7 +8830,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 when the lambdaVersionArn is unversioned (no trailing version)', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations({
+      const result = await controller.applyLlmoCloudFrontAssociations({
         ...associateContext,
         data: { ...associateContext.data, lambdaVersionArn: 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin' },
       });
@@ -8839,7 +8840,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 when the lambdaVersionArn account segment does not match the request account', async () => {
-      const result = await controller.applyEdgeOptimizeAssociations({
+      const result = await controller.applyLlmoCloudFrontAssociations({
         ...associateContext,
         data: { ...associateContext.data, lambdaVersionArn: 'arn:aws:lambda:us-east-1:999999999999:function:edgeoptimize-origin:1' },
       });
@@ -8850,7 +8851,7 @@ describe('LlmoController', () => {
 
     it('returns 500 with a generic message when the AWS call fails (conflict)', async () => {
       applyEdgeOptimizeAssociationsStub = sinon.stub().rejects(new Error('already has a different viewer-request function'));
-      const result = await controller.applyEdgeOptimizeAssociations(associateContext);
+      const result = await controller.applyLlmoCloudFrontAssociations(associateContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('viewer-request');
@@ -8859,13 +8860,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.applyEdgeOptimizeAssociations(associateContext);
+      const result = await controller.applyLlmoCloudFrontAssociations(associateContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.applyEdgeOptimizeAssociations(associateContext);
+      const result = await deniedController.applyLlmoCloudFrontAssociations(associateContext);
       expect(result.status).to.equal(403);
     });
 
@@ -8877,12 +8878,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .applyEdgeOptimizeAssociations(associateContext);
+        .applyLlmoCloudFrontAssociations(associateContext);
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('verifyEdgeOptimizeRouting', () => {
+  describe('verifyLlmoCloudFrontRouting', () => {
     let verifyContext;
 
     beforeEach(() => {
@@ -8914,7 +8915,7 @@ describe('LlmoController', () => {
     });
 
     it('resolves the domain from the site and verifies routing (no distribution lookup)', async () => {
-      const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
+      const result = await controller.verifyLlmoCloudFrontRouting(verifyContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -8925,14 +8926,14 @@ describe('LlmoController', () => {
     });
 
     it('uses an explicit domain when provided (no distribution lookup)', async () => {
-      await controller.verifyEdgeOptimizeRouting({ ...verifyContext, data: { ...verifyContext.data, domain: 'www.example.com' } });
+      await controller.verifyLlmoCloudFrontRouting({ ...verifyContext, data: { ...verifyContext.data, domain: 'www.example.com' } });
       expect(listCloudFrontDistributionsStub.called).to.equal(false);
       expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
     });
 
     it('falls back to the distribution domain when the site host is unavailable', async () => {
       mockSite.getBaseURL.returns('');
-      const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
+      const result = await controller.verifyLlmoCloudFrontRouting(verifyContext);
       expect(result.status).to.equal(200);
       expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://d111111abcdef8.cloudfront.net/')).to.equal(true);
       expect(listCloudFrontDistributionsStub.calledOnce).to.equal(true);
@@ -8941,30 +8942,30 @@ describe('LlmoController', () => {
     it('returns 400 when no domain can be resolved (no site host, no distribution)', async () => {
       mockSite.getBaseURL.returns('');
       listCloudFrontDistributionsStub = sinon.stub().resolves([]);
-      const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
+      const result = await controller.verifyLlmoCloudFrontRouting(verifyContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('domain');
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.verifyEdgeOptimizeRouting({ ...verifyContext, data: { ...verifyContext.data, accountId: '123' } });
+      const result = await controller.verifyLlmoCloudFrontRouting({ ...verifyContext, data: { ...verifyContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.verifyEdgeOptimizeRouting({ ...verifyContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
+      const result = await controller.verifyLlmoCloudFrontRouting({ ...verifyContext, data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.verifyEdgeOptimizeRouting({ ...verifyContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.verifyLlmoCloudFrontRouting({ ...verifyContext, data: { accountId: '120569600543', externalId: 'ext' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 500 with a generic message when the verify call fails', async () => {
       verifyEdgeOptimizeRoutingStub = sinon.stub().rejects(new Error('fetch failed'));
-      const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
+      const result = await controller.verifyLlmoCloudFrontRouting(verifyContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('fetch failed');
@@ -8973,13 +8974,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.verifyEdgeOptimizeRouting(verifyContext);
+      const result = await controller.verifyLlmoCloudFrontRouting(verifyContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.verifyEdgeOptimizeRouting(verifyContext);
+      const result = await deniedController.verifyLlmoCloudFrontRouting(verifyContext);
       expect(result.status).to.equal(403);
     });
 
@@ -8991,12 +8992,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .verifyEdgeOptimizeRouting(verifyContext);
+        .verifyLlmoCloudFrontRouting(verifyContext);
       expect(result.status).to.equal(403);
     });
   });
 
-  describe('deployEdgeOptimize', () => {
+  describe('deployLlmoCloudFront', () => {
     let deployContext;
 
     const sampleSteps = [
@@ -9035,7 +9036,7 @@ describe('LlmoController', () => {
     });
 
     it('runs the orchestrator and returns the per-step status', async () => {
-      const result = await controller.deployEdgeOptimize(deployContext);
+      const result = await controller.deployLlmoCloudFront(deployContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -9057,7 +9058,7 @@ describe('LlmoController', () => {
     });
 
     it('passes the env-driven origin domain when set', async () => {
-      await controller.deployEdgeOptimize({
+      await controller.deployLlmoCloudFront({
         ...deployContext,
         env: { EDGE_OPTIMIZE_ORIGIN_DOMAIN: 'live.edgeoptimize.net' },
       });
@@ -9067,7 +9068,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when the site has no Edge Optimize API key', async () => {
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
-      const result = await controller.deployEdgeOptimize(deployContext);
+      const result = await controller.deployLlmoCloudFront(deployContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('API key');
@@ -9075,31 +9076,31 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, accountId: '123' } });
+      const result = await controller.deployLlmoCloudFront({ ...deployContext, data: { ...deployContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, externalId: '' } });
+      const result = await controller.deployLlmoCloudFront({ ...deployContext, data: { ...deployContext.data, externalId: '' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, distributionId: '' } });
+      const result = await controller.deployLlmoCloudFront({ ...deployContext, data: { ...deployContext.data, distributionId: '' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('distributionId');
     });
 
     it('returns 400 when the originId is missing', async () => {
-      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, originId: '' } });
+      const result = await controller.deployLlmoCloudFront({ ...deployContext, data: { ...deployContext.data, originId: '' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('originId');
     });
 
     it('returns 400 when the behavior is missing', async () => {
-      const result = await controller.deployEdgeOptimize({ ...deployContext, data: { ...deployContext.data, behavior: '' } });
+      const result = await controller.deployLlmoCloudFront({ ...deployContext, data: { ...deployContext.data, behavior: '' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('behavior');
@@ -9107,7 +9108,7 @@ describe('LlmoController', () => {
 
     it('returns 500 with a generic message when the orchestrator throws', async () => {
       runEdgeOptimizeDeployStepStub = sinon.stub().rejects(new Error('assume failed'));
-      const result = await controller.deployEdgeOptimize(deployContext);
+      const result = await controller.deployLlmoCloudFront(deployContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('assume failed');
@@ -9116,13 +9117,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.deployEdgeOptimize(deployContext);
+      const result = await controller.deployLlmoCloudFront(deployContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.deployEdgeOptimize(deployContext);
+      const result = await deniedController.deployLlmoCloudFront(deployContext);
       expect(result.status).to.equal(403);
     });
 
@@ -9134,12 +9135,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .deployEdgeOptimize(deployContext);
+        .deployLlmoCloudFront(deployContext);
       expect(result.status).to.equal(403);
     });
 
     it('defaults to production resolution when environment is omitted', async () => {
-      const result = await controller.deployEdgeOptimize(deployContext);
+      const result = await controller.deployLlmoCloudFront(deployContext);
       expect(result.status).to.equal(200);
       const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
       // production path uses the prod baseURL host (www.example.com) + prod metaconfig key.
@@ -9158,7 +9159,7 @@ describe('LlmoController', () => {
         .withArgs('https://staging.example.com')
         .resolves({ apiKeys: ['stage-key-999'] });
 
-      const result = await controller.deployEdgeOptimize({
+      const result = await controller.deployLlmoCloudFront({
         ...deployContext,
         data: { ...deployContext.data, environment: 'stage' },
       });
@@ -9172,7 +9173,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an unknown environment', async () => {
-      const result = await controller.deployEdgeOptimize({
+      const result = await controller.deployLlmoCloudFront({
         ...deployContext,
         data: { ...deployContext.data, environment: 'qa' },
       });
@@ -9182,7 +9183,7 @@ describe('LlmoController', () => {
 
     it('returns 400 for stage when no stage domain is configured', async () => {
       mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      const result = await controller.deployEdgeOptimize({
+      const result = await controller.deployLlmoCloudFront({
         ...deployContext,
         data: { ...deployContext.data, environment: 'stage' },
       });
@@ -9197,7 +9198,7 @@ describe('LlmoController', () => {
         stagingDomains: [{ domain: 'staging.example.com', id: 'stage-site-id' }],
       });
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
-      const result = await controller.deployEdgeOptimize({
+      const result = await controller.deployLlmoCloudFront({
         ...deployContext,
         data: { ...deployContext.data, environment: 'stage' },
       });
@@ -9215,7 +9216,7 @@ describe('LlmoController', () => {
       mockTokowakaClient.fetchMetaconfig
         .withArgs('https://staging.example.com')
         .resolves({ apiKeys: [] });
-      const result = await controller.deployEdgeOptimize({
+      const result = await controller.deployLlmoCloudFront({
         ...deployContext,
         data: { ...deployContext.data, environment: 'stage' },
       });
@@ -9226,7 +9227,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('planEdgeOptimize', () => {
+  describe('planLlmoCloudFront', () => {
     let planContext;
 
     const samplePlan = {
@@ -9274,7 +9275,7 @@ describe('LlmoController', () => {
     });
 
     it('runs the planner and returns the per-step plan', async () => {
-      const result = await controller.planEdgeOptimize(planContext);
+      const result = await controller.planLlmoCloudFront(planContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -9300,7 +9301,7 @@ describe('LlmoController', () => {
         steps: samplePlan.steps,
       });
 
-      const result = await controller.planEdgeOptimize(planContext);
+      const result = await controller.planLlmoCloudFront(planContext);
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.canProceed).to.equal(false);
@@ -9308,32 +9309,32 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, accountId: '123' } });
+      const result = await controller.planLlmoCloudFront({ ...planContext, data: { ...planContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
       expect(planEdgeOptimizeDeployStub.called).to.equal(false);
     });
 
     it('returns 400 when the external id is missing', async () => {
-      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, externalId: '' } });
+      const result = await controller.planLlmoCloudFront({ ...planContext, data: { ...planContext.data, externalId: '' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, distributionId: '' } });
+      const result = await controller.planLlmoCloudFront({ ...planContext, data: { ...planContext.data, distributionId: '' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('distributionId');
     });
 
     it('returns 400 when the originId is missing', async () => {
-      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, originId: '' } });
+      const result = await controller.planLlmoCloudFront({ ...planContext, data: { ...planContext.data, originId: '' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('originId');
     });
 
     it('returns 400 when the behavior is missing', async () => {
-      const result = await controller.planEdgeOptimize({ ...planContext, data: { ...planContext.data, behavior: '' } });
+      const result = await controller.planLlmoCloudFront({ ...planContext, data: { ...planContext.data, behavior: '' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('behavior');
@@ -9341,7 +9342,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when the site has no Edge Optimize API key', async () => {
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
-      const result = await controller.planEdgeOptimize(planContext);
+      const result = await controller.planLlmoCloudFront(planContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('API key');
@@ -9350,7 +9351,7 @@ describe('LlmoController', () => {
 
     it('returns 500 with a generic message when the planner throws', async () => {
       planEdgeOptimizeDeployStub = sinon.stub().rejects(new Error('plan failed'));
-      const result = await controller.planEdgeOptimize(planContext);
+      const result = await controller.planLlmoCloudFront(planContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('plan failed');
@@ -9359,13 +9360,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.planEdgeOptimize(planContext);
+      const result = await controller.planLlmoCloudFront(planContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.planEdgeOptimize(planContext);
+      const result = await deniedController.planLlmoCloudFront(planContext);
       expect(result.status).to.equal(403);
     });
 
@@ -9377,12 +9378,12 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .planEdgeOptimize(planContext);
+        .planLlmoCloudFront(planContext);
       expect(result.status).to.equal(403);
     });
 
     it('returns targetDomain (prod host) and defaults to production when env is omitted', async () => {
-      const result = await controller.planEdgeOptimize(planContext);
+      const result = await controller.planLlmoCloudFront(planContext);
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.targetDomain).to.equal('www.example.com');
@@ -9399,7 +9400,7 @@ describe('LlmoController', () => {
         .withArgs('https://staging.example.com')
         .resolves({ apiKeys: ['stage-key-999'] });
 
-      const result = await controller.planEdgeOptimize({
+      const result = await controller.planLlmoCloudFront({
         ...planContext,
         data: { ...planContext.data, environment: 'stage' },
       });
@@ -9415,7 +9416,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 for an unknown environment', async () => {
-      const result = await controller.planEdgeOptimize({
+      const result = await controller.planLlmoCloudFront({
         ...planContext,
         data: { ...planContext.data, environment: 'qa' },
       });
@@ -9425,7 +9426,7 @@ describe('LlmoController', () => {
 
     it('returns 400 for stage when no stage domain is configured', async () => {
       mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      const result = await controller.planEdgeOptimize({
+      const result = await controller.planLlmoCloudFront({
         ...planContext,
         data: { ...planContext.data, environment: 'stage' },
       });
@@ -9440,7 +9441,7 @@ describe('LlmoController', () => {
         stagingDomains: [{ domain: 'staging.example.com', id: 'stage-site-id' }],
       });
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
-      const result = await controller.planEdgeOptimize({
+      const result = await controller.planLlmoCloudFront({
         ...planContext,
         data: { ...planContext.data, environment: 'stage' },
       });
@@ -9451,7 +9452,7 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('getEdgeOptimizePermissions', () => {
+  describe('getLlmoCloudFrontPermissions', () => {
     let permissionsContext;
     let s3SendStub;
 
@@ -9506,7 +9507,7 @@ describe('LlmoController', () => {
     });
 
     it('returns the manifest + adobeAccount', async () => {
-      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      const result = await controller.getLlmoCloudFrontPermissions(permissionsContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -9519,7 +9520,7 @@ describe('LlmoController', () => {
     });
 
     it('uses env-configured bucket + trusted principal when set', async () => {
-      const result = await controller.getEdgeOptimizePermissions({
+      const result = await controller.getLlmoCloudFrontPermissions({
         ...permissionsContext,
         env: {
           EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'custom-bucket',
@@ -9534,14 +9535,15 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 when template hosting is not configured (no S3 client)', async () => {
-      const result = await controller.getEdgeOptimizePermissions({ ...permissionsContext, s3: {} });
+      const result = await controller
+        .getLlmoCloudFrontPermissions({ ...permissionsContext, s3: {} });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('not configured');
     });
 
     it('returns 400 when the trusted principal is not configured', async () => {
-      const result = await controller.getEdgeOptimizePermissions({
+      const result = await controller.getLlmoCloudFrontPermissions({
         ...permissionsContext,
         env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template' },
       });
@@ -9552,7 +9554,7 @@ describe('LlmoController', () => {
 
     it('returns 500 with a generic message when an unexpected error is thrown', async () => {
       mockDataAccess.Site.findById.rejects(new Error('db down'));
-      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      const result = await controller.getLlmoCloudFrontPermissions(permissionsContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('db down');
@@ -9561,7 +9563,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when the manifest read fails', async () => {
       s3SendStub.rejects(new Error('NoSuchKey'));
-      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      const result = await controller.getLlmoCloudFrontPermissions(permissionsContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('not available');
@@ -9569,7 +9571,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when the template has no permissions metadata', async () => {
       s3SendStub.resolves({ Body: { transformToString: async () => 'Resources:\n  Foo:\n    Type: AWS::IAM::Role\n' } });
-      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      const result = await controller.getLlmoCloudFrontPermissions(permissionsContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('not available');
@@ -9577,13 +9579,13 @@ describe('LlmoController', () => {
 
     it('returns 404 when the site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.getEdgeOptimizePermissions(permissionsContext);
+      const result = await controller.getLlmoCloudFrontPermissions(permissionsContext);
       expect(result.status).to.equal(404);
     });
 
     it('returns 403 when the user lacks access to the site', async () => {
       const deniedController = controllerWithAccessDenied(mockContext);
-      const result = await deniedController.getEdgeOptimizePermissions(permissionsContext);
+      const result = await deniedController.getLlmoCloudFrontPermissions(permissionsContext);
       expect(result.status).to.equal(403);
     });
 
@@ -9595,7 +9597,7 @@ describe('LlmoController', () => {
         ...getCommonMocks(),
       });
       const result = await LlmoControllerNoAdmin(mockContext)
-        .getEdgeOptimizePermissions(permissionsContext);
+        .getLlmoCloudFrontPermissions(permissionsContext);
       expect(result.status).to.equal(403);
     });
   });
