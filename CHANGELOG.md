@@ -1,3 +1,10 @@
+## [1.606.1](https://github.com/adobe/spacecat-api-service/compare/v1.606.0...v1.606.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **llmo:** return 409 when Cloudflare deploy worker already exists ([#2714](https://github.com/adobe/spacecat-api-service/issues/2714)) ([72836a1](https://github.com/adobe/spacecat-api-service/commit/72836a10153ad798060aba07b5796cef59b7fc89))
+
 # [1.606.0](https://github.com/adobe/spacecat-api-service/compare/v1.605.0...v1.606.0) (2026-06-26)
 
 
