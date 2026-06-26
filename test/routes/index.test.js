@@ -378,6 +378,7 @@ describe('getRouteHandlers', () => {
   const mockEntitlementController = {
     getByOrganizationID: () => null,
     createEntitlement: () => null,
+    createSiteEntitlement: () => null,
   };
 
   const mockReportsController = {
@@ -1132,6 +1133,7 @@ describe('getRouteHandlers', () => {
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
+      'POST /sites/:siteId/entitlements',
       'GET /organizations/:organizationId/feature-flags',
       'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
       'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -1239,6 +1241,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.createEntitlement);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['POST /sites/:siteId/entitlements'].handler).to.equal(mockEntitlementController.createSiteEntitlement);
+    expect(dynamicRoutes['POST /sites/:siteId/entitlements'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.putByOrganizationProductAndName);
     expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].paramNames).to.deep.equal(['organizationId', 'product', 'flagName']);
     expect(dynamicRoutes['DELETE /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.deleteByOrganizationProductAndName);
