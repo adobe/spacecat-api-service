@@ -461,6 +461,23 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(409);
       const body = await res.json();
       expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
+      expect(body.message).to.equal(
+        `A worker named '${DERIVED_SCRIPT_NAME}' already exists in this Cloudflare account`,
+      );
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
+    it('returns 409 when existence check fails with non-JSON worker script GET (legacy client)', async () => {
+      mockCfClient.deployWorkerScript.rejects(
+        new Error(`Cloudflare API returned a non-JSON response on /accounts/${ACCOUNT_ID}/workers/scripts/${DERIVED_SCRIPT_NAME}`),
+      );
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
+      expect(body.message).to.equal(
+        `A worker named '${DERIVED_SCRIPT_NAME}' already exists in this Cloudflare account`,
+      );
       expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
     });
 
