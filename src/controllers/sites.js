@@ -454,10 +454,17 @@ function SitesController(ctx, log, env) {
     }
 
     const limitParam = context?.data?.limit;
+    const cursor = context?.data?.cursor || null;
 
     // Optional substring search by base URL. Runs after the authz check (so
     // unauthorized callers still get 403) and before the cursor/legacy branches.
     const baseUrlLike = context?.data?.baseUrlLike;
+    if (hasText(baseUrlLike) && hasText(cursor)) {
+      // baseUrlLike search does not paginate via cursor; accepting both would
+      // silently discard the cursor and mislead the client into thinking
+      // cursor pagination is active. Reject the combination explicitly.
+      return badRequest('cursor is not supported with baseUrlLike');
+    }
     if (hasText(baseUrlLike)) {
       const q = baseUrlLike.trim();
       if (q.length < 3) {
@@ -479,12 +486,28 @@ function SitesController(ctx, log, env) {
       // Fetch one extra row to detect whether more results exist beyond the limit.
       // The data-access `where` builder passes (attrs, op): `attrs` maps model
       // fields to DB columns, `op` carries the operators. (NOT `s => s.ilike(...)`.)
-      const rows = await Site.all({}, {
-        where: (attr, op) => op.ilike(attr.baseURL, `%${escaped}%`),
-        limit: effectiveLimit + 1,
-        order: 'asc',
-      });
-      const list = Array.isArray(rows) ? rows : (rows?.data ?? []);
+      let rows;
+      try {
+        rows = await Site.all({}, {
+          where: (attr, op) => op.ilike(attr.baseURL, `%${escaped}%`),
+          limit: effectiveLimit + 1,
+          order: 'asc',
+        });
+      } catch (e) {
+        // Re-throw so the framework still returns a 500 — the point here is a
+        // searchable, prefixed log line, not swallowing the error.
+        log.error(`[sites][baseUrlLike] query failed requestId=${requestId}`, e);
+        throw e;
+      }
+      let list;
+      if (Array.isArray(rows)) {
+        list = rows;
+      } else if (Array.isArray(rows?.data)) {
+        list = rows.data;
+      } else {
+        log.warn(`[sites][baseUrlLike] unexpected Site.all shape; returning empty requestId=${requestId}`);
+        list = [];
+      }
       const hasMore = list.length > effectiveLimit;
       const sites = list.slice(0, effectiveLimit).map((site) => SiteDto.toListJSON(site));
 
@@ -503,7 +526,6 @@ function SitesController(ctx, log, env) {
       return ok({ sites, pagination: { limit: effectiveLimit, hasMore, baseUrlLike: q } });
     }
 
-    const cursor = context?.data?.cursor || null;
     const paginated = hasText(limitParam) || hasText(cursor);
 
     if (cursor !== null) {

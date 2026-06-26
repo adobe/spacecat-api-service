@@ -1373,6 +1373,41 @@ describe('Sites Controller', () => {
       expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
       expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
+
+    it('returns 400 when baseUrlLike is combined with a cursor (cursor is not silently discarded)', async () => {
+      const result = await sitesController.getAll({
+        ...context,
+        data: { baseUrlLike: 'site', cursor: 'abc' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'cursor is not supported with baseUrlLike');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    it('warns and returns an empty list when Site.all returns an unexpected shape', async () => {
+      mockDataAccess.Site.all.resolves({ unexpected: true });
+
+      const result = await sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array').that.is.empty;
+      expect(body.pagination).to.deep.equal({ limit: 50, hasMore: false, baseUrlLike: 'site' });
+      expect(loggerStub.warn).to.have.been.calledWithMatch(/\[sites\]\[baseUrlLike\] unexpected Site\.all shape/);
+    });
+
+    it('logs a prefixed error and re-throws when the Site.all search query rejects', async () => {
+      const boom = new Error('boom');
+      mockDataAccess.Site.all.rejects(boom);
+
+      await expect(
+        sitesController.getAll({ ...context, data: { baseUrlLike: 'site' } }),
+      ).to.be.rejectedWith('boom');
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[baseUrlLike\] query failed/);
+    });
   });
 
   describe('GET /sites - S2S readAll capability', () => {
