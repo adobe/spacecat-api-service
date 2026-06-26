@@ -170,8 +170,37 @@ function LlmoCloudflareController(ctx) {
   // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
   const listAccounts = cfListProxy('listAccounts', 'account listing');
 
-  // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones
-  const listZones = cfListProxy('listZones', 'zone listing');
+  /**
+   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones?accountId=<id>
+   * Lists only the zones belonging to the selected Cloudflare account. `accountId` is a
+   * Cloudflare identifier (not a SpaceCat entity), supplied as a query parameter.
+   */
+  const listZones = async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+
+    const { client, error } = requireCfClient(context);
+    if (error) {
+      return error;
+    }
+
+    const { accountId } = context.data || {};
+    if (!hasText(accountId)) {
+      return badRequest('Missing accountId query parameter');
+    }
+    if (!CF_ID_RE.test(accountId)) {
+      return badRequest('accountId must be a 32-character hexadecimal Cloudflare account ID');
+    }
+
+    try {
+      const zones = await client.listZones();
+      return ok((zones || []).filter((zone) => zone?.account?.id === accountId));
+    } catch (e) {
+      return cfErrorResponse(e, 'zone listing');
+    }
+  };
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
@@ -276,11 +305,12 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes
-   * Body: { pattern }
+   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes
+   * Body: { zoneId, pattern }
    * Verifies server-side that the pattern targets the site's own domain and does not collide
    * with an existing route in the zone before creating it, so a deploy cannot silently override
-   * a route the customer already has.
+   * a route the customer already has. `zoneId` is a Cloudflare identifier (not a SpaceCat
+   * entity), so it is supplied in the body rather than the path.
    */
   const addRoute = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -300,16 +330,14 @@ function LlmoCloudflareController(ctx) {
       return nameError;
     }
 
-    const { zoneId } = context.params;
+    const { zoneId, pattern } = context.data || {};
+
     if (!hasText(zoneId)) {
-      return badRequest('Missing zoneId');
+      return badRequest('Missing zoneId in request body');
     }
     if (!CF_ID_RE.test(zoneId)) {
       return badRequest('zoneId must be a 32-character hexadecimal Cloudflare zone ID');
     }
-
-    const { pattern } = context.data || {};
-
     if (!hasText(pattern)) {
       return badRequest('Missing pattern in request body');
     }
