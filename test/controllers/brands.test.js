@@ -5488,6 +5488,24 @@ describe('Brands Controller', () => {
       );
     });
 
+    it('forwards baseSiteId: null to storage so a pending brand can unset its primary URL (LLMO-5870)', async () => {
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Updated Brand' });
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: null },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      // The controller must not strip an explicit null — it is the unset signal the
+      // storage layer gates on `existing.status === 'pending'`.
+      expect(updateBrandStub.firstCall.args[0].updates).to.have.property('baseSiteId', null);
+    });
+
     it('re-syncs brand aliases across markets when brandAliases changes on a sub-workspace brand', async () => {
       const updated = {
         id: BRAND_UUID,

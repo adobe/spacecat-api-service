@@ -3809,8 +3809,12 @@ Brand:
       description: The name of the brand
       type: string
     baseSiteId:
-      description: UUID of the brand's primary site. Immutable once set. Unique per organization.
-      type: string
+      description: >-
+        UUID of the brand's primary site. Unique per organization. Immutable once
+        set on an active brand. On a pending brand it may be re-pointed to a
+        different site or cleared (send null) to free the site for reuse by
+        another brand.
+      type: [string, 'null']
       format: uuid
     baseUrl:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
