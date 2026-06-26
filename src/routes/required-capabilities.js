@@ -195,6 +195,7 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
   'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
   'POST /organizations/:organizationId/task-management/:provider/tickets',
+  'GET /organizations/:organizationId/task-management/:provider/projects',
   // Hybrid permission model — state-layer management + capability
   // introspection. Customer-org admins manage their own ReBAC bindings here,
   // self-gated in the controller by `<product>/can_manage_users` (CRUD) and
