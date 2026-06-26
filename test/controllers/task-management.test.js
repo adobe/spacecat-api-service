@@ -733,7 +733,7 @@ describe('TaskManagementController', () => {
           projectKey: 'P',
           connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID, sid2],
-          attachment: { content, mimeType: 'text/plain', filename: 'note.txt' },
+          attachments: [{ content, mimeType: 'text/plain', filename: 'note.txt' }],
         },
       }));
       expect(res.status).to.equal(400);
@@ -1521,7 +1521,7 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { mimeType: 'image/png', filename: 'a.png' },
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachments: [{ mimeType: 'image/png', filename: 'a.png' }],
         },
       }));
       expect(res.status).to.equal(400);
@@ -1533,7 +1533,7 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: Buffer.from('x').toString('base64'), filename: 'a.png' },
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachments: [{ content: Buffer.from('x').toString('base64'), filename: 'a.png' }],
         },
       }));
       expect(res.status).to.equal(400);
@@ -1543,7 +1543,7 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: Buffer.from('x').toString('base64'), mimeType: 'image/png' },
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachments: [{ content: Buffer.from('x').toString('base64'), mimeType: 'image/png' }],
         },
       }));
       expect(res.status).to.equal(400);
@@ -1554,7 +1554,7 @@ describe('TaskManagementController', () => {
       // base64 of empty string decodes to zero bytes
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: '', mimeType: 'image/png', filename: 'a.png' },
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachments: [{ content: '', mimeType: 'image/png', filename: 'a.png' }],
         },
       }));
       expect(res.status).to.equal(400);
@@ -1565,7 +1565,7 @@ describe('TaskManagementController', () => {
       const oversized = Buffer.alloc(3 * 1024 * 1024 + 1, 0x00);
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachment: { content: oversized.toString('base64'), mimeType: 'image/png', filename: 'big.png' },
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, attachments: [{ content: oversized.toString('base64'), mimeType: 'image/png', filename: 'big.png' }],
         },
       }));
       expect(res.status).to.equal(400);
@@ -1616,7 +1616,7 @@ describe('TaskManagementController', () => {
           projectKey: 'PROJ',
           connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID],
-          attachment: { content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' },
+          attachments: [{ content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' }],
         },
       }));
 
@@ -1669,7 +1669,7 @@ describe('TaskManagementController', () => {
           projectKey: 'PROJ',
           connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID],
-          attachment: { content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' },
+          attachments: [{ content: validPng.toString('base64'), mimeType: 'image/png', filename: 'screenshot.png' }],
         },
       }));
 
