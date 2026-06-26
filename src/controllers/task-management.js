@@ -303,8 +303,9 @@ function TaskManagementController(context) {
             suggestionId: b.getSuggestionId(),
             opportunityId: b.getOpportunityId(),
           }));
-        } catch {
+        } catch (bridgeErr) {
           // Bridge load failure does not fail the list — return empty array.
+          log.warn({ ticketId: ticket.getId(), err: bridgeErr }, 'Failed to load bridge rows for ticket');
         }
         return serializeTicket(ticket, suggestions);
       }),
@@ -415,8 +416,9 @@ function TaskManagementController(context) {
         suggestionId: b.getSuggestionId(),
         opportunityId: b.getOpportunityId(),
       }));
-    } catch {
+    } catch (bridgeErr) {
       // Bridge load failure does not fail the list — return empty suggestions array.
+      log.warn({ ticketId: ticket.getId(), opportunityId, err: bridgeErr }, 'Failed to load bridge rows for ticket');
     }
 
     return createResponse([serializeTicket(ticket, suggestions)], STATUS_OK);
@@ -1055,7 +1057,11 @@ function TaskManagementController(context) {
         },
         'Ticket created in Jira but persistence failed',
       );
-      const body = { message: 'Ticket created but could not be saved' };
+      const body = {
+        message: 'Ticket created but could not be saved',
+        ticketKey: ticketResult.ticketKey,
+        ticketUrl: ticketResult.ticketUrl,
+      };
       await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
       return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
     }
