@@ -217,6 +217,24 @@ const routeFacsCapabilities = {
     'PATCH /consumers/:consumerId', // admin
     'POST /consumers/:consumerId/revoke', // admin
     'POST /consumers/register', // admin
+
+    // LLMO CloudFront Optimize-at-Edge onboarding wizard — admin-only (gateEdgeOptimizeWizard)
+    'POST /sites/:siteId/llmo/edge-optimize-bootstrap-url',
+    'POST /sites/:siteId/llmo/edge-optimize/connect',
+    'POST /sites/:siteId/llmo/edge-optimize/distributions',
+    'POST /sites/:siteId/llmo/edge-optimize/prerequisites',
+    'POST /sites/:siteId/llmo/edge-optimize/origins',
+    'POST /sites/:siteId/llmo/edge-optimize/behaviors',
+    'POST /sites/:siteId/llmo/edge-optimize/create-origin',
+    'POST /sites/:siteId/llmo/edge-optimize/create-function',
+    'POST /sites/:siteId/llmo/edge-optimize/apply-cache',
+    'POST /sites/:siteId/llmo/edge-optimize/create-lambda',
+    'POST /sites/:siteId/llmo/edge-optimize/lambda-status',
+    'POST /sites/:siteId/llmo/edge-optimize/apply-associations',
+    'POST /sites/:siteId/llmo/edge-optimize/verify',
+    'POST /sites/:siteId/llmo/edge-optimize/deploy',
+    'POST /sites/:siteId/llmo/edge-optimize/plan',
+    'GET /sites/:siteId/llmo/edge-optimize/permissions',
   ],
 
   PRODUCTS_ROUTES: {

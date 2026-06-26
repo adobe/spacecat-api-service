@@ -2397,6 +2397,1174 @@ llmo-edge-optimize-status:
     security:
       - api_key: [ ]
 
+site-llmo-edge-optimize-bootstrap-url:
+  post:
+    tags:
+      - llmo
+    summary: Generate a CloudFormation quick-create URL for the Edge Optimize connector role
+    description: |
+      Returns a one-click AWS CloudFormation quick-create URL (with a server-side
+      presigned template URL) that the customer uses to create the cross-account
+      connector role in their own AWS account. The template bucket stays private —
+      presigning is done with the service execution role — so no public S3 endpoint
+      is required and the customer needs no S3 access of their own.
+    operationId: getEdgeOptimizeBootstrapUrl
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - accountId
+            properties:
+              accountId:
+                type: string
+                description: The 12-digit AWS account ID hosting the customer's CloudFront distribution
+                pattern: '^[0-9]{12}$'
+                example: '682033462621'
+    responses:
+      '200':
+        description: Bootstrap URL generated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - externalId
+                - roleArn
+                - quickCreateUrl
+              properties:
+                externalId:
+                  type: string
+                  description: Per-session external ID baked into the role's trust policy
+                roleName:
+                  type: string
+                roleArn:
+                  type: string
+                trustedPrincipalArn:
+                  type: string
+                stackName:
+                  type: string
+                quickCreateUrl:
+                  type: string
+                  description: One-click CloudFormation quick-create URL (presigned template)
+                presignTtlSeconds:
+                  type: integer
+              example:
+                externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+                roleName: AdobeLLMOptimizerCloudFrontConnectorRole
+                roleArn: 'arn:aws:iam::682033462621:role/AdobeLLMOptimizerCloudFrontConnectorRole'
+                trustedPrincipalArn: 'arn:aws:iam::120569600543:root'
+                stackName: adobe-edgeoptimize-connector-role
+                quickCreateUrl: 'https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=...'
+                presignTtlSeconds: 900
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-connect:
+  post:
+    tags:
+      - llmo
+    summary: Verify the Edge Optimize cross-account connector role is assumable
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Allow access" step. Attempts to assume
+      the customer's cross-account connector role (created via the CloudFormation bootstrap) using
+      the per-session external ID. Returns `connected: true` when the role is assumable; otherwise
+      returns `connected: false` with a `reason` so the wizard can keep polling while the customer
+      finishes creating the role.
+    operationId: connectEdgeOptimize
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-connector-request'
+    responses:
+      '200':
+        description: Connection probe result (inspect the `connected` field).
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - connected
+              properties:
+                connected:
+                  type: boolean
+                  description: Whether the connector role was assumable.
+                accountId:
+                  type: string
+                  description: The 12-digit AWS account ID (present when connected).
+                roleArn:
+                  type: string
+                  description: The connector role ARN (present when connected).
+                reason:
+                  type: string
+                  description: Why the role was not assumable (present when not connected).
+              example:
+                connected: true
+                accountId: '682033462621'
+                roleArn: 'arn:aws:iam::682033462621:role/AdobeLLMOptimizerCloudFrontConnectorRole'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-distributions:
+  post:
+    tags:
+      - llmo
+    summary: List the customer's CloudFront distributions
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Choose distribution" step. Assumes the
+      cross-account connector role and lists the customer's CloudFront distributions (read-only)
+      so the wizard can let the customer pick one to configure.
+    operationId: getEdgeOptimizeDistributions
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-connector-request'
+    responses:
+      '200':
+        description: CloudFront distributions in the customer account.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - distributions
+              properties:
+                distributions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      domainName:
+                        type: string
+                      aliases:
+                        type: array
+                        items:
+                          type: string
+                      status:
+                        type: string
+                      enabled:
+                        type: boolean
+                      comment:
+                        type: string
+              example:
+                distributions:
+                  - id: E2EXAMPLE123
+                    domainName: d111111abcdef8.cloudfront.net
+                    aliases:
+                      - www.example.com
+                    status: Deployed
+                    enabled: true
+                    comment: prod distribution
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-prerequisites:
+  post:
+    tags:
+      - llmo
+    summary: Run the Edge Optimize wizard pre-flight checks
+    description: |
+      Used by the CloudFront "Deploy routing" wizard to confirm the connector role is assumable
+      and grants CloudFront read access. Each check reports its `ok` status individually (with a
+      `detail` message on failure) so the wizard can show a per-check status rather than failing
+      the whole step. Always returns HTTP 200 — inspect each check's `ok` field.
+    operationId: checkEdgeOptimizePrerequisites
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-connector-request'
+    responses:
+      '200':
+        description: Prerequisite check results (inspect each check's `ok` field).
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - checks
+              properties:
+                checks:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - ok
+                    properties:
+                      name:
+                        type: string
+                      ok:
+                        type: boolean
+                      detail:
+                        type: string
+                        description: Failure detail (present when `ok` is false).
+              example:
+                checks:
+                  - name: connectorRole
+                    ok: true
+                  - name: cloudFrontRead
+                    ok: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-origins:
+  post:
+    tags:
+      - llmo
+    summary: Read the origins configured on a CloudFront distribution
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Review origins" step. Assumes the connector
+      role, reads the distribution config (read-only), and returns its origins plus a flag
+      indicating whether an Edge Optimize origin already exists.
+    operationId: getEdgeOptimizeOrigins
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-distribution-request'
+    responses:
+      '200':
+        description: The distribution's origins.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - origins
+                - hasEdgeOptimizeOrigin
+              properties:
+                origins:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      domainName:
+                        type: string
+                      originPath:
+                        type: string
+                hasEdgeOptimizeOrigin:
+                  type: boolean
+                  description: Whether an Edge Optimize origin is already configured.
+              example:
+                origins:
+                  - id: origin-aem
+                    domainName: origin.example.com
+                    originPath: /content
+                hasEdgeOptimizeOrigin: false
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-behaviors:
+  post:
+    tags:
+      - llmo
+    summary: Read the cache behaviors configured on a CloudFront distribution
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Review routing" step. Assumes the connector
+      role, reads the distribution config (read-only), and returns the default cache behavior
+      followed by each ordered cache behavior so the wizard can show how traffic is currently
+      routed.
+    operationId: getEdgeOptimizeBehaviors
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-distribution-request'
+    responses:
+      '200':
+        description: The distribution's cache behaviors.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - behaviors
+              properties:
+                behaviors:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      pathPattern:
+                        type: string
+                      targetOriginId:
+                        type: string
+                      isDefault:
+                        type: boolean
+              example:
+                behaviors:
+                  - pathPattern: Default (*)
+                    targetOriginId: origin-aem
+                    isDefault: true
+                  - pathPattern: /api/*
+                    targetOriginId: origin-api
+                    isDefault: false
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-create-origin:
+  post:
+    tags:
+      - llmo
+    summary: Add the Edge Optimize origin to a CloudFront distribution
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Create Edge Optimize origin" step. Assumes
+      the connector role and, if no Edge Optimize origin exists yet, adds a custom HTTPS origin
+      pointing at the Edge Optimize target domain via UpdateDistribution. Idempotent — returns
+      `created: false, alreadyExisted: true` when the origin is already present. (CloudFront deploy
+      propagates in the background; this call does not block on it.)
+    operationId: createEdgeOptimizeOrigin
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-distribution-request'
+    responses:
+      '200':
+        description: Whether the Edge Optimize origin was created or already existed.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - created
+                - alreadyExisted
+                - originId
+              properties:
+                created:
+                  type: boolean
+                alreadyExisted:
+                  type: boolean
+                originId:
+                  type: string
+              example:
+                created: true
+                alreadyExisted: false
+                originId: EdgeOptimize_Origin
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-create-function:
+  post:
+    tags:
+      - llmo
+    summary: Create or update the Edge Optimize routing CloudFront Function
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Create routing function" step. Assumes the
+      connector role, derives the distribution's default-behavior target origin, and creates (or
+      updates) the `edgeoptimize-routing` CloudFront Function, then publishes it to LIVE. Idempotent.
+    operationId: createEdgeOptimizeRoutingFunction
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-distribution-request'
+    responses:
+      '200':
+        description: The published routing function.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - created
+                - stage
+              properties:
+                name:
+                  type: string
+                created:
+                  type: boolean
+                stage:
+                  type: string
+              example:
+                name: edgeoptimize-routing
+                created: true
+                stage: LIVE
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-apply-cache:
+  post:
+    tags:
+      - llmo
+    summary: Forward the Edge Optimize headers in a behavior's cache policy
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Apply cache headers" step. Assumes the
+      connector role and ensures the Edge Optimize routing headers
+      (`x-edgeoptimize-config`, `x-edgeoptimize-url`) are forwarded by the target behavior's
+      (custom) cache policy, setting the policy MinTTL to 0. Idempotent.
+    operationId: applyEdgeOptimizeCache
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-behavior-request'
+    responses:
+      '200':
+        description: Whether the cache policy was updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - policyId
+                - updated
+                - alreadyForwarded
+              properties:
+                policyId:
+                  type: string
+                updated:
+                  type: boolean
+                alreadyForwarded:
+                  type: boolean
+              example:
+                policyId: 1234abcd-12ab-34cd-56ef-1234567890ab
+                updated: true
+                alreadyForwarded: false
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-create-lambda:
+  post:
+    tags:
+      - llmo
+    summary: Create or update the Edge Optimize Lambda@Edge function
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Create Lambda@Edge function" step. Assumes
+      the connector role, ensures the `edgeoptimize-origin-role` execution role exists (with a
+      bounded propagation wait), creates (or updates) the `edgeoptimize-origin` Lambda function, and
+      publishes a numbered version (required for Lambda@Edge). Returns the versioned ARN the
+      "Associate" step needs. Idempotent.
+    operationId: createEdgeOptimizeLambda
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-connector-request'
+    responses:
+      '200':
+        description: The published Lambda@Edge function version.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - functionArn
+                - versionArn
+                - version
+                - roleArn
+                - created
+              properties:
+                functionArn:
+                  type: string
+                versionArn:
+                  type: string
+                  description: The published, versioned Lambda ARN (use this for associations).
+                version:
+                  type: string
+                roleArn:
+                  type: string
+                created:
+                  type: boolean
+              example:
+                functionArn: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin
+                versionArn: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin:1
+                version: '1'
+                roleArn: arn:aws:iam::682033462621:role/edgeoptimize-origin-role
+                created: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-lambda-status:
+  post:
+    tags:
+      - llmo
+    summary: Read the Edge Optimize Lambda@Edge function status
+    description: |
+      Used by the CloudFront "Deploy routing" wizard to check on entry (and poll after a slow or
+      timed-out create) whether the `edgeoptimize-origin` Lambda@Edge function already exists and
+      has a published numbered version. Read-only — assumes the connector role and inspects the
+      function configuration + versions.
+    operationId: getEdgeOptimizeLambdaStatus
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-connector-request'
+    responses:
+      '200':
+        description: The Lambda@Edge function status.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - exists
+                - versionArn
+              properties:
+                exists:
+                  type: boolean
+                state:
+                  type: string
+                lastUpdateStatus:
+                  type: string
+                functionArn:
+                  type: string
+                versionArn:
+                  type: string
+                  description: Latest published numbered version ARN, or null if not yet published.
+                version:
+                  type: string
+              example:
+                exists: true
+                state: Active
+                lastUpdateStatus: Successful
+                functionArn: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin
+                versionArn: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin:1
+                version: '1'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-apply-associations:
+  post:
+    tags:
+      - llmo
+    summary: Associate the routing function and Lambda@Edge onto a behavior
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Associate" step. Assumes the connector role
+      and wires the `edgeoptimize-routing` CloudFront Function (viewer-request) plus the
+      `edgeoptimize-origin` Lambda@Edge (origin-request and origin-response, versioned ARN) onto the
+      user-selected cache behavior via UpdateDistribution. Surfaces a clear error if a conflicting
+      viewer-request function is already associated.
+    operationId: applyEdgeOptimizeAssociations
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-associate-request'
+    responses:
+      '200':
+        description: The applied associations.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cfFunctionArn
+                - lambdaArn
+              properties:
+                cfFunctionArn:
+                  type: string
+                lambdaArn:
+                  type: string
+              example:
+                cfFunctionArn: arn:aws:cloudfront::682033462621:function/edgeoptimize-routing
+                lambdaArn: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin:1
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-verify:
+  post:
+    tags:
+      - llmo
+    summary: Verify Edge Optimize routing end-to-end
+    description: |
+      Used by the CloudFront "Deploy routing" wizard's "Verify routing" step. Fetches the
+      distribution domain server-side as an agentic bot and as a human, then inspects the
+      `x-edgeoptimize-*` response headers. `passed` is true only when the bot response carries
+      `x-edgeoptimize-request-id` (page served from the Edge Optimize prerender cache) and the human
+      response is not optimized. `x-edgeoptimize-fo` means failover to origin — NOT success.
+    operationId: verifyEdgeOptimizeRouting
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-distribution-request'
+    responses:
+      '200':
+        description: The verification result (inspect `passed`).
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - passed
+              properties:
+                passed:
+                  type: boolean
+                requestId:
+                  type: string
+                details:
+                  type: object
+                  description: The bot and human probe results (status + x-edgeoptimize-* headers).
+              example:
+                passed: true
+                requestId: req-123
+                details:
+                  bot:
+                    status: 200
+                    headers:
+                      x-edgeoptimize-request-id: req-123
+                  human:
+                    status: 200
+                    headers: {}
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-deploy:
+  post:
+    tags:
+      - llmo
+    summary: Orchestrate the full Edge Optimize CloudFront deploy (idempotent, step-on-poll)
+    description: |
+      Single endpoint that drives the CloudFront "Deploy routing" wizard end-to-end. The frontend
+      calls it once and then polls it every ~30s; each call advances the deploy sequence (origin →
+      routing function → cache policy → Lambda@Edge → association → verify) as far as it safely can
+      while staying well under the gateway's ~60s first-byte timeout, and returns the per-step
+      status. It is safe to call repeatedly: completed steps are gated and never re-mutated (no
+      CloudFront re-deploy churn, no routing-function re-publish). When the Lambda@Edge is still
+      provisioning the sequence pauses (associate/verify stay pending) and the next poll re-checks.
+      The caller passes the customer's selected distribution, failover origin, and behavior
+      explicitly; the Edge Optimize API key and forwarded host are derived server-side from the site.
+      Always returns HTTP 200 unless validation or the access gate fails; a step that errors is
+      surfaced on its own row with `status: error` rather than failing the whole response.
+    operationId: deployEdgeOptimize
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-deploy-request'
+    responses:
+      '200':
+        description: The current per-step deploy status.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - routingDeployed
+                - verified
+                - steps
+              properties:
+                routingDeployed:
+                  type: boolean
+                  description: True once the association step has completed.
+                verified:
+                  type: boolean
+                  description: True once end-to-end routing verification passes.
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - key
+                      - label
+                      - status
+                    properties:
+                      key:
+                        type: string
+                        enum:
+                          - origin
+                          - function
+                          - cache
+                          - lambda
+                          - associate
+                          - verify
+                      label:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - pending
+                          - in_progress
+                          - done
+                          - error
+                      detail:
+                        type: string
+              example:
+                routingDeployed: false
+                verified: false
+                steps:
+                  - key: origin
+                    label: Edge Optimize origin
+                    status: done
+                  - key: function
+                    label: Routing function
+                    status: done
+                  - key: cache
+                    label: Cache policy
+                    status: done
+                  - key: lambda
+                    label: Lambda@Edge
+                    status: in_progress
+                    detail: Lambda@Edge is still provisioning
+                  - key: associate
+                    label: Association
+                    status: pending
+                  - key: verify
+                    label: Verify routing
+                    status: pending
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-edge-optimize-plan:
+  post:
+    tags:
+      - llmo
+    summary: Preview (non-mutating) the Edge Optimize CloudFront deploy plan
+    description: |
+      Read-only "Review & Deploy" preview for the CloudFront wizard. Mirrors the deploy endpoint
+      (same validation, access gate, role assumption, and server-derived Edge Optimize origin
+      headers) but runs the NON-mutating planner and returns the per-step plan plus
+      `canProceed`/`blocker` so the frontend can show exactly what will happen before the customer
+      commits. The caller passes the selected distribution, failover origin, and behavior; the Edge
+      Optimize API key and forwarded host are derived server-side from the site (env-aware via the
+      optional `environment` flag). The response also includes `targetDomain` — the resolved host
+      the backend will route to for the chosen environment.
+    operationId: planEdgeOptimize
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/edge-optimize-plan-request'
+    responses:
+      '200':
+        description: The per-step plan plus whether the deploy can proceed.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - canProceed
+                - steps
+              properties:
+                canProceed:
+                  type: boolean
+                  description: True when the deploy can proceed (no blocking condition detected).
+                blocker:
+                  type:
+                    - string
+                    - 'null'
+                  description: Human-readable reason the deploy cannot proceed, or null.
+                targetDomain:
+                  type: string
+                  description: >-
+                    The resolved host the backend will route to for the chosen environment
+                    (the forwarded host). Informational — the frontend also knows it locally.
+                  example: www.example.com
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - key
+                      - label
+                      - action
+                    properties:
+                      key:
+                        type: string
+                        enum:
+                          - origin
+                          - function
+                          - cache
+                          - lambda
+                          - associate
+                          - verify
+                      label:
+                        type: string
+                      action:
+                        type: string
+                      detail:
+                        type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+edge-optimize-connector-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+
+edge-optimize-distribution-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+    - distributionId
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+    distributionId:
+      type: string
+      description: The CloudFront distribution ID to inspect.
+      example: E2EXAMPLE123
+
+edge-optimize-behavior-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+    - distributionId
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+    distributionId:
+      type: string
+      description: The CloudFront distribution ID to modify.
+      example: E2EXAMPLE123
+    pathPattern:
+      type: string
+      description: The cache behavior to target; use `default` for the default behavior.
+      default: default
+      example: /api/*
+
+edge-optimize-associate-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+    - distributionId
+    - lambdaVersionArn
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+    distributionId:
+      type: string
+      description: The CloudFront distribution ID to modify.
+      example: E2EXAMPLE123
+    pathPattern:
+      type: string
+      description: The cache behavior to wire; use `default` for the default behavior.
+      default: default
+      example: /api/*
+    lambdaVersionArn:
+      type: string
+      description: The published, versioned Lambda@Edge ARN from the create-lambda step.
+      example: arn:aws:lambda:us-east-1:682033462621:function:edgeoptimize-origin:1
+
+edge-optimize-deploy-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+    - distributionId
+    - originId
+    - behavior
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+    distributionId:
+      type: string
+      description: The CloudFront distribution ID to configure.
+      example: E2EXAMPLE123
+    originId:
+      type: string
+      description: >-
+        The customer's existing failover origin id (the default behavior's target origin),
+        baked into the routing function's failover origin group.
+      example: origin-aem
+    behavior:
+      type: string
+      description: The cache behavior path pattern to target; use `default` for the default behavior.
+      example: default
+    environment:
+      type: string
+      description: >-
+        Which environment to route. Optional; defaults to `production` (backward-compatible). When
+        `stage`, the backend resolves the site's single configured stage domain and uses the stage
+        site's Edge Optimize API key + forwarded host instead of production's.
+      enum:
+        - production
+        - stage
+      default: production
+      example: production
+
+edge-optimize-plan-request:
+  type: object
+  required:
+    - accountId
+    - externalId
+    - distributionId
+    - originId
+    - behavior
+  properties:
+    accountId:
+      type: string
+      description: The 12-digit AWS account ID hosting the customer's CloudFront distribution.
+      pattern: '^[0-9]{12}$'
+      example: '682033462621'
+    externalId:
+      type: string
+      description: Per-session external ID baked into the connector role's trust policy.
+      example: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+    distributionId:
+      type: string
+      description: The CloudFront distribution ID to preview.
+      example: E2EXAMPLE123
+    originId:
+      type: string
+      description: >-
+        The customer's existing failover origin id (the default behavior's target origin),
+        baked into the routing function's failover origin group.
+      example: origin-aem
+    behavior:
+      type: string
+      description: The cache behavior path pattern to target; use `default` for the default behavior.
+      example: default
+    environment:
+      type: string
+      description: >-
+        Which environment to route. Optional; defaults to `production` (backward-compatible). When
+        `stage`, the backend resolves the site's single configured stage domain and uses the stage
+        site's Edge Optimize API key + forwarded host instead of production's.
+      enum:
+        - production
+        - stage
+      default: production
+      example: production
+
 llmo-probe-edge-optimize:
   get:
     tags:
