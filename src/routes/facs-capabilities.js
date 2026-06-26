@@ -139,11 +139,19 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
+    // LLMO Cloudflare onboarding — LLMO-admin manual provisioning, gated by
+    // isLLMOAdministrator() with a caller-supplied x-cloudflare-token; not a FACS surface.
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
     'POST /sites/:siteId/site-enrollments', // hasAdminAccess
+    'POST /sites/:siteId/entitlements', // hasAdminAccess
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
@@ -512,6 +520,7 @@ const routeFacsCapabilities = {
       'PATCH /tools/import/jobs/:jobId': 'llmo/can_configure',
       'PATCH /trial-users/email-preferences': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_configure',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'llmo/can_configure',

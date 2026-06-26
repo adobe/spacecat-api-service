@@ -132,6 +132,14 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
+  // LLMO Cloudflare onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
+  // uses a caller-supplied x-cloudflare-token, not S2S JWT
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',
@@ -154,6 +162,7 @@ export const INTERNAL_ROUTES = [
   // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
   'POST /sites/:siteId/site-enrollments',
+  'POST /sites/:siteId/entitlements',
   // Feature flags write - admin only, mysticat-backed org config
   'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
   'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -280,6 +289,7 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/topics/:topicId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'organization:read',
