@@ -296,8 +296,8 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: { accountId: '682033462621' },
         env: {
-          EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage',
-          EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic',
+          SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage',
+          SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic',
         },
         s3: {
           s3Client: {},
@@ -368,7 +368,7 @@ describe('LlmoCloudFrontController', () => {
     it('returns 400 when the trusted principal is not configured', async () => {
       const result = await controller.createBootstrapUrl({
         ...bootstrapContext,
-        env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage' },
+        env: { SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template-stage' },
       });
 
       expect(result.status).to.equal(400);
@@ -945,7 +945,7 @@ describe('LlmoCloudFrontController', () => {
     it('passes the env-driven origin domain when set', async () => {
       await controller.createOrigin({
         ...originContext,
-        env: { EDGE_OPTIMIZE_ORIGIN_DOMAIN: 'live.edgeoptimize.net' },
+        env: { EDGE_OPTIMIZE_EDGE_DOMAIN: 'live.edgeoptimize.net' },
       });
 
       expect(createEdgeOptimizeOriginStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'live.edgeoptimize.net')).to.equal(true);
@@ -1680,7 +1680,7 @@ describe('LlmoCloudFrontController', () => {
     it('passes the env-driven origin domain when set', async () => {
       await controller.deploy({
         ...deployContext,
-        env: { EDGE_OPTIMIZE_ORIGIN_DOMAIN: 'live.edgeoptimize.net' },
+        env: { EDGE_OPTIMIZE_EDGE_DOMAIN: 'live.edgeoptimize.net' },
       });
       const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
       expect(params.originDomain).to.equal('live.edgeoptimize.net');
@@ -2104,8 +2104,8 @@ describe('LlmoCloudFrontController', () => {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
         env: {
-          EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template',
-          EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic',
+          SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template',
+          SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::682033462621:role/spacecat-role-lambda-generic',
         },
         s3: {
           s3Client: { send: s3SendStub },
@@ -2133,8 +2133,8 @@ describe('LlmoCloudFrontController', () => {
       const result = await controller.getPermissions({
         ...permissionsContext,
         env: {
-          EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'custom-bucket',
-          EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::111111111111:role/prod-signer',
+          SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET: 'custom-bucket',
+          SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN: 'arn:aws:iam::111111111111:role/prod-signer',
         },
       });
       expect(result.status).to.equal(200);
@@ -2154,7 +2154,7 @@ describe('LlmoCloudFrontController', () => {
     it('returns 400 when the trusted principal is not configured', async () => {
       const result = await controller.getPermissions({
         ...permissionsContext,
-        env: { EDGE_OPTIMIZE_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template' },
+        env: { SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template' },
       });
       expect(result.status).to.equal(400);
       const body = await result.json();

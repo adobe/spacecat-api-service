@@ -83,9 +83,9 @@ function LlmoCloudFrontController(ctx) {
       }
 
       // The template-hosting S3 bucket — per-environment, from Vault
-      // (dx_mysticat/<env>/api-service.EDGE_OPTIMIZE_TEMPLATE_BUCKET). Lives in the same account
-      // the service deploys/signs in, so it is read same-account; the customer fetches via presign.
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
+      // (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET).
+      // Read same-account; the customer fetches it via a presigned URL.
+      const bucket = env.SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET;
       if (!hasText(bucket) || !s3?.s3Client) {
         return badRequest('Edge optimize template hosting is not configured for this environment');
       }
@@ -101,8 +101,8 @@ function LlmoCloudFrontController(ctx) {
       const externalId = crypto.randomUUID();
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
       // The Adobe principal allowed to assume the customer's connector role — per-environment,
-      // from Vault (dx_mysticat/<env>/api-service.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN).
-      const trustedPrincipalArn = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN;
+      // from Vault (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN).
+      const trustedPrincipalArn = env.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN;
       if (!hasText(trustedPrincipalArn)) {
         return badRequest('Edge optimize is not configured for this environment (missing trusted principal)');
       }
@@ -444,7 +444,7 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
-    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
+    const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
       accountId, externalId, distributionId, error: credError,
@@ -762,7 +762,7 @@ function LlmoCloudFrontController(ctx) {
     const behavior = String(context.data?.behavior || '').trim();
     const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
-    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
+    const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
       accountId, externalId, distributionId, error: credError,
@@ -832,7 +832,7 @@ function LlmoCloudFrontController(ctx) {
     const behavior = String(context.data?.behavior || '').trim();
     const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
-    const originDomain = env?.EDGE_OPTIMIZE_ORIGIN_DOMAIN || 'live.edgeoptimize.net';
+    const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
       accountId, externalId, distributionId, error: credError,
@@ -912,7 +912,7 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      const bucket = env.EDGE_OPTIMIZE_TEMPLATE_BUCKET;
+      const bucket = env.SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET;
       if (!hasText(bucket) || !s3?.s3Client || !s3?.GetObjectCommand) {
         return badRequest('Edge optimize template hosting is not configured for this environment');
       }
@@ -922,8 +922,8 @@ function LlmoCloudFrontController(ctx) {
       const key = env.EDGE_OPTIMIZE_TEMPLATE_KEY || 'customer-bootstrap-role.yaml';
 
       // The Adobe principal that assumes the connector role — per-environment, from Vault
-      // (dx_mysticat/<env>/api-service.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN).
-      const adobeAccount = env.EDGE_OPTIMIZE_TRUSTED_PRINCIPAL_ARN;
+      // (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN).
+      const adobeAccount = env.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN;
       if (!hasText(adobeAccount)) {
         return badRequest('Edge optimize is not configured for this environment (missing trusted principal)');
       }
