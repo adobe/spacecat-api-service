@@ -1104,30 +1104,24 @@ function LlmoCloudFrontController(ctx) {
         return badRequest('CloudFront connector is not configured for this environment (missing trusted principal)');
       }
 
-      let manifest;
-      try {
-        const response = await s3.s3Client.send(new s3.GetObjectCommand({
-          Bucket: bucket,
-          Key: key,
-        }));
-        const body = await response.Body.transformToString();
-        const doc = yaml.load(body, { schema: CFN_YAML_SCHEMA });
-        const perms = doc?.Metadata?.AdobeLLMOptimizerPermissions;
-        if (!Array.isArray(perms?.groups) || perms.groups.length === 0) {
-          throw new Error('connector template has no AdobeLLMOptimizerPermissions metadata');
-        }
-        // Map the template's {name, scope, summary} groups to the UI's {name, items[]} shape.
-        manifest = {
-          appName: perms.appName || 'Adobe LLM Optimizer',
-          groups: perms.groups.map((g) => ({
-            name: g.name,
-            items: [g.scope ? `Scoped to ${g.scope}` : null, g.summary].filter(Boolean),
-          })),
-        };
-      } catch (s3Error) {
-        log.error(`[cdn-onboard-cloudfront] Failed to read permissions from connector template for site ${siteId}: ${s3Error.message}`);
-        return badRequest('CloudFront connector permissions are not available');
+      const response = await s3.s3Client.send(new s3.GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      }));
+      const body = await response.Body.transformToString();
+      const doc = yaml.load(body, { schema: CFN_YAML_SCHEMA });
+      const perms = doc?.Metadata?.AdobeLLMOptimizerPermissions;
+      if (!Array.isArray(perms?.groups) || perms.groups.length === 0) {
+        throw new Error('connector template has no AdobeLLMOptimizerPermissions metadata');
       }
+      // Map the template's {name, scope, summary} groups to the UI's {name, items[]} shape.
+      const manifest = {
+        appName: perms.appName || 'Adobe LLM Optimizer',
+        groups: perms.groups.map((g) => ({
+          name: g.name,
+          items: [g.scope ? `Scoped to ${g.scope}` : null, g.summary].filter(Boolean),
+        })),
+      };
 
       log.info(`[cdn-onboard-cloudfront] Returned permissions for site ${siteId}`);
       return ok({ adobeAccount, manifest });

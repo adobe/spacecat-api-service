@@ -2251,20 +2251,21 @@ describe('LlmoCloudFrontController', () => {
       expect(body.message).to.include('Failed to read the CloudFront connector permissions');
     });
 
-    it('returns 400 when the manifest read fails', async () => {
+    it('returns 500 when the manifest read fails (server-side S3 failure)', async () => {
       s3SendStub.rejects(new Error('NoSuchKey'));
       const result = await controller.getPermissions(permissionsContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('not available');
+      expect(body.message).to.not.include('NoSuchKey');
+      expect(body.message).to.include('Failed to read the CloudFront connector permissions');
     });
 
-    it('returns 400 when the template has no permissions metadata', async () => {
+    it('returns 500 when the template has no permissions metadata', async () => {
       s3SendStub.resolves({ Body: { transformToString: async () => 'Resources:\n  Foo:\n    Type: AWS::IAM::Role\n' } });
       const result = await controller.getPermissions(permissionsContext);
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('not available');
+      expect(body.message).to.include('Failed to read the CloudFront connector permissions');
     });
 
     it('returns 404 when the site is not found', async () => {
