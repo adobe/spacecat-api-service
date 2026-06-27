@@ -5746,8 +5746,14 @@ site-llmo-cloudflare-deploy:
       Fetches the pinned Edge Optimize worker script and deploys it to the given Cloudflare
       account. The worker name is derived server-side from the site's base URL
       (`edge-optimize-router-<canonical-host>`, e.g. `edge-optimize-router-example-com`) and is
-      not client-supplied. Sets the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding to
-      `targetHost`, and sets the site's LLMO API key as the `EDGE_OPTIMIZE_API_KEY` secret.
+      not client-supplied. The worker is tagged with `adobe-llmo` plus the caller's identity, and
+      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to `targetHost`, and the site's
+      LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
+
+      The deploy is idempotent: if a worker we previously deployed (carrying the `adobe-llmo` tag)
+      already exists, the response is `200` with `alreadyDeployed: true` and the secret is not
+      re-set. A worker with the same derived name that is **not** tagged by us is a foreign
+      collision and returns `409`.
 
       If the worker is deployed but the secret cannot be set, the worker is live but
       non-functional; the response is a `502` whose body carries `partial: true` so the
@@ -5780,7 +5786,9 @@ site-llmo-cloudflare-deploy:
                 example: 'www.example.com'
     responses:
       '200':
-        description: Worker deployed and API key secret set
+        description: >-
+          Worker deployed and API key secret set, or — when `alreadyDeployed` is `true` — a
+          worker we previously deployed already exists and was left unchanged.
         content:
           application/json:
             schema:
@@ -5792,6 +5800,11 @@ site-llmo-cloudflare-deploy:
                   type: string
                 targetHost:
                   type: string
+                alreadyDeployed:
+                  type: boolean
+                  description: >-
+                    Present and `true` when an existing worker tagged by us was found and the
+                    deploy was skipped (idempotent); the API key secret was not re-set.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -5801,7 +5814,9 @@ site-llmo-cloudflare-deploy:
       '404':
         $ref: './responses.yaml#/404'
       '409':
-        description: A worker with the derived name already exists in the account.
+        description: >-
+          A worker with the derived name already exists in the account but is not tagged by us
+          (a foreign collision).
         content:
           application/json:
             schema:
@@ -5856,9 +5871,16 @@ site-llmo-cloudflare-routes:
       Creates a Cloudflare worker route in the given zone, targeting the service-owned worker
       derived from the site's base URL (`edge-optimize-router-<canonical-host>`) — the worker
       name is not client-supplied. `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
-      so it is supplied in the request body. Before creating the route the service fetches the
-      zone's existing routes and rejects the request with `409` if a route for the same
-      `pattern` already exists, so a deploy can never silently override an existing route.
+      so it is supplied in the request body.
+
+      Before creating the route the service fetches the zone's existing routes and protects the
+      customer's current routing using wildcard-aware host-overlap detection (not just exact
+      pattern-string matching): if any existing route **bound to a different worker** shares a
+      host with the requested pattern — e.g. a `*.example.com/*` route already covers a requested
+      `a.example.com/*` — the request is rejected with `409` and the conflicting routes are
+      returned in `conflictingRoutes`. If an overlapping route already points to our own derived
+      worker, the request is idempotent and returns `200` with `alreadyRouted: true` without
+      creating a duplicate.
 
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:
@@ -5887,7 +5909,9 @@ site-llmo-cloudflare-routes:
                 example: 'www.example.com/*'
     responses:
       '200':
-        description: Route created
+        description: >-
+          Route created, or — when `alreadyRouted` is `true` — an overlapping route already
+          points to our worker and was left unchanged.
         content:
           application/json:
             schema:
@@ -5901,6 +5925,11 @@ site-llmo-cloudflare-routes:
                   type: string
                 script:
                   type: string
+                alreadyRouted:
+                  type: boolean
+                  description: >-
+                    Present and `true` when an overlapping route already pointed to our derived
+                    worker; no new route was created.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -5910,7 +5939,9 @@ site-llmo-cloudflare-routes:
       '404':
         $ref: './responses.yaml#/404'
       '409':
-        description: A route for the requested pattern already exists in this zone
+        description: >-
+          An existing route bound to a different worker shares a host with the requested pattern;
+          adding the route could affect the customer's current routing.
         content:
           application/json:
             schema:
@@ -5921,7 +5952,18 @@ site-llmo-cloudflare-routes:
                 existingRoute:
                   type: object
                   additionalProperties: true
-                  description: The pre-existing Cloudflare route that conflicts
+                  description: >-
+                    The first conflicting Cloudflare route (kept for backwards compatibility;
+                    equals `conflictingRoutes[0]`).
+                conflictingRoutes:
+                  type: array
+                  maxItems: 10
+                  description: >-
+                    The conflicting Cloudflare routes (bound to other workers) whose host
+                    overlaps the requested pattern, capped at 10.
+                  items:
+                    type: object
+                    additionalProperties: true
       '502':
         $ref: './responses.yaml#/502'
     security:
