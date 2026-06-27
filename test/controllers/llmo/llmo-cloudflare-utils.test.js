@@ -116,5 +116,10 @@ describe('llmo-cloudflare-utils', () => {
     it('does not match unrelated wildcard scopes', () => {
       expect(routeHostsOverlap('*.example.com/*', '*.other.com/*')).to.equal(false);
     });
+
+    it('returns false when a pattern yields an empty host (e.g. a path-only pattern)', () => {
+      expect(routeHostsOverlap('/just/a/path', 'example.com/*')).to.equal(false);
+      expect(routeHostsOverlap('example.com/*', '*./*')).to.equal(false);
+    });
   });
 });

@@ -69,8 +69,9 @@ const toWorkerTag = (value) => {
   if (!hasText(value) || value === 'unknown') {
     return null;
   }
-  const sanitized = value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, CF_TAG_MAX_LEN);
-  return hasText(sanitized) ? sanitized : null;
+  // Replacement preserves length (every char maps to itself or '_'), so a non-empty input always
+  // yields a non-empty tag — no empty-result case to guard here.
+  return value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, CF_TAG_MAX_LEN);
 };
 
 /**
@@ -511,7 +512,11 @@ function LlmoCloudflareController(ctx) {
       (route) => hasText(route?.pattern) && routeHostsOverlap(route.pattern, pattern),
     );
 
-    const foreignConflicts = overlapping.filter((route) => route.script !== scriptName);
+    // Only a route bound to a DIFFERENT worker is a blocking conflict; a disabled/no-script route
+    // on the same host has no worker to disrupt, so it does not block onboarding.
+    const foreignConflicts = overlapping.filter(
+      (route) => hasText(route.script) && route.script !== scriptName,
+    );
     if (foreignConflicts.length > 0) {
       log.info(auditLine(context, 'add-route', 'conflict-foreign', {
         siteId,
@@ -519,7 +524,7 @@ function LlmoCloudflareController(ctx) {
         scriptName,
         pattern,
         host: targetRouteHost,
-        conflicts: foreignConflicts.map((r) => `${r.pattern}->${r.script || 'none'}`).join(','),
+        conflicts: foreignConflicts.map((r) => `${r.pattern}->${r.script}`).join(','),
       }));
       return createResponse({
         message: `Existing route(s) in this zone already route host '${targetRouteHost}' to `

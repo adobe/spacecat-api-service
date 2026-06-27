@@ -511,6 +511,24 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
     });
 
+    it('returns 502 when the deploy rejection is not an Error instance (no message)', async () => {
+      mockCfClient.deployWorkerScript.rejects({ noMessage: true });
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
+    it('includes the invocation id in audit logs when present', async () => {
+      mockContext.invocation = { id: 'req-abc-123' };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+      const logged = mockContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('requestId=req-abc-123');
+    });
+
     it('returns 409 when a worker with the derived name already exists', async () => {
       mockCfClient.deployWorkerScript.rejects(
         new Error(`Worker script '${DERIVED_SCRIPT_NAME}' already exists in account ${ACCOUNT_ID}. Set overwrite: true to replace it.`),
@@ -619,6 +637,17 @@ describe('LlmoCloudflareController', () => {
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(200);
       expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
+    });
+
+    it('does not block on an overlapping route that has no worker bound (disabled route)', async () => {
+      const disabled = { id: ROUTE_ID, pattern: 'example.com/*' }; // no script
+      mockCfClient.listRoutes.resolves([disabled]);
+      const route = { id: 'r2', pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.addRoute.resolves(route);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.called;
     });
 
     it('is idempotent (200, no add) when an overlapping route already points to our worker', async () => {
