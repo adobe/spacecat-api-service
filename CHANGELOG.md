@@ -1,3 +1,10 @@
+# [1.607.0](https://github.com/adobe/spacecat-api-service/compare/v1.606.2...v1.607.0) (2026-06-27)
+
+
+### Features
+
+* **llmo:** tag Cloudflare workers for idempotent deploys and add audit logging ([#2716](https://github.com/adobe/spacecat-api-service/issues/2716)) ([be40387](https://github.com/adobe/spacecat-api-service/commit/be40387c84fdd4a2576346779898ea34db6e6d48))
+
 ## [1.606.2](https://github.com/adobe/spacecat-api-service/compare/v1.606.1...v1.606.2) (2026-06-26)
 
 
