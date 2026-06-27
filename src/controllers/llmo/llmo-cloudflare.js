@@ -17,7 +17,9 @@ import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { deriveWorkerName, hostInSiteDomain, routePatternHost } from './llmo-cloudflare-utils.js';
+import {
+  deriveWorkerName, hostInSiteDomain, routePatternHost, routeHostsOverlap,
+} from './llmo-cloudflare-utils.js';
 
 const CF_TOKEN_HEADER = 'x-cloudflare-token';
 // TEMPORARY: body/query fallback field for the CF token, used only until the
@@ -447,9 +449,10 @@ function LlmoCloudflareController(ctx) {
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes
    * Body: { zoneId, pattern }
-   * Verifies server-side that the pattern targets the site's own domain and does not collide
-   * with an existing route in the zone before creating it, so a deploy cannot silently override
-   * a route the customer already has. `zoneId` is a Cloudflare identifier (not a SpaceCat
+   * Verifies server-side that the pattern targets the site's own domain and that no existing
+   * route in the zone already targets the same host (compared by resolved host, not raw pattern
+   * string) before creating it, so onboarding cannot silently add a second/overlapping route on
+   * a host the customer already routes. `zoneId` is a Cloudflare identifier (not a SpaceCat
    * entity), so it is supplied in the body rather than the path.
    */
   const addRoute = async (context) => {
@@ -490,8 +493,12 @@ function LlmoCloudflareController(ctx) {
       siteId, zoneId, scriptName, pattern,
     }));
 
-    // Guard against overriding an existing route: fetch the zone's current routes and reject
-    // if the requested pattern already exists.
+    // Protect the customer's existing routing: fetch the zone's routes and reject if any route
+    // bound to a DIFFERENT worker shares a host with the one we are about to add. We compare host
+    // globs (wildcard-aware, path-ignored) rather than raw pattern strings, so a customer's
+    // "*.example.com/*" worker route blocks an onboarding attempt on "a.example.com/*", and
+    // scheme/path/string variants on the same host are caught too — not just exact duplicates.
+    // Routes already bound to our own derived worker are safe and treated as idempotent.
     let existingRoutes;
     try {
       existingRoutes = await cfClient.listRoutes(zoneId);
@@ -499,15 +506,37 @@ function LlmoCloudflareController(ctx) {
       return cfErrorResponse(e, 'route lookup', context, { siteId, zoneId });
     }
 
-    const conflict = (existingRoutes || []).find((route) => route?.pattern === pattern);
-    if (conflict) {
-      log.info(auditLine(context, 'add-route', 'conflict', {
-        siteId, zoneId, scriptName, pattern,
+    const targetRouteHost = routePatternHost(pattern).toLowerCase();
+    const overlapping = (existingRoutes || []).filter(
+      (route) => hasText(route?.pattern) && routeHostsOverlap(route.pattern, pattern),
+    );
+
+    const foreignConflicts = overlapping.filter((route) => route.script !== scriptName);
+    if (foreignConflicts.length > 0) {
+      log.info(auditLine(context, 'add-route', 'conflict-foreign', {
+        siteId,
+        zoneId,
+        scriptName,
+        pattern,
+        host: targetRouteHost,
+        conflicts: foreignConflicts.map((r) => `${r.pattern}->${r.script || 'none'}`).join(','),
       }));
       return createResponse({
-        message: `A route for pattern '${pattern}' already exists in this zone`,
-        existingRoute: conflict,
+        message: `Existing route(s) in this zone already route host '${targetRouteHost}' to `
+          + 'another worker; refusing to add a route that could affect the customer\'s current '
+          + 'routing',
+        existingRoute: foreignConflicts[0],
+        conflictingRoutes: foreignConflicts,
       }, 409);
+    }
+
+    // An overlapping route already bound to our worker means this host is already onboarded.
+    const ownExisting = overlapping.find((route) => route.script === scriptName);
+    if (ownExisting) {
+      log.info(auditLine(context, 'add-route', 'already-routed', {
+        siteId, zoneId, scriptName, pattern, host: targetRouteHost,
+      }));
+      return ok({ ...ownExisting, alreadyRouted: true });
     }
 
     try {

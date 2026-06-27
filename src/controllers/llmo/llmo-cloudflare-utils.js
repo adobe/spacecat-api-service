@@ -54,3 +54,43 @@ export const routePatternHost = (pattern) => pattern
   .replace(/^https?:\/\//i, '')
   .split('/')[0]
   .replace(/^\*\.?/, '');
+
+/**
+ * The host glob of a route pattern: scheme stripped, path removed, lowercased, with any leading
+ * "*." wildcard label preserved (e.g. "https://*.example.com/a/*" -> "*.example.com",
+ * "example.com/*" -> "example.com"). Unlike routePatternHost, this keeps the wildcard so callers
+ * can reason about which hostnames the route actually matches.
+ */
+export const routePatternHostGlob = (pattern) => pattern
+  .replace(/^https?:\/\//i, '')
+  .split('/')[0]
+  .toLowerCase();
+
+/**
+ * Whether two route host globs can match a common hostname (set intersection), accounting for a
+ * single leading "*." wildcard label, per Cloudflare semantics: a bare host matches only itself,
+ * and "*.base" matches any strict subdomain of base (e.g. *.example.com matches www.example.com
+ * but NOT example.com). Used to detect whether a new route would share a host with an existing one
+ * — i.e. could affect that host's current routing — regardless of path.
+ */
+export const routeHostsOverlap = (patternA, patternB) => {
+  const a = routePatternHostGlob(patternA);
+  const b = routePatternHostGlob(patternB);
+  const wcA = a.startsWith('*.');
+  const wcB = b.startsWith('*.');
+  const baseA = wcA ? a.slice(2) : a;
+  const baseB = wcB ? b.slice(2) : b;
+  if (!baseA || !baseB) {
+    return false;
+  }
+  if (!wcA && !wcB) {
+    return baseA === baseB;
+  }
+  if (wcA && wcB) {
+    // Subdomain sets of *.baseA and *.baseB intersect when one base is the other or below it.
+    return baseA === baseB || baseA.endsWith(`.${baseB}`) || baseB.endsWith(`.${baseA}`);
+  }
+  // One wildcard, one bare host: the wildcard must cover the bare host (strict subdomain).
+  const [wcBase, host] = wcA ? [baseA, baseB] : [baseB, baseA];
+  return host.endsWith(`.${wcBase}`);
+};

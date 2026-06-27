@@ -572,7 +572,7 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
     });
 
-    it('returns 409 and does not add when the pattern already exists', async () => {
+    it('returns 409 and does not add when another worker already routes the same host', async () => {
       const existing = { id: ROUTE_ID, pattern: 'example.com/*', script: 'other-worker' };
       // Include a null entry to exercise the route?.pattern guard.
       mockCfClient.listRoutes.resolves([null, existing]);
@@ -581,6 +581,54 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(409);
       const body = await res.json();
       expect(body.existingRoute).to.deep.equal(existing);
+      expect(body.conflictingRoutes).to.deep.equal([existing]);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('returns 409 when a wildcard route to another worker covers the requested subdomain', async () => {
+      // Customer has *.example.com/* on another worker; onboarding mistakenly targets
+      // a.example.com/* — adding our worker there would collide, so it must fail with 409.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'a.example.com/*' };
+      const existing = { id: ROUTE_ID, pattern: '*.example.com/*', script: 'customer-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.conflictingRoutes).to.deep.equal([existing]);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('catches host conflicts across scheme/path variants (not just exact pattern strings)', async () => {
+      const existing = { id: ROUTE_ID, pattern: 'https://example.com/blog/*', script: 'other-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('allows the route when an existing route on a different host points to another worker', async () => {
+      // A customer worker on a sibling subdomain must NOT block onboarding the apex host.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/*' };
+      const sibling = { id: ROUTE_ID, pattern: 'shop.example.com/*', script: 'other-worker' };
+      mockCfClient.listRoutes.resolves([sibling]);
+      const route = { id: 'r2', pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.addRoute.resolves(route);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
+    });
+
+    it('is idempotent (200, no add) when an overlapping route already points to our worker', async () => {
+      const own = { id: ROUTE_ID, pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.listRoutes.resolves([own]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.alreadyRouted).to.be.true;
       expect(mockCfClient.addRoute).to.not.have.been.called;
     });
 

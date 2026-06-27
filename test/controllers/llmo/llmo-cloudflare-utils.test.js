@@ -16,6 +16,8 @@ import {
   deriveWorkerName,
   hostInSiteDomain,
   routePatternHost,
+  routePatternHostGlob,
+  routeHostsOverlap,
 } from '../../../src/controllers/llmo/llmo-cloudflare-utils.js';
 
 describe('llmo-cloudflare-utils', () => {
@@ -73,6 +75,46 @@ describe('llmo-cloudflare-utils', () => {
 
     it('strips a scheme when present', () => {
       expect(routePatternHost('https://www.example.com/*')).to.equal('www.example.com');
+    });
+  });
+
+  describe('routePatternHostGlob', () => {
+    it('keeps the leading wildcard label (unlike routePatternHost)', () => {
+      expect(routePatternHostGlob('*.example.com/path*')).to.equal('*.example.com');
+    });
+
+    it('strips scheme and path and lowercases', () => {
+      expect(routePatternHostGlob('https://WWW.Example.com/a/*')).to.equal('www.example.com');
+    });
+  });
+
+  describe('routeHostsOverlap', () => {
+    it('matches identical bare hosts', () => {
+      expect(routeHostsOverlap('example.com/*', 'https://example.com/blog/*')).to.equal(true);
+    });
+
+    it('does not match different bare hosts', () => {
+      expect(routeHostsOverlap('shop.example.com/*', 'example.com/*')).to.equal(false);
+      expect(routeHostsOverlap('www.example.com/*', 'a.example.com/*')).to.equal(false);
+    });
+
+    it('matches when a wildcard route covers a bare subdomain (and vice versa)', () => {
+      // Customer *.example.com/* worker vs onboarding a.example.com/* -> must overlap.
+      expect(routeHostsOverlap('*.example.com/*', 'a.example.com/*')).to.equal(true);
+      expect(routeHostsOverlap('a.example.com/*', '*.example.com/*')).to.equal(true);
+    });
+
+    it('a wildcard does not match its own apex (Cloudflare semantics)', () => {
+      expect(routeHostsOverlap('*.example.com/*', 'example.com/*')).to.equal(false);
+    });
+
+    it('matches overlapping wildcard scopes', () => {
+      expect(routeHostsOverlap('*.example.com/*', '*.a.example.com/*')).to.equal(true);
+      expect(routeHostsOverlap('*.example.com/*', '*.example.com/api*')).to.equal(true);
+    });
+
+    it('does not match unrelated wildcard scopes', () => {
+      expect(routeHostsOverlap('*.example.com/*', '*.other.com/*')).to.equal(false);
     });
   });
 });
