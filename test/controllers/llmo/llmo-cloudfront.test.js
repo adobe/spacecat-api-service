@@ -269,6 +269,16 @@ describe('LlmoCloudFrontController', () => {
     mockDataAccess = { Site: { findById: sinon.stub().resolves(mockSite) } };
     mockTokowakaClient.fetchMetaconfig = sinon.stub();
 
+    // Default: the chosen distribution (E2EXAMPLE123) serves the test site host (www.example.com),
+    // so the controller's distribution↔site guardrail passes. Endpoint-specific tests override.
+    listDistributionsStub.resolves([{
+      id: 'E2EXAMPLE123',
+      domainName: 'd111111abcdef8.cloudfront.net',
+      aliases: ['www.example.com'],
+      status: 'Deployed',
+      enabled: true,
+    }]);
+
     mockContext = {
       params: { siteId: TEST_SITE_ID },
       data: {},
@@ -384,7 +394,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('presign boom');
-      expect(body.message).to.include('Failed to generate the edge optimize bootstrap URL');
+      expect(body.message).to.include('Failed to generate the CloudFront bootstrap URL');
     });
   });
 
@@ -475,7 +485,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('db boom');
-      expect(body.message).to.include('Failed to connect the edge optimize role');
+      expect(body.message).to.include('Failed to connect the CloudFront connector role');
     });
   });
 
@@ -657,7 +667,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('db boom');
-      expect(body.message).to.include('Failed to check edge optimize prerequisites');
+      expect(body.message).to.include('Failed to check CloudFront prerequisites');
     });
   });
 
@@ -951,7 +961,7 @@ describe('LlmoCloudFrontController', () => {
       expect(createOriginStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'live.edgeoptimize.net')).to.equal(true);
     });
 
-    it('returns 400 when the site has no Edge Optimize API key', async () => {
+    it('returns 400 when the site has no LLMO API key', async () => {
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
 
       const result = await controller.createOrigin(originContext);
@@ -1007,7 +1017,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('UpdateDistribution failed');
-      expect(body.message).to.include('Failed to create the edge optimize origin');
+      expect(body.message).to.include('Failed to create the Edge Optimize origin');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1099,7 +1109,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('CreateFunction failed');
-      expect(body.message).to.include('Failed to create the edge optimize routing function');
+      expect(body.message).to.include('Failed to create the CloudFront routing function');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1185,7 +1195,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('UpdateCachePolicy failed');
-      expect(body.message).to.include('Failed to apply edge optimize cache headers');
+      expect(body.message).to.include('Failed to apply CloudFront cache headers');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1267,7 +1277,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('CreateRole failed');
-      expect(body.message).to.include('Failed to create the edge optimize Lambda@Edge function');
+      expect(body.message).to.include('Failed to create the CloudFront Lambda@Edge function');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1355,7 +1365,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('ListVersions failed');
-      expect(body.message).to.include('Failed to read the edge optimize Lambda@Edge status');
+      expect(body.message).to.include('Failed to read the CloudFront Lambda@Edge status');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1473,7 +1483,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('viewer-request');
-      expect(body.message).to.include('Failed to associate edge optimize routing');
+      expect(body.message).to.include('Failed to associate CloudFront routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1582,7 +1592,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('fetch failed');
-      expect(body.message).to.include('Failed to verify edge optimize routing');
+      expect(body.message).to.include('Failed to verify CloudFront routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1665,6 +1675,47 @@ describe('LlmoCloudFrontController', () => {
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
     });
 
+    it('blocks when the distribution CNAMEs do not include the site host', async () => {
+      listDistributionsStub.resolves([{
+        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: ['other.example.org'], status: 'Deployed', enabled: true,
+      }]);
+      const result = await controller.deploy(deployContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('does not serve www.example.com');
+      expect(runDeployStepStub.called).to.equal(false);
+    });
+
+    it('blocks when the distribution has no custom domain (CNAME) to validate', async () => {
+      listDistributionsStub.resolves([{
+        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: [], status: 'Deployed', enabled: true,
+      }]);
+      const result = await controller.deploy(deployContext);
+      expect(result.status).to.equal(400);
+      expect(runDeployStepStub.called).to.equal(false);
+    });
+
+    it('proceeds despite a domain mismatch when allowDomainMismatch is set (logged override)', async () => {
+      listDistributionsStub.resolves([{
+        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: ['other.example.org'], status: 'Deployed', enabled: true,
+      }]);
+      const result = await controller.deploy({
+        ...deployContext,
+        data: { ...deployContext.data, allowDomainMismatch: true },
+      });
+      expect(result.status).to.equal(200);
+      expect(runDeployStepStub.calledOnce).to.equal(true);
+    });
+
+    it('blocks when the distribution is not found in the account', async () => {
+      listDistributionsStub.resolves([]);
+      const result = await controller.deploy(deployContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('not found in this account');
+      expect(runDeployStepStub.called).to.equal(false);
+    });
+
     it('passes the env-driven origin domain when set', async () => {
       await controller.deploy({
         ...deployContext,
@@ -1674,7 +1725,7 @@ describe('LlmoCloudFrontController', () => {
       expect(params.originDomain).to.equal('live.edgeoptimize.net');
     });
 
-    it('returns 400 when the site has no Edge Optimize API key', async () => {
+    it('returns 400 when the site has no LLMO API key', async () => {
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
       const result = await controller.deploy(deployContext);
       expect(result.status).to.equal(400);
@@ -1720,7 +1771,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('assume failed');
-      expect(body.message).to.include('Failed to deploy edge optimize routing');
+      expect(body.message).to.include('Failed to deploy CloudFront routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1750,12 +1801,12 @@ describe('LlmoCloudFrontController', () => {
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
     });
 
-    it('returns 400 when the onboarded site has no Edge Optimize API key', async () => {
+    it('returns 400 when the onboarded site has no LLMO API key', async () => {
       mockTokowakaClient.fetchMetaconfig = sinon.stub().resolves({ apiKeys: [] });
       const result = await controller.deploy(deployContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.include('Site has no Edge Optimize API key');
+      expect(body.message).to.include('No LLMO API key found for this site');
       expect(runDeployStepStub.called).to.equal(false);
     });
   });
@@ -1841,6 +1892,18 @@ describe('LlmoCloudFrontController', () => {
       expect(body.blocker).to.include("can't proceed with this automation");
     });
 
+    it('returns canProceed:false + blocker when the distribution does not serve the site', async () => {
+      listDistributionsStub.resolves([{
+        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: ['other.example.org'], status: 'Deployed', enabled: true,
+      }]);
+      const result = await controller.plan(planContext);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.canProceed).to.equal(false);
+      expect(body.blocker).to.include('does not serve www.example.com');
+      expect(planDeployStub.called).to.equal(false);
+    });
+
     it('returns 400 for an invalid account id', async () => {
       const result = await controller.plan({ ...planContext, data: { ...planContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
@@ -1873,7 +1936,7 @@ describe('LlmoCloudFrontController', () => {
       expect(body.message).to.include('behavior');
     });
 
-    it('returns 400 when the site has no Edge Optimize API key', async () => {
+    it('returns 400 when the site has no LLMO API key', async () => {
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: [] });
       const result = await controller.plan(planContext);
       expect(result.status).to.equal(400);
@@ -1888,7 +1951,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('plan failed');
-      expect(body.message).to.include('Failed to preview edge optimize routing');
+      expect(body.message).to.include('Failed to preview CloudFront routing');
     });
 
     it('returns 404 when the site is not found', async () => {
@@ -1919,12 +1982,12 @@ describe('LlmoCloudFrontController', () => {
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
     });
 
-    it('returns 400 when the onboarded site has no Edge Optimize API key', async () => {
+    it('returns 400 when the onboarded site has no LLMO API key', async () => {
       mockTokowakaClient.fetchMetaconfig = sinon.stub().resolves({ apiKeys: [] });
       const result = await controller.plan(planContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.include('Site has no Edge Optimize API key');
+      expect(body.message).to.include('No LLMO API key found for this site');
       expect(planDeployStub.called).to.equal(false);
     });
   });
@@ -2034,7 +2097,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.not.include('db down');
-      expect(body.message).to.include('Failed to read edge optimize permissions');
+      expect(body.message).to.include('Failed to read the CloudFront connector permissions');
     });
 
     it('returns 400 when the manifest read fails', async () => {

@@ -79,7 +79,7 @@ function LlmoCloudFrontController(ctx) {
         return forbidden('User does not have access to this site');
       }
       if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can generate the edge optimize bootstrap URL');
+        return forbidden('Only LLMO administrators can generate the CloudFront bootstrap URL');
       }
 
       // The template-hosting S3 bucket — per-environment, from Vault
@@ -87,7 +87,7 @@ function LlmoCloudFrontController(ctx) {
       // Read same-account; the customer fetches it via a presigned URL.
       const bucket = env.SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET;
       if (!hasText(bucket) || !s3?.s3Client) {
-        return badRequest('Edge optimize template hosting is not configured for this environment');
+        return badRequest('CloudFront template hosting is not configured for this environment');
       }
 
       const key = env.EDGE_OPTIMIZE_TEMPLATE_KEY || 'customer-bootstrap-role.yaml';
@@ -104,7 +104,7 @@ function LlmoCloudFrontController(ctx) {
       // from Vault (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN).
       const trustedPrincipalArn = env.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN;
       if (!hasText(trustedPrincipalArn)) {
-        return badRequest('Edge optimize is not configured for this environment (missing trusted principal)');
+        return badRequest('CloudFront connector is not configured for this environment (missing trusted principal)');
       }
 
       // Presign the (private) template so the customer's CloudFormation can read it
@@ -126,7 +126,7 @@ function LlmoCloudFrontController(ctx) {
       Object.entries(params).forEach(([k, v]) => qs.set(`param_${k}`, v));
       const quickCreateUrl = `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?${qs.toString()}`;
 
-      log.info(`[edge-optimize-bootstrap-url] Generated bootstrap URL for site ${siteId}, account ${accountId}`);
+      log.info(`[cdn-onboard-cloudfront] Generated bootstrap URL for site ${siteId}, account ${accountId}`);
 
       return ok({
         externalId,
@@ -138,8 +138,8 @@ function LlmoCloudFrontController(ctx) {
         presignTtlSeconds,
       });
     } catch (error) {
-      log.error(`Failed to generate edge optimize bootstrap URL for site ${siteId}:`, error);
-      return internalServerError('Failed to generate the edge optimize bootstrap URL, please try again');
+      log.error(`Failed to generate CloudFront bootstrap URL for site ${siteId}:`, error);
+      return internalServerError('Failed to generate the CloudFront bootstrap URL, please try again');
     }
   };
 
@@ -180,6 +180,10 @@ function LlmoCloudFrontController(ctx) {
     if (requireDistribution && !hasText(distributionId)) {
       return { error: badRequest('distributionId is required') };
     }
+    // CloudFront distribution IDs are uppercase alphanumeric, 12–14 chars — reject garbage early.
+    if (hasText(distributionId) && !/^[A-Z0-9]{12,14}$/.test(distributionId)) {
+      return { error: badRequest('distributionId must be a valid CloudFront distribution ID') };
+    }
     return { accountId, externalId, distributionId };
   };
 
@@ -188,6 +192,77 @@ function LlmoCloudFrontController(ctx) {
     return {
       ...assumed,
       cloudFrontClient: new CloudFrontEdgeClient({ credentials: assumed.credentials }),
+    };
+  };
+
+  // Acting operator + request id for audit logging. The IMS profile email identifies who triggered
+  // the change; the invocation id correlates the "intent" and "result" lines for one request.
+  const actorOf = (context) => context?.attributes?.authInfo?.getProfile()?.email || 'system';
+  const reqIdOf = (context) => context?.invocation?.id || 'unknown';
+
+  // One structured audit line per mutation, emitted BEFORE the AWS call (intent) and AFTER
+  // (result|error). Shipped to Splunk for a durable, queryable who/when/what trail. A separately
+  // persisted audit record is tracked as a follow-up (see PR; LLMO ticket).
+  const logMutation = (log, phase, fields) => {
+    log.info(`[cdn-onboard-cloudfront] ${JSON.stringify({ phase, ...fields, ts: new Date().toISOString() })}`);
+  };
+
+  // Surface actionable AWS failures (permissions, preconditions, throttling) instead of collapsing
+  // them to a generic 500 + "please try again" — which hides the cause and invites a blind retry of
+  // a partially-applied production mutation. Genuinely unknown errors still return a generic 500.
+  const CATEGORIZED_AWS_ERRORS = new Set([
+    'AccessDenied', 'AccessDeniedException', 'PreconditionFailed',
+    'ThrottlingException', 'TooManyRequestsException', 'InvalidArgument', 'NoSuchDistribution',
+  ]);
+  const mutationErrorResponse = (error, fallbackMessage) => (
+    CATEGORIZED_AWS_ERRORS.has(error?.name)
+      ? badRequest(cleanupHeaderValue(`${error.name}: ${error.message}`))
+      : internalServerError(fallbackMessage)
+  );
+
+  // Guardrail: the chosen distribution must actually serve this site's domain, so a mutation can
+  // never be applied to the wrong distribution. Allow ONLY when the site host is among the
+  // distribution's CNAMEs (Aliases). A distribution with no matching CNAME (including
+  // *.cloudfront.net-only) is rejected unless the caller passes an explicit, logged override.
+  // Returns `{ error }` (badRequest) on a block, `{}` when allowed.
+  const assertDistributionServesSite = async (
+    cloudFrontClient,
+    distributionId,
+    site,
+    context,
+    log,
+  ) => {
+    const baseURL = site.getBaseURL();
+    let baseHost = '';
+    try {
+      baseHost = new URL(baseURL).host.toLowerCase();
+    } catch (e) {
+      baseHost = '';
+    }
+    const fwdHost = String(calculateForwardedHost(baseURL, log) || '').toLowerCase();
+    const siteHosts = new Set([baseHost, fwdHost].filter(Boolean));
+
+    const distributions = await cloudFrontClient.listDistributions();
+    const dist = distributions.find((d) => d.id === distributionId);
+    if (!dist) {
+      return { error: badRequest(`Distribution ${distributionId} not found in this account`) };
+    }
+    const aliases = (dist.aliases || []).map((a) => a.toLowerCase());
+    if (aliases.some((a) => siteHosts.has(a))) {
+      return {};
+    }
+
+    const allowOverride = context.data?.allowDomainMismatch === true;
+    if (allowOverride) {
+      log.warn(`[cdn-onboard-cloudfront] OVERRIDE site ${site.getId()}: distribution `
+        + `${distributionId} (aliases: ${aliases.join(',') || 'none'}) does not serve `
+        + `${baseHost} — proceeding by explicit override`);
+      return {};
+    }
+    return {
+      error: badRequest(`Distribution ${distributionId} does not serve ${baseHost}`
+        + ` (its domains: ${aliases.join(', ') || 'none'}).`
+        + ' Select the CloudFront distribution that serves this site.'),
     };
   };
 
@@ -205,24 +280,24 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the edge optimize role');
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the CloudFront connector role');
       if (error) {
         return error;
       }
 
       try {
         const { roleArn } = await assumeConnectorRole({ accountId, externalId, roleName });
-        log.info(`[edge-optimize-connect] Connected site ${siteId} to account ${accountId}`);
+        log.info(`[cdn-onboard-cloudfront] Connected site ${siteId} to account ${accountId}`);
         return ok({ connected: true, accountId, roleArn });
       } catch (assumeError) {
         // The role may not exist yet (customer still creating it) or the external ID may not
         // match — surface as not-connected so the wizard can keep polling rather than erroring.
-        log.info(`[edge-optimize-connect] Role not yet assumable for site ${siteId}: ${assumeError.message}`);
+        log.info(`[cdn-onboard-cloudfront] Role not yet assumable for site ${siteId}: ${assumeError.message}`);
         return ok({ connected: false, reason: cleanupHeaderValue(assumeError.message) });
       }
     } catch (error) {
-      log.error(`Failed to connect edge optimize role for site ${siteId}:`, error);
-      return internalServerError('Failed to connect the edge optimize role, please try again');
+      log.error(`Failed to connect CloudFront connector role for site ${siteId}:`, error);
+      return internalServerError('Failed to connect the CloudFront connector role, please try again');
     }
   };
 
@@ -271,7 +346,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'check edge optimize prerequisites');
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'check CloudFront prerequisites');
       if (error) {
         return error;
       }
@@ -300,8 +375,8 @@ function LlmoCloudFrontController(ctx) {
       // TODO: also validate the Edge Optimize API key here (was part of the standalone wizard).
       return ok({ checks: [connectorRoleCheck, cloudFrontReadCheck] });
     } catch (error) {
-      log.error(`Failed to check edge optimize prerequisites for site ${siteId}:`, error);
-      return internalServerError('Failed to check edge optimize prerequisites, please try again');
+      log.error(`Failed to check CloudFront prerequisites for site ${siteId}:`, error);
+      return internalServerError('Failed to check CloudFront prerequisites, please try again');
     }
   };
 
@@ -391,10 +466,7 @@ function LlmoCloudFrontController(ctx) {
     const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
     const apiKey = metaconfig?.apiKeys?.[0];
     if (!hasText(apiKey)) {
-      return {
-        error: badRequest('Site has no Edge Optimize API key'
-          + ' — enable Edge Optimize for this site first'),
-      };
+      return { error: badRequest('No LLMO API key found for this site') };
     }
     const forwardedHost = calculateForwardedHost(baseURL, log);
     return { target: { baseURL, apiKey, forwardedHost } };
@@ -418,7 +490,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize origin');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the Edge Optimize origin');
       if (error) {
         return error;
       }
@@ -436,22 +508,40 @@ function LlmoCloudFrontController(ctx) {
       const { cloudFrontClient } = await assumeCloudFrontClient({
         accountId, externalId, roleName,
       });
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
+      const audit = {
+        actor: actorOf(context), siteId, accountId, distributionId, action: 'create-origin', requestId: reqIdOf(context),
+      };
+      logMutation(log, 'intent', audit);
       const result = await cloudFrontClient.createOrigin(
         distributionId,
         originDomain,
         { apiKey, forwardedHost },
       );
       let action = 'Origin already existed for';
+      let resultLabel = 'exists';
       if (result.created) {
         action = 'Created origin for';
+        resultLabel = 'created';
       } else if (result.updated) {
         action = 'Patched origin headers for';
+        resultLabel = 'updated';
       }
-      log.info(`[edge-optimize-origin] ${action} site ${siteId}, distribution ${distributionId}`);
+      logMutation(log, 'result', { ...audit, result: resultLabel });
+      log.info(`[cdn-onboard-cloudfront] ${action} site ${siteId}, distribution ${distributionId}`);
       return ok(result);
     } catch (error) {
-      log.error(`Failed to create CloudFront Edge Optimize origin for site ${siteId}:`, error);
-      return internalServerError('Failed to create the edge optimize origin, please try again');
+      log.error(`Failed to create the Edge Optimize origin for site ${siteId}:`, error);
+      return mutationErrorResponse(error, 'Failed to create the Edge Optimize origin, please try again');
     }
   };
 
@@ -474,7 +564,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize routing function');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the CloudFront routing function');
       if (error) {
         return error;
       }
@@ -482,6 +572,16 @@ function LlmoCloudFrontController(ctx) {
       const { cloudFrontClient } = await assumeCloudFrontClient({
         accountId, externalId, roleName,
       });
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
       // Derive the default-behavior target origin id from the live distribution config.
       const { defaultCacheBehavior } = await cloudFrontClient.getDistributionConfig(distributionId);
       const defaultOriginId = defaultCacheBehavior?.targetOriginId;
@@ -489,16 +589,21 @@ function LlmoCloudFrontController(ctx) {
         return badRequest('Could not determine the default cache behavior target origin');
       }
 
+      const audit = {
+        actor: actorOf(context), siteId, accountId, distributionId, action: 'create-function', requestId: reqIdOf(context),
+      };
+      logMutation(log, 'intent', audit);
       const result = await cloudFrontClient.createCloudFrontFunction(
         defaultOriginId,
         distributionId,
         targetedPaths,
       );
-      log.info(`[edge-optimize-function] ${result.created ? 'Created' : 'Updated'} routing function for site ${siteId}`);
+      logMutation(log, 'result', { ...audit, result: result.created ? 'created' : 'updated' });
+      log.info(`[cdn-onboard-cloudfront] ${result.created ? 'Created' : 'Updated'} routing function for site ${siteId}`);
       return ok(result);
     } catch (error) {
       log.error(`Failed to create CloudFront routing function for site ${siteId}:`, error);
-      return internalServerError('Failed to create the edge optimize routing function, please try again');
+      return mutationErrorResponse(error, 'Failed to create the CloudFront routing function, please try again');
     }
   };
 
@@ -519,7 +624,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'apply edge optimize cache headers');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'apply CloudFront cache headers');
       if (error) {
         return error;
       }
@@ -527,12 +632,27 @@ function LlmoCloudFrontController(ctx) {
       const { cloudFrontClient } = await assumeCloudFrontClient({
         accountId, externalId, roleName,
       });
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
+      const audit = {
+        actor: actorOf(context), siteId, accountId, distributionId, behavior: pathPattern, action: 'apply-cache', requestId: reqIdOf(context),
+      };
+      logMutation(log, 'intent', audit);
       const result = await cloudFrontClient.updateCacheSettings(distributionId, pathPattern);
-      log.info(`[edge-optimize-cache] Applied cache headers for site ${siteId}, behavior ${pathPattern}`);
+      logMutation(log, 'result', { ...audit, result: result.scenario || 'applied' });
+      log.info(`[cdn-onboard-cloudfront] Applied cache headers for site ${siteId}, behavior ${pathPattern}`);
       return ok(result);
     } catch (error) {
       log.error(`Failed to apply CloudFront cache headers for site ${siteId}:`, error);
-      return internalServerError('Failed to apply edge optimize cache headers, please try again');
+      return mutationErrorResponse(error, 'Failed to apply CloudFront cache headers, please try again');
     }
   };
 
@@ -552,7 +672,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'create the edge optimize Lambda@Edge function');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the CloudFront Lambda@Edge function');
       if (error) {
         return error;
       }
@@ -561,15 +681,30 @@ function LlmoCloudFrontController(ctx) {
         cloudFrontClient,
         accountId: resolvedAccountId,
       } = await assumeCloudFrontClient({ accountId, externalId, roleName });
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
+      const audit = {
+        actor: actorOf(context), siteId, accountId, distributionId, action: 'create-lambda', requestId: reqIdOf(context),
+      };
+      logMutation(log, 'intent', audit);
       const result = await cloudFrontClient.createLambdaAtEdge(
         resolvedAccountId,
         { distributionId },
       );
-      log.info(`[edge-optimize-lambda] ${result.created ? 'Created' : 'Updated'} Lambda@Edge for site ${siteId}, published version ${result.version}`);
+      logMutation(log, 'result', { ...audit, result: result.status || (result.created ? 'created' : 'updated') });
+      log.info(`[cdn-onboard-cloudfront] ${result.created ? 'Created' : 'Updated'} Lambda@Edge for site ${siteId}, published version ${result.version}`);
       return ok(result);
     } catch (error) {
       log.error(`Failed to create Lambda@Edge function for site ${siteId}:`, error);
-      return internalServerError('Failed to create the edge optimize Lambda@Edge function, please try again');
+      return mutationErrorResponse(error, 'Failed to create the CloudFront Lambda@Edge function, please try again');
     }
   };
 
@@ -589,7 +724,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read the edge optimize Lambda@Edge status');
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read the CloudFront Lambda@Edge status');
       if (error) {
         return error;
       }
@@ -601,7 +736,7 @@ function LlmoCloudFrontController(ctx) {
       return ok(status);
     } catch (error) {
       log.error(`Failed to read Lambda@Edge status for site ${siteId}:`, error);
-      return internalServerError('Failed to read the edge optimize Lambda@Edge status, please try again');
+      return internalServerError('Failed to read the CloudFront Lambda@Edge status, please try again');
     }
   };
 
@@ -633,7 +768,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'associate edge optimize routing');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'associate CloudFront routing');
       if (error) {
         return error;
       }
@@ -641,16 +776,31 @@ function LlmoCloudFrontController(ctx) {
       const { cloudFrontClient } = await assumeCloudFrontClient({
         accountId, externalId, roleName,
       });
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
+      const audit = {
+        actor: actorOf(context), siteId, accountId, distributionId, behavior: pathPattern, action: 'associate', requestId: reqIdOf(context),
+      };
+      logMutation(log, 'intent', audit);
       const result = await cloudFrontClient.applyAssociations(
         distributionId,
         pathPattern,
         lambdaVersionArn,
       );
-      log.info(`[edge-optimize-associate] Associated routing for site ${siteId}, behavior ${pathPattern}`);
+      logMutation(log, 'result', { ...audit, result: 'associated' });
+      log.info(`[cdn-onboard-cloudfront] Associated routing for site ${siteId}, behavior ${pathPattern}`);
       return ok(result);
     } catch (error) {
       log.error(`Failed to associate CloudFront routing for site ${siteId}:`, error);
-      return internalServerError('Failed to associate edge optimize routing, please try again');
+      return mutationErrorResponse(error, 'Failed to associate CloudFront routing, please try again');
     }
   };
 
@@ -670,7 +820,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'verify edge optimize routing');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'verify CloudFront routing');
       if (error) {
         return error;
       }
@@ -684,7 +834,7 @@ function LlmoCloudFrontController(ctx) {
         try {
           domain = String(calculateForwardedHost(site.getBaseURL(), log) || '').trim();
         } catch (e) {
-          log.warn(`[edge-optimize-verify] could not derive host from site baseURL: ${e.message}`);
+          log.warn(`[cdn-onboard-cloudfront] could not derive host from site baseURL: ${e.message}`);
         }
       }
       if (!hasText(domain)) {
@@ -701,11 +851,11 @@ function LlmoCloudFrontController(ctx) {
 
       const url = /^https?:\/\//.test(domain) ? domain : `https://${domain}/`;
       const result = await verifyAwsRouting(url);
-      log.info(`[edge-optimize-verify] Verified routing for site ${siteId}: passed=${result.passed}`);
+      log.info(`[cdn-onboard-cloudfront] Verified routing for site ${siteId}: passed=${result.passed}`);
       return ok(result);
     } catch (error) {
       log.error(`Failed to verify CloudFront routing for site ${siteId}:`, error);
-      return internalServerError('Failed to verify edge optimize routing, please try again');
+      return internalServerError('Failed to verify CloudFront routing, please try again');
     }
   };
 
@@ -738,7 +888,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'deploy edge optimize routing');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'deploy CloudFront routing');
       if (error) {
         return error;
       }
@@ -759,6 +909,21 @@ function LlmoCloudFrontController(ctx) {
         accountId: resolvedAccountId,
       } = await assumeCloudFrontClient({ accountId, externalId, roleName });
 
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
+
+      const audit = {
+        actor: actorOf(context), siteId, accountId, distributionId, behavior, action: 'deploy', requestId: reqIdOf(context),
+      };
+      logMutation(log, 'intent', audit);
       const result = await cloudFrontClient.runDeployStep({
         distributionId,
         originId,
@@ -768,12 +933,13 @@ function LlmoCloudFrontController(ctx) {
         accountId: resolvedAccountId,
       });
 
-      log.info(`[edge-optimize-deploy] site ${siteId}: routingDeployed=${result.routingDeployed},`
+      logMutation(log, 'result', { ...audit, result: `routingDeployed=${result.routingDeployed},verified=${result.verified}` });
+      log.info(`[cdn-onboard-cloudfront] site ${siteId}: routingDeployed=${result.routingDeployed},`
         + ` verified=${result.verified}, steps=${result.steps.map((s) => `${s.key}:${s.status}`).join(',')}`);
       return ok(result);
     } catch (error) {
-      log.error(`[edge-optimize-deploy] Failed for site ${siteId}:`, error);
-      return internalServerError('Failed to deploy edge optimize routing, please try again');
+      log.error(`[cdn-onboard-cloudfront] Failed for site ${siteId}:`, error);
+      return mutationErrorResponse(error, 'Failed to deploy CloudFront routing, please try again');
     }
   };
 
@@ -804,7 +970,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'preview edge optimize routing');
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'preview CloudFront routing');
       if (error) {
         return error;
       }
@@ -822,6 +988,24 @@ function LlmoCloudFrontController(ctx) {
         accountId: resolvedAccountId,
       } = await assumeCloudFrontClient({ accountId, externalId, roleName });
 
+      // Dry-run: a distribution that doesn't serve this site surfaces as a blocker (not a hard
+      // error) so the review screen explains it and keeps Deploy disabled.
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return ok({
+          canProceed: false,
+          blocker: `Distribution ${distributionId} does not serve ${forwardedHost}.`
+            + ' Select the CloudFront distribution that serves this site.',
+          steps: [],
+        });
+      }
+
       const result = await cloudFrontClient.planDeploy({
         distributionId,
         originId,
@@ -831,14 +1015,14 @@ function LlmoCloudFrontController(ctx) {
         accountId: resolvedAccountId,
       });
 
-      log.info(`[edge-optimize-plan] site ${siteId}: canProceed=${result.canProceed},`
+      log.info(`[cdn-onboard-cloudfront] site ${siteId}: canProceed=${result.canProceed},`
         + ` steps=${result.steps.map((s) => `${s.key}:${s.action}`).join(',')}`);
-      // targetDomain lets the FE display exactly the host the BE will route to for this env.
+      // targetDomain lets the FE display exactly the host the BE will route to for this site.
       // Loosely coupled: the FE also knows it locally, so this is purely informational.
       return ok({ ...result, targetDomain: forwardedHost });
     } catch (error) {
-      log.error(`[edge-optimize-plan] Failed for site ${siteId}:`, error);
-      return internalServerError('Failed to preview edge optimize routing, please try again');
+      log.error(`[cdn-onboard-cloudfront] Failed for site ${siteId}:`, error);
+      return internalServerError('Failed to preview CloudFront routing, please try again');
     }
   };
 
@@ -859,14 +1043,14 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'view edge optimize permissions');
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'view the CloudFront connector permissions');
       if (error) {
         return error;
       }
 
       const bucket = env.SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET;
       if (!hasText(bucket) || !s3?.s3Client || !s3?.GetObjectCommand) {
-        return badRequest('Edge optimize template hosting is not configured for this environment');
+        return badRequest('CloudFront template hosting is not configured for this environment');
       }
       // SINGLE SOURCE OF TRUTH: read the high-level permission summary from the connector role
       // template's Metadata block — the same file (and the same S3 object) that defines the actual
@@ -877,7 +1061,7 @@ function LlmoCloudFrontController(ctx) {
       // (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN).
       const adobeAccount = env.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN;
       if (!hasText(adobeAccount)) {
-        return badRequest('Edge optimize is not configured for this environment (missing trusted principal)');
+        return badRequest('CloudFront connector is not configured for this environment (missing trusted principal)');
       }
 
       let manifest;
@@ -901,15 +1085,15 @@ function LlmoCloudFrontController(ctx) {
           })),
         };
       } catch (s3Error) {
-        log.error(`[edge-optimize-permissions] Failed to read permissions from connector template for site ${siteId}: ${s3Error.message}`);
-        return badRequest('Edge optimize permissions are not available');
+        log.error(`[cdn-onboard-cloudfront] Failed to read permissions from connector template for site ${siteId}: ${s3Error.message}`);
+        return badRequest('CloudFront connector permissions are not available');
       }
 
-      log.info(`[edge-optimize-permissions] Returned permissions for site ${siteId}`);
+      log.info(`[cdn-onboard-cloudfront] Returned permissions for site ${siteId}`);
       return ok({ adobeAccount, manifest });
     } catch (error) {
-      log.error(`Failed to read edge optimize permissions for site ${siteId}:`, error);
-      return internalServerError('Failed to read edge optimize permissions, please try again');
+      log.error(`Failed to read the CloudFront connector permissions for site ${siteId}:`, error);
+      return internalServerError('Failed to read the CloudFront connector permissions, please try again');
     }
   };
 
