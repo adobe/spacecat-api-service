@@ -13,7 +13,7 @@
 import {
   ok, badRequest, forbidden, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, composeBaseURL } from '@adobe/spacecat-shared-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import crypto from 'crypto';
 import yaml from 'js-yaml';
@@ -166,7 +166,7 @@ function LlmoCloudFrontController(ctx) {
   // `{ accountId, externalId, distributionId, error }` where `error` is a badRequest Response
   // when validation fails (undefined otherwise) — keeping the messages/status identical to the
   // previously inlined checks.
-  const parseEoCredentials = (context, { requireDistribution = false } = {}) => {
+  const validateCloudfrontCredentials = (context, { requireDistribution = false } = {}) => {
     const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
     const externalId = String(context.data?.externalId || '').trim();
     const distributionId = String(context.data?.distributionId || '').trim();
@@ -199,7 +199,7 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
     if (credError) {
       return credError;
     }
@@ -234,7 +234,7 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
     if (credError) {
       return credError;
     }
@@ -265,7 +265,7 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = parseEoCredentials(context);
+    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
     if (credError) {
       return credError;
     }
@@ -315,7 +315,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -349,7 +349,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -377,51 +377,16 @@ function LlmoCloudFrontController(ctx) {
     }
   };
 
-  // Single source of environment-awareness for the CloudFront wizard. The FE sends only an optional
-  // `environment` flag ('production' | 'stage'); the BE does ALL resolution here and returns the EO
-  // origin headers (apiKey + forwardedHost) plus the resolved baseURL the wizard will route to.
-  //
-  // - 'production' / absent → today's behavior: prod site baseURL → first metaconfig apiKey +
-  //   calculateForwardedHost(prod baseURL).
-  // - 'stage' → resolve the single stage domain persisted on the prod site's edgeOptimizeConfig
-  //   (stagingDomains[0]); compose its baseURL; look up the (already-onboarded) stage site; use
-  //   that stage site's first metaconfig apiKey + calculateForwardedHost(stage baseURL).
+  // Resolve the Edge Optimize origin headers (apiKey + forwardedHost) and the baseURL the wizard
+  // routes to, for the site being onboarded. The wizard is environment-agnostic: a stage domain is
+  // just another onboarded LLMO site, so the caller invokes the wizard with that site's siteId and
+  // this resolves against whatever site it is given (production or stage alike).
   //
   // Returns `{ target: { baseURL, apiKey, forwardedHost }, error }`. On any resolution failure
   // `error` is a badRequest Response the caller returns directly; otherwise `error` is undefined.
-  const resolveEoTarget = async (context, site, environment, log) => {
-    const { Site } = context.dataAccess;
+  const resolveEoTarget = async (context, site, log) => {
     const tokowakaClient = TokowakaClient.createFrom(context);
 
-    if (environment === 'stage') {
-      const edgeConfig = site.getConfig().getEdgeOptimizeConfig() || {};
-      const stagingDomains = Array.isArray(edgeConfig.stagingDomains)
-        ? edgeConfig.stagingDomains
-        : [];
-      const stageDomain = String(stagingDomains[0]?.domain || '').trim();
-      if (!hasText(stageDomain)) {
-        return { error: badRequest('No stage domain configured for this site') };
-      }
-
-      const stageBaseURL = composeBaseURL(stageDomain);
-      const stageSite = await Site.findByBaseURL(stageBaseURL);
-      if (!stageSite) {
-        return { error: badRequest('Stage site not found — add the stage domain first') };
-      }
-
-      const metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
-      const apiKey = metaconfig?.apiKeys?.[0];
-      if (!hasText(apiKey)) {
-        return {
-          error: badRequest('Stage site has no Edge Optimize API key'
-            + ' — enable Edge Optimize for the stage domain first'),
-        };
-      }
-      const forwardedHost = calculateForwardedHost(stageBaseURL, log);
-      return { target: { baseURL: stageBaseURL, apiKey, forwardedHost } };
-    }
-
-    // production / absent
     const baseURL = site.getBaseURL();
     const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
     const apiKey = metaconfig?.apiKeys?.[0];
@@ -442,18 +407,14 @@ function LlmoCloudFrontController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
-    }
-    if (environment !== 'production' && environment !== 'stage') {
-      return badRequest("environment must be 'production' or 'stage'");
     }
 
     try {
@@ -464,9 +425,9 @@ function LlmoCloudFrontController(ctx) {
 
       // The EO origin needs custom headers so the routing function's request authenticates to Edge
       // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
-      // are derived server-side from the site (env-aware via resolveEoTarget) — no UI input beyond
-      // the optional `environment` flag. Without them Verify never goes green.
-      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      // are derived server-side from the onboarded site (resolveEoTarget) — no UI input. Without
+      // them Verify never goes green.
+      const { target, error: targetError } = await resolveEoTarget(context, site, log);
       if (targetError) {
         return targetError;
       }
@@ -507,7 +468,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -552,7 +513,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -585,7 +546,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -622,7 +583,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -656,7 +617,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -703,7 +664,7 @@ function LlmoCloudFrontController(ctx) {
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -760,13 +721,12 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const originId = String(context.data?.originId || '').trim();
     const behavior = String(context.data?.behavior || '').trim();
-    const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -775,9 +735,6 @@ function LlmoCloudFrontController(ctx) {
     }
     if (!hasText(behavior)) {
       return badRequest('behavior is required');
-    }
-    if (environment !== 'production' && environment !== 'stage') {
-      return badRequest("environment must be 'production' or 'stage'");
     }
 
     try {
@@ -788,9 +745,9 @@ function LlmoCloudFrontController(ctx) {
 
       // The EO origin needs custom headers so the routing function's request authenticates to Edge
       // Optimize (x-edgeoptimize-api-key) and resolves the customer host (x-forwarded-host). Both
-      // are derived server-side from the site (env-aware via resolveEoTarget) — no UI input beyond
-      // the optional `environment` flag. Without them Verify never goes green.
-      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      // are derived server-side from the onboarded site (resolveEoTarget) — no UI input. Without
+      // them Verify never goes green.
+      const { target, error: targetError } = await resolveEoTarget(context, site, log);
       if (targetError) {
         return targetError;
       }
@@ -830,13 +787,12 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const originId = String(context.data?.originId || '').trim();
     const behavior = String(context.data?.behavior || '').trim();
-    const environment = String(context.data?.environment || 'production').trim();
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
     const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
       accountId, externalId, distributionId, error: credError,
-    } = parseEoCredentials(context, { requireDistribution: true });
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
@@ -846,9 +802,6 @@ function LlmoCloudFrontController(ctx) {
     if (!hasText(behavior)) {
       return badRequest('behavior is required');
     }
-    if (environment !== 'production' && environment !== 'stage') {
-      return badRequest("environment must be 'production' or 'stage'");
-    }
 
     try {
       const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'preview edge optimize routing');
@@ -856,10 +809,9 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      // Derive the EO origin headers server-side (same as deploy, env-aware via resolveEoTarget) so
-      // the origin step of the plan reflects whether the existing origin already carries the right
-      // headers for the chosen environment.
-      const { target, error: targetError } = await resolveEoTarget(context, site, environment, log);
+      // Derive the EO origin headers server-side (same as deploy, via resolveEoTarget) so the
+      // origin step of the plan reflects whether the existing origin already carries them.
+      const { target, error: targetError } = await resolveEoTarget(context, site, log);
       if (targetError) {
         return targetError;
       }

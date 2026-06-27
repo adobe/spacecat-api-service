@@ -3577,17 +3577,6 @@ cloudfront-deploy-request:
       type: string
       description: The cache behavior path pattern to target; use `default` for the default behavior.
       example: default
-    environment:
-      type: string
-      description: >-
-        Which environment to route. Optional; defaults to `production` (backward-compatible). When
-        `stage`, the backend resolves the site's single configured stage domain and uses the stage
-        site's Edge Optimize API key + forwarded host instead of production's.
-      enum:
-        - production
-        - stage
-      default: production
-      example: production
 
 cloudfront-plan-request:
   type: object
@@ -3621,17 +3610,6 @@ cloudfront-plan-request:
       type: string
       description: The cache behavior path pattern to target; use `default` for the default behavior.
       example: default
-    environment:
-      type: string
-      description: >-
-        Which environment to route. Optional; defaults to `production` (backward-compatible). When
-        `stage`, the backend resolves the site's single configured stage domain and uses the stage
-        site's Edge Optimize API key + forwarded host instead of production's.
-      enum:
-        - production
-        - stage
-      default: production
-      example: production
 
 llmo-probe-edge-optimize:
   get:

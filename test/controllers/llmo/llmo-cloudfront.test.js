@@ -962,18 +962,6 @@ describe('LlmoCloudFrontController', () => {
       expect(createOriginStub.called).to.equal(false);
     });
 
-    it("returns 400 when environment is neither 'production' nor 'stage'", async () => {
-      const result = await controller.createOrigin({
-        ...originContext,
-        data: { ...originContext.data, environment: 'staging' },
-      });
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.include("'production' or 'stage'");
-      expect(createOriginStub.called).to.equal(false);
-    });
-
     it('is idempotent when the origin already exists', async () => {
       createOriginStub = sinon.stub().resolves({
         created: false, alreadyExisted: true, updated: false, originId: 'EdgeOptimize_Origin',
@@ -1754,90 +1742,20 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('defaults to production resolution when environment is omitted', async () => {
+    it('resolves the onboarded site apiKey + forwardedHost for the EO origin headers', async () => {
       const result = await controller.deploy(deployContext);
       expect(result.status).to.equal(200);
       const [, params] = runDeployStepStub.firstCall.args;
-      // production path uses the prod baseURL host (www.example.com) + prod metaconfig key.
+      // Uses the called site's baseURL host (www.example.com) + its metaconfig key.
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
     });
 
-    it("uses the stage apiKey + forwardedHost when environment is 'stage'", async () => {
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
-        stagingDomains: [{ domain: 'staging.example.com', id: 'stage-site-id' }],
-      });
-      mockDataAccess.Site.findByBaseURL = sinon.stub()
-        .withArgs('https://staging.example.com')
-        .resolves({ getId: () => 'stage-site-id' });
-      // prod metaconfig is the default stub; the stage one wins for the stage baseURL.
-      mockTokowakaClient.fetchMetaconfig
-        .withArgs('https://staging.example.com')
-        .resolves({ apiKeys: ['stage-key-999'] });
-
-      const result = await controller.deploy({
-        ...deployContext,
-        data: { ...deployContext.data, environment: 'stage' },
-      });
-
-      expect(result.status).to.equal(200);
-      const [, params] = runDeployStepStub.firstCall.args;
-      expect(params.originHeaders).to.deep.equal({
-        apiKey: 'stage-key-999',
-        forwardedHost: 'staging.example.com',
-      });
-    });
-
-    it('returns 400 for an unknown environment', async () => {
-      const result = await controller.deploy({
-        ...deployContext,
-        data: { ...deployContext.data, environment: 'qa' },
-      });
-      expect(result.status).to.equal(400);
-      expect(runDeployStepStub.called).to.equal(false);
-    });
-
-    it('returns 400 for stage when no stage domain is configured', async () => {
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      const result = await controller.deploy({
-        ...deployContext,
-        data: { ...deployContext.data, environment: 'stage' },
-      });
+    it('returns 400 when the onboarded site has no Edge Optimize API key', async () => {
+      mockTokowakaClient.fetchMetaconfig = sinon.stub().resolves({ apiKeys: [] });
+      const result = await controller.deploy(deployContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.include('No stage domain');
-      expect(runDeployStepStub.called).to.equal(false);
-    });
-
-    it('returns 400 for stage when the stage site is not found', async () => {
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
-        stagingDomains: [{ domain: 'staging.example.com', id: 'stage-site-id' }],
-      });
-      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
-      const result = await controller.deploy({
-        ...deployContext,
-        data: { ...deployContext.data, environment: 'stage' },
-      });
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.include('Stage site not found');
-      expect(runDeployStepStub.called).to.equal(false);
-    });
-
-    it('returns 400 for stage when the stage site has no Edge Optimize API key', async () => {
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
-        stagingDomains: [{ domain: 'staging.example.com', id: 'stage-site-id' }],
-      });
-      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves({ getId: () => 'stage-site-id' });
-      mockTokowakaClient.fetchMetaconfig
-        .withArgs('https://staging.example.com')
-        .resolves({ apiKeys: [] });
-      const result = await controller.deploy({
-        ...deployContext,
-        data: { ...deployContext.data, environment: 'stage' },
-      });
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.include('Stage site has no Edge Optimize API key');
+      expect(body.message).to.include('Site has no Edge Optimize API key');
       expect(runDeployStepStub.called).to.equal(false);
     });
   });
@@ -1992,7 +1910,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('returns targetDomain (prod host) and defaults to production when env is omitted', async () => {
+    it('returns targetDomain (site host) and the resolved EO origin headers', async () => {
       const result = await controller.plan(planContext);
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -2001,63 +1919,12 @@ describe('LlmoCloudFrontController', () => {
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
     });
 
-    it('uses the stage apiKey + forwardedHost and returns the stage targetDomain', async () => {
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
-        stagingDomains: [{ domain: 'staging.example.com', id: 'stage-site-id' }],
-      });
-      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves({ getId: () => 'stage-site-id' });
-      mockTokowakaClient.fetchMetaconfig
-        .withArgs('https://staging.example.com')
-        .resolves({ apiKeys: ['stage-key-999'] });
-
-      const result = await controller.plan({
-        ...planContext,
-        data: { ...planContext.data, environment: 'stage' },
-      });
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.targetDomain).to.equal('staging.example.com');
-      const [, params] = planDeployStub.firstCall.args;
-      expect(params.originHeaders).to.deep.equal({
-        apiKey: 'stage-key-999',
-        forwardedHost: 'staging.example.com',
-      });
-    });
-
-    it('returns 400 for an unknown environment', async () => {
-      const result = await controller.plan({
-        ...planContext,
-        data: { ...planContext.data, environment: 'qa' },
-      });
-      expect(result.status).to.equal(400);
-      expect(planDeployStub.called).to.equal(false);
-    });
-
-    it('returns 400 for stage when no stage domain is configured', async () => {
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      const result = await controller.plan({
-        ...planContext,
-        data: { ...planContext.data, environment: 'stage' },
-      });
+    it('returns 400 when the onboarded site has no Edge Optimize API key', async () => {
+      mockTokowakaClient.fetchMetaconfig = sinon.stub().resolves({ apiKeys: [] });
+      const result = await controller.plan(planContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.include('No stage domain');
-      expect(planDeployStub.called).to.equal(false);
-    });
-
-    it('returns 400 for stage when the stage site is not found', async () => {
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
-        stagingDomains: [{ domain: 'staging.example.com', id: 'stage-site-id' }],
-      });
-      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
-      const result = await controller.plan({
-        ...planContext,
-        data: { ...planContext.data, environment: 'stage' },
-      });
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.include('Stage site not found');
+      expect(body.message).to.include('Site has no Edge Optimize API key');
       expect(planDeployStub.called).to.equal(false);
     });
   });
