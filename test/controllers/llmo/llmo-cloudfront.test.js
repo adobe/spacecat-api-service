@@ -76,17 +76,17 @@ describe('LlmoCloudFrontController', () => {
   let mockLog;
   let mockTokowakaClient;
   let assumeConnectorRoleStub;
-  let listCloudFrontDistributionsStub;
+  let listDistributionsStub;
   let getDistributionConfigStub;
-  let createEdgeOptimizeOriginStub;
-  let createEdgeOptimizeRoutingFunctionStub;
-  let applyEdgeOptimizeCacheHeadersStub;
-  let createEdgeOptimizeLambdaStub;
-  let getEdgeOptimizeLambdaStatusStub;
-  let applyEdgeOptimizeAssociationsStub;
-  let verifyEdgeOptimizeRoutingStub;
-  let runEdgeOptimizeDeployStepStub;
-  let planEdgeOptimizeDeployStub;
+  let createOriginStub;
+  let createCloudFrontFunctionStub;
+  let updateCacheSettingsStub;
+  let createLambdaAtEdgeStub;
+  let getLambdaAtEdgeStatusStub;
+  let applyAssociationsStub;
+  let verifyRoutingStub;
+  let runDeployStepStub;
+  let planDeployStub;
 
   // The control-plane functions are imported from '@adobe/spacecat-shared-tokowaka-client';
   // the wrappers read the mutable outer stubs so each test can reassign them in beforeEach.
@@ -96,7 +96,7 @@ describe('LlmoCloudFrontController', () => {
       this.region = region;
     }
     CloudFrontEdgeClient.prototype.listDistributions = function listDistributions() {
-      return listCloudFrontDistributionsStub(this.credentials, this.region);
+      return listDistributionsStub(this.credentials, this.region);
     };
     CloudFrontEdgeClient.prototype.getDistributionConfig = function getDistributionConfig(
       distributionId,
@@ -108,7 +108,7 @@ describe('LlmoCloudFrontController', () => {
       originDomain,
       headers,
     ) {
-      return createEdgeOptimizeOriginStub(
+      return createOriginStub(
         this.credentials,
         distributionId,
         originDomain,
@@ -121,7 +121,7 @@ describe('LlmoCloudFrontController', () => {
       distributionId,
       targetedPaths,
     ) {
-      return createEdgeOptimizeRoutingFunctionStub(
+      return createCloudFrontFunctionStub(
         this.credentials,
         defaultOriginId,
         distributionId,
@@ -134,7 +134,7 @@ describe('LlmoCloudFrontController', () => {
       pathPattern,
       opts,
     ) {
-      return applyEdgeOptimizeCacheHeadersStub(
+      return updateCacheSettingsStub(
         this.credentials,
         distributionId,
         pathPattern,
@@ -145,19 +145,19 @@ describe('LlmoCloudFrontController', () => {
       accountId,
       opts,
     ) {
-      return createEdgeOptimizeLambdaStub(this.credentials, accountId, opts);
+      return createLambdaAtEdgeStub(this.credentials, accountId, opts);
     };
     CloudFrontEdgeClient.prototype.getLambdaAtEdgeStatus = function getLambdaStatus(
       distributionId,
     ) {
-      return getEdgeOptimizeLambdaStatusStub(this.credentials, distributionId, this.region);
+      return getLambdaAtEdgeStatusStub(this.credentials, distributionId, this.region);
     };
     CloudFrontEdgeClient.prototype.applyAssociations = function applyAssociations(
       distributionId,
       pathPattern,
       lambdaVersionArn,
     ) {
-      return applyEdgeOptimizeAssociationsStub(
+      return applyAssociationsStub(
         this.credentials,
         distributionId,
         pathPattern,
@@ -166,25 +166,25 @@ describe('LlmoCloudFrontController', () => {
       );
     };
     CloudFrontEdgeClient.prototype.runDeployStep = function runDeployStep(params) {
-      return runEdgeOptimizeDeployStepStub(this.credentials, params, this.region);
+      return runDeployStepStub(this.credentials, params, this.region);
     };
     CloudFrontEdgeClient.prototype.planDeploy = function planDeploy(params) {
-      return planEdgeOptimizeDeployStub(this.credentials, params, this.region);
+      return planDeployStub(this.credentials, params, this.region);
     };
 
     return {
       assumeConnectorRole: (...args) => assumeConnectorRoleStub(...args),
-      listDistributions: (...args) => listCloudFrontDistributionsStub(...args),
+      listDistributions: (...args) => listDistributionsStub(...args),
       getDistributionConfig: (...args) => getDistributionConfigStub(...args),
-      createOrigin: (...args) => createEdgeOptimizeOriginStub(...args),
-      createCloudFrontFunction: (...args) => createEdgeOptimizeRoutingFunctionStub(...args),
-      updateCacheSettings: (...args) => applyEdgeOptimizeCacheHeadersStub(...args),
-      createLambdaAtEdge: (...args) => createEdgeOptimizeLambdaStub(...args),
-      getLambdaAtEdgeStatus: (...args) => getEdgeOptimizeLambdaStatusStub(...args),
-      applyAssociations: (...args) => applyEdgeOptimizeAssociationsStub(...args),
-      verifyRouting: (...args) => verifyEdgeOptimizeRoutingStub(...args),
-      runDeployStep: (...args) => runEdgeOptimizeDeployStepStub(...args),
-      planDeploy: (...args) => planEdgeOptimizeDeployStub(...args),
+      createOrigin: (...args) => createOriginStub(...args),
+      createCloudFrontFunction: (...args) => createCloudFrontFunctionStub(...args),
+      updateCacheSettings: (...args) => updateCacheSettingsStub(...args),
+      createLambdaAtEdge: (...args) => createLambdaAtEdgeStub(...args),
+      getLambdaAtEdgeStatus: (...args) => getLambdaAtEdgeStatusStub(...args),
+      applyAssociations: (...args) => applyAssociationsStub(...args),
+      verifyRouting: (...args) => verifyRoutingStub(...args),
+      runDeployStep: (...args) => runDeployStepStub(...args),
+      planDeploy: (...args) => planDeployStub(...args),
       CloudFrontEdgeClient,
     };
   };
@@ -217,17 +217,17 @@ describe('LlmoCloudFrontController', () => {
   before(async function beforeAll() {
     this.timeout(120000);
     assumeConnectorRoleStub = sinon.stub();
-    listCloudFrontDistributionsStub = sinon.stub();
+    listDistributionsStub = sinon.stub();
     getDistributionConfigStub = sinon.stub();
-    createEdgeOptimizeOriginStub = sinon.stub();
-    createEdgeOptimizeRoutingFunctionStub = sinon.stub();
-    applyEdgeOptimizeCacheHeadersStub = sinon.stub();
-    createEdgeOptimizeLambdaStub = sinon.stub();
-    getEdgeOptimizeLambdaStatusStub = sinon.stub();
-    applyEdgeOptimizeAssociationsStub = sinon.stub();
-    verifyEdgeOptimizeRoutingStub = sinon.stub();
-    runEdgeOptimizeDeployStepStub = sinon.stub();
-    planEdgeOptimizeDeployStub = sinon.stub();
+    createOriginStub = sinon.stub();
+    createCloudFrontFunctionStub = sinon.stub();
+    updateCacheSettingsStub = sinon.stub();
+    createLambdaAtEdgeStub = sinon.stub();
+    getLambdaAtEdgeStatusStub = sinon.stub();
+    applyAssociationsStub = sinon.stub();
+    verifyRoutingStub = sinon.stub();
+    runDeployStepStub = sinon.stub();
+    planDeployStub = sinon.stub();
     mockTokowakaClient = { fetchMetaconfig: sinon.stub() };
 
     LlmoCloudFrontController = await esmock(
@@ -242,17 +242,17 @@ describe('LlmoCloudFrontController', () => {
 
   beforeEach(() => {
     assumeConnectorRoleStub = sinon.stub();
-    listCloudFrontDistributionsStub = sinon.stub();
+    listDistributionsStub = sinon.stub();
     getDistributionConfigStub = sinon.stub();
-    createEdgeOptimizeOriginStub = sinon.stub();
-    createEdgeOptimizeRoutingFunctionStub = sinon.stub();
-    applyEdgeOptimizeCacheHeadersStub = sinon.stub();
-    createEdgeOptimizeLambdaStub = sinon.stub();
-    getEdgeOptimizeLambdaStatusStub = sinon.stub();
-    applyEdgeOptimizeAssociationsStub = sinon.stub();
-    verifyEdgeOptimizeRoutingStub = sinon.stub();
-    runEdgeOptimizeDeployStepStub = sinon.stub();
-    planEdgeOptimizeDeployStub = sinon.stub();
+    createOriginStub = sinon.stub();
+    createCloudFrontFunctionStub = sinon.stub();
+    updateCacheSettingsStub = sinon.stub();
+    createLambdaAtEdgeStub = sinon.stub();
+    getLambdaAtEdgeStatusStub = sinon.stub();
+    applyAssociationsStub = sinon.stub();
+    verifyRoutingStub = sinon.stub();
+    runDeployStepStub = sinon.stub();
+    planDeployStub = sinon.stub();
 
     mockLog = {
       info: sinon.stub(),
@@ -488,7 +488,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      listCloudFrontDistributionsStub = sinon.stub().resolves([
+      listDistributionsStub = sinon.stub().resolves([
         {
           id: 'E2EXAMPLE123',
           domainName: 'd111111abcdef8.cloudfront.net',
@@ -514,7 +514,7 @@ describe('LlmoCloudFrontController', () => {
       expect(body.distributions).to.have.length(1);
       expect(body.distributions[0].id).to.equal('E2EXAMPLE123');
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
-      expect(listCloudFrontDistributionsStub.calledOnce).to.equal(true);
+      expect(listDistributionsStub.calledOnce).to.equal(true);
     });
 
     it('returns 400 for an invalid account id', async () => {
@@ -530,7 +530,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
-      listCloudFrontDistributionsStub = sinon.stub().rejects(new Error('ListDistributions failed'));
+      listDistributionsStub = sinon.stub().rejects(new Error('ListDistributions failed'));
 
       const result = await controller.listDistributions(distributionsContext);
 
@@ -566,7 +566,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      listCloudFrontDistributionsStub = sinon.stub().resolves([]);
+      listDistributionsStub = sinon.stub().resolves([]);
       prereqContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
@@ -585,7 +585,7 @@ describe('LlmoCloudFrontController', () => {
         { name: 'cloudFrontRead', ok: true },
       ]);
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
-      expect(listCloudFrontDistributionsStub.calledOnce).to.equal(true);
+      expect(listDistributionsStub.calledOnce).to.equal(true);
     });
 
     it('reports connectorRole false (not erroring) when the role is not assumable', async () => {
@@ -601,7 +601,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('reports cloudFrontRead false (not erroring) when the list call fails', async () => {
-      listCloudFrontDistributionsStub = sinon.stub().rejects(new Error('AccessDenied: cloudfront:ListDistributions'));
+      listDistributionsStub = sinon.stub().rejects(new Error('AccessDenied: cloudfront:ListDistributions'));
 
       const result = await controller.checkPrerequisites(prereqContext);
 
@@ -909,7 +909,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      createEdgeOptimizeOriginStub = sinon.stub().resolves({
+      createOriginStub = sinon.stub().resolves({
         created: true, alreadyExisted: false, updated: false, originId: 'EdgeOptimize_Origin',
       });
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['eo-key-123'] });
@@ -934,7 +934,7 @@ describe('LlmoCloudFrontController', () => {
         created: true, alreadyExisted: false, updated: false, originId: 'EdgeOptimize_Origin',
       });
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
-      expect(createEdgeOptimizeOriginStub.calledOnceWith(
+      expect(createOriginStub.calledOnceWith(
         sinon.match.any,
         'E2EXAMPLE123',
         'live.edgeoptimize.net',
@@ -948,7 +948,7 @@ describe('LlmoCloudFrontController', () => {
         env: { EDGE_OPTIMIZE_EDGE_DOMAIN: 'live.edgeoptimize.net' },
       });
 
-      expect(createEdgeOptimizeOriginStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'live.edgeoptimize.net')).to.equal(true);
+      expect(createOriginStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'live.edgeoptimize.net')).to.equal(true);
     });
 
     it('returns 400 when the site has no Edge Optimize API key', async () => {
@@ -959,7 +959,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('API key');
-      expect(createEdgeOptimizeOriginStub.called).to.equal(false);
+      expect(createOriginStub.called).to.equal(false);
     });
 
     it("returns 400 when environment is neither 'production' nor 'stage'", async () => {
@@ -971,11 +971,11 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include("'production' or 'stage'");
-      expect(createEdgeOptimizeOriginStub.called).to.equal(false);
+      expect(createOriginStub.called).to.equal(false);
     });
 
     it('is idempotent when the origin already exists', async () => {
-      createEdgeOptimizeOriginStub = sinon.stub().resolves({
+      createOriginStub = sinon.stub().resolves({
         created: false, alreadyExisted: true, updated: false, originId: 'EdgeOptimize_Origin',
       });
 
@@ -985,7 +985,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('reports a header patch on an existing header-less origin', async () => {
-      createEdgeOptimizeOriginStub = sinon.stub().resolves({
+      createOriginStub = sinon.stub().resolves({
         created: false, alreadyExisted: true, updated: true, originId: 'EdgeOptimize_Origin',
       });
 
@@ -1014,7 +1014,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
-      createEdgeOptimizeOriginStub = sinon.stub().rejects(new Error('UpdateDistribution failed'));
+      createOriginStub = sinon.stub().rejects(new Error('UpdateDistribution failed'));
       const result = await controller.createOrigin(originContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1056,7 +1056,7 @@ describe('LlmoCloudFrontController', () => {
         defaultCacheBehavior: { pathPattern: 'Default (*)', targetOriginId: 'origin-aem' },
         cacheBehaviors: [],
       });
-      createEdgeOptimizeRoutingFunctionStub = sinon.stub().resolves({
+      createCloudFrontFunctionStub = sinon.stub().resolves({
         name: 'edgeoptimize-routing', created: true, stage: 'LIVE',
       });
       functionContext = {
@@ -1077,7 +1077,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body).to.deep.equal({ name: 'edgeoptimize-routing', created: true, stage: 'LIVE' });
-      expect(createEdgeOptimizeRoutingFunctionStub.calledOnceWith(sinon.match.any, 'origin-aem', 'E2EXAMPLE123', null)).to.equal(true);
+      expect(createCloudFrontFunctionStub.calledOnceWith(sinon.match.any, 'origin-aem', 'E2EXAMPLE123', null)).to.equal(true);
     });
 
     it('returns 400 when the default cache behavior has no target origin', async () => {
@@ -1106,7 +1106,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
-      createEdgeOptimizeRoutingFunctionStub = sinon.stub().rejects(new Error('CreateFunction failed'));
+      createCloudFrontFunctionStub = sinon.stub().rejects(new Error('CreateFunction failed'));
       const result = await controller.createRoutingFunction(functionContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1143,7 +1143,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      applyEdgeOptimizeCacheHeadersStub = sinon.stub().resolves({
+      updateCacheSettingsStub = sinon.stub().resolves({
         policyId: 'cp-1', updated: true, alreadyForwarded: false,
       });
       cacheContext = {
@@ -1165,7 +1165,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.policyId).to.equal('cp-1');
-      expect(applyEdgeOptimizeCacheHeadersStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', '/api/*')).to.equal(true);
+      expect(updateCacheSettingsStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', '/api/*')).to.equal(true);
     });
 
     it('defaults the behavior to "default" when pathPattern is omitted', async () => {
@@ -1173,7 +1173,7 @@ describe('LlmoCloudFrontController', () => {
         ...cacheContext,
         data: { ...cacheContext.data, pathPattern: undefined },
       });
-      expect(applyEdgeOptimizeCacheHeadersStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'default')).to.equal(true);
+      expect(updateCacheSettingsStub.calledOnceWith(sinon.match.any, 'E2EXAMPLE123', 'default')).to.equal(true);
     });
 
     it('returns 400 for an invalid account id', async () => {
@@ -1192,7 +1192,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
-      applyEdgeOptimizeCacheHeadersStub = sinon.stub().rejects(new Error('UpdateCachePolicy failed'));
+      updateCacheSettingsStub = sinon.stub().rejects(new Error('UpdateCachePolicy failed'));
       const result = await controller.applyCache(cacheContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1228,7 +1228,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      createEdgeOptimizeLambdaStub = sinon.stub().resolves({
+      createLambdaAtEdgeStub = sinon.stub().resolves({
         functionArn: 'arn:fn',
         versionArn: 'arn:fn:1',
         version: '1',
@@ -1250,7 +1250,7 @@ describe('LlmoCloudFrontController', () => {
       const body = await result.json();
       expect(body.versionArn).to.equal('arn:fn:1');
       expect(body.version).to.equal('1');
-      expect(createEdgeOptimizeLambdaStub.calledOnceWith(sinon.match.any, '120569600543')).to.equal(true);
+      expect(createLambdaAtEdgeStub.calledOnceWith(sinon.match.any, '120569600543')).to.equal(true);
     });
 
     it('returns 400 for an invalid account id', async () => {
@@ -1274,7 +1274,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
-      createEdgeOptimizeLambdaStub = sinon.stub().rejects(new Error('CreateRole failed'));
+      createLambdaAtEdgeStub = sinon.stub().rejects(new Error('CreateRole failed'));
       const result = await controller.createLambda(lambdaContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1311,7 +1311,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      getEdgeOptimizeLambdaStatusStub = sinon.stub().resolves({
+      getLambdaAtEdgeStatusStub = sinon.stub().resolves({
         exists: true, state: 'Active', lastUpdateStatus: 'Successful', versionArn: 'arn:fn:2', version: '2',
       });
       statusContext = {
@@ -1329,11 +1329,11 @@ describe('LlmoCloudFrontController', () => {
       const body = await result.json();
       expect(body.exists).to.equal(true);
       expect(body.versionArn).to.equal('arn:fn:2');
-      expect(getEdgeOptimizeLambdaStatusStub.calledOnce).to.equal(true);
+      expect(getLambdaAtEdgeStatusStub.calledOnce).to.equal(true);
     });
 
     it('returns exists:false when the function is absent', async () => {
-      getEdgeOptimizeLambdaStatusStub = sinon.stub().resolves({ exists: false, versionArn: null });
+      getLambdaAtEdgeStatusStub = sinon.stub().resolves({ exists: false, versionArn: null });
       const result = await controller.fetchLambdaStatus(statusContext);
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -1362,7 +1362,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the AWS call fails', async () => {
-      getEdgeOptimizeLambdaStatusStub = sinon.stub().rejects(new Error('ListVersions failed'));
+      getLambdaAtEdgeStatusStub = sinon.stub().rejects(new Error('ListVersions failed'));
       const result = await controller.fetchLambdaStatus(statusContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1392,7 +1392,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      applyEdgeOptimizeAssociationsStub = sinon.stub().resolves({
+      applyAssociationsStub = sinon.stub().resolves({
         cloudFrontFunctionArn: 'arn:cf-fn',
         lambdaArn: 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:1',
       });
@@ -1416,7 +1416,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.cloudFrontFunctionArn).to.equal('arn:cf-fn');
-      expect(applyEdgeOptimizeAssociationsStub.calledOnceWith(
+      expect(applyAssociationsStub.calledOnceWith(
         sinon.match.any,
         'E2EXAMPLE123',
         '/api/*',
@@ -1480,7 +1480,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the AWS call fails (conflict)', async () => {
-      applyEdgeOptimizeAssociationsStub = sinon.stub().rejects(new Error('already has a different viewer-request function'));
+      applyAssociationsStub = sinon.stub().rejects(new Error('already has a different viewer-request function'));
       const result = await controller.applyAssociations(associateContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1517,12 +1517,12 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      listCloudFrontDistributionsStub = sinon.stub().resolves([
+      listDistributionsStub = sinon.stub().resolves([
         {
           id: 'E2EXAMPLE123', domainName: 'd111111abcdef8.cloudfront.net', aliases: [], status: 'Deployed', enabled: true, comment: '',
         },
       ]);
-      verifyEdgeOptimizeRoutingStub = sinon.stub().resolves({
+      verifyRoutingStub = sinon.stub().resolves({
         passed: true,
         requestId: 'req-123',
         details: { bot: { status: 200, headers: {} }, human: { status: 200, headers: {} } },
@@ -1546,27 +1546,27 @@ describe('LlmoCloudFrontController', () => {
       const body = await result.json();
       expect(body.passed).to.equal(true);
       expect(body.requestId).to.equal('req-123');
-      expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
-      expect(listCloudFrontDistributionsStub.called).to.equal(false);
+      expect(verifyRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
+      expect(listDistributionsStub.called).to.equal(false);
     });
 
     it('uses an explicit domain when provided (no distribution lookup)', async () => {
       await controller.verifyRouting({ ...verifyContext, data: { ...verifyContext.data, domain: 'www.example.com' } });
-      expect(listCloudFrontDistributionsStub.called).to.equal(false);
-      expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
+      expect(listDistributionsStub.called).to.equal(false);
+      expect(verifyRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
     });
 
     it('falls back to the distribution domain when the site host is unavailable', async () => {
       mockSite.getBaseURL.returns('');
       const result = await controller.verifyRouting(verifyContext);
       expect(result.status).to.equal(200);
-      expect(verifyEdgeOptimizeRoutingStub.calledOnceWith('https://d111111abcdef8.cloudfront.net/')).to.equal(true);
-      expect(listCloudFrontDistributionsStub.calledOnce).to.equal(true);
+      expect(verifyRoutingStub.calledOnceWith('https://d111111abcdef8.cloudfront.net/')).to.equal(true);
+      expect(listDistributionsStub.calledOnce).to.equal(true);
     });
 
     it('returns 400 when no domain can be resolved (no site host, no distribution)', async () => {
       mockSite.getBaseURL.returns('');
-      listCloudFrontDistributionsStub = sinon.stub().resolves([]);
+      listDistributionsStub = sinon.stub().resolves([]);
       const result = await controller.verifyRouting(verifyContext);
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -1589,7 +1589,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the verify call fails', async () => {
-      verifyEdgeOptimizeRoutingStub = sinon.stub().rejects(new Error('fetch failed'));
+      verifyRoutingStub = sinon.stub().rejects(new Error('fetch failed'));
       const result = await controller.verifyRouting(verifyContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1635,7 +1635,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      runEdgeOptimizeDeployStepStub = sinon.stub().resolves({
+      runDeployStepStub = sinon.stub().resolves({
         routingDeployed: false,
         verified: false,
         steps: sampleSteps,
@@ -1665,8 +1665,8 @@ describe('LlmoCloudFrontController', () => {
       expect(body.steps).to.deep.equal(sampleSteps);
       // assumeConnectorRole is called exactly once for the whole sequence.
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
-      expect(runEdgeOptimizeDeployStepStub.calledOnce).to.equal(true);
-      const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
+      expect(runDeployStepStub.calledOnce).to.equal(true);
+      const [, params] = runDeployStepStub.firstCall.args;
       expect(params).to.include({
         distributionId: 'E2EXAMPLE123',
         originId: 'origin-aem',
@@ -1682,7 +1682,7 @@ describe('LlmoCloudFrontController', () => {
         ...deployContext,
         env: { EDGE_OPTIMIZE_EDGE_DOMAIN: 'live.edgeoptimize.net' },
       });
-      const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
+      const [, params] = runDeployStepStub.firstCall.args;
       expect(params.originDomain).to.equal('live.edgeoptimize.net');
     });
 
@@ -1692,7 +1692,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('API key');
-      expect(runEdgeOptimizeDeployStepStub.called).to.equal(false);
+      expect(runDeployStepStub.called).to.equal(false);
     });
 
     it('returns 400 for an invalid account id', async () => {
@@ -1727,7 +1727,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 500 with a generic message when the orchestrator throws', async () => {
-      runEdgeOptimizeDeployStepStub = sinon.stub().rejects(new Error('assume failed'));
+      runDeployStepStub = sinon.stub().rejects(new Error('assume failed'));
       const result = await controller.deploy(deployContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1757,7 +1757,7 @@ describe('LlmoCloudFrontController', () => {
     it('defaults to production resolution when environment is omitted', async () => {
       const result = await controller.deploy(deployContext);
       expect(result.status).to.equal(200);
-      const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
+      const [, params] = runDeployStepStub.firstCall.args;
       // production path uses the prod baseURL host (www.example.com) + prod metaconfig key.
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
     });
@@ -1780,7 +1780,7 @@ describe('LlmoCloudFrontController', () => {
       });
 
       expect(result.status).to.equal(200);
-      const [, params] = runEdgeOptimizeDeployStepStub.firstCall.args;
+      const [, params] = runDeployStepStub.firstCall.args;
       expect(params.originHeaders).to.deep.equal({
         apiKey: 'stage-key-999',
         forwardedHost: 'staging.example.com',
@@ -1793,7 +1793,7 @@ describe('LlmoCloudFrontController', () => {
         data: { ...deployContext.data, environment: 'qa' },
       });
       expect(result.status).to.equal(400);
-      expect(runEdgeOptimizeDeployStepStub.called).to.equal(false);
+      expect(runDeployStepStub.called).to.equal(false);
     });
 
     it('returns 400 for stage when no stage domain is configured', async () => {
@@ -1805,7 +1805,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('No stage domain');
-      expect(runEdgeOptimizeDeployStepStub.called).to.equal(false);
+      expect(runDeployStepStub.called).to.equal(false);
     });
 
     it('returns 400 for stage when the stage site is not found', async () => {
@@ -1820,7 +1820,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('Stage site not found');
-      expect(runEdgeOptimizeDeployStepStub.called).to.equal(false);
+      expect(runDeployStepStub.called).to.equal(false);
     });
 
     it('returns 400 for stage when the stage site has no Edge Optimize API key', async () => {
@@ -1838,7 +1838,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('Stage site has no Edge Optimize API key');
-      expect(runEdgeOptimizeDeployStepStub.called).to.equal(false);
+      expect(runDeployStepStub.called).to.equal(false);
     });
   });
 
@@ -1873,7 +1873,7 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
-      planEdgeOptimizeDeployStub = sinon.stub().resolves(samplePlan);
+      planDeployStub = sinon.stub().resolves(samplePlan);
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['eo-key-123'] });
       planContext = {
         ...mockContext,
@@ -1897,8 +1897,8 @@ describe('LlmoCloudFrontController', () => {
       // plan response now carries an extra targetDomain (the resolved host) alongside the plan.
       expect(body).to.deep.equal({ ...samplePlan, targetDomain: 'www.example.com' });
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
-      expect(planEdgeOptimizeDeployStub.calledOnce).to.equal(true);
-      const [, params] = planEdgeOptimizeDeployStub.firstCall.args;
+      expect(planDeployStub.calledOnce).to.equal(true);
+      const [, params] = planDeployStub.firstCall.args;
       expect(params).to.include({
         distributionId: 'E2EXAMPLE123',
         originId: 'origin-aem',
@@ -1910,7 +1910,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns canProceed:false + blocker when the behavior is already associated', async () => {
-      planEdgeOptimizeDeployStub = sinon.stub().resolves({
+      planDeployStub = sinon.stub().resolves({
         canProceed: false,
         blocker: "This behaviour is already associated with routes, please recheck — can't proceed with this automation.",
         steps: samplePlan.steps,
@@ -1926,7 +1926,7 @@ describe('LlmoCloudFrontController', () => {
     it('returns 400 for an invalid account id', async () => {
       const result = await controller.plan({ ...planContext, data: { ...planContext.data, accountId: '123' } });
       expect(result.status).to.equal(400);
-      expect(planEdgeOptimizeDeployStub.called).to.equal(false);
+      expect(planDeployStub.called).to.equal(false);
     });
 
     it('returns 400 when the external id is missing', async () => {
@@ -1961,11 +1961,11 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('API key');
-      expect(planEdgeOptimizeDeployStub.called).to.equal(false);
+      expect(planDeployStub.called).to.equal(false);
     });
 
     it('returns 500 with a generic message when the planner throws', async () => {
-      planEdgeOptimizeDeployStub = sinon.stub().rejects(new Error('plan failed'));
+      planDeployStub = sinon.stub().rejects(new Error('plan failed'));
       const result = await controller.plan(planContext);
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -1997,7 +1997,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.targetDomain).to.equal('www.example.com');
-      const [, params] = planEdgeOptimizeDeployStub.firstCall.args;
+      const [, params] = planDeployStub.firstCall.args;
       expect(params.originHeaders).to.deep.equal({ apiKey: 'eo-key-123', forwardedHost: 'www.example.com' });
     });
 
@@ -2018,7 +2018,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.targetDomain).to.equal('staging.example.com');
-      const [, params] = planEdgeOptimizeDeployStub.firstCall.args;
+      const [, params] = planDeployStub.firstCall.args;
       expect(params.originHeaders).to.deep.equal({
         apiKey: 'stage-key-999',
         forwardedHost: 'staging.example.com',
@@ -2031,7 +2031,7 @@ describe('LlmoCloudFrontController', () => {
         data: { ...planContext.data, environment: 'qa' },
       });
       expect(result.status).to.equal(400);
-      expect(planEdgeOptimizeDeployStub.called).to.equal(false);
+      expect(planDeployStub.called).to.equal(false);
     });
 
     it('returns 400 for stage when no stage domain is configured', async () => {
@@ -2043,7 +2043,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('No stage domain');
-      expect(planEdgeOptimizeDeployStub.called).to.equal(false);
+      expect(planDeployStub.called).to.equal(false);
     });
 
     it('returns 400 for stage when the stage site is not found', async () => {
@@ -2058,7 +2058,7 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('Stage site not found');
-      expect(planEdgeOptimizeDeployStub.called).to.equal(false);
+      expect(planDeployStub.called).to.equal(false);
     });
   });
 
