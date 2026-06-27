@@ -1088,6 +1088,41 @@ describe('LlmoCloudFrontController', () => {
       expect(body.created).to.equal(false);
     });
 
+    it('forwards a valid targetedPaths array to the function builder', async () => {
+      const result = await controller.createRoutingFunction({
+        ...functionContext,
+        data: { ...functionContext.data, targetedPaths: ['/products', '/blog'] },
+      });
+      expect(result.status).to.equal(200);
+      expect(createCloudFrontFunctionStub.calledOnce).to.equal(true);
+      const [, originId, distId, paths] = createCloudFrontFunctionStub.firstCall.args;
+      expect(originId).to.equal('origin-aem');
+      expect(distId).to.equal('E2EXAMPLE123');
+      expect(paths).to.deep.equal(['/products', '/blog']);
+    });
+
+    it('returns 400 when a targetedPaths entry is malformed', async () => {
+      const result = await controller.createRoutingFunction({
+        ...functionContext,
+        data: { ...functionContext.data, targetedPaths: ['/ok', 'bad path; rm -rf'] },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('targetedPaths entry');
+      expect(createCloudFrontFunctionStub.called).to.equal(false);
+    });
+
+    it('returns 400 when there are too many targetedPaths', async () => {
+      const result = await controller.createRoutingFunction({
+        ...functionContext,
+        data: { ...functionContext.data, targetedPaths: Array.from({ length: 21 }, (_, i) => `/p${i}`) },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('at most 20');
+      expect(createCloudFrontFunctionStub.called).to.equal(false);
+    });
+
     it('returns 400 when the default cache behavior has no target origin', async () => {
       getDistributionConfigStub = sinon.stub().resolves({
         origins: [], defaultCacheBehavior: null, cacheBehaviors: [],

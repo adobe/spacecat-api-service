@@ -39,6 +39,13 @@ const CFN_YAML_SCHEMA = yaml.DEFAULT_SCHEMA.extend(
   )),
 );
 
+// targetedPaths is an optional allowlist (route only these paths instead of all HTML pages),
+// used mainly for testing — so it is meant to be a short list. The paths are embedded into the
+// viewer-request CloudFront Function, which AWS caps at 10 KB of code; keeping the list small
+// (and each entry bounded) leaves ample headroom even as the base function grows over time.
+const TARGETED_PATHS_MAX_ENTRIES = 20;
+const TARGETED_PATHS_MAX_ENTRY_LENGTH = 256;
+
 /**
  * Controller for the CloudFront "Optimize at Edge" onboarding wizard. Mirrors the structure of
  * the Cloudflare onboarding controller: it owns the multi-step, cross-account control-plane flow
@@ -568,6 +575,21 @@ function LlmoCloudFrontController(ctx) {
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
+    }
+    // targetedPaths is embedded into the CloudFront Function as JSON (not interpolated), so this is
+    // a sanity/size guard, not an injection fix: cap the count (short testing list) and check each
+    // entry is a clean path.
+    if (targetedPaths !== null) {
+      if (targetedPaths.length > TARGETED_PATHS_MAX_ENTRIES) {
+        return badRequest(`targetedPaths supports at most ${TARGETED_PATHS_MAX_ENTRIES} paths`);
+      }
+      const validEntries = targetedPaths.every((p) => typeof p === 'string'
+        && p.length > 0 && p.length <= TARGETED_PATHS_MAX_ENTRY_LENGTH
+        && /^[a-zA-Z0-9/_.*-]+$/.test(p));
+      if (!validEntries) {
+        return badRequest('Each targetedPaths entry must be a non-empty path'
+          + ` (max ${TARGETED_PATHS_MAX_ENTRY_LENGTH} chars; alphanumerics and / _ . * - only)`);
+      }
     }
 
     try {
