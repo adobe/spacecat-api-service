@@ -1078,6 +1078,16 @@ describe('LlmoCloudFrontController', () => {
       expect(createCloudFrontFunctionStub.calledOnceWith(sinon.match.any, 'origin-aem', 'E2EXAMPLE123', null)).to.equal(true);
     });
 
+    it('reports an updated (not created) routing function', async () => {
+      createCloudFrontFunctionStub = sinon.stub().resolves({
+        name: 'edgeoptimize-routing', created: false, stage: 'LIVE',
+      });
+      const result = await controller.createRoutingFunction(functionContext);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.created).to.equal(false);
+    });
+
     it('returns 400 when the default cache behavior has no target origin', async () => {
       getDistributionConfigStub = sinon.stub().resolves({
         origins: [], defaultCacheBehavior: null, cacheBehaviors: [],
@@ -1615,6 +1625,112 @@ describe('LlmoCloudFrontController', () => {
     });
   });
 
+  describe('distribution↔site guardrail (granular endpoints) + validation', () => {
+    const creds = {
+      accountId: '120569600543',
+      externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
+      distributionId: 'E2EXAMPLE123',
+    };
+    const ctxWith = (data) => ({
+      ...mockContext, params: { siteId: TEST_SITE_ID }, data, env: {},
+    });
+    const nonMatching = () => listDistributionsStub.resolves([{
+      id: 'E2EXAMPLE123',
+      domainName: 'd1.cloudfront.net',
+      aliases: ['other.example.org'],
+      status: 'Deployed',
+      enabled: true,
+    }]);
+
+    beforeEach(() => {
+      // These endpoints run gate → (resolveEoTarget) → assume role → guardrail; stub the role +
+      // metaconfig so execution reaches the guardrail (the global beforeEach leaves them bare).
+      assumeConnectorRoleStub.resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['eo-key-123'] });
+    });
+
+    it('createOrigin blocks when the distribution does not serve the site', async () => {
+      nonMatching();
+      const result = await controller.createOrigin(ctxWith({ ...creds }));
+      expect(result.status).to.equal(400);
+      expect(createOriginStub.called).to.equal(false);
+    });
+
+    it('createRoutingFunction blocks when the distribution does not serve the site', async () => {
+      nonMatching();
+      const result = await controller.createRoutingFunction(ctxWith({ ...creds }));
+      expect(result.status).to.equal(400);
+      expect(createCloudFrontFunctionStub.called).to.equal(false);
+    });
+
+    it('applyCache blocks when the distribution does not serve the site', async () => {
+      nonMatching();
+      const result = await controller.applyCache(ctxWith({ ...creds }));
+      expect(result.status).to.equal(400);
+      expect(updateCacheSettingsStub.called).to.equal(false);
+    });
+
+    it('createLambda blocks when the distribution does not serve the site', async () => {
+      nonMatching();
+      const result = await controller.createLambda(ctxWith({ ...creds }));
+      expect(result.status).to.equal(400);
+      expect(createLambdaAtEdgeStub.called).to.equal(false);
+    });
+
+    it('applyAssociations blocks when the distribution does not serve the site', async () => {
+      nonMatching();
+      const result = await controller.applyAssociations(ctxWith({
+        ...creds,
+        pathPattern: 'default',
+        lambdaVersionArn: 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:1',
+      }));
+      expect(result.status).to.equal(400);
+      expect(applyAssociationsStub.called).to.equal(false);
+    });
+
+    it('rejects a malformed distributionId before doing any work', async () => {
+      const result = await controller.createOrigin(ctxWith({ ...creds, distributionId: 'bad id!' }));
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('valid CloudFront distribution ID');
+      expect(createOriginStub.called).to.equal(false);
+    });
+
+    it('blocks when the site base URL is unparseable (no host to match)', async () => {
+      mockSite.getBaseURL.returns('not-a-url');
+      nonMatching();
+      const result = await controller.createOrigin(ctxWith({ ...creds }));
+      expect(result.status).to.equal(400);
+      expect(createOriginStub.called).to.equal(false);
+    });
+
+    it('emits an audit line with the resolved caller and request id', async () => {
+      createOriginStub = sinon.stub().resolves({ created: true, originId: 'EdgeOptimize_Origin' });
+      const auditCtx = {
+        ...ctxWith({ ...creds }),
+        attributes: { authInfo: { getProfile: () => ({ email: 'operator@adobe.com' }) } },
+        invocation: { id: 'req-abc-123' },
+      };
+      const result = await controller.createOrigin(auditCtx);
+      expect(result.status).to.equal(200);
+      const line = mockLog.info.getCalls().map((c) => c.args[0]).find((m) => typeof m === 'string' && m.includes('action=create-origin'));
+      expect(line).to.include('caller=operator@adobe.com');
+      expect(line).to.include('requestId=req-abc-123');
+    });
+
+    it('surfaces a categorized AWS error (AccessDenied) as 400, not a generic 500', async () => {
+      createOriginStub = sinon.stub().rejects(Object.assign(new Error('not allowed'), { name: 'AccessDenied' }));
+      const result = await controller.createOrigin(ctxWith({ ...creds }));
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('AccessDenied');
+    });
+  });
+
   describe('deploy', () => {
     let deployContext;
 
@@ -1697,7 +1813,7 @@ describe('LlmoCloudFrontController', () => {
 
     it('proceeds despite a domain mismatch when allowDomainMismatch is set (logged override)', async () => {
       listDistributionsStub.resolves([{
-        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: ['other.example.org'], status: 'Deployed', enabled: true,
+        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: [], status: 'Deployed', enabled: true,
       }]);
       const result = await controller.deploy({
         ...deployContext,

@@ -195,21 +195,32 @@ function LlmoCloudFrontController(ctx) {
     };
   };
 
-  // Acting operator + request id for audit logging. The IMS profile email identifies who triggered
-  // the change; the invocation id correlates the "intent" and "result" lines for one request.
-  const actorOf = (context) => context?.attributes?.authInfo?.getProfile()?.email || 'system';
-  const reqIdOf = (context) => context?.invocation?.id || 'unknown';
+  // Caller identity for audit lines; defaults so the field is always present (mirrors Cloudflare).
+  const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
 
-  // One structured audit line per mutation, emitted BEFORE the AWS call (intent) and AFTER
-  // (result|error). Shipped to Splunk for a durable, queryable who/when/what trail. A separately
-  // persisted audit record is tracked as a follow-up (see PR; LLMO ticket).
-  const logMutation = (log, phase, fields) => {
-    log.info(`[cdn-onboard-cloudfront] ${JSON.stringify({ phase, ...fields, ts: new Date().toISOString() })}`);
+  // Greppable key=value audit line per mutation (started/done/error), correlated by requestId —
+  // same shape as the Cloudflare onboarding controller. Null/empty fields are dropped.
+  const auditLine = (context, action, outcome, fields = {}) => {
+    const entries = {
+      action,
+      outcome,
+      caller: getCallerId(context),
+      requestId: context?.invocation?.id || 'unknown',
+      ...fields,
+    };
+    const fmt = (v) => {
+      const s = String(v);
+      return /\s/.test(s) ? `"${s.replace(/"/g, "'")}"` : s;
+    };
+    const kv = Object.entries(entries)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}=${fmt(v)}`)
+      .join(' ');
+    return `[cdn-onboard-cloudfront] ${kv}`;
   };
 
-  // Surface actionable AWS failures (permissions, preconditions, throttling) instead of collapsing
-  // them to a generic 500 + "please try again" — which hides the cause and invites a blind retry of
-  // a partially-applied production mutation. Genuinely unknown errors still return a generic 500.
+  // Surface actionable AWS failures (permissions, preconditions, throttling) as 4xx instead of a
+  // generic 500 + "try again", which hides the cause and invites a blind retry.
   const CATEGORIZED_AWS_ERRORS = new Set([
     'AccessDenied', 'AccessDeniedException', 'PreconditionFailed',
     'ThrottlingException', 'TooManyRequestsException', 'InvalidArgument', 'NoSuchDistribution',
@@ -220,10 +231,8 @@ function LlmoCloudFrontController(ctx) {
       : internalServerError(fallbackMessage)
   );
 
-  // Guardrail: the chosen distribution must actually serve this site's domain, so a mutation can
-  // never be applied to the wrong distribution. Allow ONLY when the site host is among the
-  // distribution's CNAMEs (Aliases). A distribution with no matching CNAME (including
-  // *.cloudfront.net-only) is rejected unless the caller passes an explicit, logged override.
+  // Guardrail: a mutation may only touch a distribution that serves this site — allow only when the
+  // site host is among the distribution's CNAMEs (Aliases), else block (explicit override aside).
   // Returns `{ error }` (badRequest) on a block, `{}` when allowed.
   const assertDistributionServesSite = async (
     cloudFrontClient,
@@ -234,12 +243,13 @@ function LlmoCloudFrontController(ctx) {
   ) => {
     const baseURL = site.getBaseURL();
     let baseHost = '';
+    let fwdHost = '';
     try {
       baseHost = new URL(baseURL).host.toLowerCase();
+      fwdHost = calculateForwardedHost(baseURL, log).toLowerCase();
     } catch (e) {
-      baseHost = '';
+      // unparseable base URL / host derivation failed — leaves no host to match against
     }
-    const fwdHost = String(calculateForwardedHost(baseURL, log) || '').toLowerCase();
     const siteHosts = new Set([baseHost, fwdHost].filter(Boolean));
 
     const distributions = await cloudFrontClient.listDistributions();
@@ -247,7 +257,7 @@ function LlmoCloudFrontController(ctx) {
     if (!dist) {
       return { error: badRequest(`Distribution ${distributionId} not found in this account`) };
     }
-    const aliases = (dist.aliases || []).map((a) => a.toLowerCase());
+    const aliases = dist.aliases.map((a) => a.toLowerCase());
     if (aliases.some((a) => siteHosts.has(a))) {
       return {};
     }
@@ -518,29 +528,26 @@ function LlmoCloudFrontController(ctx) {
       if (guard.error) {
         return guard.error;
       }
-      const audit = {
-        actor: actorOf(context), siteId, accountId, distributionId, action: 'create-origin', requestId: reqIdOf(context),
-      };
-      logMutation(log, 'intent', audit);
+      log.info(auditLine(context, 'create-origin', 'started', { siteId, accountId, distributionId }));
       const result = await cloudFrontClient.createOrigin(
         distributionId,
         originDomain,
         { apiKey, forwardedHost },
       );
-      let action = 'Origin already existed for';
       let resultLabel = 'exists';
       if (result.created) {
-        action = 'Created origin for';
         resultLabel = 'created';
       } else if (result.updated) {
-        action = 'Patched origin headers for';
         resultLabel = 'updated';
       }
-      logMutation(log, 'result', { ...audit, result: resultLabel });
-      log.info(`[cdn-onboard-cloudfront] ${action} site ${siteId}, distribution ${distributionId}`);
+      log.info(auditLine(context, 'create-origin', 'done', {
+        siteId, accountId, distributionId, result: resultLabel,
+      }));
       return ok(result);
     } catch (error) {
-      log.error(`Failed to create the Edge Optimize origin for site ${siteId}:`, error);
+      log.error(auditLine(context, 'create-origin', 'error', {
+        siteId, accountId, distributionId, error: error.message,
+      }));
       return mutationErrorResponse(error, 'Failed to create the Edge Optimize origin, please try again');
     }
   };
@@ -589,20 +596,20 @@ function LlmoCloudFrontController(ctx) {
         return badRequest('Could not determine the default cache behavior target origin');
       }
 
-      const audit = {
-        actor: actorOf(context), siteId, accountId, distributionId, action: 'create-function', requestId: reqIdOf(context),
-      };
-      logMutation(log, 'intent', audit);
+      log.info(auditLine(context, 'create-function', 'started', { siteId, accountId, distributionId }));
       const result = await cloudFrontClient.createCloudFrontFunction(
         defaultOriginId,
         distributionId,
         targetedPaths,
       );
-      logMutation(log, 'result', { ...audit, result: result.created ? 'created' : 'updated' });
-      log.info(`[cdn-onboard-cloudfront] ${result.created ? 'Created' : 'Updated'} routing function for site ${siteId}`);
+      log.info(auditLine(context, 'create-function', 'done', {
+        siteId, accountId, distributionId, created: result.created,
+      }));
       return ok(result);
     } catch (error) {
-      log.error(`Failed to create CloudFront routing function for site ${siteId}:`, error);
+      log.error(auditLine(context, 'create-function', 'error', {
+        siteId, accountId, distributionId, error: error.message,
+      }));
       return mutationErrorResponse(error, 'Failed to create the CloudFront routing function, please try again');
     }
   };
@@ -642,16 +649,18 @@ function LlmoCloudFrontController(ctx) {
       if (guard.error) {
         return guard.error;
       }
-      const audit = {
-        actor: actorOf(context), siteId, accountId, distributionId, behavior: pathPattern, action: 'apply-cache', requestId: reqIdOf(context),
-      };
-      logMutation(log, 'intent', audit);
+      log.info(auditLine(context, 'apply-cache', 'started', {
+        siteId, accountId, distributionId, behavior: pathPattern,
+      }));
       const result = await cloudFrontClient.updateCacheSettings(distributionId, pathPattern);
-      logMutation(log, 'result', { ...audit, result: result.scenario || 'applied' });
-      log.info(`[cdn-onboard-cloudfront] Applied cache headers for site ${siteId}, behavior ${pathPattern}`);
+      log.info(auditLine(context, 'apply-cache', 'done', {
+        siteId, accountId, distributionId, behavior: pathPattern, scenario: result.scenario,
+      }));
       return ok(result);
     } catch (error) {
-      log.error(`Failed to apply CloudFront cache headers for site ${siteId}:`, error);
+      log.error(auditLine(context, 'apply-cache', 'error', {
+        siteId, accountId, distributionId, behavior: pathPattern, error: error.message,
+      }));
       return mutationErrorResponse(error, 'Failed to apply CloudFront cache headers, please try again');
     }
   };
@@ -691,19 +700,19 @@ function LlmoCloudFrontController(ctx) {
       if (guard.error) {
         return guard.error;
       }
-      const audit = {
-        actor: actorOf(context), siteId, accountId, distributionId, action: 'create-lambda', requestId: reqIdOf(context),
-      };
-      logMutation(log, 'intent', audit);
+      log.info(auditLine(context, 'create-lambda', 'started', { siteId, accountId, distributionId }));
       const result = await cloudFrontClient.createLambdaAtEdge(
         resolvedAccountId,
         { distributionId },
       );
-      logMutation(log, 'result', { ...audit, result: result.status || (result.created ? 'created' : 'updated') });
-      log.info(`[cdn-onboard-cloudfront] ${result.created ? 'Created' : 'Updated'} Lambda@Edge for site ${siteId}, published version ${result.version}`);
+      log.info(auditLine(context, 'create-lambda', 'done', {
+        siteId, accountId, distributionId, status: result.status, version: result.version,
+      }));
       return ok(result);
     } catch (error) {
-      log.error(`Failed to create Lambda@Edge function for site ${siteId}:`, error);
+      log.error(auditLine(context, 'create-lambda', 'error', {
+        siteId, accountId, distributionId, error: error.message,
+      }));
       return mutationErrorResponse(error, 'Failed to create the CloudFront Lambda@Edge function, please try again');
     }
   };
@@ -786,20 +795,22 @@ function LlmoCloudFrontController(ctx) {
       if (guard.error) {
         return guard.error;
       }
-      const audit = {
-        actor: actorOf(context), siteId, accountId, distributionId, behavior: pathPattern, action: 'associate', requestId: reqIdOf(context),
-      };
-      logMutation(log, 'intent', audit);
+      log.info(auditLine(context, 'associate', 'started', {
+        siteId, accountId, distributionId, behavior: pathPattern,
+      }));
       const result = await cloudFrontClient.applyAssociations(
         distributionId,
         pathPattern,
         lambdaVersionArn,
       );
-      logMutation(log, 'result', { ...audit, result: 'associated' });
-      log.info(`[cdn-onboard-cloudfront] Associated routing for site ${siteId}, behavior ${pathPattern}`);
+      log.info(auditLine(context, 'associate', 'done', {
+        siteId, accountId, distributionId, behavior: pathPattern,
+      }));
       return ok(result);
     } catch (error) {
-      log.error(`Failed to associate CloudFront routing for site ${siteId}:`, error);
+      log.error(auditLine(context, 'associate', 'error', {
+        siteId, accountId, distributionId, behavior: pathPattern, error: error.message,
+      }));
       return mutationErrorResponse(error, 'Failed to associate CloudFront routing, please try again');
     }
   };
@@ -920,10 +931,9 @@ function LlmoCloudFrontController(ctx) {
         return guard.error;
       }
 
-      const audit = {
-        actor: actorOf(context), siteId, accountId, distributionId, behavior, action: 'deploy', requestId: reqIdOf(context),
-      };
-      logMutation(log, 'intent', audit);
+      log.info(auditLine(context, 'deploy', 'started', {
+        siteId, accountId, distributionId, behavior,
+      }));
       const result = await cloudFrontClient.runDeployStep({
         distributionId,
         originId,
@@ -933,12 +943,20 @@ function LlmoCloudFrontController(ctx) {
         accountId: resolvedAccountId,
       });
 
-      logMutation(log, 'result', { ...audit, result: `routingDeployed=${result.routingDeployed},verified=${result.verified}` });
-      log.info(`[cdn-onboard-cloudfront] site ${siteId}: routingDeployed=${result.routingDeployed},`
-        + ` verified=${result.verified}, steps=${result.steps.map((s) => `${s.key}:${s.status}`).join(',')}`);
+      log.info(auditLine(context, 'deploy', 'done', {
+        siteId,
+        accountId,
+        distributionId,
+        behavior,
+        routingDeployed: result.routingDeployed,
+        verified: result.verified,
+        steps: result.steps.map((s) => `${s.key}:${s.status}`).join(','),
+      }));
       return ok(result);
     } catch (error) {
-      log.error(`[cdn-onboard-cloudfront] Failed for site ${siteId}:`, error);
+      log.error(auditLine(context, 'deploy', 'error', {
+        siteId, accountId, distributionId, behavior, error: error.message,
+      }));
       return mutationErrorResponse(error, 'Failed to deploy CloudFront routing, please try again');
     }
   };
