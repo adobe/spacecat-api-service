@@ -2397,6 +2397,83 @@ llmo-edge-optimize-status:
     security:
       - api_key: [ ]
 
+site-llmo-edge-optimize-bootstrap-url:
+  post:
+    tags:
+      - llmo
+    summary: Generate a CloudFormation quick-create URL for the Edge Optimize connector role
+    description: |
+      Returns a one-click AWS CloudFormation quick-create URL (with a server-side
+      presigned template URL) that the customer uses to create the cross-account
+      connector role in their own AWS account. The template bucket stays private —
+      presigning is done with the service execution role — so no public S3 endpoint
+      is required and the customer needs no S3 access of their own.
+    operationId: getEdgeOptimizeBootstrapUrl
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - accountId
+            properties:
+              accountId:
+                type: string
+                description: The 12-digit AWS account ID hosting the customer's CloudFront distribution
+                pattern: '^[0-9]{12}$'
+                example: '682033462621'
+    responses:
+      '200':
+        description: Bootstrap URL generated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - externalId
+                - roleArn
+                - quickCreateUrl
+              properties:
+                externalId:
+                  type: string
+                  description: Per-session external ID baked into the role's trust policy
+                roleName:
+                  type: string
+                roleArn:
+                  type: string
+                trustedPrincipalArn:
+                  type: string
+                stackName:
+                  type: string
+                quickCreateUrl:
+                  type: string
+                  description: One-click CloudFormation quick-create URL (presigned template)
+                presignTtlSeconds:
+                  type: integer
+              example:
+                externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5'
+                roleName: AdobeLLMOptimizerCloudFrontConnectorRole
+                roleArn: 'arn:aws:iam::682033462621:role/AdobeLLMOptimizerCloudFrontConnectorRole'
+                trustedPrincipalArn: 'arn:aws:iam::120569600543:root'
+                stackName: adobe-edgeoptimize-connector-role
+                quickCreateUrl: 'https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=...'
+                presignTtlSeconds: 900
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-probe-edge-optimize:
   get:
     tags:
