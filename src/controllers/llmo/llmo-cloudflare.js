@@ -28,6 +28,18 @@ const CF_TOKEN_MISSING = 'Missing x-cloudflare-token header';
 const EDGE_OPTIMIZE_API_KEY_SECRET = 'EDGE_OPTIMIZE_API_KEY';
 const EDGE_OPTIMIZE_TARGET_HOST_BINDING = 'EDGE_OPTIMIZE_TARGET_HOST';
 
+// Stable ownership tag attached to every worker we deploy. CloudflareClient uses it to make
+// re-deploys idempotent: a worker that already carries this tag is recognized as ours and the
+// upload is skipped (deployWorkerScript returns null); a same-named worker WITHOUT it is a
+// foreign collision and surfaces as an 'already exists' error (mapped to 409).
+const CF_WORKER_OWNER_TAG = 'adobe-llmo';
+
+// Cloudflare allows up to 8 tags per script and uses them in comma/colon-delimited filter
+// expressions, so caller-derived tag values must be sanitized. Cloudflare explicitly disallows
+// ',' and '&'; we conservatively restrict to [A-Za-z0-9._-] (dropping '@', ':', etc.) and cap the
+// length, since the full validation rules are undocumented and a rejected tag fails the deploy.
+const CF_TAG_MAX_LEN = 80;
+
 // Pin the worker script to an immutable commit SHA rather than a mutable branch HEAD so a
 // push to llmo-code-samples can never silently change what is deployed to customer accounts.
 // Overridable via env for forward-compat, but the default is always a pinned SHA.
@@ -38,6 +50,47 @@ const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
 // Boundary input validation (defense-in-depth, independent of CloudflareClient behaviour).
 const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+/**
+ * Identifies the API caller for audit logging and worker tagging. profile.email is an IMS user
+ * GUID (GUID@hexOrgId.e), not an RFC-5322 address — see access-control-util.js. Returns 'unknown'
+ * when the profile is unavailable (e.g. non-JWT auth) so audit lines always carry the field.
+ */
+const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
+
+/**
+ * Sanitizes a value (e.g. the caller's IMS identity) into a Cloudflare-safe worker tag: keeps
+ * only [A-Za-z0-9._-], capped at CF_TAG_MAX_LEN. Returns null when there is no usable identity
+ * (so the deploy still gets the stable ownership tag without an empty/invalid extra tag).
+ */
+const toWorkerTag = (value) => {
+  if (!hasText(value) || value === 'unknown') {
+    return null;
+  }
+  const sanitized = value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, CF_TAG_MAX_LEN);
+  return hasText(sanitized) ? sanitized : null;
+};
+
+/**
+ * Builds a single greppable audit line for the Cloudflare onboarding operations. Every line
+ * carries action, outcome, caller, and requestId so a deploy/route attempt can be correlated
+ * end-to-end in Splunk; `fields` adds operation-specific identifiers (siteId, accountId, ...).
+ * Null/undefined/empty fields are dropped to keep lines clean.
+ */
+const auditLine = (context, action, outcome, fields = {}) => {
+  const entries = {
+    action,
+    outcome,
+    caller: getCallerId(context),
+    requestId: context?.invocation?.id || 'unknown',
+    ...fields,
+  };
+  const kv = Object.entries(entries)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${k}=${v}`)
+    .join(' ');
+  return `[llmo-cf] ${kv}`;
+};
 
 /**
  * Whether a deployWorkerScript failure indicates the target worker name is already taken.
@@ -99,9 +152,9 @@ function LlmoCloudflareController(ctx) {
    * HTTP response. These are external network calls, so failures are routine: we log the cause
    * and surface a sanitized, status-appropriate response instead of an unstructured 500.
    */
-  const cfErrorResponse = (error, action) => {
+  const cfErrorResponse = (error, action, context, fields = {}) => {
     const message = error?.message || String(error);
-    log.error(`Cloudflare ${action} failed: ${message}`);
+    log.error(auditLine(context, 'cf-call', 'error', { op: `'${action}'`, ...fields, error: `'${message}'` }));
     if (/returned 401\b/.test(message)) {
       return unauthorized('Cloudflare authentication failed');
     }
@@ -174,7 +227,7 @@ function LlmoCloudflareController(ctx) {
     try {
       return ok(await client[method]());
     } catch (e) {
-      return cfErrorResponse(e, action);
+      return cfErrorResponse(e, action, context, { siteId: context.params?.siteId });
     }
   };
 
@@ -228,7 +281,10 @@ function LlmoCloudflareController(ctx) {
       const zones = await client.listZones({ accountId });
       return ok(zones || []);
     } catch (e) {
-      return cfErrorResponse(e, 'zone listing');
+      return cfErrorResponse(e, 'zone listing', context, {
+        siteId: context.params?.siteId,
+        accountId,
+      });
     }
   };
 
@@ -236,9 +292,13 @@ function LlmoCloudflareController(ctx) {
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
    * Body: { accountId, targetHost }
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
-   * from the site (see deriveWorkerName), then sets the LLMO API key as the
-   * EDGE_OPTIMIZE_API_KEY secret on the worker. Returns 409 if a worker with the derived name
-   * already exists in the account (the client refuses to overwrite).
+   * from the site (see deriveWorkerName), tagging it with CF_WORKER_OWNER_TAG (+ the caller's
+   * IMS identity), then sets the LLMO API key as the EDGE_OPTIMIZE_API_KEY secret on the worker.
+   *
+   * Idempotency via tags: if a worker we previously deployed (matching CF_WORKER_OWNER_TAG)
+   * already exists, the client skips the upload and we return 200 with `alreadyDeployed: true`
+   * without re-setting the secret. A same-named worker that does NOT carry the tag is treated as
+   * a foreign collision and returns 409.
    */
   const deployWorker = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -276,15 +336,31 @@ function LlmoCloudflareController(ctx) {
       return badRequest('targetHost must belong to the site\'s domain');
     }
 
+    const siteId = site.getId();
+
+    // Tags attached to the worker. CF_WORKER_OWNER_TAG is always present and always first so the
+    // client's idempotency match (tags.some((t) => settings.tags?.includes(t))) recognizes any
+    // worker we previously deployed — regardless of which IMS user originally created it. The
+    // caller's IMS identity is appended (sanitized to a Cloudflare-safe value) purely as an audit
+    // breadcrumb of who first deployed it; it never participates in cross-user matching.
+    const callerTag = toWorkerTag(getCallerId(context));
+    const tags = callerTag ? [CF_WORKER_OWNER_TAG, callerTag] : [CF_WORKER_OWNER_TAG];
+
+    log.info(auditLine(context, 'deploy-worker', 'started', {
+      siteId, accountId, scriptName, targetHost,
+    }));
+
     let llmoApiKey;
     try {
       llmoApiKey = await getLlmoApiKey(site, context);
     } catch (e) {
-      log.error(`Failed to fetch LLMO metaconfig for site ${site.getId()}: ${e.message}`);
+      log.error(auditLine(context, 'deploy-worker', 'metaconfig-failed', {
+        siteId, accountId, scriptName, error: `'${e.message}'`,
+      }));
       return createResponse({ message: 'Failed to fetch site metaconfig' }, 502);
     }
     if (!hasText(llmoApiKey)) {
-      log.error(`No LLMO API key found for site ${site.getId()}`);
+      log.error(auditLine(context, 'deploy-worker', 'no-api-key', { siteId, accountId, scriptName }));
       return internalServerError('LLMO API key not configured for this site');
     }
 
@@ -292,23 +368,45 @@ function LlmoCloudflareController(ctx) {
     try {
       workerScript = await fetchWorkerScript();
     } catch (e) {
-      return cfErrorResponse(e, 'worker script fetch');
+      return cfErrorResponse(e, 'worker script fetch', context, { siteId, scriptName });
     }
 
     const bindings = [
       { name: EDGE_OPTIMIZE_TARGET_HOST_BINDING, type: 'plain_text', text: targetHost },
     ];
 
+    let deployResult;
     try {
-      // overwrite defaults to false, so the client rejects if the worker already exists,
-      // preventing an onboarding deploy from silently replacing one.
-      await cfClient.deployWorkerScript(accountId, scriptName, workerScript, bindings);
+      // overwrite stays false. With tags, the client is idempotent: a worker already carrying
+      // CF_WORKER_OWNER_TAG is recognized as ours and the upload is skipped (returns null); a
+      // same-named worker WITHOUT the tag is a foreign collision and throws 'already exists'.
+      deployResult = await cfClient.deployWorkerScript(
+        accountId,
+        scriptName,
+        workerScript,
+        bindings,
+        { tags },
+      );
     } catch (e) {
       if (isWorkerDeployConflictError(e)) {
-        log.info(`Worker '${scriptName}' already exists in account ${accountId}; refusing to overwrite`);
+        log.info(auditLine(context, 'deploy-worker', 'conflict-foreign', {
+          siteId, accountId, scriptName,
+        }));
         return workerAlreadyExistsResponse(scriptName, accountId);
       }
-      return cfErrorResponse(e, 'worker deployment');
+      return cfErrorResponse(e, 'worker deployment', context, { siteId, accountId, scriptName });
+    }
+
+    if (deployResult === null) {
+      // The client skipped the upload because a worker we own (matching CF_WORKER_OWNER_TAG)
+      // already exists. It already carries its API key secret from the original deploy, so this
+      // is a no-op success: we return without re-setting the secret.
+      log.info(auditLine(context, 'deploy-worker', 'already-deployed', {
+        siteId, accountId, scriptName, targetHost,
+      }));
+      return ok({
+        scriptName, accountId, targetHost, alreadyDeployed: true,
+      });
     }
 
     try {
@@ -323,11 +421,14 @@ function LlmoCloudflareController(ctx) {
       // functional. We cannot delete it (the client exposes no delete-script operation), so
       // log the partial state explicitly and return a structured response the caller can
       // act on (re-deploy to set the secret).
-      log.error(
-        `Worker '${scriptName}' deployed for site ${site.getId()} but setting the `
-        + `${EDGE_OPTIMIZE_API_KEY_SECRET} secret failed: ${e.message}. `
-        + 'The worker is live but non-functional and must be re-deployed.',
-      );
+      log.error(auditLine(context, 'deploy-worker', 'secret-failed', {
+        siteId,
+        accountId,
+        scriptName,
+        secret: EDGE_OPTIMIZE_API_KEY_SECRET,
+        error: `'${e.message}'`,
+        note: "'worker is live but non-functional; re-deploy to complete setup'",
+      }));
       return createResponse({
         message: 'Worker deployed but failed to set its API key secret; '
           + 'the worker is live but not yet functional. Re-deploy to complete setup.',
@@ -337,7 +438,9 @@ function LlmoCloudflareController(ctx) {
       }, 502);
     }
 
-    log.info(`Deployed Cloudflare worker '${scriptName}' for site ${site.getId()}`);
+    log.info(auditLine(context, 'deploy-worker', 'deployed', {
+      siteId, accountId, scriptName, targetHost,
+    }));
     return ok({ scriptName, accountId, targetHost });
   };
 
@@ -382,18 +485,25 @@ function LlmoCloudflareController(ctx) {
       return badRequest('route pattern must target the site\'s domain');
     }
 
+    const siteId = site.getId();
+    log.info(auditLine(context, 'add-route', 'started', {
+      siteId, zoneId, scriptName, pattern,
+    }));
+
     // Guard against overriding an existing route: fetch the zone's current routes and reject
     // if the requested pattern already exists.
     let existingRoutes;
     try {
       existingRoutes = await cfClient.listRoutes(zoneId);
     } catch (e) {
-      return cfErrorResponse(e, 'route lookup');
+      return cfErrorResponse(e, 'route lookup', context, { siteId, zoneId });
     }
 
     const conflict = (existingRoutes || []).find((route) => route?.pattern === pattern);
     if (conflict) {
-      log.info(`Route pattern '${pattern}' already exists in zone ${zoneId}; refusing to override`);
+      log.info(auditLine(context, 'add-route', 'conflict', {
+        siteId, zoneId, scriptName, pattern,
+      }));
       return createResponse({
         message: `A route for pattern '${pattern}' already exists in this zone`,
         existingRoute: conflict,
@@ -402,9 +512,12 @@ function LlmoCloudflareController(ctx) {
 
     try {
       const route = await cfClient.addRoute(zoneId, pattern, scriptName);
+      log.info(auditLine(context, 'add-route', 'created', {
+        siteId, zoneId, scriptName, pattern,
+      }));
       return ok(route);
     } catch (e) {
-      return cfErrorResponse(e, 'route creation');
+      return cfErrorResponse(e, 'route creation', context, { siteId, zoneId, scriptName });
     }
   };
 

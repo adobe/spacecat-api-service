@@ -321,6 +321,64 @@ describe('LlmoCloudflareController', () => {
       });
     });
 
+    it('tags the worker with the ownership tag and the sanitized caller IMS identity', async () => {
+      // profile.email is an IMS GUID (GUID@hexOrgId.e); '@' is not a Cloudflare-safe tag char and
+      // is sanitized to '_' so the deploy cannot be rejected for an invalid tag.
+      mockContext.attributes = {
+        authInfo: { getProfile: () => ({ email: 'CALLER-GUID@abc123.e' }) },
+      };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts).to.deep.equal({ tags: ['adobe-llmo', 'CALLER-GUID_abc123.e'] });
+    });
+
+    it('always tags with adobe-llmo first so any IMS user matches a worker another user deployed', async () => {
+      // With no resolvable caller identity, only the stable ownership tag is attached — this is
+      // the tag the client uses to recognize the worker on a later re-deploy by a different user.
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      await controller.deployWorker(mockContext);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts.tags[0]).to.equal('adobe-llmo');
+      expect(opts.tags).to.deep.equal(['adobe-llmo']);
+    });
+
+    it('sanitizes Cloudflare-unsafe characters (commas, ampersands) out of the caller tag', async () => {
+      mockContext.attributes = {
+        authInfo: { getProfile: () => ({ email: 'a,b&c d:e' }) },
+      };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      await controller.deployWorker(mockContext);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts).to.deep.equal({ tags: ['adobe-llmo', 'a_b_c_d_e'] });
+    });
+
+    it('is idempotent (200, skips secret) when the client skips an already-tagged worker', async () => {
+      // The client returns null when a worker we own (matching tag) already exists.
+      mockCfClient.deployWorkerScript.resolves(null);
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({
+        scriptName: DERIVED_SCRIPT_NAME,
+        accountId: ACCOUNT_ID,
+        targetHost: TARGET_HOST,
+        alreadyDeployed: true,
+      });
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
     it('accepts the cloudflareToken from the body when the header is absent', async () => {
       mockContext.pathInfo.headers = {};
       mockContext.data = {
