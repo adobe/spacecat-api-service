@@ -17,7 +17,8 @@ import {
   hostInSiteDomain,
   routePatternHost,
   routePatternHostGlob,
-  routeHostsOverlap,
+  globsIntersect,
+  routePatternsOverlap,
 } from '../../../src/controllers/llmo/llmo-cloudflare-utils.js';
 
 describe('llmo-cloudflare-utils', () => {
@@ -88,38 +89,68 @@ describe('llmo-cloudflare-utils', () => {
     });
   });
 
-  describe('routeHostsOverlap', () => {
-    it('matches identical bare hosts', () => {
-      expect(routeHostsOverlap('example.com/*', 'https://example.com/blog/*')).to.equal(true);
+  describe('globsIntersect', () => {
+    it('matches identical literal strings and empty patterns', () => {
+      expect(globsIntersect('abc', 'abc')).to.equal(true);
+      expect(globsIntersect('', '')).to.equal(true);
     });
 
-    it('does not match different bare hosts', () => {
-      expect(routeHostsOverlap('shop.example.com/*', 'example.com/*')).to.equal(false);
-      expect(routeHostsOverlap('www.example.com/*', 'a.example.com/*')).to.equal(false);
+    it('treats * as zero-or-more of any character', () => {
+      expect(globsIntersect('a*c', 'abbbc')).to.equal(true);
+      expect(globsIntersect('a*', 'a')).to.equal(true); // star matches empty
+      expect(globsIntersect('*', 'anything')).to.equal(true);
     });
 
-    it('matches when a wildcard route covers a bare subdomain (and vice versa)', () => {
-      // Customer *.example.com/* worker vs onboarding a.example.com/* -> must overlap.
-      expect(routeHostsOverlap('*.example.com/*', 'a.example.com/*')).to.equal(true);
-      expect(routeHostsOverlap('a.example.com/*', '*.example.com/*')).to.equal(true);
+    it('returns false when literals diverge with no covering wildcard', () => {
+      expect(globsIntersect('abc', 'abd')).to.equal(false);
+      expect(globsIntersect('foo*', 'bar*')).to.equal(false);
+      expect(globsIntersect('abc', 'ab')).to.equal(false);
     });
 
-    it('a wildcard does not match its own apex (Cloudflare semantics)', () => {
-      expect(routeHostsOverlap('*.example.com/*', 'example.com/*')).to.equal(false);
+    it('intersects two wildcard patterns', () => {
+      expect(globsIntersect('a*d', '*bd')).to.equal(true);
+      expect(globsIntersect('x*', '*y')).to.equal(true);
+    });
+  });
+
+  describe('routePatternsOverlap', () => {
+    it('matches the same host across scheme/path variants', () => {
+      expect(routePatternsOverlap('example.com/*', 'https://example.com/blog/*')).to.equal(true);
     });
 
-    it('matches overlapping wildcard scopes', () => {
-      expect(routeHostsOverlap('*.example.com/*', '*.a.example.com/*')).to.equal(true);
-      expect(routeHostsOverlap('*.example.com/*', '*.example.com/api*')).to.equal(true);
+    it('does not match different hosts', () => {
+      expect(routePatternsOverlap('shop.example.com/*', 'example.com/*')).to.equal(false);
+      expect(routePatternsOverlap('www.example.com/*', 'a.example.com/*')).to.equal(false);
+    });
+
+    it('matches when a "*." wildcard route covers a concrete subdomain (and vice versa)', () => {
+      expect(routePatternsOverlap('*.example.com/*', 'a.example.com/*')).to.equal(true);
+      expect(routePatternsOverlap('a.example.com/*', '*.example.com/*')).to.equal(true);
+    });
+
+    it('a "*." wildcard does not match its own apex (the literal dot enforces a subdomain)', () => {
+      expect(routePatternsOverlap('*.example.com/*', 'example.com/*')).to.equal(false);
+    });
+
+    it('the broader "*example.com" wildcard (no dot) matches the apex AND subdomains', () => {
+      // *example.com/* matches example.com, www.example.com — and even look-alikes.
+      expect(routePatternsOverlap('*example.com/*', 'example.com/*')).to.equal(true);
+      expect(routePatternsOverlap('*example.com/*', 'www.example.com/*')).to.equal(true);
+      expect(routePatternsOverlap('*example.com/*', 'notexample.com/*')).to.equal(true);
+    });
+
+    it('considers only the host — same host with different paths still overlaps', () => {
+      // Path is intentionally ignored: any host overlap is a conflict.
+      expect(routePatternsOverlap('example.com/*', 'example.com/blog/*')).to.equal(true);
+      expect(routePatternsOverlap('example.com/foo/*', 'example.com/bar/*')).to.equal(true);
     });
 
     it('does not match unrelated wildcard scopes', () => {
-      expect(routeHostsOverlap('*.example.com/*', '*.other.com/*')).to.equal(false);
+      expect(routePatternsOverlap('*.example.com/*', '*.other.com/*')).to.equal(false);
     });
 
-    it('returns false when a pattern yields an empty host (e.g. a path-only pattern)', () => {
-      expect(routeHostsOverlap('/just/a/path', 'example.com/*')).to.equal(false);
-      expect(routeHostsOverlap('example.com/*', '*./*')).to.equal(false);
+    it('matches the host regardless of whether a path is present', () => {
+      expect(routePatternsOverlap('example.com', 'example.com/blog/*')).to.equal(true);
     });
   });
 });

@@ -18,8 +18,12 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  deriveWorkerName, hostInSiteDomain, routePatternHost, routeHostsOverlap,
+  deriveWorkerName, hostInSiteDomain, routePatternHost, routePatternHostGlob, routePatternsOverlap,
 } from './llmo-cloudflare-utils.js';
+
+// Cap the conflicting-routes list returned in a 409 so a zone with many overlapping routes can't
+// produce an unbounded response payload.
+const MAX_CONFLICTING_ROUTES = 10;
 
 const CF_TOKEN_HEADER = 'x-cloudflare-token';
 // TEMPORARY: body/query fallback field for the CF token, used only until the
@@ -88,9 +92,16 @@ const auditLine = (context, action, outcome, fields = {}) => {
     requestId: context?.invocation?.id || 'unknown',
     ...fields,
   };
+  // Quote any value containing whitespace so key=value parsers (Splunk, grep) don't misread an
+  // embedded space (e.g. in an error message) as a field boundary. Inner double quotes are
+  // downgraded to single quotes to keep the token well-formed.
+  const fmt = (v) => {
+    const s = String(v);
+    return /\s/.test(s) ? `"${s.replace(/"/g, "'")}"` : s;
+  };
   const kv = Object.entries(entries)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v]) => `${k}=${v}`)
+    .map(([k, v]) => `${k}=${fmt(v)}`)
     .join(' ');
   return `[llmo-cf] ${kv}`;
 };
@@ -157,7 +168,7 @@ function LlmoCloudflareController(ctx) {
    */
   const cfErrorResponse = (error, action, context, fields = {}) => {
     const message = error?.message || String(error);
-    log.error(auditLine(context, 'cf-call', 'error', { op: `'${action}'`, ...fields, error: `'${message}'` }));
+    log.error(auditLine(context, 'cf-call', 'error', { op: action, ...fields, error: message }));
     if (/returned 401\b/.test(message)) {
       return unauthorized('Cloudflare authentication failed');
     }
@@ -358,7 +369,7 @@ function LlmoCloudflareController(ctx) {
       llmoApiKey = await getLlmoApiKey(site, context);
     } catch (e) {
       log.error(auditLine(context, 'deploy-worker', 'metaconfig-failed', {
-        siteId, accountId, scriptName, error: `'${e.message}'`,
+        siteId, accountId, scriptName, error: e.message,
       }));
       return createResponse({ message: 'Failed to fetch site metaconfig' }, 502);
     }
@@ -429,8 +440,8 @@ function LlmoCloudflareController(ctx) {
         accountId,
         scriptName,
         secret: EDGE_OPTIMIZE_API_KEY_SECRET,
-        error: `'${e.message}'`,
-        note: "'worker is live but non-functional; re-deploy to complete setup'",
+        error: e.message,
+        note: 'worker is live but non-functional; re-deploy to complete setup',
       }));
       return createResponse({
         message: 'Worker deployed but failed to set its API key secret; '
@@ -495,11 +506,11 @@ function LlmoCloudflareController(ctx) {
     }));
 
     // Protect the customer's existing routing: fetch the zone's routes and reject if any route
-    // bound to a DIFFERENT worker shares a host with the one we are about to add. We compare host
-    // globs (wildcard-aware, path-ignored) rather than raw pattern strings, so a customer's
-    // "*.example.com/*" worker route blocks an onboarding attempt on "a.example.com/*", and
-    // scheme/path/string variants on the same host are caught too — not just exact duplicates.
-    // Routes already bound to our own derived worker are safe and treated as idempotent.
+    // bound to a DIFFERENT worker shares a host with the one we are about to add (path ignored —
+    // any host overlap is a conflict). We use generic host-glob intersection
+    // (routePatternsOverlap), so a customer's "*.example.com/*" or broader "*example.com/*" worker
+    // route blocks an onboarding attempt on "a.example.com/*", and scheme/wildcard variants are
+    // caught too — not just exact duplicates. A route bound to our own worker is idempotent.
     let existingRoutes;
     try {
       existingRoutes = await cfClient.listRoutes(zoneId);
@@ -507,9 +518,11 @@ function LlmoCloudflareController(ctx) {
       return cfErrorResponse(e, 'route lookup', context, { siteId, zoneId });
     }
 
-    const targetRouteHost = routePatternHost(pattern).toLowerCase();
+    // Use the wildcard-preserving glob for display so a wildcard pattern is reported as
+    // "*.example.com" (what it matches) rather than the stripped apex.
+    const targetRouteHost = routePatternHostGlob(pattern);
     const overlapping = (existingRoutes || []).filter(
-      (route) => hasText(route?.pattern) && routeHostsOverlap(route.pattern, pattern),
+      (route) => hasText(route?.pattern) && routePatternsOverlap(route.pattern, pattern),
     );
 
     // Only a route bound to a DIFFERENT worker is a blocking conflict; a disabled/no-script route
@@ -518,20 +531,22 @@ function LlmoCloudflareController(ctx) {
       (route) => hasText(route.script) && route.script !== scriptName,
     );
     if (foreignConflicts.length > 0) {
+      const conflictingRoutes = foreignConflicts.slice(0, MAX_CONFLICTING_ROUTES);
       log.info(auditLine(context, 'add-route', 'conflict-foreign', {
         siteId,
         zoneId,
         scriptName,
         pattern,
         host: targetRouteHost,
-        conflicts: foreignConflicts.map((r) => `${r.pattern}->${r.script}`).join(','),
+        conflictCount: foreignConflicts.length,
+        conflicts: conflictingRoutes.map((r) => `${r.pattern}->${r.script}`).join(','),
       }));
       return createResponse({
         message: `Existing route(s) in this zone already route host '${targetRouteHost}' to `
           + 'another worker; refusing to add a route that could affect the customer\'s current '
           + 'routing',
-        existingRoute: foreignConflicts[0],
-        conflictingRoutes: foreignConflicts,
+        existingRoute: conflictingRoutes[0],
+        conflictingRoutes,
       }, 409);
     }
 

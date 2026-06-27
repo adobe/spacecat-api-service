@@ -307,6 +307,7 @@ describe('LlmoCloudflareController', () => {
         DERIVED_SCRIPT_NAME,
         WORKER_SCRIPT_TEXT,
         [{ name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: TARGET_HOST }],
+        { tags: ['adobe-llmo'] },
       );
       expect(mockCfClient.setWorkerSecret).to.have.been.calledWith(
         ACCOUNT_ID,
@@ -335,6 +336,28 @@ describe('LlmoCloudflareController', () => {
 
       const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
       expect(opts).to.deep.equal({ tags: ['adobe-llmo', 'CALLER-GUID_abc123.e'] });
+    });
+
+    it('truncates an over-long caller identity tag to CF_TAG_MAX_LEN (80 chars)', async () => {
+      const longId = `${'a'.repeat(120)}@org.e`;
+      mockContext.attributes = { authInfo: { getProfile: () => ({ email: longId }) } };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      await controller.deployWorker(mockContext);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts.tags[0]).to.equal('adobe-llmo');
+      expect(opts.tags[1]).to.have.lengthOf(80);
+      expect(opts.tags[1]).to.equal('a'.repeat(80));
+    });
+
+    it('quotes audit-log values containing spaces so key=value parsing stays intact', async () => {
+      mockTokowakaClient.fetchMetaconfig.rejects(new Error('tokowaka is not reachable'));
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+      const logged = mockContext.log.error.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('error="tokowaka is not reachable"');
     });
 
     it('always tags with adobe-llmo first so any IMS user matches a worker another user deployed', async () => {
@@ -608,6 +631,33 @@ describe('LlmoCloudflareController', () => {
       // a.example.com/* — adding our worker there would collide, so it must fail with 409.
       mockContext.data = { zoneId: ZONE_ID, pattern: 'a.example.com/*' };
       const existing = { id: ROUTE_ID, pattern: '*.example.com/*', script: 'customer-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.conflictingRoutes).to.deep.equal([existing]);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('caps conflictingRoutes at 10 for a zone with many overlapping routes', async () => {
+      const many = Array.from({ length: 14 }, (_, i) => ({
+        id: `r${i}`, pattern: 'example.com/*', script: `worker-${i}`,
+      }));
+      mockCfClient.listRoutes.resolves(many);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.conflictingRoutes).to.have.lengthOf(10);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('returns 409 when a broad "*example.com/*" route (no dot) on another worker covers the host', async () => {
+      // *example.com/* matches the apex too (wildcard = zero-or-more chars), so onboarding
+      // example.com/* must be blocked.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/*' };
+      const existing = { id: ROUTE_ID, pattern: '*example.com/*', script: 'customer-worker' };
       mockCfClient.listRoutes.resolves([existing]);
 
       const res = await controller.addRoute(mockContext);

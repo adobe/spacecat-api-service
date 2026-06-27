@@ -67,30 +67,50 @@ export const routePatternHostGlob = (pattern) => pattern
   .toLowerCase();
 
 /**
- * Whether two route host globs can match a common hostname (set intersection), accounting for a
- * single leading "*." wildcard label, per Cloudflare semantics: a bare host matches only itself,
- * and "*.base" matches any strict subdomain of base (e.g. *.example.com matches www.example.com
- * but NOT example.com). Used to detect whether a new route would share a host with an existing one
- * — i.e. could affect that host's current routing — regardless of path.
+ * Whether two strings containing `*` wildcards can match a common string — i.e. their match-sets
+ * intersect. Each `*` matches zero or more of any character, matching Cloudflare's route-pattern
+ * operator ("The only supported operator is the wildcard (*), which matches zero or more of any
+ * character"). Memoized O(|a|·|b|) two-pattern intersection.
  */
-export const routeHostsOverlap = (patternA, patternB) => {
-  const a = routePatternHostGlob(patternA);
-  const b = routePatternHostGlob(patternB);
-  const wcA = a.startsWith('*.');
-  const wcB = b.startsWith('*.');
-  const baseA = wcA ? a.slice(2) : a;
-  const baseB = wcB ? b.slice(2) : b;
-  if (!baseA || !baseB) {
-    return false;
-  }
-  if (!wcA && !wcB) {
-    return baseA === baseB;
-  }
-  if (wcA && wcB) {
-    // Subdomain sets of *.baseA and *.baseB intersect when one base is the other or below it.
-    return baseA === baseB || baseA.endsWith(`.${baseB}`) || baseB.endsWith(`.${baseA}`);
-  }
-  // One wildcard, one bare host: the wildcard must cover the bare host (strict subdomain).
-  const [wcBase, host] = wcA ? [baseA, baseB] : [baseB, baseA];
-  return host.endsWith(`.${wcBase}`);
+export const globsIntersect = (a, b) => {
+  const memo = new Map();
+  const visit = (i, j) => {
+    const key = i * (b.length + 1) + j;
+    if (memo.has(key)) {
+      return memo.get(key);
+    }
+    let res;
+    if (i === a.length && j === b.length) {
+      res = true;
+    } else if (i < a.length && a[i] === '*') {
+      // `*` matches the empty string (advance a) or one more character also produced by b.
+      res = visit(i + 1, j) || (j < b.length && visit(i, j + 1));
+    } else if (j < b.length && b[j] === '*') {
+      res = visit(i, j + 1) || (i < a.length && visit(i + 1, j));
+    } else if (i < a.length && j < b.length && a[i] === b[j]) {
+      res = visit(i + 1, j + 1);
+    } else {
+      res = false;
+    }
+    memo.set(key, res);
+    return res;
+  };
+  return visit(0, 0);
 };
+
+/**
+ * Whether the HOST globs of two Cloudflare route patterns can match a common hostname — i.e. the
+ * two routes could serve the same host (regardless of path). Only the host portion is compared
+ * (the path is intentionally ignored): a route sharing the host affects that host's routing for
+ * the paths it covers, and we treat any host overlap as a conflict. A Cloudflare hostname wildcard
+ * never crosses the `/` into the path, so taking the host segment and glob-intersecting is exact.
+ *
+ * This is the generic form — no special-casing of wildcard position:
+ *  - `*.example.com` (literal dot) forces a subdomain, so it never matches the apex `example.com`;
+ *  - the broader `*example.com` (bare `*`) also matches the apex and look-alikes;
+ *  - `*.example.com` matches a concrete subdomain like `a.example.com`.
+ */
+export const routePatternsOverlap = (patternA, patternB) => globsIntersect(
+  routePatternHostGlob(patternA),
+  routePatternHostGlob(patternB),
+);
