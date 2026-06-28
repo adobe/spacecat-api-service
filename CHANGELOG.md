@@ -1,3 +1,10 @@
+# [1.608.0](https://github.com/adobe/spacecat-api-service/compare/v1.607.0...v1.608.0) (2026-06-28)
+
+
+### Features
+
+* **edge-optimize:** source CloudFront control-plane from tokowaka-client ([#2682](https://github.com/adobe/spacecat-api-service/issues/2682)) ([46703d2](https://github.com/adobe/spacecat-api-service/commit/46703d23a383e04a9896d2303097a8e4c27a1002))
+
 # [1.607.0](https://github.com/adobe/spacecat-api-service/compare/v1.606.2...v1.607.0) (2026-06-27)
 
 
