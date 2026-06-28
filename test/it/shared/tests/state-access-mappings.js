@@ -203,6 +203,39 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
       });
     });
 
+    describe('can_view baseline auto-injection', () => {
+      before(() => resetData());
+
+      it('POST without can_view persists can_view alongside the requested capability', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, {
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_2,
+          grantedCapabilities: ['llmo/can_configure'],
+        });
+        expect(res.status).to.equal(201);
+        expect(res.body.grantedCapabilities).to.have.members([
+          'llmo/can_configure',
+          'llmo/can_view',
+        ]);
+      });
+
+      it('GET round-trips the auto-injected can_view from the DB', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${BASE}?resourceType=brand&resourceId=${BRAND_RESOURCE_ID_2}`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        expect(res.body.items[0].grantedCapabilities).to.have.members([
+          'llmo/can_configure',
+          'llmo/can_view',
+        ]);
+      });
+    });
+
     describe('org-scoped binding', () => {
       before(() => resetData());
 
@@ -497,13 +530,26 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.status).to.equal(403);
       });
 
-      it('PATCH-empty removes access on the managed binding (200)', async () => {
+      it('PATCH-empty is rejected (400) — emptying is done via DELETE', async () => {
         const http = getHttpClient();
         const res = await http.brandManager.patch(`${BASE}/${managedMappingId}`, {
           grantedCapabilities: [],
         });
+        expect(res.status).to.equal(400);
+      });
+
+      it('DELETE empties access on the managed binding (200)', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.delete(`${BASE}/${managedMappingId}`);
         expect(res.status).to.equal(200);
         expect(res.body.grantedCapabilities).to.be.an('array').with.lengthOf(0);
+        expect(res.body.revokedAt).to.equal(null);
+      });
+
+      it('DELETE 403s on a binding belonging to an unmanaged resource', async () => {
+        const http = getHttpClient();
+        const res = await http.brandManager.delete(`${BASE}/${UNMANAGED_MAPPING_ID}`);
+        expect(res.status).to.equal(403);
       });
 
       it('GET audit-logs 403s (org-wide read is FACS-only)', async () => {

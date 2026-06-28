@@ -265,7 +265,9 @@ function StateAccessMappingsController(context) {
       return 'grantedCapabilities must be an array';
     }
     if (grantedCapabilities.length === 0) {
-      return allowEmpty ? null : 'grantedCapabilities must be a non-empty array';
+      return allowEmpty
+        ? null
+        : 'grantedCapabilities must be a non-empty array; use DELETE /state/access-mappings/:id to revoke all capabilities';
     }
     const productLower = product.toLowerCase();
     const catalog = new Set(getProductCapabilityCatalog(product));
@@ -296,6 +298,9 @@ function StateAccessMappingsController(context) {
    */
   function ensureBaselineCanView(capabilities, product) {
     const canView = `${product.toLowerCase()}/can_view`;
+    // Case-sensitive match is safe: validateGrantedCapabilities already rejects
+    // any capability whose prefix is not the lowercase product code, so every
+    // entry here is lowercase.
     return capabilities.includes(canView) ? capabilities : [...capabilities, canView];
   }
 
@@ -915,6 +920,10 @@ function StateAccessMappingsController(context) {
       if (!updated) {
         return notFound('Mapping not found');
       }
+      // DELETE is audited as `update_capabilities` (to the empty set) rather
+      // than a distinct `revoke_capabilities` op: the row is emptied, not
+      // tombstoned, so it is the same state mutation as a PATCH. The empty
+      // capability set in the event payload distinguishes it for SOC analysts.
       await emitAuditEvent(ctx, {
         imsOrgId,
         product,

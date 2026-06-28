@@ -873,6 +873,25 @@ describe('StateAccessMappingsController', () => {
       expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
     });
 
+    it('flow 8.3: 404s when a state-layer manager targets a row that does not exist', async () => {
+      const managerRow = makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: VALID_UUID_RES,
+        granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+        getFacsAccessMappingById: sinon.stub().resolves(null),
+      });
+      const ctx = makeContext({
+        facsPermissions: [], isAdmin: false, pathParams: { id: VALID_UUID_MAPPING },
+      });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(404);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
     it('returns 500 when the RPC helper throws', async () => {
       const { Controller } = await loadController({
         updateFacsAccessMappingCapabilities: sinon.stub().rejects(new Error('db down')),
