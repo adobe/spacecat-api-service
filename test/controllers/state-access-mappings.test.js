@@ -595,6 +595,24 @@ describe('StateAccessMappingsController', () => {
       expect(event.actorId).to.equal(CALLER_USER);
     });
 
+    it('audits the persisted capabilities incl. the auto-injected can_view', async () => {
+      const row = makeRow();
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+      });
+      const ctx = makeContext({
+        body: { ...validBody, grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      // Records what the subject actually received, not the raw request.
+      expect(event.grantedCapabilities).to.have.members([
+        'llmo/can_configure',
+        'llmo/can_view',
+      ]);
+    });
+
     it('still returns 201 when the audit write fails (logs a warning, not failure)', async () => {
       const row = makeRow();
       const ctx = makeContext({ body: validBody });

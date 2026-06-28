@@ -761,7 +761,9 @@ function StateAccessMappingsController(context) {
         bindingSubjectId: subjectId,
         resourceType,
         resourceId,
-        grantedCapabilities,
+        // Audit the capabilities actually persisted (incl. the auto-injected
+        // can_view baseline), not the raw request input.
+        grantedCapabilities: capabilitiesToStore,
       });
       return createResponse(toMappingDto(createdRow), 201);
     } catch (error) {
@@ -856,7 +858,9 @@ function StateAccessMappingsController(context) {
         bindingSubjectId: updated.subject_id,
         resourceType: updated.resource_type,
         resourceId: updated.resource_id,
-        grantedCapabilities,
+        // Audit the capabilities actually persisted (incl. the auto-injected
+        // can_view baseline), not the raw request input.
+        grantedCapabilities: capabilitiesToStore,
       });
       return ok(toMappingDto(updated));
     } catch (error) {
