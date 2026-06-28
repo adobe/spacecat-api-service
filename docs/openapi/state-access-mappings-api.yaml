@@ -77,6 +77,11 @@ state-access-mappings:
       validated against the product's capability catalog. For `subjectType:
       org`, `subjectId` must equal the caller's canonical org id.
 
+      `grantedCapabilities` must be non-empty (a `400` is returned otherwise — to
+      remove all access, use `DELETE` on the created row). The product's
+      `<product>/can_view` is always added as a baseline if the request omits it,
+      so the persisted set may contain one more capability than was sent.
+
       Authority (hybrid-model §8.3): a FACS-layer `can_manage_users` holder (or
       admin) may write on any resource. A state-layer manager may write **only**
       on resources where they hold state `can_manage_users` (`403` otherwise),
@@ -220,8 +225,9 @@ state-access-mapping-by-id:
       Empties the row's `grantedCapabilities` (sets it to `[]`), leaving the
       binding active but granting nothing — the supported way to remove access.
       The row is **not** tombstoned/revoked; capabilities can be re-added later
-      via `PATCH`. 404 when the row does not exist, has been revoked, or belongs
-      to a different org / product.
+      via `PATCH`. Idempotent: calling `DELETE` on an already-empty row returns
+      `200` with the unchanged row. 404 when the row does not exist, has been
+      revoked, or belongs to a different org / product.
     operationId: deleteStateAccessMapping
     responses:
       '200':
