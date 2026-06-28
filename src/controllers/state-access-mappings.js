@@ -253,21 +253,18 @@ function StateAccessMappingsController(context) {
    * shape `<product-lower>/<capability>` AND belongs to the product's
    * capability catalog. Returns an error message string, or null on success.
    *
+   * Both POST and PATCH require a non-empty set; removing all access is done
+   * via DELETE (which empties the row), never by sending an empty array.
+   *
    * @param {*} grantedCapabilities
    * @param {string} product
-   * @param {object} [opts]
-   * @param {boolean} [opts.allowEmpty=false] - When true, an empty array is
-   *   valid. PATCH uses this so a binding can be emptied (active row that grants
-   *   nothing = "remove access"); create still requires at least one capability.
    */
-  function validateGrantedCapabilities(grantedCapabilities, product, { allowEmpty = false } = {}) {
+  function validateGrantedCapabilities(grantedCapabilities, product) {
     if (!Array.isArray(grantedCapabilities)) {
       return 'grantedCapabilities must be an array';
     }
     if (grantedCapabilities.length === 0) {
-      return allowEmpty
-        ? null
-        : 'grantedCapabilities must be a non-empty array; use DELETE /state/access-mappings/:id to revoke all capabilities';
+      return 'grantedCapabilities must be a non-empty array; use DELETE /state/access-mappings/:id to revoke all capabilities';
     }
     const productLower = product.toLowerCase();
     const catalog = new Set(getProductCapabilityCatalog(product));

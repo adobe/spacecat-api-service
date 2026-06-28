@@ -772,6 +772,25 @@ describe('StateAccessMappingsController', () => {
       expect(event.grantedCapabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
     });
 
+    it('audits the persisted capabilities incl. the auto-injected can_view', async () => {
+      const updated = makeRow({ granted_capabilities: ['llmo/can_configure', 'llmo/can_view'] });
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      // Records what the subject actually received, not the raw request.
+      expect(event.grantedCapabilities).to.have.members([
+        'llmo/can_configure',
+        'llmo/can_view',
+      ]);
+    });
+
     it('does not emit an audit event and still 200s when audit write fails', async () => {
       const updated = makeRow();
       const ctx = makeContext({
@@ -833,6 +852,20 @@ describe('StateAccessMappingsController', () => {
       expect(body.grantedCapabilities).to.deep.equal([]);
       // Empties via the capability-edit RPC with [] (no tombstone/revoke).
       expect(updateStub.firstCall.args[1].grantedCapabilities).to.deep.equal([]);
+    });
+
+    it('is idempotent: DELETE on an already-empty row returns 200 unchanged', async () => {
+      const alreadyEmpty = makeRow({ granted_capabilities: [] });
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(alreadyEmpty),
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.id).to.equal(alreadyEmpty.id);
+      expect(body.grantedCapabilities).to.deep.equal([]);
+      expect(body.revokedAt).to.equal(null);
     });
 
     it('emits an update_capabilities audit event (allow, empty caps)', async () => {
