@@ -241,6 +241,23 @@ describe('SerenityController', () => {
     it('requires a log', () => {
       expect(() => SerenityController({ env: {} }, null, {})).to.throw('Log required');
     });
+
+    // The warn-once latch is process-global; no other test constructs with the
+    // flag set, so this test owns the single flip. It reads the flag through the
+    // third `env` arg (context has no `env`), exercising the `context?.env || env`
+    // fallback branch — the context.env side is already covered by every other
+    // constructor here.
+    it('warns at most once when SERENITY_ALLOW_NON_IMS_AUTH is enabled', () => {
+      const log = fakeLog();
+      SerenityController({ region: 'x' }, log, { SERENITY_ALLOW_NON_IMS_AUTH: 'true' });
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/SERENITY_ALLOW_NON_IMS_AUTH is enabled/);
+
+      // A second construction with the flag still set does not warn again.
+      const log2 = fakeLog();
+      SerenityController({ env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } }, log2, {});
+      expect(log2.warn).to.not.have.been.called;
+    });
   });
 
   describe('auth + brand resolution', () => {
