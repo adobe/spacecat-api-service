@@ -153,6 +153,18 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
   const items = familyItems(family);
   const matches = items.filter((w) => w?.title === title && w?.status === 'created');
   if (matches.length === 0) {
+    // Surface filtered-out non-`created` same-title stubs (Semrush ack-then-fail
+    // zombies) so their accumulation is visible in logs without a manual family
+    // query — they are the exact failure mode this status filter absorbs (#2718).
+    const ignored = items.filter((w) => w?.title === title && w?.status !== 'created');
+    if (ignored.length > 0) {
+      log?.info?.('ensureSubworkspace: ignoring non-created same-title family stub(s)', {
+        parentWorkspaceId,
+        title,
+        ignoredCount: ignored.length,
+        ignoredStatuses: ignored.map((w) => w?.status),
+      });
+    }
     return null;
   }
   if (matches.length > 1) {

@@ -300,6 +300,53 @@ describe('workspace-lifecycle', () => {
         expect(result).to.equal(SUB_WS);
         expect(transport.createSubworkspace).to.have.been.calledOnce;
       });
+
+      it('logs the count of ignored non-created same-title stubs (operational visibility)', async () => {
+        // Zombies accumulating under a brand should be visible in logs without a
+        // manual family query — the proactive find emits an info line naming the count.
+        const localLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'zombie-1', title: EXPECTED_TITLE, status: 'not ready' },
+            { id: 'zombie-2', title: EXPECTED_TITLE, status: 'invalid subscription' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        await ensureSubworkspace(transport, brand, PARENT_WS, 1, localLog, NOOP_TIMING);
+
+        const logged = localLog.info.getCalls()
+          .find((c) => /ignoring non-created same-title/.test(c.args[0]));
+        expect(logged, 'expected an ignored-stub log line').to.exist;
+        expect(logged.args[1]).to.include({ ignoredCount: 2 });
+      });
+
+      it('does NOT log ignored stubs when no same-title stub exists (clean first create)', async () => {
+        // Happy path: empty family → no ignored-stub noise.
+        const localLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+        const transport = makeTransport();
+        const brand = makeBrand();
+
+        await ensureSubworkspace(transport, brand, PARENT_WS, 1, localLog, NOOP_TIMING);
+
+        const logged = localLog.info.getCalls()
+          .find((c) => /ignoring non-created same-title/.test(c.args[0]));
+        expect(logged, 'expected no ignored-stub log line').to.not.exist;
+      });
+
+      it('propagates a listWorkspaceFamily error from the proactive check (fail-safe: no blind create)', async () => {
+        // If we cannot read the family we cannot know whether a created child
+        // already exists, so creating blindly would risk the very duplicate-stub
+        // problem this guard prevents. Fail rather than create.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().rejects(new SerenityTransportError(503, 'upstream down')),
+        });
+        const brand = makeBrand();
+
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+          .to.be.rejectedWith(SerenityTransportError);
+        expect(transport.createSubworkspace).to.not.have.been.called;
+      });
     });
 
     it('502s when create returns no id', async () => {
