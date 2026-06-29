@@ -30,11 +30,23 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  *      so no path-routing proxy is needed); `NODE_TLS_REJECT_UNAUTHORIZED=0`
  *      trusts their self-signed certs.
  *
- * This increment covers the route gate, the IMS-only relaxation, and the
- * brand-INDEPENDENT catalog reads that flow all the way to the Project Engine
- * mock. The sub-workspace lifecycle (activate/deactivate, market create/delete)
- * mutates mock state and is the next increment — `resetSemrushMocks()` in
- * setup.js is wired for it.
+ * Coverage in this suite:
+ *   - Route gate (UUID validation, fires before auth).
+ *   - The IMS-only relaxation reaching the handler (unknown brand → 404).
+ *   - Brand-INDEPENDENT org catalog reads (models, languages) live via the mock.
+ *   - Brand-level reads driven through SUB-WORKSPACE resolution: BRAND_1's
+ *     `semrush_workspace_id` is aligned to the mock seed (SERENITY_MOCK_WORKSPACE_ID),
+ *     so `GET models` / `GET markets` resolve a real workspace and read live data.
+ *   - Every brand-level WRITE endpoint reaching its handler past auth + brand
+ *     resolution and failing at body/slice validation (the deepest 2xx is blocked
+ *     by the mock — see below), which still proves each route → controller wiring.
+ *
+ * Not covered (mock limitation, NOT a gap to fix here): the create/activate happy
+ * paths. The Project Engine mock returns 406 on the project `publish` step, so
+ * `POST markets` / `activate` cannot reach a 2xx against the pinned mock image —
+ * the suite asserts their validation surface instead. A mock that implements
+ * `publish` is the prerequisite for the create/lifecycle 2xx increment;
+ * `resetSemrushMocks()` in setup.js is already wired for it.
  */
 export default function serenityTests(getHttpClient, resetData) {
   // Seed the baseline org/brand rows the catalog + brand-resolution tests read.
@@ -118,6 +130,83 @@ export default function serenityTests(getHttpClient, resetData) {
       );
       expect(res.status).to.equal(404);
       expect(res.body.message).to.match(/brand not found/i);
+    });
+  });
+
+  describe('Serenity API — brand-level reads via the live sub-workspace', () => {
+    // BRAND_1 is in sub-workspace mode and its semrush_workspace_id is aligned to
+    // the mock seed, so these reads resolve a REAL workspace and return live mock
+    // data — exercising the sub-workspace brand-resolution path the unknown-brand
+    // 404 tests above never reach.
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+
+    it('GET /serenity/models returns the workspace AI model catalog', async () => {
+      const res = await getHttpClient().admin.get(`${base}/models`);
+      expect(res.status).to.equal(200);
+      expect(res.body.items).to.be.an('array').that.is.not.empty;
+      // Every model carries the id/key/name the UI renders; assert the shape so a
+      // contract drift (renamed field / error body as 200) fails loudly.
+      res.body.items.forEach((m) => {
+        expect(m).to.include.keys('id', 'key', 'name');
+        expect(m.id).to.be.a('string');
+        expect(m.key).to.be.a('string');
+      });
+    });
+
+    it('GET /serenity/markets returns the (empty) market list envelope', async () => {
+      // The seed ships no market slice for this workspace, so the list is empty —
+      // but a 200 with an `items` array proves the full read chain (relaxed auth →
+      // brand resolution → sub-workspace transport → HTTPS to the mock → parse).
+      const res = await getHttpClient().admin.get(`${base}/markets`);
+      expect(res.status).to.equal(200);
+      expect(res.body.items).to.be.an('array');
+    });
+  });
+
+  describe('Serenity API — write endpoints reach the handler (post-auth validation)', () => {
+    // These drive the real seeded BRAND_1: each request passes the relaxed auth
+    // AND brand resolution, then fails at the handler's own body/slice validation.
+    // That proves every write route is wired to its controller method and runs
+    // the real handler — the create/activate 2xx is blocked by the mock's publish
+    // 406 (see file header), so the validation surface is what we can assert.
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+
+    it('GET /serenity/tags 400s without a (geoTargetId, languageCode) slice', async () => {
+      const res = await getHttpClient().admin.get(`${base}/tags`);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalidRequest');
+    });
+
+    it('PUT /serenity/models 400s without a market slice', async () => {
+      const res = await getHttpClient().admin.put(`${base}/models`, { modelIds: [] });
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalidRequest');
+    });
+
+    it('POST /serenity/markets 400s when brandDomain/brandNames are missing', async () => {
+      const res = await getHttpClient().admin.post(`${base}/markets`, { market: 'US', languageCode: 'en' });
+      expect(res.status).to.equal(400);
+      expect(res.body.message).to.match(/brandDomain is required/i);
+    });
+
+    it('POST /serenity/markets 400s when market is not an ISO-2 country code', async () => {
+      const res = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'USA', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(res.status).to.equal(400);
+      expect(res.body.message).to.match(/market must be an ISO-2 country code/i);
+    });
+
+    it('POST /serenity/prompts 400s on an empty prompts array', async () => {
+      const res = await getHttpClient().admin.post(`${base}/prompts`, { prompts: [] });
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalidRequest');
+    });
+
+    it('POST /serenity/prompts/bulk-delete 400s on an empty body', async () => {
+      const res = await getHttpClient().admin.post(`${base}/prompts/bulk-delete`, {});
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalidRequest');
     });
   });
 }

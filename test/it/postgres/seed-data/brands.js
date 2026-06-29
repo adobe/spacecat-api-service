@@ -27,7 +27,11 @@ export const brands = [
     organization_id: '11111111-1111-4111-b111-111111111111',
     name: 'Test Brand',
     site_id: '33333333-3333-4333-b333-333333333333',
-    semrush_workspace_id: 'it-semrush-ws-1',
+    // Aligned with the Semrush vendor-mock seed (SERENITY_MOCK_WORKSPACE_ID in
+    // seed-ids.js) so the brand-level serenity read endpoints resolve to a
+    // workspace the mock actually seeds with a project/model/prompt/market —
+    // not just an unknown workspace that 404s.
+    semrush_workspace_id: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
     status: 'active',
     origin: 'human',
     regions: ['us'],
