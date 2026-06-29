@@ -103,6 +103,10 @@ export default function serenityTests(getHttpClient, resetData) {
         `/v2/orgs/${ORG_1_ID}/brands/${unknownBrand}/serenity/markets`,
       );
       expect(res.status).to.equal(404);
+      // Assert the handler's own 404 body ("brand not found ..."), not just the
+      // status: this distinguishes the controller running and rejecting the
+      // unknown brand from a generic unmatched-route / middleware 404.
+      expect(res.body.message).to.match(/brand not found/i);
     });
 
     // A second brand-level route for breadth: a different controller method
@@ -113,6 +117,7 @@ export default function serenityTests(getHttpClient, resetData) {
         `/v2/orgs/${ORG_1_ID}/brands/${unknownBrand}/serenity/prompts?geoTargetId=2840&languageCode=en`,
       );
       expect(res.status).to.equal(404);
+      expect(res.body.message).to.match(/brand not found/i);
     });
   });
 }

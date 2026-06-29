@@ -108,30 +108,23 @@ async function waitForMinio(maxAttempts = 60, intervalMs = 500) {
  * @param {number} intervalMs - Delay between attempts
  */
 async function waitForSemrushMocks(maxAttempts = 60, intervalMs = 1000) {
-  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  try {
-    for (let i = 0; i < maxAttempts; i += 1) {
-      try {
-        const results = await Promise.all(
-          MOCK_DUMP_PATHS.map((url) => fetch(url).then((r) => r.ok).catch(() => false)),
-        );
-        if (results.every(Boolean)) {
-          return;
-        }
-      } catch {
-        // Not ready yet
+  // TLS verification is disabled process-wide by startContainers (and again by
+  // buildEnv) for this IT-only process, so the self-signed mock cert is trusted
+  // here without per-call save/restore.
+  for (let i = 0; i < maxAttempts; i += 1) {
+    try {
+      const results = await Promise.all(
+        MOCK_DUMP_PATHS.map((url) => fetch(url).then((r) => r.ok).catch(() => false)),
+      );
+      if (results.every(Boolean)) {
+        return;
       }
-      await new Promise((resolve) => { setTimeout(resolve, intervalMs); });
+    } catch {
+      // Not ready yet
     }
-    throw new Error(`Semrush mocks did not become ready within ${maxAttempts * intervalMs}ms`);
-  } finally {
-    if (prev === undefined) {
-      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    } else {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
-    }
+    await new Promise((resolve) => { setTimeout(resolve, intervalMs); });
   }
+  throw new Error(`Semrush mocks did not become ready within ${maxAttempts * intervalMs}ms`);
 }
 
 /**
@@ -139,27 +132,20 @@ async function waitForSemrushMocks(maxAttempts = 60, intervalMs = 1000) {
  * mutate mock state (activate/create/delete) so each starts from a known store.
  */
 export async function resetSemrushMocks() {
-  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  try {
-    // Throw on a failed reset rather than swallow it: a silently-failed reset
-    // would leave mutated mock state behind and produce flaky, order-dependent
-    // tests (the mutating-lifecycle increment relies on this).
-    await Promise.all(
-      MOCK_RESET_PATHS.map(async (url) => {
-        const res = await fetch(url, { method: 'POST' });
-        if (!res.ok) {
-          throw new Error(`Semrush mock reset failed (${res.status}) at ${url}`);
-        }
-      }),
-    );
-  } finally {
-    if (prev === undefined) {
-      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    } else {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
-    }
-  }
+  // TLS verification is already off process-wide (startContainers + buildEnv ran
+  // during harness startup, before any test calls this), so the self-signed mock
+  // cert is trusted without a per-call save/restore.
+  // Throw on a failed reset rather than swallow it: a silently-failed reset would
+  // leave mutated mock state behind and produce flaky, order-dependent tests (the
+  // mutating-lifecycle increment relies on this).
+  await Promise.all(
+    MOCK_RESET_PATHS.map(async (url) => {
+      const res = await fetch(url, { method: 'POST' });
+      if (!res.ok) {
+        throw new Error(`Semrush mock reset failed (${res.status}) at ${url}`);
+      }
+    }),
+  );
 }
 
 /**
@@ -195,6 +181,11 @@ export async function startContainers() {
   // whose mock image is not yet published makes the pull fail loudly — by design.
   process.env.SERENITY_PE_MOCK_TAG = installedVersion('@adobe/spacecat-shared-project-engine-client');
   process.env.SERENITY_UM_MOCK_TAG = installedVersion('@adobe/spacecat-shared-user-manager-client');
+
+  // The Semrush mocks serve self-signed HTTPS. Disable TLS verification for this
+  // IT-only process now — the readiness probe below runs before buildEnv/startServer
+  // would set the same flag, and it stays set for resetSemrushMocks() thereafter.
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
   execSync(
     `docker compose -f "${COMPOSE_FILE}" up -d`,
