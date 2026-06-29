@@ -1145,37 +1145,36 @@ function TaskManagementController(context) {
   // ─── Project listing ──────────────────────────────────────────────────────
 
   /**
-   * Lists available Jira projects for the active connection.
+   * Lists available Jira projects for a specific connection.
    * Used by the UI project picker when creating a ticket.
    *
-   * GET /organizations/:organizationId/task-management/:provider/projects
+   * GET /organizations/:organizationId/task-management/connections/:connectionId/projects
    */
   async function listProjects(requestContext) {
     const { params } = requestContext;
-    const { organizationId, provider } = params;
+    const { organizationId, connectionId } = params;
 
     if (!isValidUUID(organizationId)) {
       return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
     }
 
-    if (!hasText(provider)) {
-      return createResponse({ message: 'provider is required' }, STATUS_BAD_REQUEST);
+    if (!isValidUUID(connectionId)) {
+      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
     }
 
     let connection;
     try {
-      connection = await TaskManagementConnection
-        .findActiveByOrganizationAndProvider(organizationId, provider);
+      const conn = await loadConnectionForOrg(organizationId, connectionId);
+      if (!conn || conn.getStatus() !== 'active') {
+        return createResponse(
+          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
+          STATUS_NOT_FOUND,
+        );
+      }
+      connection = conn;
     } catch (err) {
-      log.error({ organizationId, provider, err }, 'Failed to load connection for listProjects');
+      log.error({ organizationId, connectionId, err }, 'Failed to load connection for listProjects');
       return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
-    }
-
-    if (!connection) {
-      return createResponse(
-        { message: `No active ${provider} connection found for organization ${organizationId}` },
-        STATUS_NOT_FOUND,
-      );
     }
 
     let projects;
@@ -1203,7 +1202,7 @@ function TaskManagementController(context) {
         );
       }
 
-      log.error({ organizationId, provider, err }, 'Failed to list projects');
+      log.error({ organizationId, connectionId, err }, 'Failed to list projects');
       return createResponse({ message: 'Failed to list projects' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
