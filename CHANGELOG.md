@@ -1,3 +1,10 @@
+# [1.609.0](https://github.com/adobe/spacecat-api-service/compare/v1.608.0...v1.609.0) (2026-06-29)
+
+
+### Features
+
+* **serenity:** register Semrush AIO intent targets in project tag taxonomy ([#2710](https://github.com/adobe/spacecat-api-service/issues/2710)) ([c0a0a6a](https://github.com/adobe/spacecat-api-service/commit/c0a0a6a63dc33a27c17ed3d666f3d23d1994da3d)), closes [Hi#level](https://github.com/Hi/issues/level) [throu#API](https://github.com/throu/issues/API)
+
 # [1.608.0](https://github.com/adobe/spacecat-api-service/compare/v1.607.0...v1.608.0) (2026-06-28)
 
 
