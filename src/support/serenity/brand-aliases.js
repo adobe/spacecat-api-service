@@ -129,6 +129,9 @@ export async function syncBrandAliasesAcrossMarkets(
       if (!sameAliasSet(currentBrandNames, desiredBrandNames)) {
         // eslint-disable-next-line no-await-in-loop
         await transport.updateProject(workspaceId, projectId, {
+          // `type` is required on ProjectUpdateRequest — the Semrush gateway
+          // (and the PE mock) 400 a typeless PATCH. AIO projects are always 'ai'.
+          type: 'ai',
           ...(hasText(display) ? { brand_name_display: display } : {}),
           brand_names: desiredBrandNames,
         });

@@ -215,6 +215,58 @@ describe('Semrush REST transport', () => {
       }
     });
 
+    // ── User Manager base-URL split (api-service#2656) ──
+    // The User Manager gateway resolves its own origin from SEMRUSH_USERS_BASE_URL,
+    // falling back to SEMRUSH_PROJECTS_BASE_URL when unset. getWorkspaceStatus is a
+    // User-Manager-gateway method; publishProject is a Project-Engine method.
+    it('routes User Manager calls at SEMRUSH_USERS_BASE_URL when set, Project Engine at SEMRUSH_PROJECTS_BASE_URL', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: {
+          SEMRUSH_PROJECTS_BASE_URL: 'https://projects.semrush.test',
+          SEMRUSH_USERS_BASE_URL: 'https://users.semrush.test',
+        },
+        imsToken: IMS,
+      });
+
+      await transport.getWorkspaceStatus(WORKSPACE_ID);
+      expect((await callOf(fetchStub)).url)
+        .to.match(/^https:\/\/users\.semrush\.test\/enterprise\/users\/api\//);
+
+      await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+      expect((await callOf(fetchStub, 1)).url)
+        .to.match(/^https:\/\/projects\.semrush\.test\/enterprise\/projects\/api\//);
+    });
+
+    it('falls back to SEMRUSH_PROJECTS_BASE_URL for User Manager calls when SEMRUSH_USERS_BASE_URL is unset', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: { SEMRUSH_PROJECTS_BASE_URL: 'https://shared.semrush.test' },
+        imsToken: IMS,
+      });
+
+      await transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      expect((await callOf(fetchStub)).url)
+        .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
+    });
+
+    it('rejects a non-https SEMRUSH_USERS_BASE_URL naming the USERS var (503)', () => {
+      try {
+        createSerenityTransport({
+          env: {
+            SEMRUSH_PROJECTS_BASE_URL: 'https://projects.semrush.test',
+            SEMRUSH_USERS_BASE_URL: 'http://attacker.example/',
+          },
+          imsToken: IMS,
+        });
+        expect.fail('expected createSerenityTransport to throw');
+      } catch (e) {
+        expect(e.message).to.match(/SEMRUSH_USERS_BASE_URL must use https/);
+        expect(e.status).to.equal(503);
+      }
+    });
+
     it('encodes path segments so reserved chars stay inside the segment', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
