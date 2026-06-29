@@ -1,3 +1,10 @@
+## [1.609.2](https://github.com/adobe/spacecat-api-service/compare/v1.609.1...v1.609.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **serenity:** harden sub-workspace create against failed-provisioning stubs ([#2719](https://github.com/adobe/spacecat-api-service/issues/2719)) ([78c15ff](https://github.com/adobe/spacecat-api-service/commit/78c15ff8dbe829d1c2cfbbec147bf00841652f3f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.609.1](https://github.com/adobe/spacecat-api-service/compare/v1.609.0...v1.609.1) (2026-06-29)
 
 
