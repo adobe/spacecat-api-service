@@ -281,8 +281,8 @@ v2-brand-for-org-activate:
         description: Organization or brand not found
       '409':
         description: |
-          The brand's primary URL is already another brand's base site
-          (violates the `brands_base_site_unique` constraint).
+          The brand's primary URL is already the primary URL (base site) of
+          another brand in this organization.
       '500':
         $ref: './responses.yaml#/500'
       '503':

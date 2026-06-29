@@ -6624,6 +6624,25 @@ describe('Brands Controller', () => {
       expect(scheduleStub).to.not.have.been.called;
     });
 
+    it('returns 400 for a brand in a non-pending, non-active state (promote-only)', async () => {
+      const { controller, updateBrandStub } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID,
+          name: 'Acme',
+          baseSiteId: SITE_ID,
+          baseUrl: 'https://site1.com',
+          region: ['us'],
+          status: 'suspended',
+          urls: [],
+        },
+      });
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal("Cannot activate a brand in status 'suspended'");
+      expect(updateBrandStub).to.not.have.been.called;
+    });
+
     // -------------------------------------------------------------------------
     // 3. Auth failures — 403
     // -------------------------------------------------------------------------
@@ -7223,6 +7242,42 @@ describe('Brands Controller', () => {
         (c) => typeof c.args[0] === 'string' && c.args[0].includes(':warning:'),
       );
       expect(warnCall, 'a :warning: alert should be posted').to.exist;
+    });
+
+    it('skips the getPromptStats DB roundtrip when DRS is unavailable (generatePrompts:false)', async () => {
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-x' });
+      const fakeDrs = {
+        isConfigured: () => false,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: sinon.stub().resolves({}),
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller, getPromptStatsStub } = await buildActivateController({
+        getPromptStatsResult: { branded: 5, unbranded: 5, intents: {} },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      // DRS is down → no schedule could be created, so don't bother computing stats.
+      expect(getPromptStatsStub).to.not.have.been.called;
+      expect(scheduleStub).to.not.have.been.called;
+    });
+
+    it('still returns 200 when the activation alert itself throws', async () => {
+      const { controller, postLlmoAlertStub } = await buildActivateController();
+      postLlmoAlertStub.rejects(new Error('slack boom'));
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
     });
   });
 

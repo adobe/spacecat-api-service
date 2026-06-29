@@ -2069,9 +2069,11 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      // brandId is UUID-validated upstream (index.js), so the name-lookup branch of
-      // resolveBrandUuid is unreachable here — fetch directly. getBrandById org-scopes
-      // (organization_id + id) and returns null → 404, so no separate resolve is needed.
+      // brandId is UUID-validated by the shared param guard in index.js before the
+      // controller runs, so resolveBrandUuid's name-lookup branch is unreachable here —
+      // fetch directly. getBrandById org-scopes (organization_id + id) and returns null
+      // → 404 (the safety net even if that validation were bypassed), so no resolve is
+      // needed.
       const brand = await getBrandById(spaceCatId, brandId, postgrestClient);
       if (!brand) {
         return notFound(`Brand not found: ${brandId}`);
@@ -2094,6 +2096,13 @@ function BrandsController(ctx, log, env) {
           status: 'active',
           baseSiteId: brand.baseSiteId,
         }, 200);
+      }
+
+      // Promote-only: only a pending brand can be activated. deleted → 404 and active →
+      // 200 no-op are handled above; reject any other state explicitly (e.g. a future
+      // suspended/draft) rather than silently activating it.
+      if (brand.status !== 'pending') {
+        return badRequest(`Cannot activate a brand in status '${brand.status}'`);
       }
 
       // 1) Resolve the brand's onboarded primary site — the prompt-gen base URL and
@@ -2195,7 +2204,9 @@ function BrandsController(ctx, log, env) {
         // schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule POSTs and
         // tolerates a 409 dedup.
         let hasExistingPrompts = false;
-        if (!generatePrompts) {
+        if (!generatePrompts && drsConfigured) {
+          // Only worth computing when we could actually schedule — skip the DB roundtrip
+          // when DRS is unavailable (no schedule would be created regardless).
           const stats = await getPromptStats({
             organizationId: spaceCatId,
             brandUuid,
@@ -2227,22 +2238,29 @@ function BrandsController(ctx, log, env) {
         ...(scheduleId ? { scheduleId } : {}),
       };
 
-      if (sideEffectError) {
-        // Activation succeeded; only the async side-effects failed. Surface the real
-        // error to ops (the offending party) — the client still gets 200 (#4).
-        await postLlmoAlert(
-          `:warning: Brand activated, but prompt-gen/schedule failed — ${brand.name} `
-          + `(${brandUuid}) in org ${spaceCatId} [site=${baseSiteId}, `
-          + `generatePrompts=${generatePrompts}]: ${sideEffectError.message}`,
-          context,
-        );
-      } else {
-        await postLlmoAlert(
-          `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
-          + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
-          + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
-          context,
-        );
+      // The activation alert is also best-effort. postLlmoAlert already swallows its own
+      // Slack errors, but we wrap it defensively so an alert failure can never escape to
+      // the outer catch and turn an already-committed activation into a 5xx.
+      try {
+        if (sideEffectError) {
+          // Activation succeeded; only the async side-effects failed. Surface the real
+          // error to ops (the offending party) — the client still gets 200 (#4).
+          await postLlmoAlert(
+            `:warning: Brand activated, but prompt-gen/schedule failed — ${brand.name} `
+            + `(${brandUuid}) in org ${spaceCatId} [site=${baseSiteId}, `
+            + `generatePrompts=${generatePrompts}]: ${sideEffectError.message}`,
+            context,
+          );
+        } else {
+          await postLlmoAlert(
+            `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
+            + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
+            + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
+            context,
+          );
+        }
+      } catch (alertError) {
+        log.error(`Brand ${brandUuid} activated; activation alert failed:`, alertError);
       }
 
       return createResponse(responseBody, 200);
