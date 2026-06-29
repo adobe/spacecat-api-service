@@ -1736,19 +1736,19 @@ describe('TaskManagementController', () => {
   describe('listProjects', () => {
     function makeReqCtx(overrides = {}) {
       return {
-        params: { organizationId: ORG_ID, provider: PROVIDER, ...(overrides.params ?? {}) },
+        params: { organizationId: ORG_ID, connectionId: CONN_ID, ...(overrides.params ?? {}) },
       };
     }
 
     it('returns 400 for invalid organizationId', async () => {
       const { listProjects } = TaskManagementController(makeContext());
-      const res = await listProjects(makeReqCtx({ params: { organizationId: 'bad', provider: PROVIDER } }));
+      const res = await listProjects(makeReqCtx({ params: { organizationId: 'bad', connectionId: CONN_ID } }));
       expect(res.status).to.equal(400);
     });
 
-    it('returns 400 when provider is empty', async () => {
+    it('returns 400 for invalid connectionId', async () => {
       const { listProjects } = TaskManagementController(makeContext());
-      const res = await listProjects(makeReqCtx({ params: { organizationId: ORG_ID, provider: '' } }));
+      const res = await listProjects(makeReqCtx({ params: { organizationId: ORG_ID, connectionId: 'not-a-uuid' } }));
       expect(res.status).to.equal(400);
     });
 
@@ -1760,8 +1760,7 @@ describe('TaskManagementController', () => {
 
     it('returns 500 on connection load error', async () => {
       const ctx = makeContext();
-      ctx.dataAccess.TaskManagementConnection.findActiveByOrganizationAndProvider
-        .rejects(new Error('db'));
+      ctx.dataAccess.TaskManagementConnection.findById.rejects(new Error('db'));
       const { listProjects } = TaskManagementController(ctx);
       const res = await listProjects(makeReqCtx());
       expect(res.status).to.equal(500);
@@ -1773,7 +1772,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
         },
       });
@@ -1808,7 +1807,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
         },
       });
@@ -1839,7 +1838,7 @@ describe('TaskManagementController', () => {
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: {
-            findActiveByOrganizationAndProvider: sinon.stub().resolves(conn),
+            findById: sinon.stub().resolves(conn),
           },
         },
       });
