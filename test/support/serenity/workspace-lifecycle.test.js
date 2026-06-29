@@ -110,49 +110,60 @@ describe('workspace-lifecycle', () => {
       expect(brand.save).to.have.been.calledOnce;
     });
 
-    it('adopts a unique family match after a create timeout (504)', async () => {
-      // GET /v1/workspaces/{id}/family returns a BARE ARRAY (live-verified), not an
-      // { items: [...] } envelope; non-matching entries are skipped and the single
-      // title match is adopted.
+    it('adopts a unique created family match after a create timeout (504 recovery preserved)', async () => {
+      // True 504-recovery: at proactive-check time nothing is adoptable yet, the
+      // create then times out (504) although it actually succeeded upstream, and
+      // the now-`created` child appears in the family on the recovery read. GET
+      // /v1/workspaces/{id}/family returns a BARE ARRAY (live-verified), not an
+      // { items: [...] } envelope; non-matching and non-`created` entries are
+      // skipped and the single title match is adopted.
+      const listWorkspaceFamily = sinon.stub();
+      listWorkspaceFamily.onFirstCall().resolves([]);
+      listWorkspaceFamily.onSecondCall().resolves([
+        { id: 'other-ws', title: 'Some Other Brand [11111111]', status: 'created' },
+        { id: 'adopted-ws', title: EXPECTED_TITLE, status: 'created' },
+      ]);
       const transport = makeTransport({
         createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves([
-          { id: 'other-ws', title: 'Some Other Brand [11111111]' },
-          { id: 'adopted-ws', title: EXPECTED_TITLE },
-        ]),
+        listWorkspaceFamily,
       });
       const brand = makeBrand();
 
       const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
 
       expect(result).to.equal('adopted-ws');
+      expect(transport.createSubworkspace).to.have.been.calledOnce;
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
     });
 
-    it('refuses to adopt a NON-empty family match after a create timeout', async () => {
-      // A timed-out create has no projects yet; a non-empty title match is some
-      // OTHER provisioned workspace, never our interrupted create. Refuse it.
+    it('refuses to adopt a NON-empty created family match (shared empty-check)', async () => {
+      // The empty-check is shared by the proactive and 504 paths. A `created`
+      // title match that already has projects is some OTHER provisioned workspace,
+      // never our interrupted/retried create — refuse rather than graft this brand
+      // onto it.
       const transport = makeTransport({
-        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves([{ id: 'occupied-ws', title: EXPECTED_TITLE }]),
+        listWorkspaceFamily: sinon.stub().resolves([
+          { id: 'occupied-ws', title: EXPECTED_TITLE, status: 'created' },
+        ]),
         listProjects: sinon.stub().resolves({ items: [{ id: 'existing-project' }] }),
       });
       const brand = makeBrand();
 
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
         .to.be.rejectedWith(/refusing to adopt/);
+      expect(transport.createSubworkspace).to.not.have.been.called;
       expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
     });
 
-    it('throws when the sole family match has no id', async () => {
+    it('throws when the sole created family match has no id', async () => {
       const transport = makeTransport({
-        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-        listWorkspaceFamily: sinon.stub().resolves([{ title: EXPECTED_TITLE }]),
+        listWorkspaceFamily: sinon.stub().resolves([{ title: EXPECTED_TITLE, status: 'created' }]),
       });
       const brand = makeBrand();
 
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
         .to.be.rejectedWith(/sole family match has no id/);
+      expect(transport.createSubworkspace).to.not.have.been.called;
       expect(transport.listProjects).to.not.have.been.called;
     });
 
@@ -168,12 +179,13 @@ describe('workspace-lifecycle', () => {
       expect(transport.createSubworkspace).to.not.have.been.called;
     });
 
-    it('fails with an ambiguousWorkspace alert on multiple family matches', async () => {
+    it('fails with an ambiguousWorkspace alert on multiple CREATED family matches', async () => {
+      // Genuine ambiguity preserved: ≥2 `created` same-title children → 409, never
+      // guess. (Non-`created` zombies are filtered out and never reach this count.)
       const transport = makeTransport({
-        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
         listWorkspaceFamily: sinon.stub().resolves([
-          { id: 'ws-a', title: EXPECTED_TITLE },
-          { id: 'ws-b', title: EXPECTED_TITLE },
+          { id: 'ws-a', title: EXPECTED_TITLE, status: 'created' },
+          { id: 'ws-b', title: EXPECTED_TITLE, status: 'created' },
         ]),
       });
       const brand = makeBrand();
@@ -186,6 +198,7 @@ describe('workspace-lifecycle', () => {
         expect(e.code).to.equal('ambiguousWorkspace');
         expect(e.status).to.equal(409);
       }
+      expect(transport.createSubworkspace).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
     });
 
@@ -216,6 +229,77 @@ describe('workspace-lifecycle', () => {
 
       await expect(ensureSubworkspace(transport, brand, '', 1, log, NOOP_TIMING))
         .to.be.rejectedWith(/has no parent workspace/);
+    });
+
+    describe('failed-provisioning stub hardening (issue #2718)', () => {
+      it('idempotent create-or-adopt: reuses an existing created empty same-title child instead of creating a duplicate', async () => {
+        // Mitigation 2: a retry must reuse the good child, not spawn another stub.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'existing-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal('existing-ws');
+        expect(transport.createSubworkspace).to.not.have.been.called;
+        expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly('existing-ws');
+        expect(brand.save).to.have.been.calledOnce;
+      });
+
+      it('does NOT adopt a single not-ready zombie stub; creates a fresh workspace', async () => {
+        // Mitigation 1: a failed-provisioning stub (status 'not ready', 0 projects)
+        // is invisible to the matcher, so it is never falsely adopted.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'zombie-ws', title: EXPECTED_TITLE, status: 'not ready' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal(SUB_WS);
+        expect(transport.createSubworkspace).to.have.been.calledOnce;
+        expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      });
+
+      it('adopts the one created match when a not-ready zombie shares the title', async () => {
+        // Mitigation 1: exactly one `created` among same-title entries → adopt it,
+        // no false 409 from the co-resident zombie.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'zombie-ws', title: EXPECTED_TITLE, status: 'not ready' },
+            { id: 'good-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal('good-ws');
+        expect(transport.createSubworkspace).to.not.have.been.called;
+        expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('good-ws');
+      });
+
+      it('accumulated not-ready zombies do NOT inflate the ambiguity 409; create proceeds', async () => {
+        // Mitigation 1: ≥2 same-title zombies but zero `created` → no false 409;
+        // the snowball is broken and a fresh create proceeds.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'zombie-1', title: EXPECTED_TITLE, status: 'not ready' },
+            { id: 'zombie-2', title: EXPECTED_TITLE, status: 'not ready' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal(SUB_WS);
+        expect(transport.createSubworkspace).to.have.been.calledOnce;
+      });
     });
 
     it('502s when create returns no id', async () => {
@@ -538,12 +622,13 @@ describe('workspace-lifecycle', () => {
       });
     });
 
-    describe('adoptFromFamily adopt path - listProjects resolves non-array', () => {
+    describe('findAdoptableFamilyMatch adopt path - listProjects resolves non-array', () => {
       it('adopts the empty match when listProjects returns {} (projectCount = 0)', async () => {
-        // Line 156: Array.isArray false branch -> projectCount = 0 -> adopts.
+        // Array.isArray false branch -> projectCount = 0 -> adopts.
         const transport = makeTransport({
-          createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
-          listWorkspaceFamily: sinon.stub().resolves([{ id: 'adopted-ws', title: EXPECTED_TITLE }]),
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'adopted-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
           listProjects: sinon.stub().resolves({}),
         });
         const brand = makeBrand();
@@ -551,6 +636,7 @@ describe('workspace-lifecycle', () => {
         const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
 
         expect(result).to.equal('adopted-ws');
+        expect(transport.createSubworkspace).to.not.have.been.called;
         expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
       });
     });
