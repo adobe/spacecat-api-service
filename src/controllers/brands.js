@@ -2084,6 +2084,18 @@ function BrandsController(ctx, log, env) {
       }
       const brandUuid = brand.id;
 
+      // Idempotent / one-shot: activating an already-active brand is a no-op. Return the
+      // current state without re-running updateBrand, prompt-gen, or the schedule — a
+      // genuine retry after a COMPLETED prompt-gen job would otherwise submit a dup
+      // (listJobs dedup only catches QUEUED/RUNNING). Activate is promote-only.
+      if (brand.status === 'active') {
+        return createResponse({
+          brandId: brandUuid,
+          status: 'active',
+          baseSiteId: brand.baseSiteId,
+        }, 200);
+      }
+
       // 1) Resolve the brand's onboarded primary site — the prompt-gen base URL and
       // the baseSiteId to anchor on. An already-sited brand carries baseSiteId (and
       // usually baseUrl); a pending brand resolves from its stashed Semrush primary URL.
@@ -2126,17 +2138,17 @@ function BrandsController(ctx, log, env) {
 
       // The brand is now active (committed above). Prompt generation and the
       // brand-presence schedule are best-effort async side-effects — a DRS failure must
-      // NOT fail the activation. We run them in a guarded block: on error we degrade to
-      // 200 with the brand active (plus whatever ids succeeded) and alert ops with the
-      // real error so it's never lost (#4). Keeping DRS errors inside this block also
-      // means they never reach createErrorResponse, so raw upstream detail can't leak to
-      // the client (#5).
-      const drsClient = DrsClient.createFrom(context);
-      const drsConfigured = drsClient.isConfigured();
+      // NOT fail the activation. We run EVERYTHING after the commit in a guarded block
+      // (DRS client construction included): on error we degrade to 200 with the brand
+      // active (plus whatever ids succeeded) and alert ops with the real error so it's
+      // never lost (#4). Keeping DRS errors inside this block also means they never reach
+      // createErrorResponse, so raw upstream detail can't leak to the client (#5).
       let promptGenerationJobId;
       let scheduleId;
       let sideEffectError;
       try {
+        const drsClient = DrsClient.createFrom(context);
+        const drsConfigured = drsClient.isConfigured();
         // 3) Optional prompt generation (async). Best-effort dedup: reuse any in-flight
         // brand-activation prompt-gen job for this site rather than submitting a dup.
         // This listJobs → status check is NOT atomic (TOCTOU) — two truly-concurrent

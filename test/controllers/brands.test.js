@@ -6585,6 +6585,45 @@ describe('Brands Controller', () => {
       expect(updateBrandStub).to.not.have.been.called;
     });
 
+    it('short-circuits to 200 (no-op) when the brand is already active', async () => {
+      const submitJobStub = sinon.stub().resolves({ job_id: 'pg-x' });
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-x' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: submitJobStub,
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller, updateBrandStub } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID,
+          name: 'Acme',
+          baseSiteId: SITE_ID,
+          baseUrl: 'https://site1.com',
+          region: ['us'],
+          status: 'active',
+          urls: [],
+        },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        brandId: BRAND_UUID,
+        status: 'active',
+        baseSiteId: SITE_ID,
+      });
+      // No re-run: no write, no prompt-gen, no schedule.
+      expect(updateBrandStub).to.not.have.been.called;
+      expect(submitJobStub).to.not.have.been.called;
+      expect(scheduleStub).to.not.have.been.called;
+    });
+
     // -------------------------------------------------------------------------
     // 3. Auth failures — 403
     // -------------------------------------------------------------------------
@@ -6718,6 +6757,34 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.promptGenerationJobId).to.equal('existing-1');
+      expect(submitJobStub).to.not.have.been.called;
+      expect(scheduleStub).to.have.been.calledOnce;
+    });
+
+    it('reuses an in-flight QUEUED job instead of submitting a new one', async () => {
+      const listJobsStub = sinon.stub().resolves([{ job_id: 'queued-1', status: 'QUEUED' }]);
+      const submitJobStub = sinon.stub().resolves({ job_id: 'new-job' });
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-1' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: listJobsStub,
+        submitPromptGenerationJob: submitJobStub,
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID, name: 'Acme', baseSiteId: SITE_ID, baseUrl: 'https://site1.com', region: ['us'], status: 'pending', urls: [],
+        },
+        fakeDrsClient: fakeDrs,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.promptGenerationJobId).to.equal('queued-1');
       expect(submitJobStub).to.not.have.been.called;
       expect(scheduleStub).to.have.been.calledOnce;
     });
