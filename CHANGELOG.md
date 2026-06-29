@@ -1,3 +1,10 @@
+## [1.609.1](https://github.com/adobe/spacecat-api-service/compare/v1.609.0...v1.609.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **llmo:** encode dataFolder path boundary Helix-safe (LLMO-5859) ([#2688](https://github.com/adobe/spacecat-api-service/issues/2688)) ([5720dd8](https://github.com/adobe/spacecat-api-service/commit/5720dd878e2a75f07ad6a7f1418b0916104c7d6e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.609.0](https://github.com/adobe/spacecat-api-service/compare/v1.608.0...v1.609.0) (2026-06-29)
 
 
