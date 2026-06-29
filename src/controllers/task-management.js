@@ -1283,71 +1283,6 @@ function TaskManagementController(context) {
     return createResponse({ issueTypes }, STATUS_OK);
   }
 
-  /**
-   * GET /organizations/:organizationId/task-management/connections/:connectionId/priorities
-   *
-   * Returns all priorities defined in the connected Jira instance.
-   * Priorities are instance-level (not project-scoped) so no query params are needed.
-   */
-  async function listPriorities(requestContext) {
-    const { params } = requestContext;
-    const { organizationId, connectionId } = params;
-
-    if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
-    }
-
-    if (!isValidUUID(connectionId)) {
-      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
-    }
-
-    let connection;
-    try {
-      const conn = await loadConnectionForOrg(organizationId, connectionId);
-      if (!conn || conn.getStatus() !== 'active') {
-        return createResponse(
-          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
-          STATUS_NOT_FOUND,
-        );
-      }
-      connection = conn;
-    } catch (err) {
-      log.error({ organizationId, connectionId, err }, 'Failed to load connection for listPriorities');
-      return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
-    }
-
-    let priorities;
-    try {
-      const connectionObj = {
-        id: connection.getId(),
-        organizationId: connection.getOrganizationId(),
-        provider: connection.getProvider(),
-        instanceUrl: connection.getInstanceUrl(),
-        metadata: connection.getMetadata(),
-      };
-      const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
-      priorities = await ticketClient.listPriorities();
-    } catch (err) {
-      const isReauthNeeded = err.status === 401
-        || err.message?.includes('requires re-authorization');
-
-      if (isReauthNeeded) {
-        await connection.markRequiresReauth().catch((updateErr) => {
-          log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after auth failure');
-        });
-        return createResponse(
-          { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
-          STATUS_CONFLICT,
-        );
-      }
-
-      log.error({ organizationId, connectionId, err }, 'Failed to list priorities');
-      return createResponse({ message: 'Failed to list priorities' }, STATUS_INTERNAL_SERVER_ERROR);
-    }
-
-    return createResponse({ priorities }, STATUS_OK);
-  }
-
   return {
     listConnections,
     getConnection,
@@ -1357,7 +1292,6 @@ function TaskManagementController(context) {
     createTicket,
     listProjects,
     listIssueTypes,
-    listPriorities,
   };
 }
 
