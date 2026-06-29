@@ -762,9 +762,7 @@ function TaskManagementController(context) {
               || batchTicketErr.message?.includes('requires re-authorization');
             if (isReauthNeeded) {
               // eslint-disable-next-line no-await-in-loop
-              await connection.markRequiresReauth().catch((updateErr) => {
-                log.warn({ updateErr }, 'Failed to mark connection as requires_reauth in batch');
-              });
+              await connection.markRequiresReauth();
               results.push({ suggestionId: suggId, status: STATUS_CONFLICT, error: 'connection_reauth_required' });
               // Short-circuit: token is invalid, remaining suggestions will also fail.
               // Mark them all as connection_reauth_required without calling Jira.
@@ -879,9 +877,7 @@ function TaskManagementController(context) {
       } catch (err) {
         const isReauthNeeded = err.status === 401 || err.message?.includes('requires re-authorization');
         if (isReauthNeeded) {
-          await connection.markRequiresReauth().catch((updateErr) => {
-            log.warn({ updateErr }, 'Failed to mark connection as requires_reauth');
-          });
+          await connection.markRequiresReauth();
           const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
           await markIdempotencyFailed(STATUS_CONFLICT, body);
           return createResponse(body, STATUS_CONFLICT);
@@ -1011,9 +1007,7 @@ function TaskManagementController(context) {
         || err.message?.includes('requires re-authorization');
 
       if (isReauthNeeded) {
-        await connection.markRequiresReauth().catch((updateErr) => {
-          log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after auth failure');
-        });
+        await connection.markRequiresReauth();
         const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
         await markIdempotencyFailed(STATUS_CONFLICT, body);
         return createResponse(body, STATUS_CONFLICT);
@@ -1193,9 +1187,7 @@ function TaskManagementController(context) {
         || err.message?.includes('requires re-authorization');
 
       if (isReauthNeeded) {
-        await connection.markRequiresReauth().catch((updateErr) => {
-          log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after auth failure');
-        });
+        await connection.markRequiresReauth();
         return createResponse(
           { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
           STATUS_CONFLICT,
@@ -1266,9 +1258,7 @@ function TaskManagementController(context) {
         || err.message?.includes('requires re-authorization');
 
       if (isReauthNeeded) {
-        await connection.markRequiresReauth().catch((updateErr) => {
-          log.warn({ updateErr }, 'Failed to mark connection as requires_reauth after auth failure');
-        });
+        await connection.markRequiresReauth();
         return createResponse(
           { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
           STATUS_CONFLICT,
