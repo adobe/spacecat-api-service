@@ -4570,7 +4570,10 @@ describe('Brands Controller', () => {
             data: {
               id: BRAND_UUID,
               name: 'New Brand',
-              status: 'active',
+              // 'pending' = no active same-name brand exists (a fresh-create
+              // precondition); avoids tripping the LLMO-5587 demotion guard, which
+              // only fires when an upsert-by-name would demote an *active* brand.
+              status: 'pending',
               origin: 'human',
               updated_at: '2026-01-01T00:00:00Z',
               updated_by: 'user@test.com',
@@ -4591,11 +4594,46 @@ describe('Brands Controller', () => {
       const response = await brandsController.createBrandForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID },
-        data: { name: 'New Brand' },
+        // baseSiteId keeps the brand active (an active brand requires a base site);
+        // without it the upsert would compute `pending` onto the same-name active
+        // brand the mock returns, which the LLMO-5587 demotion guard rejects.
+        data: { name: 'New Brand', baseSiteId: 'b2222222-2222-4222-b222-222222222222' },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
+    });
+
+    it('returns 409 when a by-name create would demote an active brand to pending (LLMO-5587)', async () => {
+      // An ACTIVE brand of the same name already exists; a create carrying
+      // status:'pending' would silently demote it via the (org, name) upsert.
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({ data: { id: BRAND_UUID, name: 'New Brand' }, error: null }),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID, name: 'New Brand', site_id: 'site-1', status: 'active',
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
     });
 
     it('returns 400 when brand data is missing', async () => {
@@ -5450,6 +5488,24 @@ describe('Brands Controller', () => {
       );
     });
 
+    it('forwards baseSiteId: null to storage so a pending brand can unset its primary URL (LLMO-5870)', async () => {
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Updated Brand' });
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: null },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      // The controller must not strip an explicit null — it is the unset signal the
+      // storage layer gates on `existing.status === 'pending'`.
+      expect(updateBrandStub.firstCall.args[0].updates).to.have.property('baseSiteId', null);
+    });
+
     it('re-syncs brand aliases across markets when brandAliases changes on a sub-workspace brand', async () => {
       const updated = {
         id: BRAND_UUID,
@@ -5851,6 +5907,77 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       expect(getBrandCompetitorsStub).to.not.have.been.called;
       expect(ciSyncStub).to.not.have.been.called;
+    });
+
+    it('returns 409 when demoting an active brand to pending (LLMO-5587)', async () => {
+      // beforeEach mock resolves a persisted brand with status 'active'; a generic
+      // PATCH carrying status:'pending' must be rejected (and emit BrandDemotionBlocked).
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
+    });
+
+    it('emits the BrandDemotionBlocked metric on a rejected demotion (LLMO-5587)', async () => {
+      // The EMF emitter writes the envelope to stdout via console.log; spy that
+      // sink and assert the emitted metric rather than mocking the emitter.
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await brandsController.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { status: 'pending' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandDemotionBlocked'));
+        expect(emfLine, 'expected a BrandDemotionBlocked EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandDemotionBlocked).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Product).to.equal('llmo');
+        // eslint-disable-next-line no-underscore-dangle
+        expect(envelope._aws.CloudWatchMetrics[0].Namespace).to.equal('Mysticat/Brands');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('swallows a logging failure during emission and still returns 409 (LLMO-5587, best-effort)', async () => {
+      // emitMetric is already best-effort; this proves emitBrandDemotionBlocked's own
+      // catch keeps a logger failure from breaking the request path (covers the catch).
+      const logSpy = sinon.stub(console, 'log');
+      const throwingLogger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub().throws(new Error('log boom')),
+        debug: sandbox.stub(),
+      };
+      const controller = BrandsController(context, throwingLogger, mockEnv);
+      try {
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { status: 'pending' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        expect(throwingLogger.warn).to.have.been.called;
+      } finally {
+        logSpy.restore();
+      }
     });
 
     it('returns 400 when brandId is missing', async () => {

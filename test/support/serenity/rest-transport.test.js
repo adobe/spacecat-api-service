@@ -880,7 +880,7 @@ describe('Semrush REST transport', () => {
   });
 
   describe('getInitStatus', () => {
-    it('GETs /v1/workspaces/{ws}/projects/{pid}/aio/init_status', async () => {
+    it('GETs /v2/workspaces/{ws}/projects/{pid}/aio/init_status', async () => {
       fetchStub.resolves(fetchOk({ initialized: false }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -888,8 +888,10 @@ describe('Semrush REST transport', () => {
 
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
+      // v2 (not v1): project-engine-client 1.2.0 moved init_status to /v2 and
+      // dropped the /v1 route.
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/init_status`,
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/init_status`,
       );
       expect(result.initialized).to.equal(false);
     });

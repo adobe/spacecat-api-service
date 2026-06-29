@@ -139,11 +139,38 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
+    // LLMO CloudFront "Optimize at Edge" onboarding wizard — admin-only
+    // (gateEdgeOptimizeWizard requires LLMO admin); cross-account control-plane, not a
+    // customer FACS surface.
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+    // LLMO Cloudflare onboarding — LLMO-admin manual provisioning, gated by
+    // isLLMOAdministrator() with a caller-supplied x-cloudflare-token; not a FACS surface.
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
     'POST /sites/:siteId/site-enrollments', // hasAdminAccess
+    'POST /sites/:siteId/entitlements', // hasAdminAccess
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
