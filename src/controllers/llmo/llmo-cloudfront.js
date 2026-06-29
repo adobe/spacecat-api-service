@@ -13,7 +13,7 @@
 import {
   ok, badRequest, forbidden, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import crypto from 'crypto';
 import yaml from 'js-yaml';
@@ -24,6 +24,16 @@ import TokowakaClient, {
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { getHostnameWithoutWww } from '../../support/edge-routing-utils.js';
+
+// The site's effective base URL for host derivation: the configured `overrideBaseURL` when valid,
+// else the site's baseURL. Mirrors the AEM-CS-Fastly edge-routing path (controllers/llmo/llmo.js)
+// and the shared client's getEffectiveBaseURL, so CloudFront routing resolves the same host as the
+// rest of the Edge Optimize pipeline (which keys content by the forwarded host of this URL).
+const effectiveBaseURL = (site) => {
+  const overrideBaseURL = site.getConfig?.()?.getFetchConfig?.()?.overrideBaseURL;
+  return isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
+};
 
 // CloudFormation templates use intrinsic-function tags (!Ref/!Sub/!GetAtt/...) that plain YAML
 // rejects. This schema tolerates them (constructing each to its raw value) so the permissions
@@ -249,15 +259,16 @@ function LlmoCloudFrontController(ctx) {
     log,
   ) => {
     const baseURL = site.getBaseURL();
-    let baseHost = '';
-    let fwdHost = '';
-    try {
-      baseHost = new URL(baseURL).host.toLowerCase();
-      fwdHost = calculateForwardedHost(baseURL, log).toLowerCase();
-    } catch (e) {
-      // unparseable base URL / host derivation failed — leaves no host to match against
+    // Match www-insensitively (x.com ≡ www.x.com) against both the site baseURL and its
+    // overrideBaseURL, so apex-only, www-only, and both-CNAME distributions all resolve correctly.
+    const siteRoots = new Set();
+    for (const url of [baseURL, effectiveBaseURL(site)]) {
+      try {
+        siteRoots.add(getHostnameWithoutWww(url, log));
+      } catch (e) {
+        // unparseable URL — skip; if no root resolves, the guard falls through to the warning
+      }
     }
-    const siteHosts = new Set([baseHost, fwdHost].filter(Boolean));
 
     const distributions = await cloudFrontClient.listDistributions();
     const dist = distributions.find((d) => d.id === distributionId);
@@ -265,19 +276,32 @@ function LlmoCloudFrontController(ctx) {
       return { error: badRequest(`Distribution ${distributionId} not found in this account`) };
     }
     const aliases = dist.aliases.map((a) => a.toLowerCase());
-    if (aliases.some((a) => siteHosts.has(a))) {
+    const aliasServesSite = aliases.some((a) => {
+      try {
+        return siteRoots.has(getHostnameWithoutWww(a, log));
+      } catch (e) {
+        return false;
+      }
+    });
+    if (aliasServesSite) {
       return {};
     }
 
+    let siteHost = baseURL;
+    try {
+      siteHost = new URL(effectiveBaseURL(site)).host;
+    } catch (e) {
+      // keep baseURL as the display value
+    }
     const allowOverride = context.data?.allowDomainMismatch === true;
     if (allowOverride) {
       log.warn(`[cdn-onboard-cloudfront] OVERRIDE site ${site.getId()}: distribution `
         + `${distributionId} (aliases: ${aliases.join(',') || 'none'}) does not serve `
-        + `${baseHost} — proceeding by explicit override`);
+        + `${siteHost} — proceeding by explicit override`);
       return {};
     }
     return {
-      error: badRequest(`Distribution ${distributionId} does not serve ${baseHost}`
+      error: badRequest(`Distribution ${distributionId} does not serve ${siteHost}`
         + ` (its domains: ${aliases.join(', ') || 'none'}).`
         + ' Select the CloudFront distribution that serves this site.'),
     };
@@ -485,7 +509,9 @@ function LlmoCloudFrontController(ctx) {
     if (!hasText(apiKey)) {
       return { error: badRequest('No LLMO API key found for this site') };
     }
-    const forwardedHost = calculateForwardedHost(baseURL, log);
+    // Forwarded host must match what the Edge Optimize pipeline keyed content under, which honors
+    // overrideBaseURL (apiKey lookup stays on baseURL to avoid affecting key resolution).
+    const forwardedHost = calculateForwardedHost(effectiveBaseURL(site), log);
     return { target: { baseURL, apiKey, forwardedHost } };
   };
 
@@ -865,7 +891,7 @@ function LlmoCloudFrontController(ctx) {
       let domain = String(context.data?.domain || '').trim();
       if (!hasText(domain)) {
         try {
-          domain = String(calculateForwardedHost(site.getBaseURL(), log) || '').trim();
+          domain = String(calculateForwardedHost(effectiveBaseURL(site), log) || '').trim();
         } catch (e) {
           log.warn(`[cdn-onboard-cloudfront] could not derive host from site baseURL: ${e.message}`);
         }

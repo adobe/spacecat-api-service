@@ -1846,6 +1846,16 @@ describe('LlmoCloudFrontController', () => {
       expect(runDeployStepStub.called).to.equal(false);
     });
 
+    it('allows an apex CNAME for a www site (www-insensitive match)', async () => {
+      // site baseURL is https://www.example.com; the distribution serves the apex example.com.
+      listDistributionsStub.resolves([{
+        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: ['example.com'], status: 'Deployed', enabled: true,
+      }]);
+      const result = await controller.deploy(deployContext);
+      expect(result.status).to.equal(200);
+      expect(runDeployStepStub.calledOnce).to.equal(true);
+    });
+
     it('proceeds despite a domain mismatch when allowDomainMismatch is set (logged override)', async () => {
       listDistributionsStub.resolves([{
         id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: [], status: 'Deployed', enabled: true,
