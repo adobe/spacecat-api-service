@@ -162,7 +162,7 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
         parentWorkspaceId,
         title,
         ignoredCount: ignored.length,
-        ignoredStatuses: ignored.map((w) => w?.status),
+        ignoredStatuses: [...new Set(ignored.map((w) => w?.status))],
       });
     }
     return null;

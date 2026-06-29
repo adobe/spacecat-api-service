@@ -301,14 +301,17 @@ describe('workspace-lifecycle', () => {
         expect(transport.createSubworkspace).to.have.been.calledOnce;
       });
 
-      it('logs the count of ignored non-created same-title stubs (operational visibility)', async () => {
+      it('logs the count of ignored non-created same-title stubs and dedupes their statuses', async () => {
         // Zombies accumulating under a brand should be visible in logs without a
-        // manual family query — the proactive find emits an info line naming the count.
+        // manual family query — the proactive find emits an info line. ignoredCount
+        // conveys volume; ignoredStatuses is deduped so repeated stubs sharing a
+        // status do not bloat the line.
         const localLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
         const transport = makeTransport({
           listWorkspaceFamily: sinon.stub().resolves([
             { id: 'zombie-1', title: EXPECTED_TITLE, status: 'not ready' },
-            { id: 'zombie-2', title: EXPECTED_TITLE, status: 'invalid subscription' },
+            { id: 'zombie-2', title: EXPECTED_TITLE, status: 'not ready' },
+            { id: 'zombie-3', title: EXPECTED_TITLE, status: 'invalid subscription' },
           ]),
         });
         const brand = makeBrand();
@@ -318,7 +321,9 @@ describe('workspace-lifecycle', () => {
         const logged = localLog.info.getCalls()
           .find((c) => /ignoring non-created same-title/.test(c.args[0]));
         expect(logged, 'expected an ignored-stub log line').to.exist;
-        expect(logged.args[1]).to.include({ ignoredCount: 2 });
+        expect(logged.args[1]).to.include({ ignoredCount: 3 });
+        expect(logged.args[1].ignoredStatuses).to.have.members(['not ready', 'invalid subscription']);
+        expect(logged.args[1].ignoredStatuses).to.have.lengthOf(2);
       });
 
       it('does NOT log ignored stubs when no same-title stub exists (clean first create)', async () => {
