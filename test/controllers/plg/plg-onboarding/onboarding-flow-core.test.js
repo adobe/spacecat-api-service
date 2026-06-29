@@ -1355,7 +1355,22 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       mockDataAccess.PlgOnboarding.create.resolves(mockOnboarding);
     });
 
-    const NON_PROD_DOMAINS = ['qa.example.com', 'stage.example.com', 'staging.example.com', 'dev.example.com', 'development.example.com', 'example.qa.com', 'example.stage.com'];
+    const NON_PROD_DOMAINS = [
+      'qa.example.com',
+      'stage.example.com',
+      'staging.example.com',
+      'dev.example.com',
+      'development.example.com',
+      'example.qa.com',
+      'example.stage.com',
+      'experience-qa.adobe.com',
+      'dev-preview.example.com',
+      'example-stage.com',
+      'qa-internal.example.com',
+      'newweb-qa2.infineon.cn',
+      'stage2.example.com',
+      'dev3-preview.example.com',
+    ];
 
     for (const domain of NON_PROD_DOMAINS) {
       // eslint-disable-next-line no-loop-func
@@ -1379,6 +1394,40 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('does not waitlist a .dev TLD domain (legitimate production gTLD)', async () => {
+      mockOnboarding.getDomain.returns('mysite.dev');
+      const context = buildContext({ domain: 'mysite.dev' });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('does not waitlist a web.dev domain (legitimate production gTLD)', async () => {
+      mockOnboarding.getDomain.returns('web.dev');
+      const context = buildContext({ domain: 'web.dev' });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips non-prod guard when steps.nonProdDomain is already true (re-entrancy guard)', async () => {
+      // Simulates a bypass handler re-running the flow after the guard already fired
+      mockOnboarding.getDomain.returns('dev.example.com');
+      mockOnboarding.getSteps.returns({ nonProdDomain: true });
+      const context = buildContext({ domain: 'dev.example.com' });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      // Guard must not fire again — status should reach ONBOARDED, not WAITLISTED
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
     });
   });
 });
