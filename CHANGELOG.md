@@ -1,3 +1,38 @@
+# [1.608.0](https://github.com/adobe/spacecat-api-service/compare/v1.607.0...v1.608.0) (2026-06-28)
+
+
+### Features
+
+* **edge-optimize:** source CloudFront control-plane from tokowaka-client ([#2682](https://github.com/adobe/spacecat-api-service/issues/2682)) ([46703d2](https://github.com/adobe/spacecat-api-service/commit/46703d23a383e04a9896d2303097a8e4c27a1002))
+
+# [1.607.0](https://github.com/adobe/spacecat-api-service/compare/v1.606.2...v1.607.0) (2026-06-27)
+
+
+### Features
+
+* **llmo:** tag Cloudflare workers for idempotent deploys and add audit logging ([#2716](https://github.com/adobe/spacecat-api-service/issues/2716)) ([be40387](https://github.com/adobe/spacecat-api-service/commit/be40387c84fdd4a2576346779898ea34db6e6d48))
+
+## [1.606.2](https://github.com/adobe/spacecat-api-service/compare/v1.606.1...v1.606.2) (2026-06-26)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-cloudflare-client to 1.2.1 ([#2715](https://github.com/adobe/spacecat-api-service/issues/2715)) ([25358a8](https://github.com/adobe/spacecat-api-service/commit/25358a8451641ac881cc63b137299bb4c4017720))
+
+## [1.606.1](https://github.com/adobe/spacecat-api-service/compare/v1.606.0...v1.606.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **llmo:** return 409 when Cloudflare deploy worker already exists ([#2714](https://github.com/adobe/spacecat-api-service/issues/2714)) ([72836a1](https://github.com/adobe/spacecat-api-service/commit/72836a10153ad798060aba07b5796cef59b7fc89))
+
+# [1.606.0](https://github.com/adobe/spacecat-api-service/compare/v1.605.0...v1.606.0) (2026-06-26)
+
+
+### Features
+
+* **preflight:** shape new DTOs and join AsyncJob on detail (SITES-47254) ([#2713](https://github.com/adobe/spacecat-api-service/issues/2713)) ([c3adb21](https://github.com/adobe/spacecat-api-service/commit/c3adb21ef84e04980a413ea6e4aa302e6900a95f))
+
 # [1.605.0](https://github.com/adobe/spacecat-api-service/compare/v1.604.1...v1.605.0) (2026-06-26)
 
 
