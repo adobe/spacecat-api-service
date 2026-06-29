@@ -161,6 +161,16 @@ export default function serenityTests(getHttpClient, resetData) {
       expect(res.status).to.equal(200);
       expect(res.body.items).to.be.an('array');
     });
+
+    it('GET /serenity/markets/:geo/:lang 404s when the slice has no market', async () => {
+      // A well-formed slice that the workspace has no market for: this resolves
+      // the brand, builds the transport, lists projects from the mock, finds no
+      // matching slice → 404 marketNotFound. Deeper reach than the unknown-brand
+      // 404 (it actually queries the mock), and distinct from the bad-geo 400.
+      const res = await getHttpClient().admin.get(`${base}/markets/2840/en`);
+      expect(res.status).to.equal(404);
+      expect(res.body.error).to.equal('marketNotFound');
+    });
   });
 
   describe('Serenity API — write endpoints reach the handler (post-auth validation)', () => {
@@ -205,6 +215,18 @@ export default function serenityTests(getHttpClient, resetData) {
 
     it('POST /serenity/prompts/bulk-delete 400s on an empty body', async () => {
       const res = await getHttpClient().admin.post(`${base}/prompts/bulk-delete`, {});
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalidRequest');
+    });
+
+    it('PATCH /serenity/prompts/:id 400s when text/tags are missing', async () => {
+      const res = await getHttpClient().admin.patch(`${base}/prompts/some-prompt-id`, {});
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('missingFields');
+    });
+
+    it('DELETE /serenity/markets/:geo/:lang 400s on a non-integer geoTargetId', async () => {
+      const res = await getHttpClient().admin.delete(`${base}/markets/not-a-number/en`);
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('invalidRequest');
     });
