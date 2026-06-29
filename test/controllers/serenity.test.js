@@ -241,6 +241,26 @@ describe('SerenityController', () => {
     it('requires a log', () => {
       expect(() => SerenityController({ env: {} }, null, {})).to.throw('Log required');
     });
+
+    // The warn-once latch is module-scoped, but `beforeEach` re-esmocks
+    // serenity.js fresh for every test, so each test gets its OWN latch — this
+    // test is self-contained, not order-dependent. The two constructions below
+    // share THIS test's module instance (first warns, second is already latched),
+    // and a future test that wants to see the warning gets a fresh module where it
+    // fires again. It reads the flag through the third `env` arg (context has no
+    // `env`), exercising the `context?.env || env` fallback branch — the
+    // context.env side is already covered by every other constructor here.
+    it('warns at most once when SERENITY_ALLOW_NON_IMS_AUTH is enabled', () => {
+      const log = fakeLog();
+      SerenityController({ region: 'x' }, log, { SERENITY_ALLOW_NON_IMS_AUTH: 'true' });
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/SERENITY_ALLOW_NON_IMS_AUTH is enabled/);
+
+      // A second construction with the flag still set does not warn again.
+      const log2 = fakeLog();
+      SerenityController({ env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } }, log2, {});
+      expect(log2.warn).to.not.have.been.called;
+    });
   });
 
   describe('auth + brand resolution', () => {
@@ -254,6 +274,28 @@ describe('SerenityController', () => {
     it('401s when the caller did not authenticate via IMS', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({ authType: 'jwt' });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    // Test-only escape hatch (SERENITY_ALLOW_NON_IMS_AUTH). The integration-test
+    // harness mints a non-IMS (JWT) token; with the flag set, the IMS-type gate
+    // is skipped so the handler runs (the Semrush mock ignores the forwarded
+    // bearer). The Authorization header is still required (asserted below).
+    it('lets a non-IMS caller through when SERENITY_ALLOW_NON_IMS_AUTH is set (reaches the handler, not 401)', async () => {
+      handlers.handleListPrompts.resolves({ items: [], total: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
+    });
+
+    it('still 401s a non-IMS caller with the flag set but NO Authorization header', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: null, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' },
+      });
       const response = await controller.listPrompts(ctx);
       expect(response.status).to.equal(401);
     });
