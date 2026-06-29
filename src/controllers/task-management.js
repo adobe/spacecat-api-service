@@ -1212,15 +1212,16 @@ function TaskManagementController(context) {
   /**
    * GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types
    *
-   * Returns all non-subtask issue types available for a given project key.
-   * projectKey is required as a query parameter because issue types are scoped
-   * per project in both company-managed and next-gen Jira projects.
+   * Returns all non-subtask issue types for a given project.
+   * projectId (numeric Jira project ID, returned by listProjects) is required
+   * as a query parameter. The hierarchy endpoint used internally requires the
+   * numeric ID, not the project key.
    */
   async function listIssueTypes(requestContext) {
     const { params, pathInfo } = requestContext;
     const { organizationId, connectionId } = params;
-    const projectKey = new URLSearchParams(pathInfo?.suffix?.split('?')[1] ?? '').get('projectKey')
-      ?? requestContext.data?.projectKey;
+    const projectId = new URLSearchParams(pathInfo?.suffix?.split('?')[1] ?? '').get('projectId')
+      ?? requestContext.data?.projectId;
 
     if (!isValidUUID(organizationId)) {
       return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
@@ -1230,8 +1231,8 @@ function TaskManagementController(context) {
       return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
     }
 
-    if (!hasText(projectKey)) {
-      return createResponse({ message: 'projectKey query parameter is required' }, STATUS_BAD_REQUEST);
+    if (!hasText(projectId)) {
+      return createResponse({ message: 'projectId query parameter is required' }, STATUS_BAD_REQUEST);
     }
 
     let connection;
@@ -1259,7 +1260,7 @@ function TaskManagementController(context) {
         metadata: connection.getMetadata(),
       };
       const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
-      issueTypes = await ticketClient.listIssueTypes(projectKey);
+      issueTypes = await ticketClient.listIssueTypes(projectId);
     } catch (err) {
       const isReauthNeeded = err.status === 401
         || err.message?.includes('requires re-authorization');
@@ -1275,7 +1276,7 @@ function TaskManagementController(context) {
       }
 
       log.error({
-        organizationId, connectionId, projectKey, err,
+        organizationId, connectionId, projectId, err,
       }, 'Failed to list issue types');
       return createResponse({ message: 'Failed to list issue types' }, STATUS_INTERNAL_SERVER_ERROR);
     }
