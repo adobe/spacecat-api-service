@@ -38,17 +38,23 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  *     `semrush_workspace_id` is aligned to the mock seed (SERENITY_MOCK_WORKSPACE_ID),
  *     so `GET models` / `GET markets` resolve a real workspace and read live data.
  *   - Every brand-level WRITE endpoint reaching its handler past auth + brand
- *     resolution and failing at body/slice validation (the deepest 2xx is blocked
- *     by the mock — see below), which still proves each route → controller wiring.
+ *     resolution and failing at body/slice validation, proving each route →
+ *     controller wiring.
+ *   - The mutating sub-workspace lifecycle live through the mock: `POST markets`
+ *     and `activate` provision a project and PUBLISH it (needs PE mock >= 1.3.1,
+ *     which fixed the empty-body-2xx 406 — adobe/spacecat-shared#1742), `deactivate`
+ *     decommissions, `DELETE markets` removes a slice.
  *
- * Not covered (mock limitation, NOT a gap to fix here): the create/activate happy
- * paths. The Project Engine mock returns 406 on the project `publish` step, so
- * `POST markets` / `activate` cannot reach a 2xx against the pinned mock image —
- * the suite asserts their validation surface instead. A mock that implements
- * `publish` is the prerequisite for the create/lifecycle 2xx increment;
- * `resetSemrushMocks()` in setup.js is already wired for it.
+ * Known mock-fidelity gaps (tracked in spacecat-shared) that cap the assertions —
+ * NOT product bugs, so the suite asserts around them rather than asserting a
+ * broken round-trip:
+ *   - A created market does not round-trip into `GET markets` / `GET markets/:slice`
+ *     / prompt-create-for-slice: the PE mock's project read-view returns an empty
+ *     `settings.ai.language.name`, so the transport's `langOf` cannot derive the
+ *     slice languageCode and the market is dropped from the listing.
+ * When those are fixed, the read-back / prompt-lifecycle assertions can be added.
  */
-export default function serenityTests(getHttpClient, resetData) {
+export default function serenityTests(getHttpClient, resetData, resetMocks = async () => {}) {
   // Seed the baseline org/brand rows the catalog + brand-resolution tests read.
   // (The route-gate cases fire before any DB access, but the org-level reads
   // need ORG_1 present.) Mirrors every other postgres factory.
@@ -229,6 +235,73 @@ export default function serenityTests(getHttpClient, resetData) {
       const res = await getHttpClient().admin.delete(`${base}/markets/not-a-number/en`);
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('invalidRequest');
+    });
+  });
+
+  describe('Serenity API — sub-workspace lifecycle (mutating, live mock)', () => {
+    // These mutate Project Engine mock state: a market provisions a project and
+    // PUBLISHES it (the publish step needs PE mock >= 1.3.1, which fixed the
+    // empty-body-2xx 406 — adobe/spacecat-shared#1742); activate/deactivate and
+    // market delete mutate too. Reset BOTH the DB and the mock stores before each
+    // case so they are order-independent.
+    //
+    // NOTE on what is asserted: the create/activate/deactivate/delete OPERATIONS
+    // return their real 2xx here. The full round-trip (a created market then
+    // appearing in GET markets / GET markets/:slice, and a prompt created against
+    // that slice) is NOT yet assertable: the mock's project read-view returns an
+    // empty `settings.ai.language.name`, so the transport's `langOf` cannot derive
+    // the slice's languageCode and the market is dropped from the listing. That is
+    // a separate mock-fidelity gap (tracked in spacecat-shared) — once the mock
+    // echoes the language name, the read-back assertions can be added.
+    beforeEach(async () => {
+      await resetData();
+      await resetMocks();
+    });
+
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+    const US_GEO = 2840; // US resolves to Google geoTargetId 2840.
+    const createUsMarket = () => getHttpClient().admin.post(`${base}/markets`, {
+      market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+    });
+
+    it('POST /serenity/markets provisions and publishes a market (201)', async () => {
+      const res = await createUsMarket();
+      expect(res.status).to.equal(201);
+      expect(res.body.published).to.equal(true);
+      expect(res.body.geoTargetId).to.equal(US_GEO);
+      expect(res.body.languageCode).to.equal('en');
+      expect(res.body.projectId).to.be.a('string').that.is.not.empty;
+    });
+
+    it('DELETE /serenity/markets/:geo/:lang returns 204 after a create', async () => {
+      await createUsMarket();
+      const del = await getHttpClient().admin.delete(`${base}/markets/${US_GEO}/en`);
+      expect(del.status).to.equal(204);
+    });
+
+    it('GET /serenity/tags returns 200 for a well-formed slice', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.get(`${base}/tags?geoTargetId=${US_GEO}&languageCode=en`);
+      expect(res.status).to.equal(200);
+      expect(res.body.items).to.be.an('array');
+    });
+
+    it('POST /serenity/activate provisions + publishes, then deactivate decommissions', async () => {
+      const activated = await getHttpClient().admin.post(`${base}/activate`, {
+        brandDomain: 'example.com',
+        brandNames: ['Test Brand'],
+        markets: [{ market: 'US', languageCode: 'en' }],
+      });
+      // 207 Multi-Status: per-market results, each a published 201.
+      expect(activated.status).to.equal(207);
+      expect(activated.body.status).to.equal('active');
+      expect(activated.body.markets).to.be.an('array').that.is.not.empty;
+      expect(activated.body.markets[0].status).to.equal(201);
+      expect(activated.body.markets[0].body.published).to.equal(true);
+
+      const deactivated = await getHttpClient().admin.post(`${base}/deactivate`, {});
+      expect(deactivated.status).to.equal(200);
+      expect(deactivated.body.status).to.equal('pending');
     });
   });
 }
