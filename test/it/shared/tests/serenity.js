@@ -45,14 +45,14 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  *     which fixed the empty-body-2xx 406 — adobe/spacecat-shared#1742), `deactivate`
  *     decommissions, `DELETE markets` removes a slice.
  *
- * Known mock-fidelity gaps (tracked in spacecat-shared) that cap the assertions —
+ * Known mock-fidelity gaps (adobe/spacecat-shared#1745) that cap the assertions —
  * NOT product bugs, so the suite asserts around them rather than asserting a
  * broken round-trip:
  *   - A created market does not round-trip into `GET markets` / `GET markets/:slice`
  *     / prompt-create-for-slice: the PE mock's project read-view returns an empty
  *     `settings.ai.language.name`, so the transport's `langOf` cannot derive the
  *     slice languageCode and the market is dropped from the listing.
- * When those are fixed, the read-back / prompt-lifecycle assertions can be added.
+ * When that is fixed, the read-back / prompt-lifecycle assertions can be added.
  */
 export default function serenityTests(getHttpClient, resetData, resetMocks = async () => {}) {
   // Seed the baseline org/brand rows the catalog + brand-resolution tests read.
