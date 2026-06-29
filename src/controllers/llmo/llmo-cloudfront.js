@@ -24,7 +24,7 @@ import TokowakaClient, {
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { getHostnameWithoutWww } from '../../support/edge-routing-utils.js';
+import { getHostnameWithoutWww, probeSiteAndResolveDomain } from '../../support/edge-routing-utils.js';
 
 // The site's effective base URL for host derivation: the configured `overrideBaseURL` when valid,
 // else the site's baseURL. Mirrors the AEM-CS-Fastly edge-routing path (controllers/llmo/llmo.js)
@@ -866,14 +866,14 @@ function LlmoCloudFrontController(ctx) {
   // Verify end-to-end routing by probing the distribution as a bot vs a human and inspecting the
   // x-edgeoptimize-* headers. Always returns 200 with { passed }; success requires a request-id.
   const verifyRouting = async (context) => {
-    const { log, dataAccess, env } = context;
+    const { log, dataAccess } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const {
-      accountId, externalId, distributionId, error: credError,
-    } = validateCloudfrontCredentials(context, { requireDistribution: true });
+    const { error: credError } = validateCloudfrontCredentials(
+      context,
+      { requireDistribution: true },
+    );
     if (credError) {
       return credError;
     }
@@ -884,25 +884,18 @@ function LlmoCloudFrontController(ctx) {
         return error;
       }
 
-      // Probe the customer's REAL onboarded domain (the site's own host) — that is where bot
-      // traffic actually lands, so it is the true end-to-end test of the routing. An explicit
-      // `domain` override still wins; the distribution's *.cloudfront.net DomainName is only a
-      // last-resort fallback for distributions with no resolvable site host.
+      // Resolve the domain to verify: explicit override → probe the live site, reusing the shared
+      // edge-routing probe (it follows 301s and confirms the agentic UA is actually routed). Bots
+      // land on the customer's real domain, so there is no *.cloudfront.net fallback.
       let domain = String(context.data?.domain || '').trim();
       if (!hasText(domain)) {
         try {
-          domain = String(calculateForwardedHost(effectiveBaseURL(site), log) || '').trim();
+          domain = await probeSiteAndResolveDomain(effectiveBaseURL(site), log);
         } catch (e) {
-          log.warn(`[cdn-onboard-cloudfront] could not derive host from site baseURL: ${e.message}`);
+          // Routing not active yet, or the site 301s to a foreign root — keep the wizard polling.
+          log.info(`[cdn-onboard-cloudfront] verify probe not ready for site ${siteId}: ${e.message}`);
+          return ok({ passed: false, reason: e.message });
         }
-      }
-      if (!hasText(domain)) {
-        const { cloudFrontClient } = await assumeCloudFrontClient({
-          accountId, externalId, roleName,
-        });
-        const distributions = await cloudFrontClient.listDistributions();
-        const match = distributions.find((d) => d.id === distributionId);
-        domain = match?.domainName || '';
       }
       if (!hasText(domain)) {
         return badRequest('Could not determine the domain to verify');
