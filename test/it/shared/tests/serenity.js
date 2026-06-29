@@ -46,14 +46,12 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  *     decommissions, `DELETE markets` removes a slice.
  *   - The sub-workspace ROUND-TRIP (read-back): a created+published market lists in
  *     `GET markets` as `live`, resolves via `GET markets/:slice`, and a prompt
- *     attaches to that slice and lists back (with text dedup). This needs the PE
- *     mock round-trip fix (adobe/spacecat-shared#1745, PR #1746): the project
- *     read-view must echo the ISO language code so the transport's `langOf` can
- *     derive the slice, and `publish` must flip `publish_status` -> `live`. The
- *     published image <= 1.3.1 does NOT, so that block is guarded by a one-shot
- *     capability probe — it SKIPS against the old image (suite stays green) and
- *     auto-activates once the client (hence the pinned mock tag) is bumped to the
- *     released round-trip mock. Verified to PASS against a local build of #1746.
+ *     attaches to that slice and lists back (with text dedup). This relies on the PE
+ *     mock round-trip fix (adobe/spacecat-shared#1745, PR #1746, shipped in PE
+ *     >= 1.3.2 / UM >= 1.3.1): the project read-view echoes the ISO language code so
+ *     the transport's `langOf` derives the slice, and `publish` flips
+ *     `publish_status` -> `live`. Pinned by the bumped client deps, so it runs
+ *     unconditionally.
  */
 export default function serenityTests(getHttpClient, resetData, resetMocks = async () => {}) {
   // Seed the baseline org/brand rows the catalog + brand-resolution tests read.
@@ -250,7 +248,7 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
     // OPERATIONS return their real 2xx. The full round-trip (a created market then
     // appearing in GET markets / GET markets/:slice, and a prompt created against
     // that slice) is asserted in the separate "sub-workspace round-trip" describe
-    // below, which is capability-gated on the PE mock round-trip fix (#1745/#1746).
+    // below, enabled by the PE mock round-trip fix (#1745/#1746, PE >= 1.3.2).
     beforeEach(async () => {
       await resetData();
       await resetMocks();
@@ -303,53 +301,22 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
     });
   });
 
-  describe('Serenity API — sub-workspace round-trip (live mock, requires #1745 fix)', () => {
-    // The read-back assertions below require the PE mock to ROUND-TRIP a created+
-    // published market (adobe/spacecat-shared#1745, fixed by PR #1746): its project
-    // read-view must echo the ISO language code (so the transport's `langOf` derives
-    // the slice's languageCode) and `publish` must flip `publish_status` -> `live`.
-    // The currently-published mock image (<= 1.3.1) does NOT, so a created market is
-    // dropped from `GET markets` and never resolves. Rather than fail against the old
-    // image, a one-shot capability probe in `before()` skips these when the booted
-    // mock cannot round-trip — the suite stays green on the published image and these
-    // auto-activate the moment the client (hence the pinned mock image) is bumped to
-    // the released round-trip mock. Verified to PASS against a local build of the
-    // #1746 (feat/1745) mock.
+  describe('Serenity API — sub-workspace round-trip (live mock)', () => {
+    // Read-back: a created+published market lists in `GET markets` as `live`,
+    // resolves via `GET markets/:slice`, and a prompt attaches to that slice and
+    // lists back (with text dedup). This is the contract the PE mock round-trip fix
+    // guarantees (adobe/spacecat-shared#1745, PR #1746): the project read-view echoes
+    // the ISO language code (so the transport's `langOf` derives the slice) and
+    // `publish` flips `publish_status` -> `live`. Pinned by the bumped client deps
+    // (PE >= 1.3.2 / UM >= 1.3.1, which select the round-trip mock image), so these
+    // run unconditionally — a regression in the mock or transport fails loudly here.
     const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
     const US_GEO = 2840; // US resolves to Google geoTargetId 2840.
     const createUsMarket = () => getHttpClient().admin.post(`${base}/markets`, {
       market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
     });
 
-    let roundTripSupported = false;
-    before(async () => {
-      await resetData();
-      await resetMocks();
-      // Probe the booted mock: create+publish a market, then see if it lists back.
-      const created = await createUsMarket();
-      if (created.status === 201) {
-        const list = await getHttpClient().admin.get(`${base}/markets`);
-        roundTripSupported = Array.isArray(list.body?.items)
-          && list.body.items.some((m) => m.geoTargetId === US_GEO && m.languageCode === 'en');
-      }
-      if (!roundTripSupported) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          '[serenity IT] booted PE mock does not round-trip a created market — '
-          + 'skipping read-back assertions (requires the adobe/spacecat-shared#1745 fix, PR #1746). '
-          + 'Bump @adobe/spacecat-shared-project-engine-client to the released round-trip mock to enable.',
-        );
-      }
-      // Leave a clean store whether or not the probe found support (the skip path
-      // below does NOT reset, so clean up the probe's mutation here).
-      await resetData();
-      await resetMocks();
-    });
-
-    beforeEach(async function gate() {
-      if (!roundTripSupported) {
-        this.skip();
-      }
+    beforeEach(async () => {
       await resetData();
       await resetMocks();
     });
