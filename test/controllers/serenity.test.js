@@ -242,11 +242,14 @@ describe('SerenityController', () => {
       expect(() => SerenityController({ env: {} }, null, {})).to.throw('Log required');
     });
 
-    // The warn-once latch is process-global; no other test constructs with the
-    // flag set, so this test owns the single flip. It reads the flag through the
-    // third `env` arg (context has no `env`), exercising the `context?.env || env`
-    // fallback branch — the context.env side is already covered by every other
-    // constructor here.
+    // The warn-once latch is module-scoped, but `beforeEach` re-esmocks
+    // serenity.js fresh for every test, so each test gets its OWN latch — this
+    // test is self-contained, not order-dependent. The two constructions below
+    // share THIS test's module instance (first warns, second is already latched),
+    // and a future test that wants to see the warning gets a fresh module where it
+    // fires again. It reads the flag through the third `env` arg (context has no
+    // `env`), exercising the `context?.env || env` fallback branch — the
+    // context.env side is already covered by every other constructor here.
     it('warns at most once when SERENITY_ALLOW_NON_IMS_AUTH is enabled', () => {
       const log = fakeLog();
       SerenityController({ region: 'x' }, log, { SERENITY_ALLOW_NON_IMS_AUTH: 'true' });

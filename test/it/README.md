@@ -274,6 +274,17 @@ This will:
 npx mocha --require test/it/postgres/harness.js --timeout 30000 test/it/postgres/sites.test.js
 ```
 
+### Mock-backed suites (serenity) — use `--timeout 60000`
+
+The `serenity` suite drives the Semrush vendor **mock** containers over real
+HTTPS (not in-process `nock` stubs — no live Semrush is contacted), so the round
+trips are slower than the pure-DB suites and the default 30000ms is too tight.
+Run it (and any other mock-backed suite) with `--timeout 60000`:
+
+```bash
+npx mocha --require test/it/postgres/harness.js --timeout 60000 test/it/postgres/serenity.test.js
+```
+
 ### Environment Variables
 
 The test harness auto-configures all environment variables. No `.env` file is needed. Key variables set by `env.js`:

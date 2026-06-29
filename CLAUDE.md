@@ -34,8 +34,9 @@ npx mocha --require test/it/postgres/harness.js --timeout 30000 'test/it/postgre
 # Single IT test file
 npx mocha --require test/it/postgres/harness.js --timeout 30000 test/it/postgres/sites.test.js
 
-# Mock-backed suites (e.g. serenity, which drives the Semrush vendor mocks over
-# HTTPS) make real upstream calls — run them with --timeout 60000:
+# Mock-backed suites (e.g. serenity, which drives the Semrush vendor mock
+# containers over real HTTPS — not in-process stubs, no live Semrush) are slower
+# than the pure-DB suites — run them with --timeout 60000:
 npx mocha --require test/it/postgres/harness.js --timeout 60000 test/it/postgres/serenity.test.js
 ```
 

@@ -114,7 +114,11 @@ async function waitForSemrushMocks(maxAttempts = 60, intervalMs = 1000) {
   for (let i = 0; i < maxAttempts; i += 1) {
     try {
       const results = await Promise.all(
-        MOCK_DUMP_PATHS.map((url) => fetch(url).then((r) => r.ok).catch(() => false)),
+        // Per-probe 5s AbortController: if a mock accepts the TCP connection but
+        // hangs (Caddy up, Counterfact not yet bound), a bare fetch could block
+        // for the platform TCP timeout and eat the whole poll budget. Cap each.
+        MOCK_DUMP_PATHS.map((url) => fetch(url, { signal: AbortSignal.timeout(5000) })
+          .then((r) => r.ok).catch(() => false)),
       );
       if (results.every(Boolean)) {
         return;
@@ -189,7 +193,10 @@ export async function startContainers() {
 
   execSync(
     `docker compose -f "${COMPOSE_FILE}" up -d`,
-    { stdio: 'inherit', timeout: 120_000 },
+    // 240s, not 120s: a cold CI runner pulls five images here — Postgres, MinIO,
+    // the data-service, and the two GHCR Semrush mocks — and the mock pulls alone
+    // can blow a tight 2-minute budget on first run.
+    { stdio: 'inherit', timeout: 240_000 },
   );
 
   // Wait for PostgREST, MinIO and the Semrush mocks to become ready in parallel
