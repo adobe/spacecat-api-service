@@ -269,6 +269,8 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/opportunities/:opportunityId/tickets': taskManagementController.listTicketsByOpportunity,
     'POST /organizations/:organizationId/task-management/:provider/tickets': taskManagementController.createTicket,
     'GET /organizations/:organizationId/task-management/connections/:connectionId/projects': taskManagementController.listProjects,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types': taskManagementController.listIssueTypes,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/priorities': taskManagementController.listPriorities,
     'GET /projects': projectsController.getAll,
     'POST /projects': projectsController.createProject,
     'GET /projects/:projectId': projectsController.getByID,
