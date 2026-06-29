@@ -2069,24 +2069,29 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) {
-        return notFound(`Brand not found: ${brandId}`);
-      }
-      const brand = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+      // brandId is UUID-validated upstream (index.js), so the name-lookup branch of
+      // resolveBrandUuid is unreachable here — fetch directly. getBrandById org-scopes
+      // (organization_id + id) and returns null → 404, so no separate resolve is needed.
+      const brand = await getBrandById(spaceCatId, brandId, postgrestClient);
       if (!brand) {
         return notFound(`Brand not found: ${brandId}`);
       }
+      // Do not resurrect a soft-deleted brand via activation (parity with the /status
+      // sibling, which guards the same with .neq('status', 'deleted')). Treat deleted
+      // as gone.
+      if (brand.status === 'deleted') {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      const brandUuid = brand.id;
 
       // 1) Resolve the brand's onboarded primary site — the prompt-gen base URL and
-      // the baseSiteId to anchor on. An already-sited brand carries baseSiteId +
-      // baseUrl; a pending brand resolves from its stashed primary URL (or urls[]).
+      // the baseSiteId to anchor on. An already-sited brand carries baseSiteId (and
+      // usually baseUrl); a pending brand resolves from its stashed Semrush primary URL.
+      // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
+      // not a declared activation anchor, so guessing one would be wrong.
       let { baseSiteId, baseUrl } = brand;
       if (!hasText(baseSiteId)) {
-        const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl
-          || (brand.urls || [])
-            .map((u) => (typeof u === 'string' ? u : (u?.value || u?.url)))
-            .find(hasText);
+        const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
         const site = hasText(primaryUrl)
           ? await Site.findByBaseURL(composeBaseURL(primaryUrl))
           : null;
@@ -2094,6 +2099,14 @@ function BrandsController(ctx, log, env) {
           return badRequest('Brand has no onboarded primary site');
         }
         baseSiteId = site.getId();
+        baseUrl = site.getBaseURL();
+      } else if (!hasText(baseUrl)) {
+        // baseSiteId is set but the base_site embed didn't carry a URL — re-look up the
+        // site by id so prompt-gen never submits with an empty base_url.
+        const site = await Site.findById(baseSiteId);
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
         baseUrl = site.getBaseURL();
       }
 
@@ -2111,66 +2124,87 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
-      // 3) Optional prompt generation (async). Idempotent: reuse any in-flight
-      // brand-activation prompt-gen job for this site rather than submitting a dup.
+      // The brand is now active (committed above). Prompt generation and the
+      // brand-presence schedule are best-effort async side-effects — a DRS failure must
+      // NOT fail the activation. We run them in a guarded block: on error we degrade to
+      // 200 with the brand active (plus whatever ids succeeded) and alert ops with the
+      // real error so it's never lost (#4). Keeping DRS errors inside this block also
+      // means they never reach createErrorResponse, so raw upstream detail can't leak to
+      // the client (#5).
       const drsClient = DrsClient.createFrom(context);
       const drsConfigured = drsClient.isConfigured();
       let promptGenerationJobId;
-      if (generatePrompts) {
-        if (drsConfigured) {
-          const inFlight = await drsClient.listJobs({
-            siteId: baseSiteId,
-            providerId: 'prompt_generation_base_url',
-            source: 'brand-activation',
-          });
-          const existing = (inFlight || []).find(
-            (job) => job.status === 'QUEUED' || job.status === 'RUNNING',
-          );
-          if (existing) {
-            promptGenerationJobId = existing.job_id;
-            log.info(`Reusing in-flight prompt-gen job ${existing.job_id} (brand ${brandUuid})`);
-          } else {
-            const region = Array.isArray(brand.region) ? brand.region[0] : undefined;
-            const job = await drsClient.submitPromptGenerationJob({
-              baseUrl,
-              brandName: brand.name,
-              // DRS defaults audience to "General Consumers" when absent; pass it
-              // explicitly to satisfy the required PromptGenerationParams type without
-              // changing behaviour.
-              audience: 'General Consumers',
+      let scheduleId;
+      let sideEffectError;
+      try {
+        // 3) Optional prompt generation (async). Best-effort dedup: reuse any in-flight
+        // brand-activation prompt-gen job for this site rather than submitting a dup.
+        // This listJobs → status check is NOT atomic (TOCTOU) — two truly-concurrent
+        // activations could both submit; acceptable since a human double-click sees the
+        // first as RUNNING, and the weekly schedule has real 409 dedup. Note the
+        // source='brand-activation' filter depends on the DRS source-filter deploy;
+        // until it lands, dedup widens to all base-url prompt-gen jobs for the site.
+        if (generatePrompts) {
+          if (drsConfigured) {
+            const inFlight = await drsClient.listJobs({
               siteId: baseSiteId,
-              imsOrgId: organization.getImsOrgId(),
-              ...(hasText(region) ? { region } : {}),
+              providerId: 'prompt_generation_base_url',
               source: 'brand-activation',
             });
-            promptGenerationJobId = job?.job_id;
+            const existing = (inFlight || []).find(
+              (job) => job.status === 'QUEUED' || job.status === 'RUNNING',
+            );
+            if (existing) {
+              promptGenerationJobId = existing.job_id;
+              log.info(`Reusing in-flight prompt-gen job ${existing.job_id} (brand ${brandUuid})`);
+            } else {
+              const region = Array.isArray(brand.region) ? brand.region[0] : undefined;
+              const job = await drsClient.submitPromptGenerationJob({
+                baseUrl,
+                brandName: brand.name,
+                // DRS defaults audience to "General Consumers" when absent; pass it
+                // explicitly to satisfy the required PromptGenerationParams type without
+                // changing behaviour.
+                audience: 'General Consumers',
+                siteId: baseSiteId,
+                imsOrgId: organization.getImsOrgId(),
+                ...(hasText(region) ? { region } : {}),
+                source: 'brand-activation',
+              });
+              promptGenerationJobId = job?.job_id;
+            }
+          } else {
+            log.warn('DRS client not configured; skipping prompt generation');
           }
-        } else {
-          log.warn('DRS client not configured; skipping prompt generation');
         }
-      }
 
-      // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
-      // when prompts were generated now or the brand already has prompts (a
-      // promptless schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule
-      // POSTs and tolerates a 409 dedup.
-      let scheduleId;
-      let hasExistingPrompts = false;
-      if (!generatePrompts) {
-        const stats = await getPromptStats({
-          organizationId: spaceCatId,
-          brandUuid,
-          postgrestClient,
-        });
-        hasExistingPrompts = (stats.branded + stats.unbranded) > 0;
-      }
-      if ((generatePrompts || hasExistingPrompts) && drsConfigured) {
-        const schedule = await drsClient.createBrandPresenceSchedule({
-          siteId: baseSiteId,
-          brandId: brandUuid,
-          orgId: spaceCatId,
-        });
-        scheduleId = schedule?.scheduleId;
+        // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
+        // when prompts were generated now or the brand already has prompts (a promptless
+        // schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule POSTs and
+        // tolerates a 409 dedup.
+        let hasExistingPrompts = false;
+        if (!generatePrompts) {
+          const stats = await getPromptStats({
+            organizationId: spaceCatId,
+            brandUuid,
+            postgrestClient,
+          });
+          hasExistingPrompts = (stats.branded + stats.unbranded) > 0;
+        }
+        if ((generatePrompts || hasExistingPrompts) && drsConfigured) {
+          const schedule = await drsClient.createBrandPresenceSchedule({
+            siteId: baseSiteId,
+            brandId: brandUuid,
+            orgId: spaceCatId,
+          });
+          scheduleId = schedule?.scheduleId;
+        }
+      } catch (error) {
+        sideEffectError = error;
+        log.error(
+          `Brand ${brandUuid} activated, but prompt-gen/schedule failed for org ${spaceCatId}:`,
+          error,
+        );
       }
 
       const responseBody = {
@@ -2181,12 +2215,23 @@ function BrandsController(ctx, log, env) {
         ...(scheduleId ? { scheduleId } : {}),
       };
 
-      await postLlmoAlert(
-        `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
-        + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
-        + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
-        context,
-      );
+      if (sideEffectError) {
+        // Activation succeeded; only the async side-effects failed. Surface the real
+        // error to ops (the offending party) — the client still gets 200 (#4).
+        await postLlmoAlert(
+          `:warning: Brand activated, but prompt-gen/schedule failed — ${brand.name} `
+          + `(${brandUuid}) in org ${spaceCatId} [site=${baseSiteId}, `
+          + `generatePrompts=${generatePrompts}]: ${sideEffectError.message}`,
+          context,
+        );
+      } else {
+        await postLlmoAlert(
+          `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
+          + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
+          + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
+          context,
+        );
+      }
 
       return createResponse(responseBody, 200);
     } catch (error) {
