@@ -34,13 +34,23 @@ export const SOURCE_TAG = Object.freeze({
 });
 
 // `intent:<value>` — the searcher intent the prompt represents.
+//
+// These are the Semrush AIO intent TARGETS, the shared vocabulary that the
+// mysticat-data-service customer-onboarding script also registers as a project's
+// tag taxonomy (its `DEFAULT_PROJECT_TAGS`). They are NOT the raw data-service
+// intent buckets persisted in `prompts.intent` (those — informational /
+// instructional / comparative / transactional / planning / delegation — live in
+// `src/support/intent.js` and are unchanged here). The DRS-bucket → Semrush-target
+// mapping is the onboarding script's `INTENT_MAP` (mysticat-data-service
+// `scripts/customer_onboarding/tags.py`; see mysticat-data-service PR #737).
+// `Navigational` has no DRS source bucket but is part of the Semrush vocabulary,
+// so it belongs in the taxonomy even though no generated prompt is tagged with it.
 export const INTENT_TAG = Object.freeze({
-  INFORMATIONAL: 'intent:informational',
-  INSTRUCTIONAL: 'intent:instructional',
-  COMPARATIVE: 'intent:comparative',
-  TRANSACTIONAL: 'intent:transactional',
-  PLANNING: 'intent:planning',
-  DELEGATION: 'intent:delegation',
+  INFORMATIONAL: 'intent:Informational',
+  TASK: 'intent:Task',
+  COMMERCIAL: 'intent:Commercial',
+  TRANSACTIONAL: 'intent:Transactional',
+  NAVIGATIONAL: 'intent:Navigational',
 });
 
 // `type:<value>` — whether the prompt mentions the brand.
@@ -55,7 +65,7 @@ export function topicTag(name) {
 }
 
 // Tags applied to EVERY AI-generated prompt on top of its `topic:<NAME>` tag:
-// `source:ai` (AI-authored) plus the default `intent:informational` (the most
+// `source:ai` (AI-authored) plus the default `intent:Informational` (the most
 // common intent for brand-topic prompts; re-classification can refine it
 // later). `type:` is classified per prompt at generation time (branded vs
 // non-branded — see the handler), so it is NOT seeded here.

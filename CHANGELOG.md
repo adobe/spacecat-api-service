@@ -1,3 +1,24 @@
+## [1.609.2](https://github.com/adobe/spacecat-api-service/compare/v1.609.1...v1.609.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **serenity:** harden sub-workspace create against failed-provisioning stubs ([#2719](https://github.com/adobe/spacecat-api-service/issues/2719)) ([78c15ff](https://github.com/adobe/spacecat-api-service/commit/78c15ff8dbe829d1c2cfbbec147bf00841652f3f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.609.1](https://github.com/adobe/spacecat-api-service/compare/v1.609.0...v1.609.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **llmo:** encode dataFolder path boundary Helix-safe (LLMO-5859) ([#2688](https://github.com/adobe/spacecat-api-service/issues/2688)) ([5720dd8](https://github.com/adobe/spacecat-api-service/commit/5720dd878e2a75f07ad6a7f1418b0916104c7d6e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.609.0](https://github.com/adobe/spacecat-api-service/compare/v1.608.0...v1.609.0) (2026-06-29)
+
+
+### Features
+
+* **serenity:** register Semrush AIO intent targets in project tag taxonomy ([#2710](https://github.com/adobe/spacecat-api-service/issues/2710)) ([c0a0a6a](https://github.com/adobe/spacecat-api-service/commit/c0a0a6a63dc33a27c17ed3d666f3d23d1994da3d)), closes [Hi#level](https://github.com/Hi/issues/level) [throu#API](https://github.com/throu/issues/API)
+
 # [1.608.0](https://github.com/adobe/spacecat-api-service/compare/v1.607.0...v1.608.0) (2026-06-28)
 
 
