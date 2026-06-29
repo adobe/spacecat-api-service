@@ -790,10 +790,11 @@ describe('brands-storage', () => {
   }
 
   // Like createTableMockClient, but records rows passed to write methods so
-  // tests can assert exactly what was written.
+  // tests can assert exactly what was written. Also records neq() filter calls
+  // so tests can verify which filters were applied to queries.
   function createCapturingClient(tableMap) {
     const calls = {
-      upsert: [], update: [], delete: [], or: [],
+      upsert: [], update: [], delete: [], or: [], neq: [],
     };
     const callCounts = {};
     const makeQuery = (table) => {
@@ -829,6 +830,12 @@ describe('brands-storage', () => {
           if (prop === 'or') {
             return (filter) => {
               calls.or.push({ table, filter });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'neq') {
+            return (col, val) => {
+              calls.neq.push({ table, col, val });
               return new Proxy({}, handler);
             };
           }
@@ -1409,8 +1416,8 @@ describe('brands-storage', () => {
     });
 
     it('creates a fresh brand when the name matches only a soft-deleted brand (LLMO-5919)', async () => {
-      // The existing-brand lookup returns null because the .neq('status','deleted')
-      // filter excludes the deleted row. The caller's baseSiteId must be applied and
+      // The existing-brand lookup must exclude soft-deleted brands via
+      // .neq('status','deleted'). The caller's baseSiteId must be applied and
       // the brand must be created as active, not resurrected with the old anchor state.
       const client = createCapturingClient({
         brands: [
@@ -1425,6 +1432,10 @@ describe('brands-storage', () => {
         brand: { name: 'Test', baseSiteId: 'new-site' },
         postgrestClient: client,
       });
+
+      // Verify the .neq filter was sent on the existing-brand lookup.
+      const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
+      expect(neqFilter?.val).to.equal('deleted');
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.site_id).to.equal('new-site');
