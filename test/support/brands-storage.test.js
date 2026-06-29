@@ -1408,6 +1408,53 @@ describe('brands-storage', () => {
       expect(log.warn).to.not.have.been.called;
     });
 
+    it('creates a fresh brand when the name matches only a soft-deleted brand (LLMO-5919)', async () => {
+      // The existing-brand lookup returns null because the .neq('status','deleted')
+      // filter excludes the deleted row. The caller's baseSiteId must be applied and
+      // the brand must be created as active, not resurrected with the old anchor state.
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // existing lookup: null (soft-deleted brand excluded)
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'new-site' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('new-site');
+      expect(brandsUpsert.row.status).to.equal('active');
+    });
+
+    it('sets site_id=null and status=pending when resurrecting a soft-deleted brand without a new baseSiteId (LLMO-5919)', async () => {
+      // Bug scenario: deleted brand had site_id='old-site'. Another brand now owns
+      // that site. A fresh create with no baseSiteId must NOT inherit the stale
+      // site_id — the ON CONFLICT UPDATE would then conflict with the other brand.
+      // The fix writes an explicit null so the stale anchor is cleared.
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // existing lookup: null (soft-deleted brand excluded)
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', status: 'pending' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' }, // no baseSiteId — should be pending
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.status).to.equal('pending');
+      expect(brandsUpsert.row.site_id).to.equal(null);
+    });
+
     it('fails closed by throwing when the existing-brand lookup errors (LLMO-5556)', async () => {
       // PostgREST returns { data: null, error } instead of throwing — without the
       // guard this would let a transient failure overwrite an existing site_id.
