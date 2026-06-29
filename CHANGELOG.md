@@ -1,3 +1,10 @@
+## [1.609.3](https://github.com/adobe/spacecat-api-service/compare/v1.609.2...v1.609.3) (2026-06-29)
+
+
+### Bug Fixes
+
+* **serenity:** add required `type` to brand-alias updateProject PATCH ([#2721](https://github.com/adobe/spacecat-api-service/issues/2721)) ([174d852](https://github.com/adobe/spacecat-api-service/commit/174d852a314f8de314a514d9587ea4651cefc67d)), closes [Hi#level](https://github.com/Hi/issues/level) [#1746](https://github.com/adobe/spacecat-api-service/issues/1746)
+
 ## [1.609.2](https://github.com/adobe/spacecat-api-service/compare/v1.609.1...v1.609.2) (2026-06-29)
 
 
