@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { getDomain } from 'tldts';
+
 /**
  * Pure, controller-independent helpers for the LLMO Cloudflare onboarding endpoints
  * (see llmo-cloudflare.js). Kept here so the controller stays minimal and these can be
@@ -34,6 +36,14 @@ export const deriveWorkerName = (baseURL) => {
   }
   return `${WORKER_NAME_PREFIX}-${slug}`.slice(0, CF_MAX_SCRIPT_NAME_LEN).replace(/-+$/g, '');
 };
+
+/**
+ * The registrable domain ("apex") of a hostname, resolved via the Public Suffix List (tldts), so
+ * multi-part TLDs are handled correctly: "www.shop.example.com" -> "example.com",
+ * "shop.example.co.uk" -> "example.co.uk", "example.com" -> "example.com". Returns null when the
+ * host has no registrable domain under the PSL (e.g. "localhost", a bare TLD, or an IP address).
+ */
+export const registrableDomain = (host) => getDomain(host);
 
 /**
  * Whether `host` belongs to the onboarded site's domain: it must equal the site's canonical

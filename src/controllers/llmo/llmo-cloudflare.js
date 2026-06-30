@@ -18,7 +18,8 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  deriveWorkerName, hostInSiteDomain, routePatternHost, routePatternHostGlob, routePatternsOverlap,
+  deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
+  routePatternsOverlap,
 } from './llmo-cloudflare-utils.js';
 
 // Cap the conflicting-routes list returned in a 409 so a zone with many overlapping routes can't
@@ -268,14 +269,17 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones?accountId=<id>
-   * Lists only the zones belonging to the selected Cloudflare account. `accountId` is a
-   * Cloudflare identifier (not a SpaceCat entity), supplied as a query parameter.
+   * Lists the zones belonging to the selected Cloudflare account that are relevant to the site —
+   * i.e. whose registrable domain (resolved via the Public Suffix List) matches the site's
+   * base-URL host, so the onboarding UI only offers zones for the site's own domain. `accountId`
+   * is a Cloudflare identifier (not a SpaceCat entity), supplied as a query parameter.
    */
   const listZones = async (context) => {
     const result = await getSiteAndCheckAccess(context);
     if (result.status) {
       return result;
     }
+    const { site } = result;
 
     const { client, error } = requireCfClient(context);
     if (error) {
@@ -291,9 +295,14 @@ function LlmoCloudflareController(ctx) {
     }
 
     try {
-      // The client pushes account.id to the Cloudflare API, so filtering happens server-side.
+      // The client pushes account.id to the Cloudflare API, so account filtering happens
+      // server-side; we then keep only the zones on the site's own registrable domain (PSL).
       const zones = await client.listZones({ accountId });
-      return ok(zones || []);
+      const siteApex = registrableDomain(new URL(site.getBaseURL()).hostname);
+      const matching = (zones || []).filter(
+        (zone) => hasText(zone?.name) && !!siteApex && registrableDomain(zone.name) === siteApex,
+      );
+      return ok(matching);
     } catch (e) {
       return cfErrorResponse(e, 'zone listing', context, {
         siteId: context.params?.siteId,

@@ -249,6 +249,31 @@ describe('LlmoCloudflareController', () => {
       expect(body).to.deep.equal([]);
     });
 
+    it('returns only zones whose registrable domain matches the site domain', async () => {
+      // Site base URL is https://www.example.com -> registrable domain example.com.
+      const match = { id: ZONE_ID, name: 'example.com' };
+      const subdomainZone = { id: 'z2', name: 'shop.example.com' }; // registrable = example.com
+      const otherTld = { id: 'z3', name: 'example.net' };
+      const unrelated = { id: 'z4', name: 'other.com' };
+      const noName = { id: 'z5' }; // exercises the hasText(zone.name) guard
+      mockCfClient.listZones.resolves([match, subdomainZone, otherTld, unrelated, noName]);
+
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([match, subdomainZone]);
+    });
+
+    it('returns no zones when the site host has no registrable domain (PSL miss)', async () => {
+      mockSite.getBaseURL = () => 'http://localhost';
+      mockCfClient.listZones.resolves([{ id: ZONE_ID, name: 'example.com' }, { id: 'z2', name: 'localhost' }]);
+
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([]);
+    });
+
     it('returns 400 when CF token is missing', async () => {
       mockContext.pathInfo.headers = {};
       const res = await controller.listZones(mockContext);
