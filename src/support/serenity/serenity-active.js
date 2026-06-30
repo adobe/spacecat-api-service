@@ -41,6 +41,20 @@ export const SERENITY_FEATURE_FLAG_NAME = 'serenity';
  */
 const flagCache = new Map();
 
+/**
+ * Composite cache key (org + product + flag), not the bare `spaceCatId`, so the
+ * Map is collision-proof if this same shape is ever reused to cache a second
+ * flag. Today this module reads exactly one flag (`LLMO/serenity`), so the
+ * product/flag segments are constant — but keying on the full identity keeps the
+ * cache correct-by-construction rather than relying on "only one consumer".
+ *
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @returns {string} The cache key.
+ */
+function flagCacheKey(spaceCatId) {
+  return `${spaceCatId}::${SERENITY_FEATURE_FLAG_PRODUCT}::${SERENITY_FEATURE_FLAG_NAME}`;
+}
+
 export function clearSerenityFlagCache() {
   flagCache.clear();
 }
@@ -89,7 +103,8 @@ export async function isSerenityActiveForOrg(ctx, spaceCatId, log) {
   }
 
   const now = Date.now();
-  const cached = flagCache.get(spaceCatId);
+  const cacheKey = flagCacheKey(spaceCatId);
+  const cached = flagCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.value;
   }
@@ -111,8 +126,8 @@ export async function isSerenityActiveForOrg(ctx, spaceCatId, log) {
 
   const value = raw === true;
   // Refresh insertion order so size eviction stays meaningful under churn.
-  flagCache.delete(spaceCatId);
+  flagCache.delete(cacheKey);
   evictIfNeeded();
-  flagCache.set(spaceCatId, { value, expiresAt: now + (value ? CACHE_TTL_MS : NEG_TTL_MS) });
+  flagCache.set(cacheKey, { value, expiresAt: now + (value ? CACHE_TTL_MS : NEG_TTL_MS) });
   return value;
 }
