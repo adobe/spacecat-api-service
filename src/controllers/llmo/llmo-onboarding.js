@@ -1402,7 +1402,7 @@ export async function activateBrandAndGeneratePrompts({
     try {
       const drsClient = DrsClient.createFrom(context);
       if (drsClient.isConfigured()) {
-        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+        const companyWebsite = baseURL;
         await triggerBrandalfOnboardingJob({
           drsClient,
           organizationId: organization.getId(),
@@ -1448,7 +1448,7 @@ export async function activateBrandAndGeneratePrompts({
           log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
         }
         const drsJob = await drsClient.submitPromptGenerationJob({
-          baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
+          baseUrl: baseURL,
           brandName: trimmedBrand,
           audience,
           siteId: site.getId(),
