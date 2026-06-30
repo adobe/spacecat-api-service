@@ -4708,10 +4708,11 @@ describe('Brands Controller', () => {
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
         const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const serenityActiveStub = sinon.stub().resolves(false);
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub,
           upsertBrand: upsertStub,
-          isSerenityActiveForOrg: sinon.stub().resolves(false),
+          isSerenityActiveForOrg: serenityActiveStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -4726,6 +4727,13 @@ describe('Brands Controller', () => {
         // The org is on the normal backend: no sub-workspace provisioned, no brand row.
         expect(provisionStub.called).to.equal(false);
         expect(upsertStub.called).to.equal(false);
+        // The gate must be asked about THIS org (2nd positional arg = spaceCatId),
+        // so a wiring slip (passing the wrong id) can't silently let a create through.
+        expect(serenityActiveStub).to.have.been.calledWith(
+          sinon.match.any,
+          ORGANIZATION_ID,
+          sinon.match.any,
+        );
       });
 
       it('mirrors the provisioned brand domain as a Site (+ brand_sites link) after the row is written', async () => {
@@ -5530,13 +5538,14 @@ describe('Brands Controller', () => {
       const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' });
       const syncStub = sinon.stub().resolves({});
       const createTransportStub = sinon.stub().returns({ name: 't' });
+      const serenityActiveStub = sinon.stub().resolves(false);
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
         // Inactive org, but the brand still carries a backfilled workspace pointer.
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' }),
-        isSerenityActiveForOrg: sinon.stub().resolves(false),
+        isSerenityActiveForOrg: serenityActiveStub,
       });
 
       const response = await controller.updateBrandForOrg({
@@ -5552,6 +5561,12 @@ describe('Brands Controller', () => {
       expect(updateBrandStub.called).to.equal(false);
       expect(syncStub.called).to.equal(false);
       expect(createTransportStub.called).to.equal(false);
+      // The gate must be asked about THIS org (2nd positional arg = spaceCatId).
+      expect(serenityActiveStub).to.have.been.calledWith(
+        sinon.match.any,
+        ORGANIZATION_ID,
+        sinon.match.any,
+      );
     });
 
     it('allows a sync-field edit when serenity is inactive but the brand is flat (no workspace) — plain backend update, no re-sync', async () => {
