@@ -116,3 +116,115 @@ describe('AuditPolicyController — E1 getPolicy', () => {
     expect(res.status).to.equal(404);
   });
 });
+
+const UPSERT_RPC = 'wrpc_upsert_audit_policy';
+
+describe('AuditPolicyController — E2 putPolicy', () => {
+  afterEach(() => sinon.restore());
+
+  function writeCtx(body, opts = {}) {
+    return buildContext({ data: body, ...opts });
+  }
+  const validBody = {
+    budget: 4000,
+    strategyName: 'tiered',
+    exclusionGlobs: ['/checkout/*'],
+    manualUrls: [],
+    scopeConfig: {},
+    lifecycleOverrides: {},
+    reason: 'trim crawl',
+    note: 'q2',
+    expectedVersion: 3,
+  };
+
+  it('writes via wrpc with token-derived author and returns 200 v+1', async () => {
+    const newRow = {
+      site_id: SITE_ID,
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: ['/checkout/*'],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      created_by: 'a',
+      updated_by: 'u@x.com',
+      reason: 'trim crawl',
+      note: 'q2',
+      created_at: 'x',
+      updated_at: 'y',
+    };
+    const client = buildClient({ rpcResult: { data: newRow, error: null } });
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, author: 'FORGED' }, { client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.version).to.equal(4);
+    expect(body.updatedBy).to.equal('u@x.com');
+    expect(client.rpc).to.have.been.calledWith(
+      UPSERT_RPC,
+      sinon.match({ p_author: 'u@x.com', p_expected_version: 3 }),
+    );
+    // author from body must be ignored
+    expect(client.rpc.firstCall.args[1]).to.not.have.property('p_author', 'FORGED');
+  });
+
+  it('returns 400 when reason is missing', async () => {
+    const controller = loadController();
+    const noReason = { ...validBody, reason: undefined };
+    const res = await controller.putPolicy(writeCtx(noReason));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when expectedVersion is missing', async () => {
+    const controller = loadController();
+    const noVer = { ...validBody, expectedVersion: undefined };
+    const res = await controller.putPolicy(writeCtx(noVer));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when budget <= 0 or globs over cap', async () => {
+    const controller = loadController();
+    const zeroBudgetRes = await controller.putPolicy(writeCtx({ ...validBody, budget: 0 }));
+    expect(zeroBudgetRes.status).to.equal(400);
+    const tooMany = Array.from({ length: 1001 }, (_, i) => `/p${i}/*`);
+    const tooManyGlobsRes = await controller.putPolicy(
+      writeCtx({ ...validBody, exclusionGlobs: tooMany }),
+    );
+    expect(tooManyGlobsRes.status).to.equal(400);
+  });
+
+  it('maps SQLSTATE 40001 to 409 with currentVersion from error.details', async () => {
+    const client = buildClient({
+      rpcResult: {
+        data: null,
+        error: { code: '40001', message: 'audit_policy_version_conflict', details: '7' },
+      },
+    });
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx(validBody, { client }));
+    expect(res.status).to.equal(409);
+    const body = await res.json();
+    expect(body.currentVersion).to.equal(7);
+  });
+
+  it('maps a redaction/validation RPC raise (P0001) to 400', async () => {
+    const client = buildClient({
+      rpcResult: { data: null, error: { code: 'P0001', message: 'secret detected in note' } },
+    });
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx(validBody, { client }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 403 when caller lacks both ASO and LLMO entitlement', async () => {
+    // hasAccess(site) -> true (org member); hasAccess(site,'','ASO') and (...,'LLMO') -> false
+    const hasAccess = sinon.stub();
+    hasAccess.withArgs(sinon.match.any).resolves(true);
+    hasAccess.withArgs(sinon.match.any, '', 'ASO').resolves(false);
+    hasAccess.withArgs(sinon.match.any, '', 'LLMO').resolves(false);
+    const controller = loadController(hasAccess);
+    const res = await controller.putPolicy(writeCtx(validBody));
+    expect(res.status).to.equal(403);
+  });
+});
