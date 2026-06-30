@@ -63,10 +63,10 @@ function makeContext({
   awsEnv = 'dev',
 } = {}) {
   return {
-    // Until facsWrapper fronts these routes, the controller restricts them to
-    // the dev environment (handlers 404 elsewhere). Default to 'dev' so the
-    // behavioural tests exercise the real handlers; the dev-only gate itself is
-    // covered by the dedicated "dev-env blocker" block.
+    // The state-layer management endpoints are kept dev-only for now (handlers
+    // 404 elsewhere). Default to 'dev' so the behavioural tests exercise the real
+    // handlers; the dev-only gate itself is covered by the dedicated
+    // "dev-env blocker" block.
     env: { AWS_ENV: awsEnv },
     log: {
       debug: sinon.stub(),
@@ -131,7 +131,7 @@ async function loadController(supportStubs = {}) {
 }
 
 describe('StateAccessMappingsController', () => {
-  describe('dev-env blocker (temporary, until facsWrapper is attached)', () => {
+  describe('dev-env blocker (state-layer endpoints kept dev-only for now)', () => {
     const HANDLERS = [
       'listMappings', 'listHistory', 'createMapping', 'patchMapping', 'deleteMapping',
       'getProductCapabilities', 'getUserCapabilities', 'getAuditLogs',

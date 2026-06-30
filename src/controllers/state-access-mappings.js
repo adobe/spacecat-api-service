@@ -1194,14 +1194,14 @@ function StateAccessMappingsController(context) {
     }
   }
 
-  // ── Temporary dev-only blocker (TODO: remove when facsWrapper is attached
-  // in api-service) ────────────────────────────────────────────────────────
-  // facsWrapper does not yet front these routes, so until it does they are
-  // restricted to the dev environment. In any other environment every handler
-  // responds 404, fully hiding the staged feature. Remove the `devOnly`
-  // wrapper (and this `isDevEnv` read) once facsWrapper enforces FACS
-  // permissions upstream — the controller's own `can_manage_users` / `can_view`
-  // gating is the permanent authorization layer.
+  // ── Temporary dev-only blocker ──────────────────────────────────────────
+  // `facsWrapper` now fronts the FACS-governed product routes (attached in
+  // `src/index.js`) and is the permanent enforcement layer, but the state-layer
+  // management endpoints are kept dev-only for now until they are ready for
+  // production exposure. In any other environment every handler responds 404,
+  // fully hiding the staged feature. Remove the `devOnly` wrapper (and this
+  // `isDevEnv` read) when these endpoints graduate to prod — the controller's own
+  // `can_manage_users` / `can_view` gating is the permanent authorization layer.
   const isDevEnv = context.env?.AWS_ENV === 'dev';
   const devOnly = (handler) => (...args) => (isDevEnv ? handler(...args) : notFound());
 
