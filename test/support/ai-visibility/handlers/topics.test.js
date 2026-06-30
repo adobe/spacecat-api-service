@@ -273,6 +273,59 @@ describe('AI Visibility – topics handlers', () => {
   /* ------------------------------------------------------------------ */
   /*  handleTopicsResearch                                               */
   /* ------------------------------------------------------------------ */
+  describe('textFilter (server-side search)', () => {
+    it('threads textFilter into topicsByFTS as a topic CONTAINS clause', async () => {
+      clients.topicClient.topicsByFTS.resolves({ topics: [] });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt&textFilter=pdf');
+      await handleTopicsResearch(sp, clients);
+      expect(clients.topicClient.topicsByFTS.calledWith(
+        sinon.match({ dimensionFilterQl: 'topic CONTAINS "pdf"' }),
+      )).to.equal(true);
+    });
+
+    it('threads textFilter into prompts list + totals as a prompt CONTAINS clause', async () => {
+      clients.promptClient.promptsByTopicFTS.resolves({ prompts: [] });
+      clients.promptClient.promptsByTopicFTSTotals.resolves({ total: 0 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt&textFilter=pdf');
+      await handleTopicsResearchPrompts(sp, clients);
+      expect(clients.promptClient.promptsByTopicFTS.calledWith(
+        sinon.match({ dimensionFilterQl: 'prompt CONTAINS "pdf"' }),
+      )).to.equal(true);
+      expect(clients.promptClient.promptsByTopicFTSTotals.calledWith(
+        sinon.match({ dimensionFilterQl: 'prompt CONTAINS "pdf"' }),
+      )).to.equal(true);
+    });
+
+    it('threads textFilter into brands as a name CONTAINS clause', async () => {
+      clients.brandClient.brandsByTopicFTS.resolves({ brands: [] });
+      clients.brandClient.brandsByTopicFTSTotals.resolves({ total: 0 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt&textFilter=adobe');
+      await handleTopicsResearchBrands(sp, clients);
+      expect(clients.brandClient.brandsByTopicFTS.calledWith(
+        sinon.match({ dimensionFilterQl: 'name CONTAINS "adobe"' }),
+      )).to.equal(true);
+    });
+
+    it('threads textFilter into source-domains as a domain CONTAINS clause', async () => {
+      clients.sourceClient.sourceDomainsByTopicFTS.resolves({ sourceDomains: [] });
+      clients.sourceClient.sourceDomainsByTopicFTSTotals.resolves({ total: 0 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt&textFilter=reddit');
+      await handleTopicsResearchSourceDomains(sp, clients);
+      expect(clients.sourceClient.sourceDomainsByTopicFTS.calledWith(
+        sinon.match({ dimensionFilterQl: 'domain CONTAINS "reddit"' }),
+      )).to.equal(true);
+    });
+
+    it('omits dimensionFilterQl when textFilter is absent', async () => {
+      clients.promptClient.promptsByTopicFTS.resolves({ prompts: [] });
+      clients.promptClient.promptsByTopicFTSTotals.resolves({ total: 0 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      await handleTopicsResearchPrompts(sp, clients);
+      const arg = clients.promptClient.promptsByTopicFTS.lastCall.args[0];
+      expect(arg).to.not.have.property('dimensionFilterQl');
+    });
+  });
+
   describe('handleTopicsResearch', () => {
     it('returns 400 when search_query is missing', async () => {
       const sp = new URLSearchParams('');

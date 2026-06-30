@@ -32,6 +32,35 @@ import {
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
+const ACCESSIBILITY_AUDIT_NAME = 'accessibility';
+
+/**
+ * Counts the number of issues for a single preflight audit. Three counting modes:
+ *  - accessibility: sum of the integer `occurrences` across opportunities
+ *    (each opportunity is an issue "type" with N occurrences).
+ *  - opportunities whose `issue` is an array (e.g. links): sum of the issue-array
+ *    lengths (each entry is one issue).
+ *  - all others: one issue per opportunity that has a truthy `issue` (exactly one
+ *    issue per opportunity).
+ * @param {Object} audit - A PreflightAudit: { name, type, opportunities }
+ * @returns {number} Total issue count for the audit
+ */
+export function countIssuesForAudit(audit) {
+  const opportunities = Array.isArray(audit?.opportunities) ? audit.opportunities : [];
+  if (audit?.name === ACCESSIBILITY_AUDIT_NAME) {
+    return opportunities.reduce((sum, opp) => sum + (opp?.occurrences ?? 0), 0);
+  }
+  return opportunities.reduce((count, opp) => {
+    if (Array.isArray(opp?.issue)) {
+      return count + opp.issue.length;
+    }
+    if (opp?.issue) {
+      return count + 1;
+    }
+    return count;
+  }, 0);
+}
+
 /**
  * Creates a preflight controller instance
  * @param {Object} ctx - The context object containing dataAccess and sqs
@@ -280,9 +309,27 @@ function PreflightController(ctx, log, env) {
 
       log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
 
+      const result = job.getResult();
+      const status = job.getStatus();
+
+      // Log a compact summary of the audit-worker results once the job is completed.
+      if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
+        const summary = result.map((r) => ({
+          pageUrl: r?.pageUrl,
+          step: r?.step,
+          audits: (Array.isArray(r?.audits) ? r.audits : []).map((a) => ({
+            name: a?.name,
+            type: a?.type,
+            opportunities: Array.isArray(a?.opportunities) ? a.opportunities.length : 0,
+            issues: countIssuesForAudit(a),
+          })),
+        }));
+        log.info(`[Preflight] Run complete. jobId=${jobId} status=${status} results=${JSON.stringify(summary)}`);
+      }
+
       return ok({
         jobId: job.getId(),
-        status: job.getStatus(),
+        status,
         createdAt: job.getCreatedAt(),
         updatedAt: job.getUpdatedAt(),
         startedAt: job.getStartedAt(),
@@ -290,7 +337,7 @@ function PreflightController(ctx, log, env) {
         recordExpiresAt: job.getRecordExpiresAt(),
         resultLocation: job.getResultLocation(),
         resultType: job.getResultType(),
-        result: job.getResult(),
+        result,
         error: job.getError(),
         metadata: job.getMetadata(),
       });
@@ -306,30 +353,43 @@ function PreflightController(ctx, log, env) {
 
   /**
    * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
-   * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
-   * identified by scanId.
+   * Mysticat processes the analysis asynchronously and writes results back to the
+   * AsyncJob identified by asyncJobId.
    *
-   * Two distinct auth headers are sent (SITES-43236 / mystique-deploy PR #463):
-   *  - `Authorization`: the customer site's page-auth token, forwarded by
-   *    Mysticat to DRS for authenticated page-HTML fetch.
-   *  - `x-ims-authorization`: spacecat-api-service's own IMS service token,
-   *    validated at the Ethos CGW-Flex edge before reaching the Mysticat pod.
-   *    Kept on a dedicated header — not `Authorization` — so the IMS edge gate
-   *    does not collide with the customer's page-auth token above.
+   * SITES-47173: mystique owns the scan_id concept end-to-end (mints its own
+   * scan_id, registers `control_scan`, tags `async_jobs.metadata.scan_id` at
+   * scan-start). Spacecat passes the AsyncJob id under its real name; the
+   * scan_id concept is internal to mystique. After this call returns, the
+   * AsyncJob's `metadata.scan_id` is populated (best-effort by mystique) for
+   * any downstream consumer that needs to discover the scan_id without
+   * round-tripping back to mystique.
+   *
+   * Two distinct auth headers are sent (SITES-46967 — header layout swap):
+   *  - `Authorization`: spacecat-api-service's own IMS service token,
+   *    validated at the Ethos CGW-Flex edge before reaching the Mysticat
+   *    pod. On the default header so CGW emits the `X-Gw-Ims-Client-Id`
+   *    identity header downstream (CGW only forwards identity headers when
+   *    the token is read from the default `Authorization` slot — empirically
+   *    confirmed under SITES-46874).
+   *  - `x-page-auth`: the customer site's page-auth token, forwarded by
+   *    Mysticat to DRS for authenticated page-HTML fetch. Moved off
+   *    `Authorization` to make room for the IMS service token (previously
+   *    rode `Authorization`, the IMS token rode `x-ims-authorization`).
    *
    * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
-   * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
+   * @param {string} asyncJobId - The AsyncJob id; mystique tags its minted
+   *   scan_id onto async_jobs.metadata for the projector lookup.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
-   * @param {string} [authorizationHeader] - Optional customer-site page-auth header.
+   * @param {string} [pageAuthHeader] - Optional customer-site page-auth header.
    * @param {string} [imsServiceToken] - Optional spacecat IMS v3 service token (raw access_token).
    */
   async function callMysticatAnalyze(
     mysticatBaseUrl,
-    scanId,
+    asyncJobId,
     siteId,
     url,
-    authorizationHeader,
+    pageAuthHeader,
     imsServiceToken,
   ) {
     const controller = new AbortController();
@@ -341,13 +401,13 @@ function PreflightController(ctx, log, env) {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
-          ...(hasText(imsServiceToken) && { 'x-ims-authorization': `Bearer ${imsServiceToken}` }),
+          ...(hasText(imsServiceToken) && { Authorization: `Bearer ${imsServiceToken}` }),
+          ...(hasText(pageAuthHeader) && { 'x-page-auth': pageAuthHeader }),
         },
         body: JSON.stringify({
           site_id: siteId,
           url,
-          scan_id: scanId,
+          async_job_id: asyncJobId,
           persist: true,
         }),
       });
@@ -460,7 +520,7 @@ function PreflightController(ctx, log, env) {
       log.warn(`checkEnableAuthentication failed for ${previewBaseURL}: ${e.message}`);
       enableAuthentication = false;
     }
-    let authorizationHeader;
+    let pageAuthHeader;
     if (enableAuthentication) {
       let promiseTokenObj;
       try {
@@ -476,7 +536,7 @@ function PreflightController(ctx, log, env) {
         const authOptions = promiseTokenObj ? { promiseToken: promiseTokenObj } : {};
         const accessToken = await retrievePageAuthentication(site, context, authOptions);
         const isBearer = site.getDeliveryType() === DELIVERY_TYPES.AEM_CS && !!promiseTokenObj;
-        authorizationHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
+        pageAuthHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
       } catch (e) {
         log.error(`Failed to retrieve page authentication: ${e.message}`);
         return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Error retrieving page authentication', 500);
@@ -485,9 +545,11 @@ function PreflightController(ctx, log, env) {
 
     // Mint a spacecat-api-service IMS service token for the Mystique CGW
     // edge gate (SITES-43236 / SITES-46699 / mystique-deploy PR #463). Sent
-    // on the dedicated x-ims-authorization header — separate from
-    // `Authorization` above, which carries the customer site's page-auth
-    // token for DRS upstream.
+    // on the `Authorization` header (SITES-46967 swap — was previously on a
+    // dedicated `x-ims-authorization` header; moved to the default slot so
+    // CGW emits the X-Gw-Ims-Client-Id identity header downstream). The
+    // customer page-auth that previously rode `Authorization` now rides
+    // `x-page-auth` and is forwarded to DRS upstream by mystique.
     //
     // Constructs a custom-env ImsClient with the dedicated PREFLIGHT_IMS_*
     // credentials provisioned in Vault for this S2S use case (SITES-46699).
@@ -576,7 +638,8 @@ function PreflightController(ctx, log, env) {
         url,
         status: AsyncJob.Status.IN_PROGRESS,
         createdBy,
-        startedAt: new Date().toISOString(),
+        // SITES-47254: startedAt is an AsyncJob concern (set automatically on
+        // AsyncJob.create); the Preflight row no longer carries it.
       });
     } catch (e) {
       log.error(`Failed to create Preflight: ${e.message}`);
@@ -590,21 +653,25 @@ function PreflightController(ctx, log, env) {
         asyncJob.getId(),
         siteId,
         url,
-        authorizationHeader,
+        pageAuthHeader,
         imsServiceToken,
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
-      preflight.setStatus(AsyncJob.Status.FAILED);
-      // Stored error message mirrors the external 502 response — the raw
-      // upstream body could carry internal hostnames / stack traces and is
-      // exposed via GET /sites/:siteId/preflights/:preflightId. Full detail
-      // is in the log.error above for ops visibility.
-      preflight.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
-      preflight.setEndedAt(new Date().toISOString());
-      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
+      const endedAt = new Date().toISOString();
+      // SITES-47254: error lives on AsyncJob only (source of truth); the
+      // Preflight row holds status + ended_at as a cache. Stored message
+      // mirrors the external 502 response — the raw upstream body could
+      // carry internal hostnames / stack traces and is exposed via
+      // GET /sites/:siteId/preflights/:preflightId. Full detail is in the
+      // log.error above for ops visibility.
       asyncJob.setStatus(AsyncJob.Status.FAILED);
+      asyncJob.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
+      asyncJob.setEndedAt(endedAt);
       await asyncJob.save().catch((e) => log.warn(`Failed to persist FAILED state on AsyncJob ${asyncJob.getId()}: ${e.message}`));
+      preflight.setStatus(AsyncJob.Status.FAILED);
+      preflight.setEndedAt(endedAt);
+      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
       return preflightError('PREFLIGHT_UPSTREAM_ERROR', 'Upstream analyze service failed', 502);
     }
 
@@ -612,7 +679,7 @@ function PreflightController(ctx, log, env) {
     const locationUrl = `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
       + `/sites/${siteId}/preflights/${preflight.getId()}`;
 
-    return createResponse(PreflightDto.toJSON(preflight), 202, { Location: locationUrl });
+    return createResponse(PreflightDto.toCreatedJSON(preflight), 202, { Location: locationUrl });
   };
 
   /**
@@ -683,7 +750,27 @@ function PreflightController(ctx, log, env) {
         return preflightError('PREFLIGHT_NOT_FOUND', `Preflight with ID ${preflightId} not found`, 404);
       }
 
-      return ok(PreflightDto.toDetailJSON(preflight));
+      // Lifecycle truth (status, endedAt, result, error) lives on async_jobs;
+      // toDetailJSON sources those from the joined row so a polling client
+      // sees terminal status alongside terminal result (no split-brain across
+      // the projector's two-write window).
+      //
+      // On a transient fetch failure (PostgREST 5xx / network blip) return
+      // 503 rather than 200-with-nulls: a 200 + `result: null` is
+      // indistinguishable on the wire from a legitimately empty completed
+      // scan, and a polling client would cache the wrong terminal answer.
+      // A null AsyncJob (no row yet — transitional/legacy flow) is NOT an
+      // error; lifecycle fields fall back to the Preflight cache.
+      let asyncJob;
+      try {
+        asyncJob = await preflight.getAsyncJob();
+      } catch (e) {
+        const msg = e?.message ?? String(e);
+        log.warn(`Failed to fetch AsyncJob for preflight ${preflightId}: ${msg}`);
+        return preflightError('PREFLIGHT_LIFECYCLE_UNAVAILABLE', 'Failed to load preflight lifecycle data', 503);
+      }
+
+      return ok(PreflightDto.toDetailJSON(preflight, asyncJob));
     } catch (e) {
       log.error(`Failed to fetch preflight ${preflightId}: ${e.message}`);
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to fetch preflight', 500);

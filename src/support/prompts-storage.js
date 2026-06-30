@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { classifyIntents } from './intent-classifier.js';
+import { throwOnPgConstraintViolation } from './errors.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
@@ -306,6 +307,8 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
   }
 }
 
+const UPDATE_CONCURRENCY = 20;
+
 const SORT_COLUMN_MAP = {
   topic: 'topics(name)',
   prompt: 'text',
@@ -508,7 +511,10 @@ export async function listPrompts({
     }
 
     if (hasText(region)) {
-      baseQuery = baseQuery.contains('regions', [region]);
+      // Stored region codes can be lower- or upper-case, so match both
+      // variants — a case-sensitive `.contains` would miss the other. (LLMO-5755)
+      const regionVariants = [...new Set([region.toLowerCase(), region.toUpperCase()])];
+      baseQuery = baseQuery.overlaps('regions', regionVariants);
     }
 
     if (hasText(search)) {
@@ -618,6 +624,11 @@ export async function getPromptById({
  * categoryId, topicId, ... }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
+ *   Optional best-effort intent classifier; applied only to prompts that change
+ *   text without an explicit intent. Non-fatal: a null result leaves intent unset.
+ * @param {number} [params.classifyIntentBatchTimeoutMs] - Cap on the classifier
+ *   batch (ms); the upsert proceeds without intent once it elapses.
  * @returns {Promise<{created: number, updated: number, prompts: object[]}>}
  */
 export async function upsertPrompts({
@@ -627,7 +638,7 @@ export async function upsertPrompts({
   postgrestClient,
   updatedBy = 'system',
   classifyIntent,
-  classifyIntentBatchTimeoutMs,
+  classifyIntentBatchTimeoutMs = 8000,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -637,18 +648,21 @@ export async function upsertPrompts({
     .map((p) => p.id || p.prompt_id)
     .filter(hasText);
 
-  let existingQuery = postgrestClient
-    .from('prompts')
-    .select('id,prompt_id,text,regions,status')
-    .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid);
-
-  if (incomingIds.length > 0) {
-    existingQuery = existingQuery.in('prompt_id', incomingIds);
-  }
-
   const [{ data: existing }, lookups] = await Promise.all([
-    existingQuery,
+    withMissingIntentFallback(postgrestClient, (includeIntent) => {
+      const cols = includeIntent
+        ? 'id,prompt_id,text,regions,status,intent'
+        : 'id,prompt_id,text,regions,status';
+      let q = postgrestClient
+        .from('prompts')
+        .select(cols)
+        .eq('organization_id', organizationId)
+        .eq('brand_id', brandUuid);
+      if (incomingIds.length > 0) {
+        q = q.in('prompt_id', incomingIds);
+      }
+      return q;
+    }),
     buildLookupMaps(organizationId, postgrestClient),
   ]);
 
@@ -659,7 +673,7 @@ export async function upsertPrompts({
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    return `${String(p.prompt || p.text || '').trim()}:${norm.join(',')}`;
+    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}`;
   };
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
@@ -705,6 +719,16 @@ export async function upsertPrompts({
     };
 
     if (match && match.status !== 'active') {
+      if (match.status === 'deleted') {
+        const reactivated = {
+          ...row,
+          id: match.id,
+          status: 'active',
+          intent: row.intent ?? match.intent,
+        };
+        toUpdate.push(reactivated);
+        processed.push({ ...reactivated, prompt_id: promptId });
+      }
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -718,10 +742,51 @@ export async function upsertPrompts({
     }
   }
 
+  // Guard against uq_prompt_text_region_per_brand: deduplicate toInsert by
+  // (lower(text), sorted_regions) before the bulk INSERT. For a new brand
+  // existingByKey is empty, so cross-topic text collisions all land here.
+  // Deterministic tie-break: sort by (topic_id, prompt_id) asc, keep first.
+  // Each drop is logged (warn) with a text hash — auditable without echoing
+  // customer data. Dropped entries are removed from processed so counts stay
+  // honest. Guard is > 1: a single-row batch cannot collide with itself.
+  if (toInsert.length > 1) {
+    const dedupKey = (row) => {
+      const t = String(row.text || '').trim().toLowerCase();
+      const r = [...(row.regions || [])].map((x) => String(x).toLowerCase()).sort().join(',');
+      return `${t}:${r}`;
+    };
+    const sortedForDedup = [...toInsert].sort((a, b) => {
+      const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
+      return tCmp !== 0 ? tCmp : String(a.prompt_id).localeCompare(String(b.prompt_id));
+    });
+    const winnerByKey = new Map();
+    const droppedIds = new Set();
+    for (const row of sortedForDedup) {
+      const key = dedupKey(row);
+      if (winnerByKey.has(key)) {
+        droppedIds.add(row.prompt_id);
+        // eslint-disable-next-line no-console
+        console.warn('[upsertPrompts] dedup-drop', {
+          brand_id: row.brand_id,
+          text_hash: crypto.createHash('sha256').update(row.text || '').digest('hex').slice(0, 12),
+          dropped_prompt_id: row.prompt_id,
+          dropped_topic_id: row.topic_id ?? null,
+          winning_prompt_id: winnerByKey.get(key).prompt_id,
+          winning_topic_id: winnerByKey.get(key).topic_id ?? null,
+        });
+      } else {
+        winnerByKey.set(key, row);
+      }
+    }
+    if (droppedIds.size > 0) {
+      const keep = (r) => !droppedIds.has(r.prompt_id);
+      toInsert.splice(0, toInsert.length, ...toInsert.filter(keep));
+      processed.splice(0, processed.length, ...processed.filter(keep));
+    }
+  }
+
   // Best-effort intent classification for prompts that arrived WITHOUT an
-  // intent (typically human-added). Pipeline prompts already carry a
-  // normalized intent and are skipped. Failures leave intent null; they MUST
-  // NOT block the write — the backfill/reconciliation path covers them later.
+  // intent. Failures leave intent null; the backfill path covers them later.
   if (typeof classifyIntent === 'function') {
     const rowsNeedingIntent = [...toInsert, ...toUpdate]
       .filter((r) => r.intent === null && hasText(r.text));
@@ -733,8 +798,6 @@ export async function upsertPrompts({
       );
       const apply = (r) => {
         const classified = intentByText.get(r.text);
-        // Only overwrite when we actually got a bucket back — a null/absent
-        // result (failed or timed-out classification) leaves intent as null.
         if (r.intent === null && hasText(r.text) && classified != null) {
           // eslint-disable-next-line no-param-reassign
           r.intent = classified;
@@ -742,7 +805,6 @@ export async function upsertPrompts({
       };
       toInsert.forEach(apply);
       toUpdate.forEach(apply);
-      // Keep the returned payload consistent with what was persisted.
       processed.forEach(apply);
     }
   }
@@ -762,25 +824,46 @@ export async function upsertPrompts({
         .select(),
     );
     if (error) {
+      throwOnPgConstraintViolation(error, {
+        23505: { status: 409, message: 'A prompt with the same text and region already exists for this brand.' },
+      });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
     created = inserted?.length ?? toInsert.length;
   }
 
-  for (const row of toUpdate) {
-    const { id, ...patch } = row;
-    // eslint-disable-next-line no-await-in-loop
-    const { error } = await withMissingIntentFallback(
-      postgrestClient,
-      (includeIntent) => postgrestClient
-        .from('prompts')
-        .update(includeIntent ? patch : stripIntent(patch))
-        .eq('id', id),
+  if (toUpdate.length > 0) {
+    let cursor = 0;
+    const errors = [];
+    const worker = async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= toUpdate.length) {
+          return;
+        }
+        const { id, ...patch } = toUpdate[index];
+        // eslint-disable-next-line no-await-in-loop
+        const { error } = await withMissingIntentFallback(
+          postgrestClient,
+          (includeIntent) => postgrestClient
+            .from('prompts')
+            .update(includeIntent ? patch : stripIntent(patch))
+            .eq('id', id),
+        );
+        if (error) {
+          errors.push(error);
+        } else {
+          updated += 1;
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(UPDATE_CONCURRENCY, toUpdate.length) }, () => worker()),
     );
-    if (error) {
-      throw new Error(`Failed to update prompt: ${error.message}`);
+    if (errors.length > 0) {
+      throw new Error(`Failed to update ${errors.length} prompt(s): ${errors.map((e) => e.message).join('; ')}`);
     }
-    updated += 1;
   }
 
   const promptsOut = processed.map((r) => ({

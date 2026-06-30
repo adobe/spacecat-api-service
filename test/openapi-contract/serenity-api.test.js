@@ -46,6 +46,7 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
         findById: sinon.stub().resolves({
           getId: () => BRAND,
           getName: () => 'Test Brand',
+          getOrganizationId: () => ORG,
           getSemrushWorkspaceId: () => null,
           setSemrushWorkspaceId: sinon.stub(),
           setStatus: sinon.stub(),
@@ -379,14 +380,26 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
           },
+          // Serenity is active for the org (org-wide LLMO/serenity flag ON) so
+          // the documented success shapes are exercised rather than the
+          // inactive-org 404.
+          '../../src/support/serenity/serenity-active.js': {
+            isSerenityActiveForOrg: () => Promise.resolve(true),
+          },
           // activate reads brand-level aliases/URLs/competitors once per batch;
           // stub them so the contract test doesn't hit the fake postgrest client.
           '../../src/support/brands-storage.js': {
-            getBrandAliasNames: () => Promise.resolve([]),
+            getBrandAliases: () => Promise.resolve([]),
             getBrandUrlSources: () => Promise.resolve({
               urls: [], socialAccounts: [], earnedContent: [],
             }),
             getBrandCompetitors: () => Promise.resolve([]),
+          },
+          // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
+          // succeed; stub it to a site id so the documented 200 (full success)
+          // shape is exercised rather than the 207/502 partial-failure paths.
+          '../../src/support/serenity/site-linkage.js': {
+            ensureMarketSite: () => Promise.resolve('site-x'),
           },
         },
       )).default;

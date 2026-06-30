@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'node:crypto';
 
@@ -555,6 +557,12 @@ function evictTagCacheIfNeeded() {
  * how the slice resolves to a `projectId` (DB row vs live listing); the cache,
  * pagination, truncation guard, and sort are identical, so they live here once.
  * `logCtx` is spread into the truncation warning for diagnosability.
+ *
+ * LIVE-LAYER READ: tags are derived by paginating `transport.listPromptsByTags`,
+ * which reads the LIVE (published) prompt layer (no v1 draft variant exists — see
+ * docs/decisions/006-serenity-v1-v2-read-drift.md). A slice whose prompts are
+ * staged in an unpublished draft therefore yields an EMPTY tag set here until the
+ * project is published — that is correct, not a missing-data bug.
  */
 export async function listTagsForProject(transport, semrushWorkspaceId, projectId, logCtx, log) {
   const cacheKey = tagCacheKey(semrushWorkspaceId, projectId);

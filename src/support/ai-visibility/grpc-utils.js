@@ -218,6 +218,21 @@ export function escapeQlString(s) {
 }
 
 /**
+ * Build a Semrush `dimension_filter_ql` `CONTAINS` clause for a free-text table
+ * search, e.g. `prompt CONTAINS "pdf"`. Returns '' when the filter is empty so
+ * callers can omit the field (leaving the request shape unchanged). The text is
+ * escaped via {@link escapeQlString} so it cannot break out of the QL literal.
+ *
+ * @param {string|null|undefined} textFilter free-text search value
+ * @param {string} column the queryable dimension column (e.g. `prompt`, `topic`, `name`, `domain`)
+ * @returns {string} the QL clause, or '' when no filter
+ */
+export function buildTextFilterQl(textFilter, column) {
+  const t = (textFilter ?? '').trim();
+  return t ? `${column} CONTAINS "${escapeQlString(t)}"` : '';
+}
+
+/**
  * Build a Semrush QL range expression like `volume >= 10 AND volume <= 100`.
  * - both bounds present → `metric >= from AND metric <= to`
  * - only `from` present → `metric >= from`

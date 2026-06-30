@@ -35,9 +35,6 @@ describe('AiVisibilityController', () => {
   let mockHandleBrandSourceOpportunities;
   let mockHandleBrandCompetitors;
   let mockHandleCompetitorsMetrics;
-  let mockHandleCompetitorsGapTopics;
-  let mockHandleCompetitorsGapSourceDomains;
-  let mockHandleCompetitorsGapPrompts;
   let mockHandleMeta;
   let mockHandlePromptsResponses;
   let mockHandlePromptsResponsesLatest;
@@ -57,7 +54,11 @@ describe('AiVisibilityController', () => {
   let mockHandleV1PromptBrandPromptsExport;
   let mockHandleV1PromptGapPrompts;
   let mockHandleV1PromptGapPromptsExport;
+  let mockHandleV1PromptGapPromptsTotals;
   let mockHandleV1PromptPromptResponse;
+  let mockHandleV1SourceGapSourceDomains;
+  let mockHandleV1SourceGapSourceDomainsExport;
+  let mockHandleV1SourceGapSourceDomainsTotals;
   let mockHandleV1BrandStatsByCountry;
   let mockHandleV1BrandStatsByLlm;
   let mockHandleV1MetaMeta;
@@ -110,15 +111,6 @@ describe('AiVisibilityController', () => {
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleCompetitorsMetrics = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleCompetitorsGapTopics = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleCompetitorsGapSourceDomains = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleCompetitorsGapPrompts = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleMeta = sandbox.stub().resolves({ status: 200, body: {} });
@@ -174,7 +166,19 @@ describe('AiVisibilityController', () => {
     mockHandleV1PromptGapPromptsExport = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1PromptGapPromptsTotals = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1PromptPromptResponse = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceGapSourceDomains = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceGapSourceDomainsExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceGapSourceDomainsTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleV1BrandStatsByCountry = sandbox
@@ -208,10 +212,6 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/competitors.js': {
         handleCompetitorsMetrics: mockHandleCompetitorsMetrics,
-        handleCompetitorsGapTopics: mockHandleCompetitorsGapTopics,
-        handleCompetitorsGapSourceDomains:
-          mockHandleCompetitorsGapSourceDomains,
-        handleCompetitorsGapPrompts: mockHandleCompetitorsGapPrompts,
       },
       '../../src/support/ai-visibility/handlers/prompts.js': {
         handlePromptsResponses: mockHandlePromptsResponses,
@@ -263,8 +263,21 @@ describe('AiVisibilityController', () => {
       '../../src/support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js': {
         handleGapPromptsExport: mockHandleV1PromptGapPromptsExport,
       },
+      '../../src/support/ai-visibility/handlers/v1/prompt/gap-prompts-totals.js': {
+        handleGapPromptsTotals: mockHandleV1PromptGapPromptsTotals,
+      },
       '../../src/support/ai-visibility/handlers/v1/prompt/prompt-response.js': {
         handlePromptResponse: mockHandleV1PromptPromptResponse,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/gap-source-domains.js': {
+        handleGapSourceDomains: mockHandleV1SourceGapSourceDomains,
+        buildGapSourceDomainsDimensionFilterQl: sandbox.stub().returns(''),
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/gap-source-domains-export.js': {
+        handleGapSourceDomainsExport: mockHandleV1SourceGapSourceDomainsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/gap-source-domains-totals.js': {
+        handleGapSourceDomainsTotals: mockHandleV1SourceGapSourceDomainsTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/brand/stats-by-country.js': {
         handleStatsByCountry: mockHandleV1BrandStatsByCountry,
@@ -569,9 +582,6 @@ describe('AiVisibilityController', () => {
       getBrandsSourceOpportunities: mockHandleBrandSourceOpportunities,
       getBrandsCompetitors: mockHandleBrandCompetitors,
       getCompetitorsMetrics: mockHandleCompetitorsMetrics,
-      getCompetitorsGapTopics: mockHandleCompetitorsGapTopics,
-      getCompetitorsGapSourceDomains: mockHandleCompetitorsGapSourceDomains,
-      getCompetitorsGapPrompts: mockHandleCompetitorsGapPrompts,
       getMeta: mockHandleMeta,
       getPromptsResponsesLatest: mockHandlePromptsResponsesLatest,
       getPromptsResponses: mockHandlePromptsResponses,
@@ -589,7 +599,11 @@ describe('AiVisibilityController', () => {
       getV1PromptBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
       getV1PromptGapPrompts: mockHandleV1PromptGapPrompts,
       getV1PromptGapPromptsExport: mockHandleV1PromptGapPromptsExport,
+      getV1PromptGapPromptsTotals: mockHandleV1PromptGapPromptsTotals,
       getV1PromptPromptResponse: mockHandleV1PromptPromptResponse,
+      getV1SourceGapSourceDomains: mockHandleV1SourceGapSourceDomains,
+      getV1SourceGapSourceDomainsExport: mockHandleV1SourceGapSourceDomainsExport,
+      getV1SourceGapSourceDomainsTotals: mockHandleV1SourceGapSourceDomainsTotals,
       getV1BrandStatsByCountry: mockHandleV1BrandStatsByCountry,
       getV1BrandStatsByLlm: mockHandleV1BrandStatsByLlm,
       getV1MetaMeta: mockHandleV1MetaMeta,
