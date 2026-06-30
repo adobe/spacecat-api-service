@@ -279,4 +279,37 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     await controller.listRevisions(buildContext({ client, params: { limit: '9999' } }));
     expect(limitSpy).to.have.been.calledWith(200);
   });
+
+  it('floors a negative limit to 1', async () => {
+    const limitSpy = sinon.stub().resolves({ data: [], error: null });
+    const order = sinon.stub().returnsThis();
+    const client = {
+      from: () => ({ select: () => ({ eq: () => ({ order, limit: limitSpy }) }) }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    await controller.listRevisions(buildContext({ client, params: { limit: '-5' } }));
+    expect(limitSpy).to.have.been.calledWith(1);
+  });
+
+  it('ignores an out-of-range cursor and falls back to the first page (no .lt call)', async () => {
+    const limitSpy = sinon.stub().resolves({ data: [], error: null });
+    const order = sinon.stub().returnsThis();
+    const ltSpy = sinon.stub().returnsThis();
+    const client = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            order, limit: limitSpy, lt: ltSpy,
+          }),
+        }),
+      }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    // encodeCursor(Number.MAX_SAFE_INTEGER) — far beyond MAX_CURSOR_VERSION
+    const tamperedCursor = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'utf8').toString('base64url');
+    await controller.listRevisions(buildContext({ client, params: { cursor: tamperedCursor } }));
+    expect(ltSpy).to.not.have.been.called;
+  });
 });

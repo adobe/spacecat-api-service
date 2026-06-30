@@ -30,6 +30,11 @@ const STRATEGIES = ['tiered'];
 const SQLSTATE_VERSION_CONFLICT = '40001';
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
+// Cursor versions above this are rejected as malformed — guards against a tampered/garbage
+// cursor (e.g. Number.MAX_SAFE_INTEGER) being fed straight into `.lt('version', cursor)` and
+// producing a misleading empty page far past the data. `version` increments by 1 per write, so
+// even a very actively-written policy is nowhere near this bound.
+const MAX_CURSOR_VERSION = 1_000_000;
 
 // Resolves false (not throw) when the caller's x-product header doesn't match productCode,
 // so the ASO/LLMO OR-check below can still try the other product.
@@ -99,7 +104,7 @@ function decodeCursor(c) {
     return null;
   }
   const v = Number.parseInt(Buffer.from(c, 'base64url').toString('utf8'), 10);
-  return Number.isInteger(v) ? v : null;
+  return Number.isInteger(v) && v >= 0 && v <= MAX_CURSOR_VERSION ? v : null;
 }
 
 function encodeCursor(version) {
@@ -221,7 +226,10 @@ export default function AuditPolicyController() {
       return auth.error;
     }
     const { siteId, client } = auth;
-    const limit = Math.min(Number.parseInt(context.params?.limit, 10) || DEFAULT_PAGE, MAX_PAGE);
+    const limit = Math.min(
+      Math.max(Number.parseInt(context.params?.limit, 10) || DEFAULT_PAGE, 1),
+      MAX_PAGE,
+    );
     const cursor = decodeCursor(context.params?.cursor);
 
     let q = client.from(REVISION_TABLE).select('*').eq('site_id', siteId);
@@ -234,6 +242,8 @@ export default function AuditPolicyController() {
       return internalServerError('Failed to read audit policy revisions');
     }
     const items = (data || []).map(AuditPolicyRevisionDto.toJSON);
+    // A full page implies more rows may exist; if the last page happens to contain exactly
+    // `limit` rows, the client makes one harmless extra request that returns an empty page.
     const nextCursor = items.length === limit
       ? encodeCursor(items[items.length - 1].version) : undefined;
     return ok({ items, ...(nextCursor ? { cursor: nextCursor } : {}) });
