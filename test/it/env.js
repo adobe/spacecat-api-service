@@ -31,6 +31,18 @@ export function buildEnv(publicKeyB64) {
     // facsWrapper fronts them (they 404 elsewhere), so the IT server must boot
     // as 'dev' for that suite to exercise the real handlers.
     AWS_ENV: 'dev',
+
+    // FACS enforcement bypass for the IT seed orgs. facsWrapper (innermost
+    // wrapper) evaluates a per-product LaunchDarkly flag for FACS-governed
+    // routes, but there is no LD SDK key in the IT env, so the LD gate would
+    // fail closed (503) for every external (non-admin) persona on those routes.
+    // The IT caller orgs — ORG_1 (the `user`/`llmoAdmin` tenancy) and ORG_3
+    // (the delegated personas) — are listed here so facsWrapper bypasses them
+    // as "internal" orgs (step 2), exactly as prod exempts Adobe-internal orgs.
+    // This lets the controller-level authZ (hasAccess / delegation) be what the
+    // IT suite exercises; facsWrapper's own allow/deny logic is unit-tested in
+    // @adobe/spacecat-shared-http-utils. Bare idents — facsWrapper normalizes.
+    FACS_EXCEPTION_INTERNAL_ORGS: 'AAAAAAAABBBBBBBBCCCCCCCC,GGGGGGGGHHHHHHHHIIIIIIII',
     AWS_ACCESS_KEY_ID: 'minioadmin',
     AWS_SECRET_ACCESS_KEY: 'minioadmin',
     AWS_SESSION_TOKEN: '',
