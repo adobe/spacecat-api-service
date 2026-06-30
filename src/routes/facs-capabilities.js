@@ -932,6 +932,8 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/top-pages/:source': 'aso/can_view',
       'GET /sites/:siteId/top-pages/:source/:geo': 'aso/can_view',
       'GET /sites/:siteId/user-activities': 'aso/can_view',
+
+      // Audit Policy / Audit Scope (SITES-47306)
       'GET /sites/:siteId/audit-policy': 'aso/can_view',
       'GET /sites/:siteId/audit-policy/revisions': 'aso/can_view',
       'GET /sites/:siteId/audit-scope/pages': 'aso/can_view',
