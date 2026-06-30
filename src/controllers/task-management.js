@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHash } from 'node:crypto';
 import {
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
@@ -701,6 +702,79 @@ function TaskManagementController(context) {
         .catch((err) => log.warn({ err }, 'Failed to mark idempotency key failed'));
     }
 
+    // --- Deterministic dedup lock (prevents cross-user duplicate tickets) -----
+    // Keyed on SHA-256(organizationId:sorted(suggestionIds)) so the same suggestion
+    // group always maps to the same key regardless of which user triggered it.
+    // Short 5-min TTL covers the Jira round-trip; the lock is DELETED on failure so
+    // the next user can immediately retry. On success it is marked completed so
+    // concurrent pollers receive the cached ticket response.
+
+    let dedupKeyId = null;
+
+    if (suggestionIds.length > 0) {
+      const dedupKey = createHash('sha256')
+        .update(`${organizationId}:${[...suggestionIds].sort().join(',')}`)
+        .digest('hex'); // 64 chars — well within the 128-char column limit
+
+      const dedupExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      const { data: dedupEntry, error: dedupInsertError } = await postgrestClient
+        .from('idempotency_keys')
+        .insert({
+          key: dedupKey,
+          organization_id: organizationId,
+          endpoint: `dedup:POST /task-management/${provider}/tickets`,
+          status: 'processing',
+          expires_at: dedupExpiresAt,
+        })
+        .select('id')
+        .single();
+
+      if (dedupInsertError) {
+        const isDedupDuplicate = dedupInsertError.code === '23505'
+          || dedupInsertError.message?.includes('unique')
+          || dedupInsertError.message?.includes('duplicate');
+        if (isDedupDuplicate) {
+          // Another request is already creating a ticket for this suggestion group.
+          // Mark the per-client idempotency key as failed so the client generates
+          // a fresh key for the next attempt, then return 409 IN_FLIGHT so the UI
+          // can poll until the in-progress request completes.
+          const body = {
+            message: 'Ticket creation already in progress for this suggestion group',
+            code: 'IN_FLIGHT',
+            retryAfter: 2,
+          };
+          await markIdempotencyFailed(STATUS_CONFLICT, body);
+          return createResponse(body, STATUS_CONFLICT);
+        }
+        // Non-duplicate DB error — proceed without dedup lock rather than blocking.
+        log.warn({ organizationId, dedupInsertError }, 'Failed to insert dedup lock — proceeding without cross-user dedup');
+      } else {
+        dedupKeyId = dedupEntry.id;
+      }
+    }
+
+    async function releaseDedupLock() {
+      if (!dedupKeyId) {
+        return;
+      }
+      await postgrestClient
+        .from('idempotency_keys')
+        .delete()
+        .eq('id', dedupKeyId)
+        .catch((err) => log.warn({ err }, 'Failed to release dedup lock'));
+    }
+
+    async function completeDedupLock(statusCode, body) {
+      if (!dedupKeyId) {
+        return;
+      }
+      await postgrestClient
+        .from('idempotency_keys')
+        .update({ status: 'completed', response: { statusCode, body } })
+        .eq('id', dedupKeyId)
+        .catch((err) => log.warn({ err }, 'Failed to complete dedup lock'));
+    }
+
     // --- Create the ticket via the provider client ----------------------------
 
     const connectionObj = {
@@ -879,6 +953,7 @@ function TaskManagementController(context) {
         if (isReauthNeeded) {
           await connection.markRequiresReauth();
           const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
+          await releaseDedupLock();
           await markIdempotencyFailed(STATUS_CONFLICT, body);
           return createResponse(body, STATUS_CONFLICT);
         }
@@ -889,6 +964,7 @@ function TaskManagementController(context) {
 
         log.error({ organizationId, provider, err }, 'Failed to create grouped ticket');
         const body = { message: 'Failed to create ticket' };
+        await releaseDedupLock();
         await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
         return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
       }
@@ -914,6 +990,7 @@ function TaskManagementController(context) {
           'Grouped ticket created in Jira but persistence failed',
         );
         const body = { message: 'Ticket created but could not be saved' };
+        await releaseDedupLock();
         await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
         return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
       }
@@ -979,6 +1056,7 @@ function TaskManagementController(context) {
         ...(linkWarnings.length > 0 ? { linkWarnings } : {}),
         ...(groupedAttachmentWarning ? { attachmentWarning: groupedAttachmentWarning } : {}),
       };
+      await completeDedupLock(STATUS_CREATED, groupedResponseBody);
       await markIdempotencyDone(STATUS_CREATED, groupedResponseBody);
       return createResponse(groupedResponseBody, STATUS_CREATED);
     }
