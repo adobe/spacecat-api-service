@@ -249,5 +249,18 @@ export default function AuditPolicyController() {
     return ok({ items, ...(nextCursor ? { cursor: nextCursor } : {}) });
   }
 
-  return { getPolicy, putPolicy, listRevisions };
+  async function notImplemented(context) {
+    const auth = await authorizeRead(context);
+    if (auth.error) {
+      return auth.error;
+    }
+    return createResponse({ message: 'Not implemented yet.' }, 501);
+  }
+  const getScopePages = notImplemented;
+  const getScopeSummary = notImplemented;
+  const getScopeSections = notImplemented;
+
+  return {
+    getPolicy, putPolicy, listRevisions, getScopePages, getScopeSummary, getScopeSections,
+  };
 }

@@ -313,3 +313,19 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     expect(ltSpy).to.not.have.been.called;
   });
 });
+
+describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
+  afterEach(() => sinon.restore());
+  for (const fn of ['getScopePages', 'getScopeSummary', 'getScopeSections']) {
+    it(`${fn} returns 501 for an authorized caller`, async () => {
+      const controller = loadController();
+      const res = await controller[fn](buildContext());
+      expect(res.status).to.equal(501);
+    });
+    it(`${fn} returns 403 for a non-member`, async () => {
+      const controller = loadController(sinon.stub().resolves(false));
+      const res = await controller[fn](buildContext());
+      expect(res.status).to.equal(403);
+    });
+  }
+});
