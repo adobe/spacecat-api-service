@@ -21,13 +21,20 @@
  *
  * Format: snake_case (PostgreSQL / PostgREST)
  */
+import { SERENITY_MOCK_WORKSPACE_ID } from '../../shared/seed-ids.js';
+
 export const brands = [
   {
     id: 'ab111111-1111-4111-b111-111111111111',
     organization_id: '11111111-1111-4111-b111-111111111111',
     name: 'Test Brand',
     site_id: '33333333-3333-4333-b333-333333333333',
-    semrush_workspace_id: 'it-semrush-ws-1',
+    // Aligned with the Semrush vendor-mock seed so the brand-level serenity read
+    // endpoints resolve to a workspace the mock actually seeds with a
+    // project/model/prompt/market — not just an unknown workspace that 404s.
+    // Import the shared constant (not a literal) so a mock-seed change updates
+    // both sides in lock-step.
+    semrush_workspace_id: SERENITY_MOCK_WORKSPACE_ID,
     status: 'active',
     origin: 'human',
     regions: ['us'],
