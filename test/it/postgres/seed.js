@@ -132,7 +132,9 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
-    insertRows('feature_flags', featureFlags),
+    // feature_flags grants INSERT to postgrest_writer only (SELECT to anon), so
+    // seed it with the writer JWT — same as the append-only audit tables.
+    insertRows('feature_flags', featureFlags, { asWriter: true }),
   ]);
 
   // Level 1b: depend on projects

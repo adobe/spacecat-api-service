@@ -110,6 +110,26 @@ The org-level catalogue routes (`GET /serenity/models`, `GET /serenity/languages
 without `:brandId`) are intentionally **not** gated — the add-brand wizard needs
 them before a workspace (or the flag) exists.
 
+### The flag also gates the serenity-adjusted brand endpoints
+
+The same helper gates the Semrush **side-effects** on the v2 brand endpoints
+(`src/controllers/brands.js`), so an inactive org operates as plain backend CRUD:
+
+- `POST /v2/orgs/:org/brands` — a **Semrush-mode** create (`semrushMarket` /
+  `generatePrompts`, i.e. one that would provision a sub-workspace) is rejected
+  with `403 Serenity is not active for this organization` while the flag is off.
+  A plain (flat) create is unaffected.
+- `PATCH /v2/orgs/:org/brands/:brandId` — an edit that would **re-sync to
+  Semrush** (URL / competitor / alias change on a brand that has a
+  `semrush_workspace_id`) is rejected `403` while the flag is off, before the
+  row is written. The same edit on a flat brand (no workspace) is a normal
+  backend update.
+- The brand **read** DTO is deliberately left alone: `semrushWorkspaceId` /
+  `pendingSemrushProvisioning` are always returned as a faithful mirror of the
+  row (the UI decides what to surface by reading the flag itself).
+- `DELETE` and status-transition have no Semrush side-effect, so they are
+  ungated.
+
 ## Endpoint surface
 
 All endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
