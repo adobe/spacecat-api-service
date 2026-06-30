@@ -139,6 +139,33 @@ describe('cdn-log-delivery support', () => {
       expect(result.deliveryId).to.equal('del-existing');
     });
 
+    it('treats a CreateDelivery ConflictException as already-existed (TOCTOU race)', async () => {
+      let describeCalls = 0;
+      sendStub.callsFake((cmd) => {
+        if (cmd.type === 'get') {
+          return Promise.reject(rnf()); // source does not exist yet → no early return
+        }
+        if (cmd.type === 'create') {
+          // A concurrent caller created the delivery between our check and this call.
+          return Promise.reject(Object.assign(new Error('exists'), { name: 'ConflictException' }));
+        }
+        if (cmd.type === 'describe') {
+          describeCalls += 1;
+          return Promise.resolve({
+            deliveries: [{ deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE123', id: 'del-raced' }],
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      const result = await mod.createCdnLogDelivery(creds, baseParams);
+
+      expect(result.created).to.equal(false);
+      expect(result.alreadyExisted).to.equal(true);
+      expect(result.deliveryId).to.equal('del-raced');
+      expect(describeCalls).to.equal(1); // looked up the winner's delivery id after the conflict
+    });
+
     it('rethrows a non-ResourceNotFound error from GetDeliverySource', async () => {
       sendStub.callsFake((cmd) => {
         if (cmd.type === 'get') {
