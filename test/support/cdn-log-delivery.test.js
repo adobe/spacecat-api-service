@@ -166,6 +166,47 @@ describe('cdn-log-delivery support', () => {
       expect(describeCalls).to.equal(1); // looked up the winner's delivery id after the conflict
     });
 
+    it('on a conflict, returns alreadyExisted with undefined id when the raced delivery is not found', async () => {
+      sendStub.callsFake((cmd) => {
+        if (cmd.type === 'get') {
+          return Promise.reject(rnf()); // source absent → reach PutDeliverySource + CreateDelivery
+        }
+        if (cmd.type === 'create') {
+          return Promise.reject(Object.assign(new Error('exists'), { name: 'ResourceAlreadyExistsException' }));
+        }
+        if (cmd.type === 'describe') {
+          // Paginate through pages with no matching deliverySourceName, then exhaust nextToken
+          // → findExistingDelivery returns undefined (its loop fall-through).
+          if (!cmd.input.nextToken) {
+            return Promise.resolve({ deliveries: [{ deliverySourceName: 'other' }], nextToken: 'p2' });
+          }
+          return Promise.resolve({ deliveries: [{ deliverySourceName: 'another' }] });
+        }
+        return Promise.resolve({});
+      });
+
+      const result = await mod.createCdnLogDelivery(creds, baseParams);
+
+      expect(result.created).to.equal(false);
+      expect(result.alreadyExisted).to.equal(true);
+      expect(result.deliveryId).to.equal(undefined);
+    });
+
+    it('rethrows a non-conflict error from CreateDelivery', async () => {
+      sendStub.callsFake((cmd) => {
+        if (cmd.type === 'get') {
+          return Promise.reject(rnf()); // source absent → reach CreateDelivery
+        }
+        if (cmd.type === 'create') {
+          return Promise.reject(Object.assign(new Error('bad input'), { name: 'ValidationException' }));
+        }
+        return Promise.resolve({});
+      });
+
+      await expect(mod.createCdnLogDelivery(creds, baseParams))
+        .to.be.rejectedWith('bad input');
+    });
+
     it('rethrows a non-ResourceNotFound error from GetDeliverySource', async () => {
       sendStub.callsFake((cmd) => {
         if (cmd.type === 'get') {
