@@ -716,13 +716,26 @@ function TaskManagementController(context) {
         .update(`${organizationId}:${[...suggestionIds].sort().join(',')}`)
         .digest('hex'); // 64 chars — well within the 128-char column limit
 
+      const dedupEndpoint = `dedup:POST /task-management/${provider}/tickets`;
       const dedupExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+      // Remove any expired row with this key so the unique constraint
+      // does not block a fresh insert (expired rows are not auto-deleted).
+      await postgrestClient
+        .from('idempotency_keys')
+        .delete()
+        .eq('key', dedupKey)
+        .eq('organization_id', organizationId)
+        .eq('endpoint', dedupEndpoint)
+        .lt('expires_at', new Date().toISOString())
+        .catch((err) => log.warn({ err }, 'Failed to delete expired dedup lock — proceeding'));
+
       const { data: dedupEntry, error: dedupInsertError } = await postgrestClient
         .from('idempotency_keys')
         .insert({
           key: dedupKey,
           organization_id: organizationId,
-          endpoint: `dedup:POST /task-management/${provider}/tickets`,
+          endpoint: dedupEndpoint,
           status: 'processing',
           expires_at: dedupExpiresAt,
         })
