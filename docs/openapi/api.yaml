@@ -79,6 +79,9 @@ tags:
     description: Brand sentiment analysis topics and guidelines management
   - name: ai-visibility
     description: AI Visibility endpoints – proxy to Semrush gRPC for brand visibility, competitor gaps, topic research, and prompt analysis
+  - name: state-access-mappings
+    description: |
+      Hybrid permission model — state-layer access mappings + capability views.
 
 paths:
   /audits/latest/{auditType}:
@@ -127,6 +130,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/status:
+    $ref: './brands-v2-api.yaml#/v2-brand-status-for-org'
   /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org-site'
   /v2/orgs/{spaceCatId}/categories:
@@ -254,6 +259,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/bot-blocker:
     $ref: './bot-blocker-api.yaml#/bot-blocker'
+  /sites/{siteId}/entitlements:
+    $ref: './entitlements-api.yaml#/ensure-entitlement-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
@@ -627,12 +634,54 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-bootstrap-url'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/connect:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-connect'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/distributions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-distributions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/prerequisites:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-prerequisites'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/origins:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-origins'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/behaviors:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-behaviors'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-origin:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-origin'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-function:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-function'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-cache:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-cache'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-lambda:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-lambda'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/lambda-status:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-lambda-status'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-associations:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-associations'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/verify:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-verify'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/plan:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
     $ref: './llmo-api.yaml#/llmo-probe-edge-optimize'
   /sites/{siteId}/llmo/edge-optimize-routing:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/config:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-config'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/accounts:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-accounts'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-zones'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:
@@ -741,6 +790,17 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-topics-export'
   /llmo/ai-visibility/v1/meta/meta:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
+
+  /state/access-mappings:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings'
+  /state/access-mappings/history:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings-history'
+  /state/access-mappings/{id}:
+    $ref: './state-access-mappings-api.yaml#/state-access-mapping-by-id'
+  /product/capabilities:
+    $ref: './state-access-mappings-api.yaml#/product-capabilities'
+  /user/capabilities/{resourceId}:
+    $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
 
 components:
   securitySchemes:

@@ -38,6 +38,19 @@ describe('metrics-emf', () => {
     expect(parsed.WebhookEnqueued).to.equal(1);
   });
 
+  it('honors a custom namespace (LLMO-5587 brand metrics)', () => {
+    const lines = [];
+    emitMetric(
+      { name: 'BrandDemotionBlocked', dimensions: { Operation: 'updateBrand' } },
+      { environment: 'prod', sink: (l) => lines.push(l), namespace: 'Mysticat/Brands' },
+    );
+    const parsed = JSON.parse(lines[0]);
+    // eslint-disable-next-line no-underscore-dangle
+    expect(parsed._aws.CloudWatchMetrics[0].Namespace).to.equal('Mysticat/Brands');
+    expect(parsed.BrandDemotionBlocked).to.equal(1);
+    expect(parsed.Operation).to.equal('updateBrand');
+  });
+
   it('supports non-Count units and explicit values', () => {
     const lines = [];
     emitMetric(

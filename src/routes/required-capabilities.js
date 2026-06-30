@@ -130,7 +130,31 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
+
+  // LLMO Cloudflare onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
+  // uses a caller-supplied x-cloudflare-token, not S2S JWT
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
@@ -154,6 +178,7 @@ export const INTERNAL_ROUTES = [
   // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
   'POST /sites/:siteId/site-enrollments',
+  'POST /sites/:siteId/entitlements',
   // Feature flags write - admin only, mysticat-backed org config
   'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
   'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -200,6 +225,22 @@ export const INTERNAL_ROUTES = [
   // bucket like `monitoring:read` that would re-create the same problem for the next
   // monitoring endpoint.
   'GET /monitoring/drs-bp-pg-audit',
+
+  // Hybrid permission model — state-layer management + capability
+  // introspection. Customer-org admins manage their own ReBAC bindings here,
+  // self-gated in the controller by `<product>/can_manage_users` (CRUD) and
+  // `<product>/can_view` (catalog/effective-capabilities). Never S2S —
+  // automated consumers must never be able to grant themselves access to
+  // customer resources. (Until facsWrapper is attached in api-service, the
+  // controller also restricts these to AWS_ENV === 'dev'.)
+  'GET /state/access-mappings',
+  'GET /state/access-mappings/history',
+  'POST /state/access-mappings',
+  'PATCH /state/access-mappings/:id',
+  'DELETE /state/access-mappings/:id',
+  'GET /organizations/:organizationId/permission/audit-logs',
+  'GET /product/capabilities',
+  'GET /user/capabilities/:resourceId',
 ];
 
 /**
@@ -265,6 +306,7 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/topics/:topicId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'organization:read',

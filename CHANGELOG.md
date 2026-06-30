@@ -1,3 +1,204 @@
+# [1.610.0](https://github.com/adobe/spacecat-api-service/compare/v1.609.4...v1.610.0) (2026-06-30)
+
+
+### Features
+
+* **state-mappings:** DELETE empties caps; POST/PATCH require non-empty + auto-add can_view ([#2705](https://github.com/adobe/spacecat-api-service/issues/2705)) ([dd77f9e](https://github.com/adobe/spacecat-api-service/commit/dd77f9e265dd07e919f0884166673098d643a5c3))
+
+## [1.609.4](https://github.com/adobe/spacecat-api-service/compare/v1.609.3...v1.609.4) (2026-06-29)
+
+
+### Bug Fixes
+
+* exclude soft-deleted brands from name uniqueness check | LLMO-5919 ([#2722](https://github.com/adobe/spacecat-api-service/issues/2722)) ([4f4a347](https://github.com/adobe/spacecat-api-service/commit/4f4a3473ca421d27d6245be4dfd84eb3746149d5))
+
+## [1.609.3](https://github.com/adobe/spacecat-api-service/compare/v1.609.2...v1.609.3) (2026-06-29)
+
+
+### Bug Fixes
+
+* **serenity:** add required `type` to brand-alias updateProject PATCH ([#2721](https://github.com/adobe/spacecat-api-service/issues/2721)) ([174d852](https://github.com/adobe/spacecat-api-service/commit/174d852a314f8de314a514d9587ea4651cefc67d)), closes [Hi#level](https://github.com/Hi/issues/level) [#1746](https://github.com/adobe/spacecat-api-service/issues/1746)
+
+## [1.609.2](https://github.com/adobe/spacecat-api-service/compare/v1.609.1...v1.609.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **serenity:** harden sub-workspace create against failed-provisioning stubs ([#2719](https://github.com/adobe/spacecat-api-service/issues/2719)) ([78c15ff](https://github.com/adobe/spacecat-api-service/commit/78c15ff8dbe829d1c2cfbbec147bf00841652f3f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.609.1](https://github.com/adobe/spacecat-api-service/compare/v1.609.0...v1.609.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **llmo:** encode dataFolder path boundary Helix-safe (LLMO-5859) ([#2688](https://github.com/adobe/spacecat-api-service/issues/2688)) ([5720dd8](https://github.com/adobe/spacecat-api-service/commit/5720dd878e2a75f07ad6a7f1418b0916104c7d6e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.609.0](https://github.com/adobe/spacecat-api-service/compare/v1.608.0...v1.609.0) (2026-06-29)
+
+
+### Features
+
+* **serenity:** register Semrush AIO intent targets in project tag taxonomy ([#2710](https://github.com/adobe/spacecat-api-service/issues/2710)) ([c0a0a6a](https://github.com/adobe/spacecat-api-service/commit/c0a0a6a63dc33a27c17ed3d666f3d23d1994da3d)), closes [Hi#level](https://github.com/Hi/issues/level) [throu#API](https://github.com/throu/issues/API)
+
+# [1.608.0](https://github.com/adobe/spacecat-api-service/compare/v1.607.0...v1.608.0) (2026-06-28)
+
+
+### Features
+
+* **edge-optimize:** source CloudFront control-plane from tokowaka-client ([#2682](https://github.com/adobe/spacecat-api-service/issues/2682)) ([46703d2](https://github.com/adobe/spacecat-api-service/commit/46703d23a383e04a9896d2303097a8e4c27a1002))
+
+# [1.607.0](https://github.com/adobe/spacecat-api-service/compare/v1.606.2...v1.607.0) (2026-06-27)
+
+
+### Features
+
+* **llmo:** tag Cloudflare workers for idempotent deploys and add audit logging ([#2716](https://github.com/adobe/spacecat-api-service/issues/2716)) ([be40387](https://github.com/adobe/spacecat-api-service/commit/be40387c84fdd4a2576346779898ea34db6e6d48))
+
+## [1.606.2](https://github.com/adobe/spacecat-api-service/compare/v1.606.1...v1.606.2) (2026-06-26)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-cloudflare-client to 1.2.1 ([#2715](https://github.com/adobe/spacecat-api-service/issues/2715)) ([25358a8](https://github.com/adobe/spacecat-api-service/commit/25358a8451641ac881cc63b137299bb4c4017720))
+
+## [1.606.1](https://github.com/adobe/spacecat-api-service/compare/v1.606.0...v1.606.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **llmo:** return 409 when Cloudflare deploy worker already exists ([#2714](https://github.com/adobe/spacecat-api-service/issues/2714)) ([72836a1](https://github.com/adobe/spacecat-api-service/commit/72836a10153ad798060aba07b5796cef59b7fc89))
+
+# [1.606.0](https://github.com/adobe/spacecat-api-service/compare/v1.605.0...v1.606.0) (2026-06-26)
+
+
+### Features
+
+* **preflight:** shape new DTOs and join AsyncJob on detail (SITES-47254) ([#2713](https://github.com/adobe/spacecat-api-service/issues/2713)) ([c3adb21](https://github.com/adobe/spacecat-api-service/commit/c3adb21ef84e04980a413ea6e4aa302e6900a95f))
+
+# [1.605.0](https://github.com/adobe/spacecat-api-service/compare/v1.604.1...v1.605.0) (2026-06-26)
+
+
+### Features
+
+* **sites:** scope latest-metrics RUM to locale path prefix ([#2670](https://github.com/adobe/spacecat-api-service/issues/2670)) ([06342bf](https://github.com/adobe/spacecat-api-service/commit/06342bf2ab925b8357b4e330a04921c96c0eaf53)), closes [#1707](https://github.com/adobe/spacecat-api-service/issues/1707) [#1707](https://github.com/adobe/spacecat-api-service/issues/1707)
+
+## [1.604.1](https://github.com/adobe/spacecat-api-service/compare/v1.604.0...v1.604.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* bump @adobe/spacecat-shared-cloudflare-client to 1.1.1 ([#2704](https://github.com/adobe/spacecat-api-service/issues/2704)) ([8333039](https://github.com/adobe/spacecat-api-service/commit/8333039341b5f89b2ff6dc6d615fb03a8fa640d7))
+
+# [1.604.0](https://github.com/adobe/spacecat-api-service/compare/v1.603.0...v1.604.0) (2026-06-26)
+
+
+### Features
+
+* **brands:** allow pending brands to unset/repoint primary URL (LLMO-5870) ([#2700](https://github.com/adobe/spacecat-api-service/issues/2700)) ([05a9d6b](https://github.com/adobe/spacecat-api-service/commit/05a9d6b0e18d9355b21b9f5d5c1f0745c770723d))
+* **serenity:** extend opt-in type-checking to the serenity controllers (ADR-005 ratchet) ([#2702](https://github.com/adobe/spacecat-api-service/issues/2702)) ([47f1ffd](https://github.com/adobe/spacecat-api-service/commit/47f1ffda5c8d0eb6a4717bd06a0271ae8877b759)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.603.0](https://github.com/adobe/spacecat-api-service/compare/v1.602.1...v1.603.0) (2026-06-26)
+
+
+### Bug Fixes
+
+* **llmo:** temporary cloudflareToken body/query fallback for CF token ([#2701](https://github.com/adobe/spacecat-api-service/issues/2701)) ([b929f76](https://github.com/adobe/spacecat-api-service/commit/b929f764a27ca08f649e623c5a5521a89ea02462)), closes [#2681](https://github.com/adobe/spacecat-api-service/issues/2681) [#2697](https://github.com/adobe/spacecat-api-service/issues/2697)
+
+
+### Features
+
+* add POST /sites/:siteId/entitlements admin endpoint ([#2665](https://github.com/adobe/spacecat-api-service/issues/2665)) ([4374fc4](https://github.com/adobe/spacecat-api-service/commit/4374fc4ea6fa13e68754007f32eb68835732cef4))
+* **serenity:** bump project-engine-client to 1.2.0 and document v1/v2 read drift ([#2699](https://github.com/adobe/spacecat-api-service/issues/2699)) ([a1ea182](https://github.com/adobe/spacecat-api-service/commit/a1ea1829855fc92e1b8b2309487be2737e480934)), closes [Hi#level](https://github.com/Hi/issues/level) [#2584](https://github.com/adobe/spacecat-api-service/issues/2584)
+
+## [1.602.1](https://github.com/adobe/spacecat-api-service/compare/v1.602.0...v1.602.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **deps:** re-bump spacecat-shared-http-utils 1.30.0 → 1.31.0 (after LD flag fix) ([#2698](https://github.com/adobe/spacecat-api-service/issues/2698)) ([3753f68](https://github.com/adobe/spacecat-api-service/commit/3753f68903c05b048a1afaf5c13d813ab35c22c2))
+
+# [1.602.0](https://github.com/adobe/spacecat-api-service/compare/v1.601.3...v1.602.0) (2026-06-26)
+
+
+### Features
+
+* **llmo:** pass Cloudflare account/zone IDs in body; scope zone listing by account ([#2697](https://github.com/adobe/spacecat-api-service/issues/2697)) ([88a23f8](https://github.com/adobe/spacecat-api-service/commit/88a23f88689b8e6fbb82a9a4e9f7080016a1f813)), closes [#2681](https://github.com/adobe/spacecat-api-service/issues/2681)
+
+## [1.601.3](https://github.com/adobe/spacecat-api-service/compare/v1.601.2...v1.601.3) (2026-06-26)
+
+
+### Bug Fixes
+
+* enforce site-scope validation for staging domains on subpath prod sites ([#2590](https://github.com/adobe/spacecat-api-service/issues/2590)) ([ed6be40](https://github.com/adobe/spacecat-api-service/commit/ed6be40295b6fa60a394dc79d0923c0e398bf95e))
+
+## [1.601.2](https://github.com/adobe/spacecat-api-service/compare/v1.601.1...v1.601.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps:** redeploy http-utils 1.30.0 revert to prod (back office outage) ([#2692](https://github.com/adobe/spacecat-api-service/issues/2692)) ([5c3cb11](https://github.com/adobe/spacecat-api-service/commit/5c3cb11029aeb6a63c7a7316085263d07751c34a)), closes [#2691](https://github.com/adobe/spacecat-api-service/issues/2691)
+
+
+### Reverts
+
+* fix(deps): bump spacecat-shared-http-utils 1.30.0 to 1.31.0 ([#2691](https://github.com/adobe/spacecat-api-service/issues/2691)) ([d8c8d8b](https://github.com/adobe/spacecat-api-service/commit/d8c8d8b8371539961cf26018bab09a60515af000)), closes [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [adobe/spacecat-shared#1712](https://github.com/adobe/spacecat-shared/issues/1712) [#2686](https://github.com/adobe/spacecat-api-service/issues/2686) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2637](https://github.com/adobe/spacecat-api-service/issues/2637) [#2681](https://github.com/adobe/spacecat-api-service/issues/2681)
+
+## [1.601.1](https://github.com/adobe/spacecat-api-service/compare/v1.601.0...v1.601.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **preflight:** rename scan_id wire field to async_job_id in callMysticatAnalyze (SITES-47173) ([#2689](https://github.com/adobe/spacecat-api-service/issues/2689)) ([3098758](https://github.com/adobe/spacecat-api-service/commit/3098758825762f6b3934601d98a13a357fb06e5a))
+
+# [1.601.0](https://github.com/adobe/spacecat-api-service/compare/v1.600.0...v1.601.0) (2026-06-25)
+
+
+### Features
+
+* **llmo:** add Cloudflare onboarding API endpoints ([#2681](https://github.com/adobe/spacecat-api-service/issues/2681)) ([acf70c4](https://github.com/adobe/spacecat-api-service/commit/acf70c4a49b48a0f5e6fbfd038dad2756651a81f))
+
+# [1.600.0](https://github.com/adobe/spacecat-api-service/compare/v1.599.0...v1.600.0) (2026-06-25)
+
+
+### Features
+
+* **brands:** guard against active->pending demotion in updateBrand/upsertBrand (LLMO-5587) ([#2637](https://github.com/adobe/spacecat-api-service/issues/2637)) ([410ae58](https://github.com/adobe/spacecat-api-service/commit/410ae58ebd4fa9105f0c058129f340a49270ef3e)), closes [#2139](https://github.com/adobe/spacecat-api-service/issues/2139) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2137](https://github.com/adobe/spacecat-api-service/issues/2137) [#2139](https://github.com/adobe/spacecat-api-service/issues/2139) [#2504](https://github.com/adobe/spacecat-api-service/issues/2504) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2621](https://github.com/adobe/spacecat-api-service/issues/2621) [#2504](https://github.com/adobe/spacecat-api-service/issues/2504)
+
+# [1.599.0](https://github.com/adobe/spacecat-api-service/compare/v1.598.1...v1.599.0) (2026-06-25)
+
+
+### Features
+
+* **brands:** add explicit brand status-transition endpoint (LLMO-5587) ([#2621](https://github.com/adobe/spacecat-api-service/issues/2621)) ([7fbebb6](https://github.com/adobe/spacecat-api-service/commit/7fbebb60e30bd22101f92491358f8432a987e358)), closes [#2504](https://github.com/adobe/spacecat-api-service/issues/2504) [#2593](https://github.com/adobe/spacecat-api-service/issues/2593) [#2137](https://github.com/adobe/spacecat-api-service/issues/2137) [#2139](https://github.com/adobe/spacecat-api-service/issues/2139) [#2637](https://github.com/adobe/spacecat-api-service/issues/2637) [#2139](https://github.com/adobe/spacecat-api-service/issues/2139) [#2137](https://github.com/adobe/spacecat-api-service/issues/2137) [#2139](https://github.com/adobe/spacecat-api-service/issues/2139) [#2504](https://github.com/adobe/spacecat-api-service/issues/2504) [#2593](https://github.com/adobe/spacecat-api-service/issues/2593) [#2300](https://github.com/adobe/spacecat-api-service/issues/2300)
+
+## [1.598.1](https://github.com/adobe/spacecat-api-service/compare/v1.598.0...v1.598.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps:** bump spacecat-shared-http-utils 1.30.0 → 1.31.0 (FACS getFacsPermissions) ([#2686](https://github.com/adobe/spacecat-api-service/issues/2686)) ([96c5c10](https://github.com/adobe/spacecat-api-service/commit/96c5c1047606cddcda5e513d847d5892410b7ea8)), closes [#1712](https://github.com/adobe/spacecat-api-service/issues/1712)
+
+# [1.598.0](https://github.com/adobe/spacecat-api-service/compare/v1.597.0...v1.598.0) (2026-06-25)
+
+
+### Features
+
+* fix-inconsistent-locale-propagation-in-fixes-API-and-embedded-suggestion-DTOs | LLMO-5430 ([#2677](https://github.com/adobe/spacecat-api-service/issues/2677)) ([5446407](https://github.com/adobe/spacecat-api-service/commit/54464070bafe2b798534dbac0fa1ec09a183f142))
+
+# [1.597.0](https://github.com/adobe/spacecat-api-service/compare/v1.596.0...v1.597.0) (2026-06-25)
+
+
+### Features
+
+* **state-mappings:** add state-layer access-mapping endpoints (dev-gated) ([#2676](https://github.com/adobe/spacecat-api-service/issues/2676)) ([98ae0fb](https://github.com/adobe/spacecat-api-service/commit/98ae0fb2ec2f95f77a1c890c2cd9d1c3b84f6f87))
+
+# [1.596.0](https://github.com/adobe/spacecat-api-service/compare/v1.595.0...v1.596.0) (2026-06-25)
+
+
+### Features
+
+* **serenity:** mirror each Semrush market as a SpaceCat Site ([#2643](https://github.com/adobe/spacecat-api-service/issues/2643)) ([0d851c8](https://github.com/adobe/spacecat-api-service/commit/0d851c89e943723b43b64f5b313a81ccc34a94c2)), closes [Hi#level](https://github.com/Hi/issues/level) [throu#API](https://github.com/throu/issues/API)
+
 # [1.595.0](https://github.com/adobe/spacecat-api-service/compare/v1.594.0...v1.595.0) (2026-06-24)
 
 
