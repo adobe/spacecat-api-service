@@ -693,7 +693,13 @@ export function getImsUserTokenStrict(context) {
   // to the Semrush vendor MOCK, which ignores it. NO deployed environment sets
   // this flag (it is never written to Vault), so production auth is unaffected —
   // the real Semrush gateway still validates the forwarded token end to end.
-  const allowNonIms = context?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  //
+  // Defense-in-depth: the hatch is HARD-DISABLED in production regardless of the
+  // flag, so an accidental SERENITY_ALLOW_NON_IMS_AUTH in prod can never open the
+  // gate — prod always fails closed and requires real IMS auth. Both AWS_ENV and
+  // ENV are checked because the codebase reads prod from either.
+  const isProd = context?.env?.AWS_ENV === 'prod' || context?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && context?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
   // Fail closed: forward the bearer upstream ONLY for a caller we can positively
   // confirm authenticated via IMS (or when the escape hatch is explicitly set).
   // A missing/non-standard authInfo (no getType) is treated as "not IMS" and

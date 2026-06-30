@@ -1563,5 +1563,25 @@ describe('utils', () => {
       const context = { attributes: { authInfo: {} }, pathInfo: { headers: {} }, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } };
       expect(() => getImsUserTokenStrict(context)).to.throw('Missing Authorization header');
     });
+
+    it('hard-disables the escape hatch in production (AWS_ENV=prod) — a non-IMS caller 401s', () => {
+      const context = {
+        ...buildContext({ getType: () => 'jwt' }),
+        env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', AWS_ENV: 'prod' },
+      };
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('hard-disables the escape hatch in production (ENV=prod) — a non-IMS caller 401s', () => {
+      const context = {
+        ...buildContext({ getType: () => 'jwt' }),
+        env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', ENV: 'prod' },
+      };
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
   });
 });
