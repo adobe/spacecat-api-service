@@ -255,7 +255,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('skips reassignment for internal org demo sites', async () => {
+    it('rejects PRE_ONBOARDING for internal org demo sites', async () => {
       const INTERNAL_ORG_ID = 'internal-org-123';
       const DEMO_SITE_ID = 'demo-site-456';
 
@@ -277,10 +277,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const response = await controller.onboard(context);
 
       expect(response.status).to.equal(200);
-      // Demo site should NOT be reassigned (stays in internal org)
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('REJECTED');
       expect(demoSite.setOrganizationId).to.not.have.been.called;
-      // PlgOnboarding org is still anchored to the resolved customer org.
-      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
     it('waitlists when preonboarded site is in different customer org', async () => {

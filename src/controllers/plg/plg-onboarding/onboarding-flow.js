@@ -500,6 +500,35 @@ export async function performAsoPlgOnboarding({
     onboarding.setCreatedBy(callerIdentity);
   }
 
+  // Early rejection: demo/internal sites must never be onboarded regardless of flow path.
+  // Check before any org resolution, RUM verification, or entitlement work.
+  // Gate the DB lookup on the env var being non-empty to avoid a wasted round-trip on the hot path.
+  const demoSiteIds = (env.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS || '').trim();
+  if (demoSiteIds) {
+    const existingSiteForDemoCheck = onboarding.getSiteId()
+      ? await Site.findById(onboarding.getSiteId())
+      : await Site.findByBaseURL(baseURL);
+    if (
+      existingSiteForDemoCheck
+      && isInternalOrgDemoSite(existingSiteForDemoCheck.getId(), env)
+    ) {
+      log.info(`Site ${existingSiteForDemoCheck.getId()} is a demo/internal site — rejecting onboarding request`);
+      const existingReviews = onboarding.getReviews() || [];
+      onboarding.setReviews([...existingReviews, {
+        reason: null,
+        decision: REVIEW_DECISIONS.UPHELD,
+        reviewedBy: 'system',
+        reviewedAt: new Date().toISOString(),
+        justification: 'Automatically rejected by system — this domain is reserved as a demo/internal site and cannot be onboarded.',
+      }]);
+      onboarding.setStatus(STATUSES.REJECTED);
+      onboarding.setWaitlistReason(null);
+      onboarding.setSiteId(existingSiteForDemoCheck.getId());
+      await persistAndNotify(onboarding, context);
+      return onboarding;
+    }
+  }
+
   const terminalFromGuard = await handleExistingOnboardedDomain({
     onboarding, domain, imsOrgId,
   }, context);
