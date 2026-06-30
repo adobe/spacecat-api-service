@@ -441,7 +441,6 @@ function isNonProdDomain(domain) {
 
 export async function performAsoPlgOnboarding({
   domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
-  bypassNonProdDomain,
 }, context) {
   const domain = prepareDomain(rawDomain);
   const callerIdentity = getReviewerIdentity(context);
@@ -518,11 +517,10 @@ export async function performAsoPlgOnboarding({
     onboarding.setCreatedBy(callerIdentity);
   }
 
-  if (!bypassNonProdDomain && !onboarding.getSteps()?.nonProdDomain && isNonProdDomain(domain)) {
+  if (!onboarding.getSteps()?.nonProdCheckBypassed && isNonProdDomain(domain)) {
     log.info(`Domain ${domain} ${NON_PROD_DOMAIN}`);
     onboarding.setStatus(STATUSES.WAITLISTED);
     onboarding.setWaitlistReason(`Domain ${domain} ${NON_PROD_DOMAIN}`);
-    onboarding.setSteps({ ...(onboarding.getSteps() || {}), nonProdDomain: true });
     await persistAndNotify(onboarding, context);
     return onboarding;
   }

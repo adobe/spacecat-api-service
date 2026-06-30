@@ -1384,7 +1384,8 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
         expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
         expect(mockOnboarding.setWaitlistReason)
           .to.have.been.calledWithMatch(/non-production domain/);
-        expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ nonProdDomain: true });
+        expect(mockOnboarding.setSteps).to.not.have.been
+          .calledWithMatch({ nonProdCheckBypassed: true });
       });
     }
 
@@ -1416,10 +1417,10 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('skips non-prod guard when steps.nonProdDomain is already true (re-entrancy guard)', async () => {
+    it('skips non-prod guard when steps.nonProdCheckBypassed is already true (re-entrancy guard)', async () => {
       // Simulates a bypass handler re-running the flow after the guard already fired
       mockOnboarding.getDomain.returns('dev.example.com');
-      mockOnboarding.getSteps.returns({ nonProdDomain: true });
+      mockOnboarding.getSteps.returns({ nonProdCheckBypassed: true });
       const context = buildContext({ domain: 'dev.example.com' });
 
       const res = await controller.onboard(context);

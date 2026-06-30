@@ -199,16 +199,16 @@ export async function bypassDomainAlreadyAssigned({ onboarding, siteConfig }, co
 
 /**
  * BYPASS for NON_PROD_DOMAIN: admin has confirmed the domain should be onboarded despite
- * containing a non-production subdomain (qa, stage, dev, etc.). Re-runs the PLG flow with
- * bypassNonProdDomain=true to skip the non-prod guard.
+ * containing a non-production subdomain (qa, stage, dev, etc.). Sets nonProdCheckBypassed
+ * in steps so the guard is skipped when the flow re-runs.
  */
 export async function bypassNonProdDomain({ onboarding }, context) {
   const { ok } = context;
+  onboarding.setSteps({ ...(onboarding.getSteps() || {}), nonProdCheckBypassed: true });
   const result = await performAsoPlgOnboarding(
     {
       domain: onboarding.getDomain(),
       imsOrgId: onboarding.getImsOrgId(),
-      bypassNonProdDomain: true,
     },
     context,
   );
