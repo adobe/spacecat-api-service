@@ -39,6 +39,7 @@ import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
 import { brands } from './seed-data/brands.js';
 import { brandSites } from './seed-data/brand-sites.js';
 import { projectionAudits } from './seed-data/projection-audits.js';
+import { featureFlags } from './seed-data/feature-flags.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -131,6 +132,7 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
+    insertRows('feature_flags', featureFlags),
   ]);
 
   // Level 1b: depend on projects
