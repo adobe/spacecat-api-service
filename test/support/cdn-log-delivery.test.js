@@ -84,6 +84,20 @@ describe('cdn-log-delivery support', () => {
       expect(() => mod.buildDeliverySourceName({ provider: 'nope', imsOrgId: 'x', resourceId: 'y' }))
         .to.throw('Unsupported CDN provider');
     });
+
+    it('hashes-truncates to <=60 chars (deterministically) for long ids', () => {
+      const imsOrgId = `${'A'.repeat(40)}@AdobeOrg`;
+      const resourceId = 'E'.repeat(40);
+      const name1 = mod.buildDeliverySourceName({ imsOrgId, resourceId });
+      const name2 = mod.buildDeliverySourceName({ imsOrgId, resourceId });
+
+      expect(name1.length).to.equal(60);
+      expect(name1).to.equal(name2); // deterministic — required for idempotency
+      expect(name1).to.match(/^llmo-cf-/);
+      // Different inputs must not collide on the truncated name.
+      const other = mod.buildDeliverySourceName({ imsOrgId, resourceId: 'F'.repeat(40) });
+      expect(other).to.not.equal(name1);
+    });
   });
 
   describe('createCdnLogDelivery', () => {
