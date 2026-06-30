@@ -5692,8 +5692,11 @@ site-llmo-cloudflare-zones:
     summary: List the Cloudflare zones for the selected account
     description: |
       Lists the Cloudflare zones belonging to the account given by `accountId` that the supplied
-      `x-cloudflare-token` can access. Used by the onboarding UI to let the user pick the zone to
-      attach the Edge Optimize worker route to.
+      `x-cloudflare-token` can access, filtered to the zones relevant to the site: only zones whose
+      registrable apex (the last two hostname labels, e.g. `example.com`) matches the site's
+      base-URL host are returned, so the onboarding UI offers only zones for the site's own domain.
+      Used by the onboarding UI to let the user pick the zone to attach the Edge Optimize worker
+      route to.
 
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:

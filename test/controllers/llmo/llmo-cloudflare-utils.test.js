@@ -15,6 +15,7 @@ import { expect } from 'chai';
 import {
   deriveWorkerName,
   hostInSiteDomain,
+  registrableDomain,
   routePatternHost,
   routePatternHostGlob,
   globsIntersect,
@@ -62,6 +63,23 @@ describe('llmo-cloudflare-utils', () => {
     it('rejects an unrelated domain and look-alike suffixes', () => {
       expect(hostInSiteDomain('evil.com', baseURL)).to.equal(false);
       expect(hostInSiteDomain('notexample.com', baseURL)).to.equal(false);
+    });
+  });
+
+  describe('registrableDomain', () => {
+    it('resolves the registrable domain for a simple TLD', () => {
+      expect(registrableDomain('www.shop.example.com')).to.equal('example.com');
+      expect(registrableDomain('example.com')).to.equal('example.com');
+    });
+
+    it('handles multi-part public suffixes via the PSL', () => {
+      expect(registrableDomain('shop.example.co.uk')).to.equal('example.co.uk');
+      expect(registrableDomain('example.com.au')).to.equal('example.com.au');
+    });
+
+    it('returns null when there is no registrable domain (localhost, bare TLD)', () => {
+      expect(registrableDomain('localhost')).to.equal(null);
+      expect(registrableDomain('com')).to.equal(null);
     });
   });
 
