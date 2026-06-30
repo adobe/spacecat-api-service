@@ -14,10 +14,15 @@ import { ELEMENT_IDS } from './element-ids.js';
 import {
   buildBrandsPayload,
   transformBrandsResponse,
+  transformBrandsToFilterDimensions,
   buildMarketsPayload,
   transformMarketsResponse,
   buildTopicsPayload,
   transformTopicsResponse,
+  transformTopicsForFilterDimensions,
+  transformCategoriesToFilterDimensions,
+  transformIntentsToFilterDimensions,
+  transformOriginsToFilterDimensions,
 } from './definitions/index.js';
 
 /**
@@ -73,6 +78,28 @@ export function createElementsService(transport) {
       const payload = buildTopicsPayload(params);
       const raw = await transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, payload);
       return transformTopicsResponse(raw);
+    },
+
+    /**
+     * Fetches filter dimensions for the URL Inspector dashboard.
+     * Currently returns topics; future iterations will add categories, intents, and sources.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query parameters (startDate, endDate, model, etc.).
+     * @returns {Promise<{topics: import('./definitions/topics.js').FilterDimensionTopic[]}>}
+     */
+    async getUrlInspectorFilterDimensions(workspaceId, params) {
+      const [rawTopics, rawBrands] = await Promise.all([
+        transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, buildTopicsPayload(params)),
+        transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
+      ]);
+      return {
+        brands: transformBrandsToFilterDimensions(rawBrands),
+        topics: transformTopicsForFilterDimensions(rawTopics),
+        categories: transformCategoriesToFilterDimensions(rawTopics),
+        page_intents: transformIntentsToFilterDimensions(rawTopics),
+        origins: transformOriginsToFilterDimensions(rawTopics),
+      };
     },
   };
 }

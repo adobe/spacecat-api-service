@@ -67,3 +67,17 @@ export function transformBrandsResponse(raw) {
     defaultSelected: item.defaultSelected === 1,
   }));
 }
+
+/**
+ * Transforms the raw Semrush Brands element response into URL Inspector filter-dimension brands.
+ * Both `id` and `label` are set to the brand name.
+ *
+ * @param {object} raw - Raw response from the Elements API.
+ * @returns {import('./topics.js').FilterDimensionItem[]}
+ */
+export function transformBrandsToFilterDimensions(raw) {
+  return (raw?.blocks?.value ?? []).map((item) => ({
+    id: item.value ?? null,
+    label: item.value ?? '',
+  }));
+}

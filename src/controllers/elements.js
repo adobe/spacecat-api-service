@@ -102,37 +102,37 @@ function requireImsBearer(ctx) {
  * @param {object} log - Logger.
  * @param {object} env - Environment variables.
  */
+/**
+ * Validates org access and resolves the Semrush workspace ID.
+ * Returns `{ workspaceId }` on success or `{ error: Response }` on failure.
+ */
+async function authorizeOrg(ctx) {
+  const spaceCatId = ctx?.params?.spaceCatId;
+  const Organization = ctx?.dataAccess?.Organization;
+  if (!Organization || typeof Organization.findById !== 'function') {
+    return { error: internalServerError('Organization data-access not available') };
+  }
+  const organization = await Organization.findById(spaceCatId);
+  if (!organization) {
+    return { error: notFound(`Organization not found: ${spaceCatId}`) };
+  }
+  const accessControl = AccessControlUtil.fromContext(ctx);
+  if (!await accessControl.hasAccess(organization)) {
+    return { error: forbidden('User does not have access to this organization') };
+  }
+  const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+  if (!hasText(workspaceId)) {
+    return { error: notFound('Organization has no semrush_workspace_id') };
+  }
+  return { workspaceId };
+}
+
 export default function ElementsController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
   }
   if (!log) {
     throw new Error('Log required');
-  }
-
-  /**
-   * Validates org access and resolves the Semrush workspace ID.
-   * Returns `{ workspaceId }` on success or `{ error: Response }` on failure.
-   */
-  async function authorizeOrg(ctx) {
-    const spaceCatId = ctx?.params?.spaceCatId;
-    const Organization = ctx?.dataAccess?.Organization;
-    if (!Organization || typeof Organization.findById !== 'function') {
-      return { error: internalServerError('Organization data-access not available') };
-    }
-    const organization = await Organization.findById(spaceCatId);
-    if (!organization) {
-      return { error: notFound(`Organization not found: ${spaceCatId}`) };
-    }
-    const accessControl = AccessControlUtil.fromContext(ctx);
-    if (!await accessControl.hasAccess(organization)) {
-      return { error: forbidden('User does not have access to this organization') };
-    }
-    const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
-    if (!hasText(workspaceId)) {
-      return { error: notFound('Organization has no semrush_workspace_id') };
-    }
-    return { workspaceId };
   }
 
   function buildService(ctx) {
@@ -158,8 +158,8 @@ export default function ElementsController(context, log, env) {
   };
 
   /**
-   * GET /v2/orgs/:spaceCatId/serenity/markets
-   * Returns available markets for a brand. Requires `?brand=<brandName>`.
+   * GET /v2/orgs/:spaceCatId/serenity/:brandName/markets
+   * Returns available markets for the given brand name.
    * The returned `id` values are Semrush project UUIDs — pass as `projectIds` in
    * subsequent brand-scoped element calls.
    */
@@ -169,7 +169,8 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const result = await buildService(ctx).getMarkets(auth.workspaceId, extractQuery(ctx));
+      const { brandName } = ctx?.params ?? {};
+      const result = await buildService(ctx).getMarkets(auth.workspaceId, { brand: brandName });
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -193,5 +194,29 @@ export default function ElementsController(context, log, env) {
     }
   };
 
-  return { listBrands, listMarkets, listTopics };
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions
+   * Returns filter dimensions for the URL Inspector dashboard.
+   * Currently includes topics only; additional dimension types will be added incrementally.
+   */
+  const listUrlInspectorFilterDimensions = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const result = await buildService(ctx)
+        .getUrlInspectorFilterDimensions(auth.workspaceId, extractQuery(ctx));
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  return {
+    listBrands,
+    listMarkets,
+    listTopics,
+    listUrlInspectorFilterDimensions,
+  };
 }

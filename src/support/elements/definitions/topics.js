@@ -67,3 +67,51 @@ export function transformTopicsResponse(raw) {
     return { value: item.value ?? '', type, name };
   });
 }
+
+/**
+ * @typedef {object} FilterDimensionItem
+ * @property {string|null} id - Dimension identifier (null when no stable ID exists).
+ * @property {string} label - Human-readable label.
+ */
+
+function extractByPrefix(raw, prefix) {
+  return (raw?.blocks?.value ?? [])
+    .filter((item) => String(item.value ?? '').startsWith(prefix))
+    .map((item) => String(item.value).substring(prefix.length));
+}
+
+/**
+ * Extracts only "topic:"-prefixed entries → `{ id: null, label }`.
+ * @param {object} raw - Raw response from the Elements API.
+ * @returns {FilterDimensionItem[]}
+ */
+export function transformTopicsForFilterDimensions(raw) {
+  return extractByPrefix(raw, 'topic:').map((label) => ({ id: null, label }));
+}
+
+/**
+ * Extracts only "category:"-prefixed entries → `{ id: null, label }`.
+ * @param {object} raw - Raw response from the Elements API.
+ * @returns {FilterDimensionItem[]}
+ */
+export function transformCategoriesToFilterDimensions(raw) {
+  return extractByPrefix(raw, 'category:').map((label) => ({ id: null, label }));
+}
+
+/**
+ * Extracts only "intent:"-prefixed entries → `{ id: UPPERCASED, label: UPPERCASED }`.
+ * @param {object} raw - Raw response from the Elements API.
+ * @returns {FilterDimensionItem[]}
+ */
+export function transformIntentsToFilterDimensions(raw) {
+  return extractByPrefix(raw, 'intent:').map((label) => ({ id: label, label }));
+}
+
+/**
+ * Extracts only "source:"-prefixed entries → `{ id: value, label: value }`.
+ * @param {object} raw - Raw response from the Elements API.
+ * @returns {FilterDimensionItem[]}
+ */
+export function transformOriginsToFilterDimensions(raw) {
+  return extractByPrefix(raw, 'source:').map((label) => ({ id: label, label }));
+}
