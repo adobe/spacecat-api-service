@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import crypto from 'crypto';
 import {
   CloudWatchLogsClient,
   PutDeliverySourceCommand,
@@ -77,6 +78,9 @@ export function buildDeliveryDestinationArn({
   return `arn:aws:logs:${region}:${adobeAccountId}:delivery-destination:${name}`;
 }
 
+// CloudWatch Logs caps a delivery-source name at 60 characters.
+const MAX_DELIVERY_SOURCE_NAME_LENGTH = 60;
+
 /** Per-resource delivery-source name, scoped by provider + org + resource. */
 export function buildDeliverySourceName({
   provider = DEFAULT_CDN_PROVIDER,
@@ -84,7 +88,16 @@ export function buildDeliverySourceName({
   resourceId,
 }) {
   const { sourceNamePrefix } = getProviderConfig(provider);
-  return `${sourceNamePrefix}-${toSafeAwsName(imsOrgId)}-${resourceId}`;
+  const name = `${sourceNamePrefix}-${toSafeAwsName(imsOrgId)}-${resourceId}`;
+  if (name.length <= MAX_DELIVERY_SOURCE_NAME_LENGTH) {
+    return name;
+  }
+  // For unusually long org/resource ids, keep the readable head and append a deterministic hash
+  // of the full name. Determinism matters: the name is regenerated on every call and idempotency
+  // (GetDeliverySource) relies on it being byte-for-byte stable for the same inputs.
+  const suffix = crypto.createHash('sha256').update(name).digest('hex').slice(0, 12);
+  const head = name.slice(0, MAX_DELIVERY_SOURCE_NAME_LENGTH - suffix.length - 1);
+  return `${head}-${suffix}`;
 }
 
 /**
@@ -195,6 +208,10 @@ export async function createCdnLogDelivery(credentials, {
     // preserve the idempotency contract instead of surfacing a 500.
     if (err?.name === 'ConflictException' || err?.name === 'ResourceAlreadyExistsException') {
       const existing = await findExistingDelivery();
+      // deliveryId may be undefined here if DescribeDeliveries hasn't caught up to the winning
+      // CreateDelivery yet (eventual consistency). That is acceptable: delivery IS enabled — the
+      // id is informational, and the caller already treats this as a successful no-op. We don't
+      // retry-loop for the id since the idempotency outcome (alreadyExisted) is already correct.
       return {
         created: false,
         alreadyExisted: true,
