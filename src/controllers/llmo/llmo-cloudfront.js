@@ -46,6 +46,11 @@ const CFN_YAML_SCHEMA = yaml.DEFAULT_SCHEMA.extend(
 const TARGETED_PATHS_MAX_ENTRIES = 20;
 const TARGETED_PATHS_MAX_ENTRY_LENGTH = 256;
 
+// Cap parallel createCdnLogDelivery calls during a rescan. CloudWatch Logs delivery APIs are
+// per-account throttled (~10-25 TPS) and each distribution issues 1-3 calls, so a customer with
+// many distributions would otherwise hammer the limit and fail most calls with ThrottlingException.
+const CDN_LOG_RESCAN_CONCURRENCY = 5;
+
 /**
  * Controller for the CloudFront "Optimize at Edge" onboarding wizard. Mirrors the structure of
  * the Cloudflare onboarding controller: it owns the multi-step, cross-account control-plane flow
@@ -1181,9 +1186,10 @@ function LlmoCloudFrontController(ctx) {
         return badRequest('Site organization has no IMS org ID');
       }
 
+      // Missing destination account is a server misconfiguration, not bad caller input → 500.
       const adobeAccountId = env?.CDN_LOG_DELIVERY_DEST_ACCOUNT_ID;
       if (!hasText(adobeAccountId)) {
-        return badRequest('CDN log delivery destination account is not configured');
+        return internalServerError('CDN log delivery destination account is not configured');
       }
       const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
 
@@ -1209,8 +1215,11 @@ function LlmoCloudFrontController(ctx) {
       }));
       return ok(result);
     } catch (error) {
-      log.error(`Failed to enable CDN log forwarding for site ${siteId}:`, error);
-      return internalServerError('An unexpected error occurred');
+      log.error(auditLine(context, 'log-delivery', 'error', {
+        siteId, accountId, distributionId, error: error.message,
+      }));
+      // Surface actionable AWS failures (AccessDenied/Throttling/…) as 4xx, like sibling endpoints.
+      return mutationErrorResponse(error, 'An unexpected error occurred');
     }
   };
 
@@ -1241,9 +1250,10 @@ function LlmoCloudFrontController(ctx) {
         return badRequest('Site organization has no IMS org ID');
       }
 
+      // Missing destination account is a server misconfiguration, not bad caller input → 500.
       const adobeAccountId = env?.CDN_LOG_DELIVERY_DEST_ACCOUNT_ID;
       if (!hasText(adobeAccountId)) {
-        return badRequest('CDN log delivery destination account is not configured');
+        return internalServerError('CDN log delivery destination account is not configured');
       }
       const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
 
@@ -1252,22 +1262,33 @@ function LlmoCloudFrontController(ctx) {
       });
       const distributions = await cloudFrontClient.listDistributions();
 
-      const results = await Promise.allSettled(
-        distributions.map((dist) => createCdnLogDelivery(credentials, {
-          provider: 'cloudfront',
-          resourceId: dist.id,
-          accountId,
-          imsOrgId,
-          deliveryDestinationArn,
-        })),
-      );
+      // Run in bounded batches (CDN_LOG_RESCAN_CONCURRENCY) so a large account doesn't trip
+      // CloudWatch Logs per-account throttling. slice()/push() preserve order, so the per-index
+      // summary mapping below stays aligned with `distributions`.
+      const results = [];
+      for (let i = 0; i < distributions.length; i += CDN_LOG_RESCAN_CONCURRENCY) {
+        const batch = distributions.slice(i, i + CDN_LOG_RESCAN_CONCURRENCY);
+        // eslint-disable-next-line no-await-in-loop
+        const batchResults = await Promise.allSettled(
+          batch.map((dist) => createCdnLogDelivery(credentials, {
+            provider: 'cloudfront',
+            resourceId: dist.id,
+            accountId,
+            imsOrgId,
+            deliveryDestinationArn,
+          })),
+        );
+        results.push(...batchResults);
+      }
 
       const summary = distributions.map((dist, i) => {
         const outcome = results[i];
         if (outcome.status === 'fulfilled') {
           return { distributionId: dist.id, ...outcome.value };
         }
-        return { distributionId: dist.id, error: outcome.reason?.message || 'unknown error' };
+        // Report only the AWS error category (e.g. ThrottlingException) — never the raw message,
+        // which can leak ARNs / role names to the caller.
+        return { distributionId: dist.id, error: outcome.reason?.name || 'unknown error' };
       });
 
       const createdCount = summary.filter((r) => r.created).length;
@@ -1284,7 +1305,7 @@ function LlmoCloudFrontController(ctx) {
       });
     } catch (error) {
       log.error(`Failed to rescan CDN log delivery for site ${siteId}:`, error);
-      return internalServerError('An unexpected error occurred');
+      return mutationErrorResponse(error, 'An unexpected error occurred');
     }
   };
 

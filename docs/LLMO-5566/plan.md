@@ -3,74 +3,74 @@ ticket: LLMO-5566
 repo: adobe/spacecat-api-service
 branch: feature/LLMO-5566-cloudfront-log-delivery-assume-role
 generated: 2026-06-26
+revised: 2026-06-30
 ---
 
-# Implementation Plan: Automate CloudFront CDN Log Delivery with AssumeRole Setup (LLMO-5566)
+# Implementation Plan: CloudFront CDN Log Delivery (LLMO-5566)
+
+> **Revised 2026-06-30.** `main` PR #2682 shipped the CloudFront onboarding wizard
+> (`LlmoCloudFrontController`, `cdn-onboard/cloudfront/*`) while this branch was open, making this
+> branch's parallel `edge-optimize/*` wizard redundant. This branch was reset onto `main` and
+> rebuilt around the only net-new slice: **CloudWatch CDN log delivery**. The wizard endpoints and
+> the org-scoped-externalId model from the original plan were dropped (main's per-session UUID
+> externalId model wins).
 
 ## Problem Statement
 
-SpaceCat's LLM Optimizer needs CDN access logs from customers' CloudFront distributions to power
-traffic-analysis features. Previously there was no automated way to configure CloudWatch Logs
-cross-account delivery from the customer's AWS account into Adobe's cdn-logs S3 bucket. Customers
-also needed a guided wizard to wire up the prerequisite CloudFront configuration (origins, cache
-behaviors, Lambda@Edge routing function).
+SpaceCat's LLM Optimizer needs CDN access logs from customers' CloudFront distributions. There was
+no automated way to configure cross-account CloudWatch Logs delivery from the customer's AWS account
+into Adobe's `cdn-logs` S3 bucket. main's CloudFront onboarding wizard wires routing but does not
+set up log delivery.
 
 ## Solution Overview
 
-Two parallel workstreams:
+Add two endpoints to the existing `LlmoCloudFrontController`, reusing its connector-role flow:
 
-1. **CloudFront Edge Optimize Wizard** (15 endpoints) — an LLMO-admin-facing step-by-step wizard
-   that connects to the customer's AWS account via an assumed-role (STS AssumeRole) and configures
-   CloudFront distributions for edge optimization. Each step is a discrete, idempotent POST endpoint.
+1. `POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery` — enable access-log forwarding for
+   a single distribution (idempotent).
+2. `POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan` — idempotently enable forwarding for
+   all distributions in the account (bounded concurrency), for recovery/re-scan.
 
-2. **CDN Log Delivery** (1 endpoint) — `POST /sites/:siteId/llmo/cdn-log-delivery` uses the same
-   connector role to create a CloudWatch Logs delivery-source in the customer's account and link it
-   to Adobe's cross-account delivery-destination, enabling automatic CDN access-log forwarding.
-
-Both workstreams are gated by `isLLMOAdministrator()` and categorized as `INTERNAL_ROUTES` in the
-FACS hybrid permission model (not surfaced on the external customer FACS API).
+The assume-role `externalId` is main's client-supplied per-session UUID
+(`validateCloudfrontCredentials`). The delivery destination + source names are **org-scoped**,
+derived server-side from the site's IMS org id (independent of the externalId). Both endpoints are
+gated by `isLLMOAdministrator()` and registered in `INTERNAL_ROUTES` (not on the external FACS
+surface).
 
 ## Key Files Changed vs main
 
 | File | Change |
 |------|--------|
-| `src/controllers/llmo/llmo.js` | +811 lines — 15 wizard endpoints + 1 CDN log delivery endpoint |
-| `src/support/edge-optimize.js` | +1346 lines — CloudFront SDK operations (AssumeRole, origins, behaviors, Lambda@Edge) |
-| `src/support/cdn-log-delivery.js` | +178 lines — CloudWatch Logs delivery-source + delivery creation |
-| `src/routes/index.js` | +16 routes (15 wizard + cdn-log-delivery) |
-| `src/routes/facs-capabilities.js` | +18 lines — routes registered in INTERNAL_ROUTES |
-| `src/routes/required-capabilities.js` | +16 lines — routes registered in INTERNAL_ROUTES (S2S system) |
-| `docs/openapi/llmo-api.yaml` | +1089 lines — full OpenAPI spec for all 16 new endpoints |
-| `test/controllers/llmo/llmo.test.js` | +1595 lines — unit tests for all endpoints |
-| `test/support/edge-optimize.test.js` | +1421 lines — unit tests for edge-optimize support layer |
-| `test/support/cdn-log-delivery.test.js` | +182 lines — unit tests for CDN log delivery support |
-| `test/e2e/llmo-cdn-log-delivery.e2e.js` | +476 lines — 4-tier e2e test suite |
+| `src/controllers/llmo/llmo-cloudfront.js` | +2 methods: `enableCdnLogDelivery`, `rescanCdnLogDelivery` |
+| `src/support/cdn-log-delivery.js` | CloudWatch Logs delivery-source + delivery creation (paginated, idempotent) |
+| `src/routes/index.js` | +2 routes (`log-delivery`, `log-rescan`) |
+| `src/routes/facs-capabilities.js`, `src/routes/required-capabilities.js` | register the 2 routes in INTERNAL_ROUTES |
+| `docs/openapi/api.yaml`, `docs/openapi/llmo-api.yaml` | OpenAPI for the 2 endpoints |
+| `package.json` | + `@aws-sdk/client-cloudwatch-logs` |
+| `test/controllers/llmo/llmo-cloudfront.test.js` | unit tests for both endpoints |
+| `test/support/cdn-log-delivery.test.js` | unit tests for the support module |
 
-## Auth and Permission Model
+## Design Notes
 
-- All 16 endpoints require a valid SpaceCat session (JWT, IMS, or API key)
-- `gateEdgeOptimizeWizard()` in `llmo.js` enforces: site must exist + user has site access +
-  `isLLMOAdministrator()` flag
-- Routes are in `INTERNAL_ROUTES` (not `PRODUCTS_ROUTES`) — they are not part of the external
-  FACS customer permission surface
+- **No local `edge-optimize.js`** — the rescan lists distributions via tokowaka's
+  `CloudFrontEdgeClient.listDistributions()`, already used by sibling endpoints.
+- **Bounded concurrency** — rescan runs `createCdnLogDelivery` in batches of
+  `CDN_LOG_RESCAN_CONCURRENCY` (5) to avoid CloudWatch Logs per-account throttling.
+- **Error handling** — server misconfig (missing `CDN_LOG_DELIVERY_DEST_ACCOUNT_ID`) → 500;
+  actionable AWS errors surface as 4xx via `mutationErrorResponse` (consistent with sibling
+  endpoints); per-distribution failures report the AWS error *category* only (no raw messages/ARNs).
 
-## E2E Test Strategy
+## Runtime Dependency (follow-up)
 
-Four tiers based on credential availability:
-
-- **Tier 1** (always run): Input validation — 400 for missing/invalid body fields
-- **Tier 2** (always run): Auth gate — 403 when called with a non-LLMO-admin API key
-- **Tier 3** (LLMO_ADMIN_API_KEY required): Response shape — soft-fail AWS calls return
-  `{connected: false}` / `{checks: [{name, ok}]}`
-- **Tier 4** (LLMO_ADMIN_API_KEY + TEST_AWS_ACCOUNT_ID + TEST_EXTERNAL_ID + TEST_DISTRIBUTION_ID):
-  Full AWS integration — real AssumeRole + distributions/origins/behaviors listing +
-  cdn-log-delivery idempotency
+For log delivery to succeed, the connector role created by main's bootstrap CloudFormation template
+(`customer-bootstrap-role.yaml`, S3-hosted) must grant `logs:PutDeliverySource`,
+`logs:CreateDelivery`, `logs:GetDeliverySource`, `logs:DescribeDeliveries`. If main's template
+predates log delivery, that template (and its `Metadata.AdobeLLMOptimizerPermissions` block) must be
+updated — tracked separately from this code change.
 
 ## Acceptance Criteria
 
-- All 15 wizard endpoints + cdn-log-delivery reachable at correct paths
-- All routes properly gated by `isLLMOAdministrator()`
-- CDN log delivery is idempotent (returns `{alreadyExisted: true}` on repeat calls)
-- FACS coverage invariant passes (`test/routes/facs-capabilities.test.js` — 26/26)
-- Unit tests pass (`npm test`)
-- OpenAPI spec validates (`npm run docs:lint`)
+- Both endpoints reachable at the documented paths and gated by `isLLMOAdministrator()`
+- Log delivery is idempotent (`{ alreadyExisted: true }` on repeat)
+- Rescan respects the concurrency cap and never aborts on a single distribution failure
+- Unit tests pass (`npm test`); OpenAPI validates (`npm run docs:lint`); route snapshot updated
