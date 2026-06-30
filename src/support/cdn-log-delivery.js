@@ -132,6 +132,26 @@ export async function createCdnLogDelivery(credentials, {
   const deliverySourceName = buildDeliverySourceName({ provider, imsOrgId, resourceId });
   const resourceArn = config.buildResourceArn({ accountId, resourceId });
 
+  // Find the existing delivery for this source, if any (paginated). Returns it or undefined.
+  const findExistingDelivery = async () => {
+    let nextToken;
+    do {
+      // eslint-disable-next-line no-await-in-loop
+      const page = await client.send(new DescribeDeliveriesCommand({
+        deliverySourceName,
+        ...(nextToken && { nextToken }),
+      }));
+      const match = (page.deliveries || []).find(
+        (d) => d.deliverySourceName === deliverySourceName,
+      );
+      if (match) {
+        return match;
+      }
+      nextToken = page.nextToken;
+    } while (nextToken);
+    return undefined;
+  };
+
   // No-op if forwarding is already enabled for this resource.
   let sourceExists = false;
   try {
@@ -144,26 +164,15 @@ export async function createCdnLogDelivery(credentials, {
   }
 
   if (sourceExists) {
-    let nextToken;
-    do {
-      // eslint-disable-next-line no-await-in-loop
-      const page = await client.send(new DescribeDeliveriesCommand({
+    const existing = await findExistingDelivery();
+    if (existing) {
+      return {
+        created: false,
+        alreadyExisted: true,
         deliverySourceName,
-        ...(nextToken && { nextToken }),
-      }));
-      const existing = (page.deliveries || []).find(
-        (d) => d.deliverySourceName === deliverySourceName,
-      );
-      if (existing) {
-        return {
-          created: false,
-          alreadyExisted: true,
-          deliverySourceName,
-          deliveryId: existing.id,
-        };
-      }
-      nextToken = page.nextToken;
-    } while (nextToken);
+        deliveryId: existing.id,
+      };
+    }
   }
 
   await client.send(new PutDeliverySourceCommand({
@@ -172,12 +181,29 @@ export async function createCdnLogDelivery(credentials, {
     logType: config.logType,
   }));
 
-  const response = await client.send(new CreateDeliveryCommand({
-    deliverySourceName,
-    deliveryDestinationArn,
-    s3DeliveryConfiguration: { suffixPath: CDN_LOG_S3_SUFFIX_PATH },
-    recordFields: config.recordFields,
-  }));
+  let response;
+  try {
+    response = await client.send(new CreateDeliveryCommand({
+      deliverySourceName,
+      deliveryDestinationArn,
+      s3DeliveryConfiguration: { suffixPath: CDN_LOG_S3_SUFFIX_PATH },
+      recordFields: config.recordFields,
+    }));
+  } catch (err) {
+    // TOCTOU: a concurrent enable/rescan for the same distribution can both pass the existence
+    // check above and race here; the losing CreateDelivery conflicts. Treat as already-enabled to
+    // preserve the idempotency contract instead of surfacing a 500.
+    if (err?.name === 'ConflictException' || err?.name === 'ResourceAlreadyExistsException') {
+      const existing = await findExistingDelivery();
+      return {
+        created: false,
+        alreadyExisted: true,
+        deliverySourceName,
+        deliveryId: existing?.id,
+      };
+    }
+    throw err;
+  }
 
   return {
     created: true,
