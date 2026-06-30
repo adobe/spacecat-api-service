@@ -38,9 +38,9 @@ test/it/
 │
 └── postgres/                     # PostgreSQL backend
     ├── harness.js                # Mocha root hooks (beforeAll/afterAll)
-    ├── setup.js                  # Docker Compose startup + PostgREST polling
+    ├── setup.js                  # Container stack startup/poll + Semrush mock reset/version-pinning
     ├── seed.js                   # TRUNCATE + re-seed via PostgREST HTTP API
-    ├── docker-compose.yml        # PostgreSQL + PostgREST containers
+    ├── docker-compose.yml        # PostgreSQL + PostgREST + MinIO + Semrush vendor mocks
     ├── .mocharc.postgres.yml     # Mocha config
     ├── seed-data/                # Seed data in snake_case
     │   ├── organizations.js
@@ -187,6 +187,37 @@ Each `describe` block calls `before(() => resetData())` which truncates all data
 
 **PostgreSQL seed** (`postgres/seed.js`): POSTs rows directly to PostgREST (snake_case). Also seeds entities like `async_jobs`.
 
+## Serenity E2E: Semrush vendor mocks
+
+The `/serenity/*` routes proxy to two external Semrush APIs (Project Engine + User Manager). To exercise them end to end — without a real IMS account or a live vendor — the harness boots **two stateful [Counterfact](https://counterfact.dev) mock containers**, published as **public GHCR images** from the same `spacecat-shared` packages that provide the typed clients:
+
+| Service (compose) | Image | Serves prefix | Host port |
+|---|---|---|---|
+| `project-engine-mock` | `ghcr.io/adobe/spacecat-shared-project-engine-client-mock` | `/enterprise/projects/api` | 8443 |
+| `user-manager-mock` | `ghcr.io/adobe/spacecat-shared-user-manager-client-mock` | `/enterprise/users/api` | 8444 |
+
+The images are public, so **no registry credentials are needed** for them (only the data-service image still needs ECR). Each serves self-signed HTTPS (Caddy → Counterfact on `:4010` internally).
+
+### How it's wired here
+
+- **Image tag = the installed client version.** `setup.js` (`installedVersion()`) reads the installed `@adobe/spacecat-shared-{project-engine,user-manager}-client` version and exports `SERENITY_PE_MOCK_TAG` / `SERENITY_UM_MOCK_TAG`, which `docker-compose.yml` interpolates. The mock is built from the same package as the client, so this guarantees the test runs against the contract version we ship. There is **no fallback** — the compose `${...:?}` form fails hard if the tag is unset, and a client bumped to a version whose mock image isn't published yet fails the pull (forcing the mock to be released in lockstep).
+- **Transport target (`env.js`):** `SEMRUSH_PROJECTS_BASE_URL` → PE mock, `SEMRUSH_USERS_BASE_URL` → UM mock (the User-Manager origin split landed in api-service#2656; it falls back to the projects host when unset, so production needs no new config). `NODE_TLS_REJECT_UNAUTHORIZED=0` trusts the self-signed certs (IT process only). **None of these need Vault / deployed-env config.**
+- **Auth (`SERENITY_ALLOW_NON_IMS_AUTH=true`, test-only):** the serenity controller normally forwards only IMS-typed tokens. This flag lets the harness's non-IMS JWT through. It's sound only against the mocks (which ignore the forwarded bearer); in production the real Semrush gateway validates the token end to end, so this never weakens deployed auth. The flag is never set in any deployed environment.
+- **Statefulness / isolation:** the mocks are stateful within a run. Auth-exempt control routes — `POST /<prefix>/__reset`, `POST /<prefix>/__seed`, `GET /<prefix>/__dump` — manage that; `setup.js` exposes `resetSemrushMocks()` for tests that mutate mock state (used by the upcoming activate/deactivate + market-create flows). Readiness is polled via `waitForSemrushMocks()`.
+- **Seed alignment:** the mock fixtures use fixed workspace/project UUIDs, so the api-service seed (org `semrush_workspace_id` = the mock parent workspace, brand `semrush_workspace_id` = the mock child) is aligned to them. See the upstream `mock/seeds.js`.
+- **Test factory:** `shared/tests/serenity.js`, wired in `postgres/serenity.test.js`.
+
+### Where the mocks are developed (and how to learn more)
+
+The mocks live in **`adobe/spacecat-shared`**, inside each client package (`packages/spacecat-shared-{project-engine,user-manager}-client/`). Authoritative docs are on that repo's `main`:
+
+- `docs/mock-usage.md` — control routes (`__reset`/`__seed`/`__dump`/`__quota`), auth behaviour, seed selection (`MOCK_SEED`).
+- `docs/mock-statefulness.md` — the in-memory store model and how writes persist within a run.
+- `docs/mock-docker.md` — the Docker image, `MOCK_SEED` / `MOCK_SEED_FILE` env, and the intended consumer (GitHub Actions `services:`) shape.
+- Package `README.md` — `npm run mock` (local Counterfact on `:4010`), `docker:build` / `docker:run`, and the spec→mock pipeline.
+- Source: `mock/` (`run.js`, `seeds.js`, `factories.js`, `stateful.js`, `store.js`, `quota.js`).
+- CI: `.github/workflows/{project-engine,user-manager}-client-mock-image.yaml` (publish on release), `*-mock-image-smoke.yaml` (PR smoke), `*-mock-e2e.yaml`.
+
 ## Running Locally
 
 ### Prerequisites
@@ -241,6 +272,17 @@ This will:
 
 ```bash
 npx mocha --require test/it/postgres/harness.js --timeout 30000 test/it/postgres/sites.test.js
+```
+
+### Mock-backed suites (serenity) — use `--timeout 60000`
+
+The `serenity` suite drives the Semrush vendor **mock** containers over real
+HTTPS (not in-process `nock` stubs — no live Semrush is contacted), so the round
+trips are slower than the pure-DB suites and the default 30000ms is too tight.
+Run it (and any other mock-backed suite) with `--timeout 60000`:
+
+```bash
+npx mocha --require test/it/postgres/harness.js --timeout 60000 test/it/postgres/serenity.test.js
 ```
 
 ### Environment Variables

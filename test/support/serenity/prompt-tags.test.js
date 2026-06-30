@@ -43,7 +43,7 @@ describe('serenity prompt-tags taxonomy', () => {
   });
 
   describe('STANDARD_PROMPT_TAGS', () => {
-    it('seeds source:ai + intent:informational only (type is classified per prompt)', () => {
+    it('seeds source:ai + intent:Informational only (type is classified per prompt)', () => {
       expect([...STANDARD_PROMPT_TAGS]).to.deep.equal([SOURCE_TAG.AI, INTENT_TAG.INFORMATIONAL]);
     });
 

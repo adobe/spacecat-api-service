@@ -87,6 +87,7 @@ describe('brand-aliases helpers', () => {
       const result = await syncBrandAliasesAcrossMarkets(transport, aliases, 'Brand', WS, undefined);
 
       expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'p-us', {
+        type: 'ai',
         brand_name_display: 'Brand',
         brand_names: ['Brand', 'Acme', 'Acme Inc'],
       });
@@ -122,6 +123,7 @@ describe('brand-aliases helpers', () => {
       );
 
       expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'p-us', {
+        type: 'ai',
         brand_name_display: 'Brand',
         brand_names: ['Brand', 'Acme'],
       });
@@ -231,6 +233,7 @@ describe('brand-aliases helpers', () => {
       );
 
       expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'p-us', {
+        type: 'ai',
         brand_names: ['Acme'], // no brand_name_display key
       });
       expect(transport.updateBenchmark).to.not.have.been.called;

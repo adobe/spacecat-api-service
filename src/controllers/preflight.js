@@ -638,7 +638,8 @@ function PreflightController(ctx, log, env) {
         url,
         status: AsyncJob.Status.IN_PROGRESS,
         createdBy,
-        startedAt: new Date().toISOString(),
+        // SITES-47254: startedAt is an AsyncJob concern (set automatically on
+        // AsyncJob.create); the Preflight row no longer carries it.
       });
     } catch (e) {
       log.error(`Failed to create Preflight: ${e.message}`);
@@ -657,16 +658,20 @@ function PreflightController(ctx, log, env) {
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
-      preflight.setStatus(AsyncJob.Status.FAILED);
-      // Stored error message mirrors the external 502 response — the raw
-      // upstream body could carry internal hostnames / stack traces and is
-      // exposed via GET /sites/:siteId/preflights/:preflightId. Full detail
-      // is in the log.error above for ops visibility.
-      preflight.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
-      preflight.setEndedAt(new Date().toISOString());
-      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
+      const endedAt = new Date().toISOString();
+      // SITES-47254: error lives on AsyncJob only (source of truth); the
+      // Preflight row holds status + ended_at as a cache. Stored message
+      // mirrors the external 502 response — the raw upstream body could
+      // carry internal hostnames / stack traces and is exposed via
+      // GET /sites/:siteId/preflights/:preflightId. Full detail is in the
+      // log.error above for ops visibility.
       asyncJob.setStatus(AsyncJob.Status.FAILED);
+      asyncJob.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
+      asyncJob.setEndedAt(endedAt);
       await asyncJob.save().catch((e) => log.warn(`Failed to persist FAILED state on AsyncJob ${asyncJob.getId()}: ${e.message}`));
+      preflight.setStatus(AsyncJob.Status.FAILED);
+      preflight.setEndedAt(endedAt);
+      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
       return preflightError('PREFLIGHT_UPSTREAM_ERROR', 'Upstream analyze service failed', 502);
     }
 
@@ -674,7 +679,7 @@ function PreflightController(ctx, log, env) {
     const locationUrl = `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
       + `/sites/${siteId}/preflights/${preflight.getId()}`;
 
-    return createResponse(PreflightDto.toJSON(preflight), 202, { Location: locationUrl });
+    return createResponse(PreflightDto.toCreatedJSON(preflight), 202, { Location: locationUrl });
   };
 
   /**
@@ -745,7 +750,27 @@ function PreflightController(ctx, log, env) {
         return preflightError('PREFLIGHT_NOT_FOUND', `Preflight with ID ${preflightId} not found`, 404);
       }
 
-      return ok(PreflightDto.toDetailJSON(preflight));
+      // Lifecycle truth (status, endedAt, result, error) lives on async_jobs;
+      // toDetailJSON sources those from the joined row so a polling client
+      // sees terminal status alongside terminal result (no split-brain across
+      // the projector's two-write window).
+      //
+      // On a transient fetch failure (PostgREST 5xx / network blip) return
+      // 503 rather than 200-with-nulls: a 200 + `result: null` is
+      // indistinguishable on the wire from a legitimately empty completed
+      // scan, and a polling client would cache the wrong terminal answer.
+      // A null AsyncJob (no row yet — transitional/legacy flow) is NOT an
+      // error; lifecycle fields fall back to the Preflight cache.
+      let asyncJob;
+      try {
+        asyncJob = await preflight.getAsyncJob();
+      } catch (e) {
+        const msg = e?.message ?? String(e);
+        log.warn(`Failed to fetch AsyncJob for preflight ${preflightId}: ${msg}`);
+        return preflightError('PREFLIGHT_LIFECYCLE_UNAVAILABLE', 'Failed to load preflight lifecycle data', 503);
+      }
+
+      return ok(PreflightDto.toDetailJSON(preflight, asyncJob));
     } catch (e) {
       log.error(`Failed to fetch preflight ${preflightId}: ${e.message}`);
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to fetch preflight', 500);
