@@ -265,6 +265,9 @@ function LlmoCloudFrontController(ctx) {
     for (const url of [baseURL, effectiveBaseURL(site)]) {
       try {
         siteRoots.add(getHostnameWithoutWww(url, log));
+      // Unreachable: an onboarded site's baseURL/overrideBaseURL is always a valid URL (a malformed
+      // one would throw earlier in resolveEoTarget). Kept as a defensive guard.
+      /* c8 ignore next 3 */
       } catch (e) {
         // unparseable URL — skip; if no root resolves, the guard falls through to the warning
       }
@@ -279,6 +282,8 @@ function LlmoCloudFrontController(ctx) {
     const aliasServesSite = aliases.some((a) => {
       try {
         return siteRoots.has(getHostnameWithoutWww(a, log));
+      // Unreachable: CloudFront aliases are always valid hostnames (getHostnameWithoutWww prepends https://).
+      /* c8 ignore next 3 */
       } catch (e) {
         return false;
       }

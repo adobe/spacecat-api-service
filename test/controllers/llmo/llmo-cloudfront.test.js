@@ -1606,6 +1606,19 @@ describe('LlmoCloudFrontController', () => {
       expect(verifyRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
     });
 
+    it('probes the overrideBaseURL (not baseURL) when one is configured', async () => {
+      mockConfig.getFetchConfig = sinon.stub().returns({ overrideBaseURL: 'https://canonical.example.com' });
+      await controller.verifyRouting(verifyContext);
+      expect(probeSiteAndResolveDomainStub.calledOnceWith('https://canonical.example.com')).to.equal(true);
+    });
+
+    it('returns 400 when the probe resolves an empty domain', async () => {
+      probeSiteAndResolveDomainStub = sinon.stub().resolves('');
+      const result = await controller.verifyRouting(verifyContext);
+      expect(result.status).to.equal(400);
+      expect(verifyRoutingStub.called).to.equal(false);
+    });
+
     it('returns passed:false (keeps polling) when the probe reports routing not active', async () => {
       probeSiteAndResolveDomainStub = sinon.stub().rejects(new Error('default UA routing is not yet active'));
       const result = await controller.verifyRouting(verifyContext);
