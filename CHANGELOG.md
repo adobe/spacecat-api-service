@@ -1,3 +1,10 @@
+# [1.610.0](https://github.com/adobe/spacecat-api-service/compare/v1.609.4...v1.610.0) (2026-06-30)
+
+
+### Features
+
+* **state-mappings:** DELETE empties caps; POST/PATCH require non-empty + auto-add can_view ([#2705](https://github.com/adobe/spacecat-api-service/issues/2705)) ([dd77f9e](https://github.com/adobe/spacecat-api-service/commit/dd77f9e265dd07e919f0884166673098d643a5c3))
+
 ## [1.609.4](https://github.com/adobe/spacecat-api-service/compare/v1.609.3...v1.609.4) (2026-06-29)
 
 
