@@ -414,6 +414,28 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * GET /v2/workspaces/{ws}/projects/{pid}/aio/tags — lists the project's
+     * STANDALONE AIO tags (the ones `createProjectTags` registers), independent of
+     * whether any prompt carries them. This is the only read that surfaces a tag
+     * with no carrying prompt — e.g. a freshly-created, still-empty `category:<NAME>`
+     * — so the Categories surface can round-trip it. `parent_id` + `search` are
+     * required by the upstream contract; pass empty strings to list all (flat).
+     */
+    async listProjectTags(semrushWorkspaceId, projectId, { search = '', page = 1, limit = 100 } = {}) {
+      return unwrap('GET', await projects.GET(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: {
+              parent_id: '', search, page, limit,
+            },
+          },
+        },
+      ));
+    },
+
+    /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      */
     async createProject(semrushWorkspaceId, body) {

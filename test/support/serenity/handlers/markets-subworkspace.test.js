@@ -673,6 +673,41 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.listPromptsByTags).to.have.been.calledWith(WS, 'p-tag');
     });
 
+    it('merges standalone tags (prompt-less categories) with prompt-derived ones, deduped by name', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 't-1', name: 'category:Running Shoes' }] }],
+        }),
+        // A standalone category created via createProjectTags that no prompt carries
+        // yet, plus one that IS already on a prompt (must not duplicate).
+        listProjectTags: sinon.stub().resolves({
+          items: [
+            { id: 't-9', name: 'category:Hiking Boots' },
+            { id: 't-1', name: 'category:Running Shoes' },
+          ],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([
+        { id: 't-1', name: 'category:Running Shoes' },
+        { id: 't-9', name: 'category:Hiking Boots' },
+      ]);
+      expect(transport.listProjectTags).to.have.been.calledWith(WS, 'p-tag');
+    });
+
+    it('keeps prompt-derived tags when the standalone tag list call fails (best-effort)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 't-1', name: 'category:Running Shoes' }] }],
+        }),
+        listProjectTags: sinon.stub().rejects(new Error('boom')),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+
     it('returns an empty set when no slice matches (no upstream prompt call)', async () => {
       const transport = makeTransport();
       const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);

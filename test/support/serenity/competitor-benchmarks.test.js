@@ -232,6 +232,41 @@ describe('competitor-benchmarks helpers', () => {
       });
     });
 
+    it('updates an existing competitor benchmark when only its name drifts (same domain)', async () => {
+      // Renaming a competitor while keeping its URL (e.g. test1234 → test12345 on
+      // test1234.de) must re-sync the upstream brand_name — it is keyed by domain.
+      const transport = makeTransport([
+        {
+          id: 'rival', main_brand: false, domain: 'test1234.de', brand_name: 'test1234',
+        },
+      ]);
+      const competitors = [
+        { name: 'test12345', url: 'https://www.test1234.de', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'rival', {
+        brand_name: 'test12345', domain: 'test1234.de',
+      });
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(result).to.deep.equal({
+        created: 0, updated: 1, deleted: 0, changed: true, rejected: [],
+      });
+    });
+
+    it('does NOT update when the name and alias set are unchanged', async () => {
+      const transport = makeTransport([
+        {
+          id: 'rival', main_brand: false, domain: 'test1234.de', brand_name: 'test1234',
+        },
+      ]);
+      const competitors = [
+        { name: 'test1234', url: 'https://www.test1234.de', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result.changed).to.equal(false);
+    });
+
     it('does NOT update when the alias set is unchanged (order/case-insensitive)', async () => {
       const transport = makeTransport([
         {

@@ -556,13 +556,32 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   if (!project) {
     return { items: [] };
   }
-  return listTagsForProject(
-    transport,
-    workspaceId,
-    String(project.id),
-    { geoTargetId, languageCode },
-    log,
-  );
+  const projectId = String(project.id);
+  // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
+  // prompt vocabulary) OR standalone (registered via createProjectTags but not yet
+  // carried by any prompt — e.g. a just-created, still-empty `category:<NAME>`).
+  // The Categories surface must round-trip BOTH, so merge them by tag name. The
+  // standalone list is best-effort: a hiccup there must not regress the
+  // prompt-derived behavior that already worked.
+  const [fromPrompts, standalone] = await Promise.all([
+    listTagsForProject(transport, workspaceId, projectId, { geoTargetId, languageCode }, log),
+    Promise.resolve()
+      .then(() => transport.listProjectTags(workspaceId, projectId))
+      .catch((e) => {
+        log?.warn?.('handleListTagsSubworkspace: standalone tag list failed (non-fatal)', {
+          workspaceId, projectId, error: e?.message,
+        });
+        return { items: [] };
+      }),
+  ]);
+  const byName = new Map();
+  const all = [...(fromPrompts?.items || []), ...(standalone?.items || [])];
+  for (const t of all) {
+    if (t && hasText(t.name) && !byName.has(t.name)) {
+      byName.set(t.name, { id: hasText(t.id) ? String(t.id) : t.name, name: t.name });
+    }
+  }
+  return { items: [...byName.values()] };
 }
 
 /**

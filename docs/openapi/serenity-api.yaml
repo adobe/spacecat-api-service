@@ -447,6 +447,70 @@ v2-serenity-tags:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Create a tag on one market
+    description: |
+      Registers a `<type>:<name>` prompt tag on the market addressed by the
+      `(geoTargetId, languageCode)` slice. `type` must be one of the OPEN tag
+      dimensions — `category` or `topic` — that accept customer-authored values;
+      the closed taxonomies (`source` / `intent` / `type`) have a fixed value
+      enum and are not freely creatable. The "Categories" view, for example, is
+      the `category:` slice of these tags across a brand's markets.
+    operationId: createSerenityTag
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [type, name, geoTargetId, languageCode]
+            additionalProperties: false
+            properties:
+              type:
+                type: string
+                enum: [category, topic]
+                description: The open tag dimension to create a value under.
+              name:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: Free-form tag value. Must not contain ':'.
+              geoTargetId:
+                type: integer
+                minimum: 1
+                description: Google Ads Geo Target ID of the market slice.
+              languageCode:
+                type: string
+                pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+                description: BCP-47 primary subtag of the market slice.
+    responses:
+      '201':
+        description: Tag registered on the market's project.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brandId: { type: string, format: uuid }
+                geoTargetId: { type: integer }
+                languageCode: { type: string }
+                type: { type: string, enum: [category, topic] }
+                name: { type: string }
+                tag:
+                  type: string
+                  description: The full `<type>:<name>` tag string registered upstream.
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or the (geoTargetId, languageCode) market not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
 
 # ─── Brand activation (sub-workspace mode) ────────────────────────────
 

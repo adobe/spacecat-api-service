@@ -55,6 +55,10 @@ import {
   handleUpdatePromptSubworkspace,
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
+import {
+  handleCreateTag,
+  handleCreateTagSubworkspace,
+} from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
@@ -674,6 +678,46 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
+   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
+   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
+   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
+   * for one, is derived from the `category:` tags across a brand's markets.
+   * Dispatches by workspace mode, mirroring the tags/markets handlers.
+   */
+  const createTag = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      // authorize() guarantees brandUuid (404s a missing brand) and, in flat
+      // mode, a non-null workspaceId (404s 'no semrush_workspace_id'); assert
+      // the invariant for the typed handler, mirroring activate().
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        )
+        : await handleCreateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const listModels = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
@@ -1254,6 +1298,7 @@ function SerenityController(context, log, env) {
     createMarket,
     deleteMarket,
     listTags,
+    createTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

@@ -686,11 +686,20 @@ export function getImsUserToken(context) {
  */
 export function getImsUserTokenStrict(context) {
   const authInfo = context?.attributes?.authInfo;
+  // Local/automated-E2E escape hatch — mirrors the serenity controller's
+  // requireImsBearer. When SERENITY_ALLOW_NON_IMS_AUTH is set, trust the present
+  // bearer even if the authInfo is not IMS-typed: locally `SKIP_AUTH=true`
+  // injects a mock (non-IMS) admin authInfo, and these flows forward the bearer
+  // to the Semrush vendor MOCK, which ignores it. NO deployed environment sets
+  // this flag (it is never written to Vault), so production auth is unaffected —
+  // the real Semrush gateway still validates the forwarded token end to end.
+  const allowNonIms = context?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
   // Fail closed: forward the bearer upstream ONLY for a caller we can positively
-  // confirm authenticated via IMS. A missing/non-standard authInfo (no getType)
-  // is treated as "not IMS" and refused, rather than falling through to proxy an
-  // unverified bearer to the Semrush gateway.
-  if (typeof authInfo?.getType !== 'function' || authInfo.getType() !== 'ims') {
+  // confirm authenticated via IMS (or when the escape hatch is explicitly set).
+  // A missing/non-standard authInfo (no getType) is treated as "not IMS" and
+  // refused, rather than falling through to proxy an unverified bearer to the
+  // Semrush gateway.
+  if (!allowNonIms && (typeof authInfo?.getType !== 'function' || authInfo.getType() !== 'ims')) {
     throw new ErrorWithStatusCode('IMS authentication required', STATUS_UNAUTHORIZED);
   }
   return getImsUserToken(context);

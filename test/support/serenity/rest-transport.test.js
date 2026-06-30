@@ -785,6 +785,24 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('listProjectTags', () => {
+    it('GETs /v2/workspaces/{ws}/projects/{pid}/aio/tags with parent_id + search', async () => {
+      fetchStub.resolves(fetchOk({ items: [{ id: 't-1', name: 'category:Running Shoes' }], page: 1, total: 1 }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.listProjectTags(WORKSPACE_ID, PROJECT_ID);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.contain(
+        `/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags`,
+      );
+      expect(call.url).to.contain('parent_id=');
+      expect(call.url).to.contain('search=');
+      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+  });
+
   describe('getBrandTopics', () => {
     it('GETs /v1/workspaces/{ws}/brand-topics with domain + country query', async () => {
       fetchStub.resolves(fetchOk([

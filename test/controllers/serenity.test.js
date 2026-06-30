@@ -120,6 +120,8 @@ describe('SerenityController', () => {
     handleCreatePromptsSubworkspace: sinon.stub(),
     handleUpdatePromptSubworkspace: sinon.stub(),
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
+    handleCreateTag: sinon.stub(),
+    handleCreateTagSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
@@ -211,6 +213,10 @@ describe('SerenityController', () => {
         handleCreatePromptsSubworkspace: handlers.handleCreatePromptsSubworkspace,
         handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
+      },
+      '../../src/support/serenity/handlers/tags.js': {
+        handleCreateTag: handlers.handleCreateTag,
+        handleCreateTagSubworkspace: handlers.handleCreateTagSubworkspace,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
@@ -855,6 +861,37 @@ describe('SerenityController', () => {
       expect(handlers.handleBulkDeletePrompts).to.have.been.calledOnce;
       expect(handlers.handleBulkDeletePromptsSubworkspace).to.not.have.been.called;
     });
+
+    it('createTag routes to the flat handler in flat mode and returns its status', async () => {
+      handlers.handleCreateTag.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: {
+          type: 'category', name: 'Footwear', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(201);
+      const body = await readBody(response);
+      expect(body.tag).to.equal('category:Footwear');
+      expect(handlers.handleCreateTag).to.have.been.calledOnce;
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag maps a handler 400 (bad body) through mapError', async () => {
+      handlers.handleCreateTag.rejects(new ErrorWithStatusCode('name is required', 400));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: { type: 'category', geoTargetId: 2840, languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const body = await readBody(response);
+      expect(body.message).to.match(/name is required/);
+    });
   });
 
   describe('controller surface', () => {
@@ -869,6 +906,7 @@ describe('SerenityController', () => {
       expect(controller.createMarket).to.be.a('function');
       expect(controller.deleteMarket).to.be.a('function');
       expect(controller.listTags).to.be.a('function');
+      expect(controller.createTag).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
 
@@ -1114,6 +1152,25 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleUpdatePromptSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleUpdatePrompt).to.not.have.been.called;
+    });
+
+    it('createTag routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleCreateTagSubworkspace.resolves({
+        status: 201,
+        body: {
+          geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: {
+          type: 'category', name: 'Footwear', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(handlers.handleCreateTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleCreateTag).to.not.have.been.called;
     });
 
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
