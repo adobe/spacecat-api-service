@@ -900,6 +900,7 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type/:channel': 'aso/can_configure',
+      'PUT /sites/:siteId/audit-policy': 'aso/can_configure',
 
       // ---- Manage users (state-layer management endpoints) ---------------
       'GET /state/access-mappings': 'aso/can_manage_users',
@@ -931,6 +932,11 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/top-pages/:source': 'aso/can_view',
       'GET /sites/:siteId/top-pages/:source/:geo': 'aso/can_view',
       'GET /sites/:siteId/user-activities': 'aso/can_view',
+      'GET /sites/:siteId/audit-policy': 'aso/can_view',
+      'GET /sites/:siteId/audit-policy/revisions': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/pages': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/summary': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/sections': 'aso/can_view',
 
       // Audits
       'GET /sites/:siteId/audits': 'aso/can_view',

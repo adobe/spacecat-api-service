@@ -108,6 +108,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -173,6 +174,7 @@ export default function getRouteHandlers(
   serenityController,
   proxyController,
   redirectsController,
+  auditPolicyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -297,6 +299,14 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
     'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
     'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
+
+    // Audit Policy contract (SITES-47306). Static segments precede dynamic :auditType match.
+    'GET /sites/:siteId/audit-policy': auditPolicyController.getPolicy,
+    'PUT /sites/:siteId/audit-policy': auditPolicyController.putPolicy,
+    'GET /sites/:siteId/audit-policy/revisions': auditPolicyController.listRevisions,
+    'GET /sites/:siteId/audit-scope/pages': auditPolicyController.getScopePages,
+    'GET /sites/:siteId/audit-scope/summary': auditPolicyController.getScopeSummary,
+    'GET /sites/:siteId/audit-scope/sections': auditPolicyController.getScopeSections,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,

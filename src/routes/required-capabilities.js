@@ -437,6 +437,14 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId/agentic-page-types/:name': 'site:write',
   'DELETE /sites/:siteId/agentic-page-types/:name': 'site:write',
 
+  // Audit Policy contract (SITES-47306)
+  'GET /sites/:siteId/audit-policy': 'site:read',
+  'PUT /sites/:siteId/audit-policy': 'site:write',
+  'GET /sites/:siteId/audit-policy/revisions': 'site:read',
+  'GET /sites/:siteId/audit-scope/pages': 'site:read',
+  'GET /sites/:siteId/audit-scope/summary': 'site:read',
+  'GET /sites/:siteId/audit-scope/sections': 'site:read',
+
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',
   'GET /sites/:siteId/experiments': 'experiment:read',
