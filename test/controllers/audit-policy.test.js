@@ -228,3 +228,55 @@ describe('AuditPolicyController — E2 putPolicy', () => {
     expect(res.status).to.equal(403);
   });
 });
+
+describe('AuditPolicyController — E3 listRevisions', () => {
+  afterEach(() => sinon.restore());
+
+  it('returns revisions newest-first with a cursor when a full page is returned', async () => {
+    const rows = Array.from({ length: 2 }, (_, i) => ({
+      version: 4 - i,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'b',
+      reason: 'r',
+      note: null,
+      effective_at: 'e',
+      superseded_at: 's',
+    }));
+    // Real PostgREST client chaining: select/eq/order are synchronous and chainable
+    // (returnsThis); only the terminal limit() call resolves { data, error } — see
+    // makeWeeksChainClient in test/controllers/llmo/llmo-referral-traffic.test.js.
+    const orderSpy = sinon.stub().returnsThis();
+    const limitSpy = sinon.stub().resolves({ data: rows, error: null });
+    const client = {
+      from: () => ({
+        select: () => ({ eq: () => ({ order: orderSpy, limit: limitSpy }) }),
+      }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client, params: { limit: '2' } }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].version).to.equal(4);
+    expect(body.items).to.have.length(2);
+    expect(body.cursor).to.be.a('string'); // full page -> next cursor present
+    expect(orderSpy).to.have.been.calledWith('version', { ascending: false });
+  });
+
+  it('clamps limit to 200 max', async () => {
+    const limitSpy = sinon.stub().resolves({ data: [], error: null });
+    const order = sinon.stub().returnsThis();
+    const client = {
+      from: () => ({ select: () => ({ eq: () => ({ order, limit: limitSpy }) }) }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    await controller.listRevisions(buildContext({ client, params: { limit: '9999' } }));
+    expect(limitSpy).to.have.been.calledWith(200);
+  });
+});

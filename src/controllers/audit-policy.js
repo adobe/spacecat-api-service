@@ -16,11 +16,9 @@ import {
 import { hasText, isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { UnauthorizedProductError } from '../support/errors.js';
-// eslint-disable-next-line no-unused-vars
 import { AuditPolicyDto, AuditPolicyRevisionDto } from '../dto/audit-policy.js';
 
 const POLICY_TABLE = 'audit_policy';
-// eslint-disable-next-line no-unused-vars
 const REVISION_TABLE = 'audit_policy_revision';
 const UPSERT_RPC = 'wrpc_upsert_audit_policy';
 
@@ -30,6 +28,8 @@ const MAX_ELEMENT_LEN = 2048;
 const MAX_NOTE_LEN = 2000;
 const STRATEGIES = ['tiered'];
 const SQLSTATE_VERSION_CONFLICT = '40001';
+const DEFAULT_PAGE = 50;
+const MAX_PAGE = 200;
 
 // Resolves false (not throw) when the caller's x-product header doesn't match productCode,
 // so the ASO/LLMO OR-check below can still try the other product.
@@ -92,6 +92,18 @@ function validatePolicyBody(b) {
     return 'expectedVersion is required and must be an integer >= 0';
   }
   return null;
+}
+
+function decodeCursor(c) {
+  if (!hasText(c)) {
+    return null;
+  }
+  const v = Number.parseInt(Buffer.from(c, 'base64url').toString('utf8'), 10);
+  return Number.isInteger(v) ? v : null;
+}
+
+function encodeCursor(version) {
+  return Buffer.from(String(version), 'utf8').toString('base64url');
 }
 
 function getAuthor(context) {
@@ -203,5 +215,29 @@ export default function AuditPolicyController() {
     return ok(AuditPolicyDto.toJSON(data));
   }
 
-  return { getPolicy, putPolicy };
+  async function listRevisions(context) {
+    const auth = await authorizeRead(context);
+    if (auth.error) {
+      return auth.error;
+    }
+    const { siteId, client } = auth;
+    const limit = Math.min(Number.parseInt(context.params?.limit, 10) || DEFAULT_PAGE, MAX_PAGE);
+    const cursor = decodeCursor(context.params?.cursor);
+
+    let q = client.from(REVISION_TABLE).select('*').eq('site_id', siteId);
+    if (cursor !== null) {
+      q = q.lt('version', cursor);
+    }
+    const { data, error } = await q.order('version', { ascending: false }).limit(limit);
+    if (error) {
+      context.log?.error?.(`audit-policy listRevisions failed: ${error.code} ${error.message}`);
+      return internalServerError('Failed to read audit policy revisions');
+    }
+    const items = (data || []).map(AuditPolicyRevisionDto.toJSON);
+    const nextCursor = items.length === limit
+      ? encodeCursor(items[items.length - 1].version) : undefined;
+    return ok({ items, ...(nextCursor ? { cursor: nextCursor } : {}) });
+  }
+
+  return { getPolicy, putPolicy, listRevisions };
 }
