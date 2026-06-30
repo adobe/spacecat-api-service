@@ -1,0 +1,199 @@
+# Audit Policy CRUD + scope reconciliation stubs.
+# `audit-policy` / `audit-policy-revisions` are fully implemented (SITES-47301
+# write-seam + SITES-47306 contract). The `audit-scope-*` paths are 501 stubs
+# pending B4 (SITES-46351, page list) and B7 (SITES-47089, reconciliation
+# counts + section aggregation).
+
+audit-policy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: Get the current audit policy for a site (synthetic version 0 default when unset)
+    operationId: getAuditPolicy
+    responses:
+      '200':
+        description: Current audit policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicy'
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  put:
+    tags:
+      - site
+      - audit policy
+    summary: Full-replace the audit policy (optimistic-locked via expectedVersion)
+    operationId: putAuditPolicy
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AuditPolicyUpsertRequest'
+    responses:
+      '200':
+        description: Updated audit policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicy'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '409':
+        description: Version conflict
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicyConflict'
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-policy-revisions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: List audit policy revisions, newest-first, cursor-paginated
+    operationId: listAuditPolicyRevisions
+    responses:
+      '200':
+        description: Revision history
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicyRevisionList'
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-scope-pages:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: |
+      Not implemented yet. In-scope page list (B4 / SITES-46351).
+    operationId: getAuditScopePages
+    responses:
+      '501':
+        description: Not implemented yet.
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-scope-summary:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: |
+      Not implemented yet. R8 reconciliation counts (B7 / SITES-47089).
+    operationId: getAuditScopeSummary
+    responses:
+      '501':
+        description: Not implemented yet.
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-scope-sections:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: |
+      Not implemented yet. R14 section aggregation (B7 / SITES-47089).
+    operationId: getAuditScopeSections
+    responses:
+      '501':
+        description: Not implemented yet.
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+# ─────────────────────────────── schemas ──────────────────────────────
+
+AuditPolicy:
+  type: object
+  properties:
+    siteId: { type: string, format: uuid }
+    version: { type: integer }
+    budget: { type: integer, minimum: 1 }
+    strategyName: { type: string, enum: [tiered] }
+    exclusionGlobs: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 1000 }
+    manualUrls: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 50000 }
+    scopeConfig: { type: object }
+    lifecycleOverrides: { type: object }
+    createdBy: { type: [string, 'null'] }
+    updatedBy: { type: [string, 'null'] }
+    reason: { type: [string, 'null'] }
+    note: { type: [string, 'null'] }
+    createdAt: { type: [string, 'null'], format: date-time }
+    updatedAt: { type: [string, 'null'], format: date-time }
+
+AuditPolicyUpsertRequest:
+  type: object
+  required: [budget, strategyName, reason, expectedVersion]
+  properties:
+    budget: { type: integer, minimum: 1 }
+    strategyName: { type: string, enum: [tiered] }
+    exclusionGlobs: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 1000 }
+    manualUrls: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 50000 }
+    scopeConfig: { type: object }
+    lifecycleOverrides: { type: object }
+    reason: { type: string, minLength: 1 }
+    note: { type: [string, 'null'], maxLength: 2000 }
+    expectedVersion: { type: integer, minimum: 0 }
+
+AuditPolicyConflict:
+  type: object
+  properties:
+    message: { type: string }
+    currentVersion: { type: integer }
+
+AuditPolicyRevision:
+  type: object
+  properties:
+    version: { type: integer }
+    budget: { type: integer }
+    strategyName: { type: string, enum: [tiered] }
+    exclusionGlobs: { type: array, items: { type: string } }
+    manualUrls: { type: array, items: { type: string } }
+    scopeConfig: { type: object }
+    lifecycleOverrides: { type: object }
+    updatedBy: { type: [string, 'null'] }
+    reason: { type: [string, 'null'] }
+    note: { type: [string, 'null'] }
+    effectiveAt: { type: [string, 'null'], format: date-time }
+    supersededAt: { type: string, format: date-time }
+
+AuditPolicyRevisionList:
+  type: object
+  properties:
+    items: { type: array, items: { $ref: '#/AuditPolicyRevision' } }
+    cursor: { type: string }

@@ -337,6 +337,16 @@ paths:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
   /sites/{siteId}/agentic-page-types/{name}:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
+  /sites/{siteId}/audit-policy:
+    $ref: './audit-policy-api.yaml#/audit-policy'
+  /sites/{siteId}/audit-policy/revisions:
+    $ref: './audit-policy-api.yaml#/audit-policy-revisions'
+  /sites/{siteId}/audit-scope/pages:
+    $ref: './audit-policy-api.yaml#/audit-scope-pages'
+  /sites/{siteId}/audit-scope/summary:
+    $ref: './audit-policy-api.yaml#/audit-scope-summary'
+  /sites/{siteId}/audit-scope/sections:
+    $ref: './audit-policy-api.yaml#/audit-scope-sections'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
