@@ -2393,10 +2393,10 @@ describe('LlmoCloudFrontController', () => {
       expect((await result.json()).message).to.include('distributionId');
     });
 
-    it('returns 400 when the destination account is not configured', async () => {
+    it('returns 500 when the destination account is not configured (server misconfig)', async () => {
       const result = await controller.enableCdnLogDelivery({ ...logDeliveryContext, env: {} });
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       expect((await result.json()).message).to.include('not configured');
     });
 
@@ -2494,6 +2494,22 @@ describe('LlmoCloudFrontController', () => {
       expect(createCdnLogDeliveryStub.callCount).to.equal(2);
     });
 
+    it('processes more distributions than the concurrency cap in order', async () => {
+      // 7 > CDN_LOG_RESCAN_CONCURRENCY (5) → exercises the multi-batch loop; order is preserved.
+      const ids = Array.from({ length: 7 }, (_, i) => `E2DIST${String(i).padStart(6, '0')}`);
+      listDistributionsStub.resolves(ids.map((id) => ({ id })));
+      createCdnLogDeliveryStub.resolves({ created: true, alreadyExisted: false });
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(7);
+      expect(body.created).to.equal(7);
+      expect(createCdnLogDeliveryStub.callCount).to.equal(7);
+      expect(body.distributions.map((d) => d.distributionId)).to.deep.equal(ids);
+    });
+
     it('reports alreadyExisted when delivery already set up', async () => {
       createCdnLogDeliveryStub.resolves({ created: false, alreadyExisted: true, deliveryId: 'del-x' });
 
@@ -2505,9 +2521,12 @@ describe('LlmoCloudFrontController', () => {
       expect(body.alreadyExisted).to.equal(2);
     });
 
-    it('records failures per distribution without aborting', async () => {
+    it('records failures per distribution (error category only) without aborting', async () => {
       createCdnLogDeliveryStub.onFirstCall().resolves({ created: true, alreadyExisted: false });
-      createCdnLogDeliveryStub.onSecondCall().rejects(new Error('AccessDenied'));
+      // A real AWS error carries the category in .name; the raw .message (with ARNs) is NOT leaked.
+      createCdnLogDeliveryStub.onSecondCall().rejects(
+        Object.assign(new Error('not authorized for arn:aws:logs:...'), { name: 'AccessDeniedException' }),
+      );
 
       const result = await controller.rescanCdnLogDelivery(rescanContext);
 
@@ -2516,7 +2535,7 @@ describe('LlmoCloudFrontController', () => {
       expect(body.scanned).to.equal(2);
       expect(body.created).to.equal(1);
       expect(body.failed).to.equal(1);
-      expect(body.distributions[1].error).to.equal('AccessDenied');
+      expect(body.distributions[1].error).to.equal('AccessDeniedException');
     });
 
     it('uses a custom role name when EDGE_OPTIMIZE_ROLE_NAME is set', async () => {
@@ -2532,9 +2551,11 @@ describe('LlmoCloudFrontController', () => {
       expect(callArgs.roleName).to.equal('CustomConnectorRole');
     });
 
-    it('falls back to "unknown error" when a rejection has no message', async () => {
+    it('falls back to "unknown error" when a rejection has no error name', async () => {
       createCdnLogDeliveryStub.onFirstCall().resolves({ created: true, alreadyExisted: false });
-      createCdnLogDeliveryStub.onSecondCall().rejects('non-error rejection');
+      // An error with an empty name exercises the `|| 'unknown error'` fallback. (Note: sinon's
+      // .rejects('str') would set .name to that string, so we build the rejection explicitly.)
+      createCdnLogDeliveryStub.onSecondCall().rejects(Object.assign(new Error('boom'), { name: '' }));
 
       const result = await controller.rescanCdnLogDelivery(rescanContext);
 
@@ -2563,10 +2584,10 @@ describe('LlmoCloudFrontController', () => {
       expect((await result.json()).message).to.include('externalId');
     });
 
-    it('returns 400 when the destination account is not configured', async () => {
+    it('returns 500 when the destination account is not configured (server misconfig)', async () => {
       const result = await controller.rescanCdnLogDelivery({ ...rescanContext, env: {} });
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       expect((await result.json()).message).to.include('not configured');
     });
 
