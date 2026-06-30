@@ -380,6 +380,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
           },
+          // Serenity is active for the org (org-wide LLMO/serenity flag ON) so
+          // the documented success shapes are exercised rather than the
+          // inactive-org 404.
+          '../../src/support/serenity/serenity-active.js': {
+            isSerenityActiveForOrg: () => Promise.resolve(true),
+          },
           // activate reads brand-level aliases/URLs/competitors once per batch;
           // stub them so the contract test doesn't hit the fake postgrest client.
           '../../src/support/brands-storage.js': {
