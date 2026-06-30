@@ -190,7 +190,7 @@ AuditPolicyRevision:
     reason: { type: [string, 'null'] }
     note: { type: [string, 'null'] }
     effectiveAt: { type: [string, 'null'], format: date-time }
-    supersededAt: { type: string, format: date-time }
+    supersededAt: { type: [string, 'null'], format: date-time }
 
 AuditPolicyRevisionList:
   type: object
