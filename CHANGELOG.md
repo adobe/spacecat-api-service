@@ -1,3 +1,10 @@
+## [1.611.1](https://github.com/adobe/spacecat-api-service/compare/v1.611.0...v1.611.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* remove temporary cloudflareToken body/query fallback ([#2727](https://github.com/adobe/spacecat-api-service/issues/2727)) ([0b253d3](https://github.com/adobe/spacecat-api-service/commit/0b253d34414a2353a06d6c45d31ba8730cd356ee)), closes [#2701](https://github.com/adobe/spacecat-api-service/issues/2701)
+
 # [1.611.0](https://github.com/adobe/spacecat-api-service/compare/v1.610.0...v1.611.0) (2026-06-30)
 
 
