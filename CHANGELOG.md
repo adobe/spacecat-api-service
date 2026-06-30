@@ -1,3 +1,10 @@
+# [1.612.0](https://github.com/adobe/spacecat-api-service/compare/v1.611.1...v1.612.0) (2026-06-30)
+
+
+### Features
+
+* **serenity:** gate serenity routes on an org-wide LLMO/serenity feature flag ([#2728](https://github.com/adobe/spacecat-api-service/issues/2728)) ([4eea5e4](https://github.com/adobe/spacecat-api-service/commit/4eea5e49e7fd22a2595841bff3cbcb427874b8e2)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.611.1](https://github.com/adobe/spacecat-api-service/compare/v1.611.0...v1.611.1) (2026-06-30)
 
 
