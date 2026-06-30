@@ -750,11 +750,11 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
  * Business Impact (adobe_analytics, ga4) has its own DRS provider check and is
  * intentionally excluded here.
  *
- * Order matters: optel is listed first because it is the preferred source.
+ * Order matters: cdn is listed first because it is the preferred source.
  * The has-data response preserves this order in availableSources so callers
- * can pick the first entry as the active source (optel wins over cdn).
+ * can pick the first entry as the active source (cdn wins over optel).
  */
-const TRAFFIC_INSIGHTS_SOURCES = ['optel', 'cdn'];
+const TRAFFIC_INSIGHTS_SOURCES = ['cdn', 'optel'];
 const TRAFFIC_INSIGHTS_TABLES = TRAFFIC_INSIGHTS_SOURCES.map((s) => SOURCE_TO_TABLE[s]);
 
 /**
@@ -767,8 +767,8 @@ const TRAFFIC_INSIGHTS_TABLES = TRAFFIC_INSIGHTS_SOURCES.map((s) => SOURCE_TO_TA
  *   { hasData: boolean, availableSources: Array<'optel'|'cdn'> }
  *
  * availableSources lists whichever of optel/cdn has at least one row, in
- * priority order (optel first). Callers should use the first entry as the
- * active source so they naturally prefer optel over cdn.
+ * priority order (cdn first). Callers use the first entry as the active
+ * source, which now prefers cdn over optel.
  * hasData is true iff availableSources is non-empty.
  *
  * Both tables are checked in parallel with limit(1) — no RPC required.

@@ -1087,7 +1087,7 @@ describe('llmo-referral-traffic', () => {
       expect(body.availableSources).to.deep.equal(['cdn']);
     });
 
-    it('returns hasData:true and availableSources:["optel","cdn"] when both have records', async () => {
+    it('returns hasData:true and availableSources:["cdn","optel"] when both have records', async () => {
       const client = makeHasDataChainClient({
         referral_traffic_optel: { data: [ROW], error: null },
         referral_traffic_cdn: { data: [ROW], error: null },
@@ -1098,7 +1098,7 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.hasData).to.equal(true);
-      expect(body.availableSources).to.deep.equal(['optel', 'cdn']);
+      expect(body.availableSources).to.deep.equal(['cdn', 'optel']);
     });
 
     it('returns hasData:false and availableSources:[] when both tables are empty', async () => {
