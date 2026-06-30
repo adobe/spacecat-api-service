@@ -790,10 +790,11 @@ describe('brands-storage', () => {
   }
 
   // Like createTableMockClient, but records rows passed to write methods so
-  // tests can assert exactly what was written.
+  // tests can assert exactly what was written. Also records neq() filter calls
+  // so tests can verify which filters were applied to queries.
   function createCapturingClient(tableMap) {
     const calls = {
-      upsert: [], update: [], delete: [], or: [],
+      upsert: [], update: [], delete: [], or: [], neq: [],
     };
     const callCounts = {};
     const makeQuery = (table) => {
@@ -829,6 +830,12 @@ describe('brands-storage', () => {
           if (prop === 'or') {
             return (filter) => {
               calls.or.push({ table, filter });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'neq') {
+            return (col, val) => {
+              calls.neq.push({ table, col, val });
               return new Proxy({}, handler);
             };
           }
@@ -1406,6 +1413,57 @@ describe('brands-storage', () => {
       });
 
       expect(log.warn).to.not.have.been.called;
+    });
+
+    it('creates a fresh brand when the name matches only a soft-deleted brand (LLMO-5919)', async () => {
+      // The existing-brand lookup must exclude soft-deleted brands via
+      // .neq('status','deleted'). The caller's baseSiteId must be applied and
+      // the brand must be created as active, not resurrected with the old anchor state.
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // existing lookup: null (soft-deleted brand excluded)
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'new-site' },
+        postgrestClient: client,
+      });
+
+      // Verify the .neq filter was sent on the existing-brand lookup.
+      const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
+      expect(neqFilter?.val).to.equal('deleted');
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('new-site');
+      expect(brandsUpsert.row.status).to.equal('active');
+    });
+
+    it('sets site_id=null and status=pending when resurrecting a soft-deleted brand without a new baseSiteId (LLMO-5919)', async () => {
+      // Bug scenario: deleted brand had site_id='old-site'. Another brand now owns
+      // that site. A fresh create with no baseSiteId must NOT inherit the stale
+      // site_id — the ON CONFLICT UPDATE would then conflict with the other brand.
+      // The fix writes an explicit null so the stale anchor is cleared.
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // existing lookup: null (soft-deleted brand excluded)
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', status: 'pending' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' }, // no baseSiteId — should be pending
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.status).to.equal('pending');
+      expect(brandsUpsert.row.site_id).to.equal(null);
     });
 
     it('fails closed by throwing when the existing-brand lookup errors (LLMO-5556)', async () => {
