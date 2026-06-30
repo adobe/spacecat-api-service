@@ -24,6 +24,7 @@ import TokowakaClient, {
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { createCdnLogDelivery, buildDeliveryDestinationArn } from '../../support/cdn-log-delivery.js';
 
 // CloudFormation templates use intrinsic-function tags (!Ref/!Sub/!GetAtt/...) that plain YAML
 // rejects. This schema tolerates them (constructing each to its raw value) so the permissions
@@ -1131,6 +1132,145 @@ function LlmoCloudFrontController(ctx) {
     }
   };
 
+  // Enable CDN access-log forwarding for a SINGLE CloudFront distribution to Adobe's cross-account
+  // cdn-logs destination (mutation, idempotent). The assume-role externalId is the per-session UUID
+  // from bootstrap (client-supplied, must match the connector role's trust policy); the delivery
+  // destination + source names are org-scoped, derived server-side from the site's IMS org id (NOT
+  // from the externalId). Returns { created, alreadyExisted, deliverySourceName, deliveryId }.
+  const enableCdnLogDelivery = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site, Organization } = dataAccess;
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    const {
+      accountId, externalId, distributionId, error: credError,
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
+    }
+
+    try {
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'enable CDN log forwarding');
+      if (error) {
+        return error;
+      }
+
+      // The cdn-logs destination/source names are scoped by IMS org, resolved server-side from the
+      // site's organization — independent of the assume-role externalId.
+      const organization = await Organization.findById(site.getOrganizationId());
+      const imsOrgId = organization?.getImsOrgId();
+      if (!hasText(imsOrgId)) {
+        return badRequest('Site organization has no IMS org ID');
+      }
+
+      const adobeAccountId = env?.CDN_LOG_DELIVERY_DEST_ACCOUNT_ID;
+      if (!hasText(adobeAccountId)) {
+        return badRequest('CDN log delivery destination account is not configured');
+      }
+      const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
+
+      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      let result;
+      try {
+        result = await createCdnLogDelivery(credentials, {
+          provider: 'cloudfront',
+          resourceId: distributionId,
+          accountId,
+          imsOrgId,
+          deliveryDestinationArn,
+        });
+      } catch (deliveryError) {
+        // Adobe destination not provisioned yet → clear 4xx instead of a raw AWS error + retry.
+        if (deliveryError?.name === 'ResourceNotFoundException') {
+          return badRequest('Adobe log destination is not provisioned for this organization yet — run cdn-logs provisioning first');
+        }
+        throw deliveryError;
+      }
+      log.info(auditLine(context, 'log-delivery', 'done', {
+        siteId, accountId, distributionId, alreadyExisted: result.alreadyExisted,
+      }));
+      return ok(result);
+    } catch (error) {
+      log.error(`Failed to enable CDN log forwarding for site ${siteId}:`, error);
+      return internalServerError('An unexpected error occurred');
+    }
+  };
+
+  // Idempotently enable CDN log delivery for ALL distributions in the customer account. Intended
+  // for re-scan use: after a new distribution is added, or to recover from a missed setup. Each
+  // distribution is attempted independently (Promise.allSettled) so one failure never aborts the
+  // rest; the response summarizes created/alreadyExisted/failed per distribution.
+  const rescanCdnLogDelivery = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site, Organization } = dataAccess;
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
+    if (credError) {
+      return credError;
+    }
+
+    try {
+      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'rescan CDN log delivery');
+      if (error) {
+        return error;
+      }
+
+      const organization = await Organization.findById(site.getOrganizationId());
+      const imsOrgId = organization?.getImsOrgId();
+      if (!hasText(imsOrgId)) {
+        return badRequest('Site organization has no IMS org ID');
+      }
+
+      const adobeAccountId = env?.CDN_LOG_DELIVERY_DEST_ACCOUNT_ID;
+      if (!hasText(adobeAccountId)) {
+        return badRequest('CDN log delivery destination account is not configured');
+      }
+      const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
+
+      const { cloudFrontClient, credentials } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+      const distributions = await cloudFrontClient.listDistributions();
+
+      const results = await Promise.allSettled(
+        distributions.map((dist) => createCdnLogDelivery(credentials, {
+          provider: 'cloudfront',
+          resourceId: dist.id,
+          accountId,
+          imsOrgId,
+          deliveryDestinationArn,
+        })),
+      );
+
+      const summary = distributions.map((dist, i) => {
+        const outcome = results[i];
+        if (outcome.status === 'fulfilled') {
+          return { distributionId: dist.id, ...outcome.value };
+        }
+        return { distributionId: dist.id, error: outcome.reason?.message || 'unknown error' };
+      });
+
+      const createdCount = summary.filter((r) => r.created).length;
+      const alreadyExisted = summary.filter((r) => r.alreadyExisted).length;
+      const failed = summary.filter((r) => r.error).length;
+      log.info(`[cdn-onboard-cloudfront] log-rescan site ${siteId}: scanned ${distributions.length} `
+        + `distributions — created=${createdCount}, alreadyExisted=${alreadyExisted}, failed=${failed}`);
+      return ok({
+        scanned: distributions.length,
+        created: createdCount,
+        alreadyExisted,
+        failed,
+        distributions: summary,
+      });
+    } catch (error) {
+      log.error(`Failed to rescan CDN log delivery for site ${siteId}:`, error);
+      return internalServerError('An unexpected error occurred');
+    }
+  };
+
   return {
     createBootstrapUrl,
     connect,
@@ -1148,6 +1288,8 @@ function LlmoCloudFrontController(ctx) {
     deploy,
     plan,
     getPermissions,
+    enableCdnLogDelivery,
+    rescanCdnLogDelivery,
   };
 }
 

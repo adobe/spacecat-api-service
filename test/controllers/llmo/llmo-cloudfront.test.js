@@ -72,6 +72,7 @@ describe('LlmoCloudFrontController', () => {
   let mockContext;
   let mockSite;
   let mockConfig;
+  let mockOrganization;
   let mockDataAccess;
   let mockLog;
   let mockTokowakaClient;
@@ -87,6 +88,8 @@ describe('LlmoCloudFrontController', () => {
   let verifyRoutingStub;
   let runDeployStepStub;
   let planDeployStub;
+  let createCdnLogDeliveryStub;
+  let buildDeliveryDestinationArnStub;
 
   // The control-plane functions are imported from '@adobe/spacecat-shared-tokowaka-client';
   // the wrappers read the mutable outer stubs so each test can reassign them in beforeEach.
@@ -211,6 +214,10 @@ describe('LlmoCloudFrontController', () => {
       calculateForwardedHost: calculateForwardedHostMock,
       ...getEdgeOptimizeStubs(),
     },
+    '../../../src/support/cdn-log-delivery.js': {
+      createCdnLogDelivery: (...args) => createCdnLogDeliveryStub(...args),
+      buildDeliveryDestinationArn: (...args) => buildDeliveryDestinationArnStub(...args),
+    },
     '../../../src/support/access-control-util.js': accessControlMock,
   });
 
@@ -228,6 +235,8 @@ describe('LlmoCloudFrontController', () => {
     verifyRoutingStub = sinon.stub();
     runDeployStepStub = sinon.stub();
     planDeployStub = sinon.stub();
+    createCdnLogDeliveryStub = sinon.stub();
+    buildDeliveryDestinationArnStub = sinon.stub();
     mockTokowakaClient = { fetchMetaconfig: sinon.stub() };
 
     LlmoCloudFrontController = await esmock(
@@ -253,6 +262,9 @@ describe('LlmoCloudFrontController', () => {
     verifyRoutingStub = sinon.stub();
     runDeployStepStub = sinon.stub();
     planDeployStub = sinon.stub();
+    createCdnLogDeliveryStub = sinon.stub();
+    buildDeliveryDestinationArnStub = sinon.stub()
+      .returns('arn:aws:logs:us-east-1:111122223333:delivery-destination:cdn-logs-org');
 
     mockLog = {
       info: sinon.stub(),
@@ -265,8 +277,16 @@ describe('LlmoCloudFrontController', () => {
       getId: sinon.stub().returns(TEST_SITE_ID),
       getConfig: sinon.stub().returns(mockConfig),
       getBaseURL: sinon.stub().returns('https://www.example.com'),
+      getOrganizationId: sinon.stub().returns('test-org-id'),
     };
-    mockDataAccess = { Site: { findById: sinon.stub().resolves(mockSite) } };
+    mockOrganization = {
+      getId: sinon.stub().returns('test-org-id'),
+      getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+    };
+    mockDataAccess = {
+      Site: { findById: sinon.stub().resolves(mockSite) },
+      Organization: { findById: sinon.stub().resolves(mockOrganization) },
+    };
     mockTokowakaClient.fetchMetaconfig = sinon.stub();
 
     // Default: the chosen distribution (E2EXAMPLE123) serves the test site host (www.example.com),
@@ -2285,6 +2305,302 @@ describe('LlmoCloudFrontController', () => {
       const result = await LlmoControllerNoAdmin(mockContext)
         .getPermissions(permissionsContext);
       expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('enableCdnLogDelivery', () => {
+    let logDeliveryContext;
+
+    beforeEach(() => {
+      assumeConnectorRoleStub.resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      createCdnLogDeliveryStub.resolves({
+        created: true,
+        alreadyExisted: false,
+        deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE123',
+        deliveryId: 'del-1',
+      });
+      logDeliveryContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {
+          accountId: '120569600543',
+          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
+          distributionId: 'E2EXAMPLE123',
+        },
+        env: { CDN_LOG_DELIVERY_DEST_ACCOUNT_ID: '111122223333' },
+      };
+    });
+
+    it('enables log forwarding and returns the delivery result', async () => {
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.created).to.equal(true);
+      expect(body.deliveryId).to.equal('del-1');
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      const callArgs = createCdnLogDeliveryStub.firstCall.args[1];
+      expect(callArgs.provider).to.equal('cloudfront');
+      expect(callArgs.resourceId).to.equal('E2EXAMPLE123');
+    });
+
+    it('is a no-op when forwarding is already enabled', async () => {
+      createCdnLogDeliveryStub.resolves({
+        created: false,
+        alreadyExisted: true,
+        deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE123',
+        deliveryId: 'del-existing',
+      });
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.alreadyExisted).to.equal(true);
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.enableCdnLogDelivery({
+        ...logDeliveryContext,
+        data: { ...logDeliveryContext.data, accountId: '123' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('12-digit');
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.enableCdnLogDelivery({
+        ...logDeliveryContext,
+        data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('externalId');
+    });
+
+    it('returns 400 when the distribution id is missing', async () => {
+      const result = await controller.enableCdnLogDelivery({
+        ...logDeliveryContext,
+        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('distributionId');
+    });
+
+    it('returns 400 when the destination account is not configured', async () => {
+      const result = await controller.enableCdnLogDelivery({ ...logDeliveryContext, env: {} });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('not configured');
+    });
+
+    it('returns 400 when the site organization has no IMS org id', async () => {
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => undefined });
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('IMS org');
+    });
+
+    it('returns a clear error when the Adobe destination is not provisioned', async () => {
+      const notFoundErr = new Error('ResourceNotFoundException: delivery destination not found');
+      notFoundErr.name = 'ResourceNotFoundException';
+      createCdnLogDeliveryStub.rejects(notFoundErr);
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('not provisioned');
+    });
+
+    it('returns 500 when createCdnLogDelivery throws a non-ResourceNotFound error', async () => {
+      createCdnLogDeliveryStub.rejects(new Error('AccessDeniedException: not authorized'));
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message).to.equal('An unexpected error occurred');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const result = await controllerWithAccessDenied(mockContext)
+        .enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const noAdmin = await esmock('../../../src/controllers/llmo/llmo-cloudfront.js', cfClientMocks(createMockAccessControlUtil(true, true, false)));
+      const result = await noAdmin(mockContext).enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('rescanCdnLogDelivery', () => {
+    let rescanContext;
+
+    beforeEach(() => {
+      assumeConnectorRoleStub.resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      listDistributionsStub.resolves([{ id: 'E2EXAMPLE001' }, { id: 'E2EXAMPLE002' }]);
+      createCdnLogDeliveryStub.resolves({
+        created: true,
+        alreadyExisted: false,
+        deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE001',
+        deliveryId: 'del-1',
+      });
+      rescanContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {
+          accountId: '120569600543',
+          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
+        },
+        env: { CDN_LOG_DELIVERY_DEST_ACCOUNT_ID: '111122223333' },
+      };
+    });
+
+    it('scans all distributions and returns a summary', async () => {
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(2);
+      expect(body.created).to.equal(2);
+      expect(body.alreadyExisted).to.equal(0);
+      expect(body.failed).to.equal(0);
+      expect(body.distributions).to.have.length(2);
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      expect(listDistributionsStub.calledOnce).to.equal(true);
+      expect(createCdnLogDeliveryStub.callCount).to.equal(2);
+    });
+
+    it('reports alreadyExisted when delivery already set up', async () => {
+      createCdnLogDeliveryStub.resolves({ created: false, alreadyExisted: true, deliveryId: 'del-x' });
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.created).to.equal(0);
+      expect(body.alreadyExisted).to.equal(2);
+    });
+
+    it('records failures per distribution without aborting', async () => {
+      createCdnLogDeliveryStub.onFirstCall().resolves({ created: true, alreadyExisted: false });
+      createCdnLogDeliveryStub.onSecondCall().rejects(new Error('AccessDenied'));
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(2);
+      expect(body.created).to.equal(1);
+      expect(body.failed).to.equal(1);
+      expect(body.distributions[1].error).to.equal('AccessDenied');
+    });
+
+    it('uses a custom role name when EDGE_OPTIMIZE_ROLE_NAME is set', async () => {
+      const ctx = {
+        ...rescanContext,
+        env: { ...rescanContext.env, EDGE_OPTIMIZE_ROLE_NAME: 'CustomConnectorRole' },
+      };
+
+      const result = await controller.rescanCdnLogDelivery(ctx);
+
+      expect(result.status).to.equal(200);
+      const callArgs = assumeConnectorRoleStub.firstCall.args[0];
+      expect(callArgs.roleName).to.equal('CustomConnectorRole');
+    });
+
+    it('falls back to "unknown error" when a rejection has no message', async () => {
+      createCdnLogDeliveryStub.onFirstCall().resolves({ created: true, alreadyExisted: false });
+      createCdnLogDeliveryStub.onSecondCall().rejects('non-error rejection');
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.distributions[1].error).to.equal('unknown error');
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.rescanCdnLogDelivery({
+        ...rescanContext,
+        data: { ...rescanContext.data, accountId: '123' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('12-digit');
+    });
+
+    it('returns 400 when the external id is missing', async () => {
+      const result = await controller.rescanCdnLogDelivery({
+        ...rescanContext,
+        data: { accountId: '120569600543' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('externalId');
+    });
+
+    it('returns 400 when the destination account is not configured', async () => {
+      const result = await controller.rescanCdnLogDelivery({ ...rescanContext, env: {} });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('not configured');
+    });
+
+    it('returns 400 when the site organization has no IMS org id', async () => {
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => undefined });
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('IMS org');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const result = await controllerWithAccessDenied(mockContext)
+        .rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 500 when an unexpected error is thrown', async () => {
+      listDistributionsStub.rejects(new Error('NetworkError'));
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message).to.equal('An unexpected error occurred');
     });
   });
 });

@@ -158,6 +158,8 @@ const routeFacsCapabilities = {
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
     'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
     // LLMO Cloudflare onboarding — LLMO-admin manual provisioning, gated by
     // isLLMOAdministrator() with a caller-supplied x-cloudflare-token; not a FACS surface.
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
