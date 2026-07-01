@@ -306,6 +306,10 @@ describe('getRouteHandlers', () => {
     getBrandOpportunities: () => null,
   };
 
+  const mockPageGroupsController = {
+    getPageGroups: () => null,
+  };
+
   const mockLlmoController = {
     getLlmoSheetData: () => null,
     getLlmoGlobalSheetData: () => null,
@@ -623,6 +627,7 @@ describe('getRouteHandlers', () => {
       mockLlmoCloudFrontController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
+      mockPageGroupsController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -996,6 +1001,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
+      'GET /sites/:siteId/page-groups',
       'GET /sites/:siteId/geo-experiments',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
