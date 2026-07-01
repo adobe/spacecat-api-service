@@ -32,6 +32,7 @@ import {
   validateSiteForRedirects,
   sendAutofixMessage,
   isViewAsTrialRequest,
+  getImsUserTokenStrict,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -180,12 +181,25 @@ describe('utils', () => {
     let rumApiClientStub;
     let site;
 
-    // Build yesterday's date path for nock URL matching
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const datePath = `${yesterday.getUTCFullYear()}/${(yesterday.getUTCMonth() + 1).toString().padStart(2, '0')}/${yesterday.getUTCDate().toString().padStart(2, '0')}`;
+    const formatBundleDatePath = (date) => `${date.getUTCFullYear()}/${(date.getUTCMonth() + 1).toString().padStart(2, '0')}/${date.getUTCDate().toString().padStart(2, '0')}`;
+    const testNow = new Date('2026-06-15T12:00:00.000Z');
+    const todayPath = formatBundleDatePath(testNow);
+    const yesterday = new Date(testNow.getTime() - 24 * 60 * 60 * 1000);
+    const datePath = formatBundleDatePath(yesterday);
 
-    const today = new Date();
-    const todayPath = `${today.getUTCFullYear()}/${(today.getUTCMonth() + 1).toString().padStart(2, '0')}/${today.getUTCDate().toString().padStart(2, '0')}`;
+    const mockResolverBundleProbe = () => nock('https://bundles.aem.page')
+      .get(`/bundles/example.com/${todayPath}`)
+      .query({ domainkey: 'test-domainkey' })
+      .reply(200, {
+        rumBundles: [
+          {
+            id: 'resolver-probe',
+            host: 'main--mysite--org.aem.live',
+            url: 'https://www.example.com/page1',
+          },
+        ],
+      });
+
     // wwwUrlResolver (shared-utils >=1.119) probes bundles.aem.page (today, then yesterday)
     // to pick the www/non-www variant. Mock the probe's "today" hit with non-empty
     // bundles so it resolves on the first date and leaves the yesterday interceptor
@@ -197,6 +211,7 @@ describe('utils', () => {
 
     beforeEach(() => {
       sandbox = sinon.createSandbox();
+      sandbox.useFakeTimers({ now: testNow, toFake: ['Date'] });
 
       rumApiClientStub = {
         retrieveDomainkey: sandbox.stub(),
@@ -230,6 +245,7 @@ describe('utils', () => {
 
     it('returns resolved author URL when RUM bundle has an AEM CS publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      mockResolverBundleProbe();
 
       mockBundleProbe();
 
@@ -261,6 +277,7 @@ describe('utils', () => {
 
     it('returns resolved author URL when RUM bundle has an AEM CS .net publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      mockResolverBundleProbe();
 
       mockBundleProbe();
 
@@ -320,6 +337,7 @@ describe('utils', () => {
 
     it('returns host only when host is not an AEM CS publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      mockResolverBundleProbe();
 
       mockBundleProbe();
 
@@ -344,6 +362,7 @@ describe('utils', () => {
 
     it('returns null when no RUM bundles are returned', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      mockResolverBundleProbe();
 
       mockBundleProbe();
 
@@ -360,6 +379,7 @@ describe('utils', () => {
 
     it('returns null when fetch fails', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      mockResolverBundleProbe();
 
       mockBundleProbe();
 
@@ -385,6 +405,7 @@ describe('utils', () => {
 
     it('returns host object when first bundle host is undefined', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+      mockResolverBundleProbe();
 
       mockBundleProbe();
 
@@ -1490,6 +1511,77 @@ describe('utils', () => {
       expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
       expect(payload).to.have.property('customData');
       expect(payload.customData).to.deep.equal({ key: 'value' });
+    });
+  });
+
+  describe('getImsUserTokenStrict', () => {
+    function buildContext(authInfo) {
+      return {
+        attributes: { authInfo },
+        pathInfo: { headers: { authorization: 'Bearer ims-user-token' } },
+      };
+    }
+
+    it('returns the bearer token when the caller authenticated via IMS', () => {
+      const context = buildContext({ getType: () => 'ims' });
+      expect(getImsUserTokenStrict(context)).to.equal('ims-user-token');
+    });
+
+    it('fails closed with 401 when authInfo has no getType', () => {
+      const context = buildContext({});
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('fails closed with 401 when authInfo is null', () => {
+      const context = buildContext(null);
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('fails closed with 401 when authInfo is absent (no attributes)', () => {
+      expect(() => getImsUserTokenStrict({ pathInfo: { headers: {} } }))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('fails closed with 401 when the caller authenticated via a non-IMS type', () => {
+      const context = buildContext({ getType: () => 'jwt' });
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('returns the bearer for a non-IMS caller when SERENITY_ALLOW_NON_IMS_AUTH is set (local/E2E escape hatch)', () => {
+      const context = { ...buildContext({ getType: () => 'jwt' }), env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } };
+      expect(getImsUserTokenStrict(context)).to.equal('ims-user-token');
+    });
+
+    it('still requires an Authorization header even with the escape hatch set', () => {
+      const context = { attributes: { authInfo: {} }, pathInfo: { headers: {} }, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } };
+      expect(() => getImsUserTokenStrict(context)).to.throw('Missing Authorization header');
+    });
+
+    it('hard-disables the escape hatch in production (AWS_ENV=prod) — a non-IMS caller 401s', () => {
+      const context = {
+        ...buildContext({ getType: () => 'jwt' }),
+        env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', AWS_ENV: 'prod' },
+      };
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('hard-disables the escape hatch in production (ENV=prod) — a non-IMS caller 401s', () => {
+      const context = {
+        ...buildContext({ getType: () => 'jwt' }),
+        env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', ENV: 'prod' },
+      };
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
     });
   });
 });

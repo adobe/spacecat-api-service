@@ -927,6 +927,61 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'User does not belong to the organization');
   });
 
+  it('returns 400 for malformed locale on getAllForOpportunity', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { locale: 'INVALID' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getAllForOpportunityPaged', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, limit: '10' },
+      data: { locale: 'fr-FR' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByStatus', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
+      data: { locale: '123' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByStatusPaged', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW', limit: '10' },
+      data: { locale: 'INVALID' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByID', async () => {
+    const response = await suggestionsController.getByID({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+      data: { locale: 'en-US' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
   it('gets all suggestions for an opportunity returns bad request if no site ID is passed', async () => {
     const response = await suggestionsController.getAllForOpportunity(
       { params: {}, ...context },
@@ -4985,8 +5040,9 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Opportunity not found');
     });
 
-    it('auto-fix suggestions returns 400 if site not enabled for autofix', async () => {
-      const response = await suggestionsController.autofixSuggestions({
+    it('auto-fix suggestions no longer blocks on the per-site autofix handler enabled-list (on-demand bypass)', async () => {
+      mockSuggestion.allByOpportunityId.resolves([]);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID_NOT_ENABLED,
           opportunityId: OPPORTUNITY_ID_NOT_ENABLED,
@@ -4994,9 +5050,12 @@ describe('Suggestions Controller', () => {
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
         ...context,
       });
-      expect(response.status).to.equal(400);
-      const error = await response.json();
-      expect(error).to.have.property('message', 'Handler is not enabled for site 07efc218-79f6-48b5-970e-deb0f88ce01b autofix type broken-backlinks');
+      if (response.status === 400) {
+        const error = await response.json();
+        expect(error.message || '').to.not.include('Handler is not enabled');
+      } else {
+        expect(response.status).to.not.equal(400);
+      }
     });
 
     it('does not set IN_PROGRESS if no valid suggestions', async () => {
@@ -5996,16 +6055,16 @@ describe('Suggestions Controller', () => {
       expect(body).to.have.property('message').that.includes('valid URL');
     });
 
-    it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
+    it('assess-urls no longer blocks on the per-site autofix handler enabled-list (on-demand bypass)', async () => {
       assessUrlsConfig.isHandlerEnabledForSite.returns(false);
       const response = await suggestionsController.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { action: 'assess-urls', pages: ['https://example.com/p'] },
         ...context,
       });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(202);
       const body = await response.json();
-      expect(body).to.have.property('message').that.includes('Handler is not enabled for site');
+      expect(body).to.have.property('message', 'Assess-urls job queued');
     });
   });
 
@@ -7823,6 +7882,46 @@ describe('Suggestions Controller', () => {
       expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
     });
 
+    it('deduplicates urls in GeoExperiment metadata when multiple suggestions share the same URL', async () => {
+      const sharedUrl = 'https://example.com/page1';
+      const dupSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'summarization',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: sharedUrl,
+          summarizationText: 'Key points text',
+          transformRules: { selector: 'h1', action: 'insertAfter' },
+          prompts: [{ prompt: 'Key points of page1?', regions: ['US'] }],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      edgeSuggestions[0].getData = () => ({
+        url: sharedUrl,
+        summarizationText: 'Page summary text',
+        transformRules: { selector: 'h1', action: 'insertBefore' },
+        prompts: [{ prompt: 'Summarize page1?', regions: ['US'] }],
+      });
+      mockSuggestion.allByOpportunityId.resolves([edgeSuggestions[0], dupSuggestion]);
+
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        env: asyncExperimentEnv,
+      });
+
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.metadata.urls).to.deep.equal([sharedUrl]);
+    });
 
     it('returns 500 when GeoExperiment save fails after DRS schedule is created', async () => {
       const removeStubFn = sandbox.stub().resolves();
@@ -12583,6 +12682,317 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(500);
       const body = await response.json();
       expect(body).to.have.property('message', 'Error revoking grant');
+    });
+  });
+
+  describe('Branch coverage gap fills', () => {
+    describe('postPlgSuggestionSkipAlert nullish fallbacks (lines 60, 82-85)', () => {
+      it('treats nullish getSiteEnrollments as empty enrollments and does not send PLG alert (covers `enrollments ?? []`)', async () => {
+        const postSlackMessageStub = sandbox.stub().resolves();
+        const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+          '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+        });
+
+        const nullEnrollmentsSite = {
+          getId: sandbox.stub().returns(SITE_ID),
+          getBaseURL: sandbox.stub().returns('https://example.com'),
+          getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+          getSiteEnrollments: sandbox.stub().resolves(null),
+        };
+        const da = {
+          ...mockSuggestionDataAccess,
+          Site: { findById: sandbox.stub().resolves(nullEnrollmentsSite) },
+        };
+        const ctrl = ControllerWithSlack({
+          dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await ctrl.patchSuggestion({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+          data: { status: 'SKIPPED' },
+          env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+          ...context,
+          dataAccess: da,
+        });
+        await new Promise(setImmediate);
+
+        expect(response.status).to.equal(200);
+        expect(postSlackMessageStub).to.not.have.been.called;
+      });
+
+      it('falls back to site.getId() / "unknown" when getBaseURL / getType getters return nullish, and reads getId() when opportunity exposes it (covers lines 82-85 both branches)', async () => {
+        const postSlackMessageStub = sandbox.stub().resolves();
+        const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+          '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+        });
+
+        const entitlement = { getProductCode: () => 'ASO', getTier: () => 'PLG' };
+        const enrollment = { getEntitlement: sandbox.stub().resolves(entitlement) };
+        const plgSiteNoBaseURL = {
+          getId: sandbox.stub().returns(SITE_ID),
+          getBaseURL: sandbox.stub().returns(undefined),
+          getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+          getSiteEnrollments: sandbox.stub().resolves([enrollment]),
+        };
+
+        const opportunityWithGetId = {
+          getSiteId: () => SITE_ID,
+          getId: () => 'covered-opp-id',
+          // intentionally NO getType — exercises line 83 `?.` undefined branch
+        };
+
+        const minimalSuggestion = {
+          getId: sandbox.stub().returns(undefined),
+          getOpportunityId: sandbox.stub().returns(OPPORTUNITY_ID),
+          getStatus: sandbox.stub().returns('NEW'),
+          getType: sandbox.stub().returns('broken-backlinks'),
+          getRank: sandbox.stub().returns(1),
+          getData: sandbox.stub().returns({ aggregationKey: 'k' }),
+          getKpiDeltas: sandbox.stub().returns({}),
+          getCreatedAt: sandbox.stub().returns('2025-01-15T10:00:00Z'),
+          getUpdatedAt: sandbox.stub().returns('2025-01-15T10:00:00Z'),
+          getUpdatedBy: sandbox.stub().returns('system'),
+          getSkipReason: sandbox.stub().returns(null),
+          getSkipDetail: sandbox.stub().returns(null),
+          getOpportunity: sandbox.stub().returns(opportunityWithGetId),
+          setRank: sandbox.stub().returnsThis(),
+          setData: sandbox.stub().returnsThis(),
+          setKpiDeltas: sandbox.stub().returnsThis(),
+          setStatus: sandbox.stub().returnsThis(),
+          setSkipReason: sandbox.stub().returnsThis(),
+          setSkipDetail: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub(),
+        };
+        minimalSuggestion.save.resolves(minimalSuggestion);
+
+        const da = {
+          ...mockSuggestionDataAccess,
+          Site: { findById: sandbox.stub().resolves(plgSiteNoBaseURL) },
+          Suggestion: {
+            ...mockSuggestionDataAccess.Suggestion,
+            findById: sandbox.stub().resolves(minimalSuggestion),
+          },
+        };
+        const ctrl = ControllerWithSlack({
+          dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await ctrl.patchSuggestion({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+          data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+          env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+          ...context,
+          dataAccess: da,
+        });
+        await new Promise(setImmediate);
+
+        expect(response.status).to.equal(200);
+        expect(postSlackMessageStub).to.have.been.calledOnce;
+        const slackBody = postSlackMessageStub.firstCall.args[1];
+        // siteBaseURL fell back to site.getId()
+        expect(slackBody).to.include(SITE_ID);
+        // opportunityType fell back to 'unknown' (getType missing)
+        expect(slackBody).to.include('unknown');
+        // opportunityId resolved from opportunity.getId?.() (defined branch)
+        expect(slackBody).to.include('covered-opp-id');
+      });
+    });
+
+    describe('autofixSuggestions S2S acl logging (lines 1132, 1135)', () => {
+      it('logs S2S auto-fix granted via the controller-scoped logger (covers line 1132 truthy `ctx.log?` branch)', async () => {
+        const ctxLog = {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        };
+        const testSite = {
+          id: SITE_ID,
+          getImsOrgId: () => 'test-org-id',
+          getDeliveryType: () => 'aem_edge',
+          getId: () => SITE_ID,
+          getBaseURL: () => 'https://test.com',
+        };
+        mockSuggestionDataAccess.Site.findById.resolves(testSite);
+        mockSuggestionDataAccess.Opportunity.findById.resolves({
+          getSiteId: () => SITE_ID,
+          getType: () => 'broken-backlinks',
+        });
+        mockSuggestion.allByOpportunityId.resolves([]);
+
+        sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+          .resolves({
+            allowed: true, reason: 'granted', clientId: 'svc-autofix', consumerId: 'consumer-1',
+          });
+
+        const EsmockedSuggestionsController = await esmock(
+          '../../src/controllers/suggestions.js',
+          {
+            '../../src/support/utils.js': {
+              getIMSPromiseToken: async () => ({
+                promise_token: 'token', expires_in: 1, token_type: 'promise_token',
+              }),
+              getIsSummitPlgEnabled: async () => true,
+            },
+          },
+        );
+
+        const controllerWithLog = EsmockedSuggestionsController({
+          dataAccess: mockSuggestionDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          log: ctxLog,
+          ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await controllerWithLog.autofixSuggestions({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          ...context,
+        });
+
+        expect(response.status).to.equal(207);
+        expect(ctxLog.info).to.have.been.calledWithMatch('[acl] S2S auto-fix granted');
+        expect(ctxLog.info).to.have.been.calledWithMatch('clientId=svc-autofix');
+        expect(ctxLog.info).to.have.been.calledWithMatch('consumerId=consumer-1');
+      });
+
+      it('logs S2S auto-fix denied with "n/a" fallback for missing clientId/consumerId (covers line 1135 truthy `ctx.log?` and `|| "n/a"` branches)', async () => {
+        const ctxLog = {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        };
+        const testSite = {
+          id: SITE_ID,
+          getImsOrgId: () => 'test-org-id',
+          getDeliveryType: () => 'aem_edge',
+          getId: () => SITE_ID,
+          getBaseURL: () => 'https://test.com',
+        };
+        mockSuggestionDataAccess.Site.findById.resolves(testSite);
+
+        sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+          .resolves({ allowed: false, reason: 'missing-capability' });
+        sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+        const controllerWithLog = SuggestionsController({
+          dataAccess: mockSuggestionDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          log: ctxLog,
+          ...authContext,
+        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+        const response = await controllerWithLog.autofixSuggestions({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          ...context,
+        });
+
+        expect(response.status).to.equal(403);
+        expect(ctxLog.info).to.have.been.calledWithMatch('[acl] Denied PATCH auto-fix');
+        expect(ctxLog.info).to.have.been.calledWithMatch('reason=missing-capability');
+        expect(ctxLog.info).to.have.been.calledWithMatch('clientId=n/a');
+        expect(ctxLog.info).to.have.been.calledWithMatch('consumerId=n/a');
+      });
+    });
+
+    describe('deploySuggestionToEdge auto-cover message (line 2172)', () => {
+      it('reports "path-level configuration" in the autoCovered message when a path suggestion covers other suggestions', async () => {
+        const pathSuggestion = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            url: 'https://example.com/products',
+            pathType: 'prefix',
+            pathPattern: '/products',
+            allowedRegexPatterns: ['^/products'],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        const coveredPerUrlSuggestion = {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/products/widget',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+
+        const prerenderOpportunity = {
+          getId: sandbox.stub().returns(OPPORTUNITY_ID),
+          getSiteId: sandbox.stub().returns(SITE_ID),
+          getType: sandbox.stub().returns('prerender'),
+        };
+
+        sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+        sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+        site.getConfig = sandbox.stub().returns({
+          getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+        });
+        site.getBaseURL = sandbox.stub().returns('https://example.com');
+        site.getId = sandbox.stub().returns(SITE_ID);
+
+        mockOpportunity.findById.resetBehavior();
+        mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+        mockSuggestion.allByOpportunityId.resolves(
+          [pathSuggestion, coveredPerUrlSuggestion],
+        );
+
+        sandbox.stub(TokowakaClient, 'createFrom').returns({
+          deployToEdge: sandbox.stub().resolves({
+            succeededSuggestions: [pathSuggestion],
+            failedSuggestions: [],
+            coveredSuggestions: [coveredPerUrlSuggestion],
+          }),
+        });
+
+        const localContext = {
+          ...context,
+          env: {
+            TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+            TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+            TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+            TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+          },
+          log: {
+            info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(), debug: sandbox.stub(),
+          },
+        };
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...localContext,
+          pathInfo: { headers: {} },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.autoCovered).to.equal(1);
+        expect(body.metadata.message).to.equal(
+          '1 additional suggestion(s) automatically marked as deployed (covered by path-level configuration)',
+        );
+      });
     });
   });
 });

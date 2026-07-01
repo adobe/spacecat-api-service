@@ -242,7 +242,7 @@ describe('topics-storage', () => {
         status: 'active',
         brand_id: null,
         topic_categories: [
-          { category_id: 'cat-uuid-123', categories: { status: 'active' } },
+          { category_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', categories: { status: 'active' } },
         ],
         created_at: '2026-04-01T00:00:00Z',
         created_by: 'system',
@@ -259,14 +259,14 @@ describe('topics-storage', () => {
 
       const result = await createTopic({
         organizationId: ORG_ID,
-        topic: { name: 'Category Linked', categoryId: 'cat-uuid-123' },
+        topic: { name: 'Category Linked', categoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
         postgrestClient,
       });
 
       expect(fromStub).to.have.been.calledWith('topic_categories');
       // Response is symmetric with GET /topics — POST callers see the
       // category they just linked.
-      expect(result.categoryUuids).to.deep.equal(['cat-uuid-123']);
+      expect(result.categoryUuids).to.deep.equal(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
     });
 
     it('warns via log when topic_categories upsert fails', async () => {
@@ -293,7 +293,7 @@ describe('topics-storage', () => {
 
       const result = await createTopic({
         organizationId: ORG_ID,
-        topic: { name: 'Warn Topic', categoryId: 'bad-category-uuid' },
+        topic: { name: 'Warn Topic', categoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
         postgrestClient,
         log,
       });
@@ -303,6 +303,8 @@ describe('topics-storage', () => {
       // Warning was emitted
       expect(log.warn).to.have.been.calledOnce;
       expect(log.warn.firstCall.args[0]).to.include('FK violation');
+      // An error without a SQLSTATE still logs cleanly via the code=n/a fallback.
+      expect(log.warn.firstCall.args[0]).to.include('code=n/a');
     });
 
     it('skips topic_categories when categoryId is not provided', async () => {
@@ -330,6 +332,128 @@ describe('topics-storage', () => {
       });
 
       expect(fromStub).to.not.have.been.calledWith('topic_categories');
+    });
+
+    it('skips the topic_categories upsert when categoryId is not a valid UUID', async () => {
+      // A non-UUID categoryId (e.g. a category slug / business-key a caller
+      // sent by mistake) can never satisfy the uuid FK to categories.id and
+      // would produce a guaranteed PostgREST 400. Skip the doomed write and
+      // warn instead. Regression guard for the onboarding-burst 400s on
+      // POST /topic_categories.
+      const dbRow = {
+        id: 'uuid-bad-cat',
+        topic_id: 'bad-cat-topic',
+        name: 'Bad Cat',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const fromStub = sinon.stub().returns(query);
+      const postgrestClient = { from: fromStub };
+      const log = { warn: sinon.stub() };
+
+      const result = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Bad Cat', categoryId: 'marketing-tips' },
+        postgrestClient,
+        log,
+      });
+
+      // Topic creation still succeeds; the junction write is never attempted.
+      expect(result.id).to.equal('bad-cat-topic');
+      expect(fromStub).to.not.have.been.calledWith('topic_categories');
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/not a valid UUID/i);
+    });
+
+    it('truncates an over-long non-UUID categoryId in the skip warning', async () => {
+      // A caller-controlled categoryId can be arbitrarily long (a URL or
+      // base64 blob); bound it so a malformed value cannot produce multi-KB
+      // log lines.
+      const dbRow = {
+        id: 'uuid-long-cat',
+        topic_id: 'long-cat-topic',
+        name: 'Long Cat',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const fromStub = sinon.stub().returns(query);
+      const postgrestClient = { from: fromStub };
+      const log = { warn: sinon.stub() };
+      const longCategoryId = 'x'.repeat(500);
+
+      await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Long Cat', categoryId: longCategoryId },
+        postgrestClient,
+        log,
+      });
+
+      expect(fromStub).to.not.have.been.calledWith('topic_categories');
+      expect(log.warn).to.have.been.calledOnce;
+      const msg = log.warn.firstCall.args[0];
+      // The full 500-char value must not land in the log line.
+      expect(msg).to.not.include(longCategoryId);
+      expect(msg.length).to.be.lessThan(200);
+    });
+
+    it('includes the PostgREST error code and details in the warn when the junction upsert fails', async () => {
+      // When a well-formed category UUID still fails the junction upsert
+      // (e.g. 23503 — the category row is not committed yet, or belongs to a
+      // different org) the warn must carry the SQLSTATE + details so the
+      // failure is diagnosable from logs. The onboarding burst of 400s was
+      // invisible precisely because only `.message` was logged.
+      const dbRow = {
+        id: 'uuid-code',
+        topic_id: 'code-topic',
+        name: 'Code Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+      const topicsQuery = createChainableQuery({ data: dbRow, error: null });
+      const tcQuery = createChainableQuery({
+        data: null,
+        error: {
+          message: 'insert or update on table "topic_categories" violates foreign key constraint',
+          code: '23503',
+          details: 'Key (category_id)=(99999999-9999-4999-8999-999999999999) is not present in table "categories".',
+        },
+      });
+      const fromStub = sinon.stub();
+      fromStub.withArgs('topics').returns(topicsQuery);
+      fromStub.withArgs('topic_categories').returns(tcQuery);
+      const postgrestClient = { from: fromStub };
+      const log = { warn: sinon.stub() };
+
+      const result = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Code Topic', categoryId: '99999999-9999-4999-8999-999999999999' },
+        postgrestClient,
+        log,
+      });
+
+      expect(result.id).to.equal('code-topic');
+      expect(fromStub).to.have.been.calledWith('topic_categories');
+      expect(log.warn).to.have.been.calledOnce;
+      const msg = log.warn.firstCall.args[0];
+      expect(msg).to.include('code=23503');
+      expect(msg).to.include('not present in table');
     });
 
     it('falls back to upsert payload (categoryUuids:[]) and warns when refetch errors', async () => {
@@ -372,7 +496,7 @@ describe('topics-storage', () => {
 
       const result = await createTopic({
         organizationId: ORG_ID,
-        topic: { name: 'Refetch Err', categoryId: 'cat-id' },
+        topic: { name: 'Refetch Err', categoryId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
         postgrestClient,
         log,
       });
