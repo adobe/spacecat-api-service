@@ -1893,6 +1893,7 @@ describe('Fixes Controller', () => {
       it('uses x-promise-token header directly and skips getIMSPromiseToken', async () => {
         getIMSPromiseTokenStub.resetHistory();
         exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
 
         const mockSite = {
           getDeliveryType: () => 'aem_cs',
@@ -1929,11 +1930,15 @@ describe('Fixes Controller', () => {
           sinon.match.any,
           'header-promise-token',
         );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] using promise token from x-promise-token header',
+        );
       });
 
       it('falls back to getIMSPromiseToken when x-promise-token header is absent', async () => {
         getIMSPromiseTokenStub.resetHistory();
         exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
 
         const mockSite = {
           getDeliveryType: () => 'aem_cs',
@@ -1969,6 +1974,9 @@ describe('Fixes Controller', () => {
         expect(exchangePromiseTokenStub).to.have.been.calledWith(
           sinon.match.any,
           'mock-promise-token',
+        );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] no x-promise-token header, creating promise token via IMS',
         );
       });
     });
