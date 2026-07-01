@@ -40,6 +40,8 @@ import { brands } from './seed-data/brands.js';
 import { brandSites } from './seed-data/brand-sites.js';
 import { projectionAudits } from './seed-data/projection-audits.js';
 import { featureFlags } from './seed-data/feature-flags.js';
+import { prompts } from './seed-data/prompts.js';
+import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -163,10 +165,15 @@ async function seed() {
     insertRows('audit_urls', auditUrls),
     insertRows('sentiment_guidelines', sentimentGuidelines),
     insertRows('brand_sites', brandSites),
+    // prompts.brand_id → brands.id, organization_id → organizations.id
+    insertRows('prompts', prompts),
   ]);
 
-  // Level 4: depend on fix_entities + suggestions
-  await insertRows('fix_entity_suggestions', fixEntitySuggestions);
+  // Level 4: depend on fix_entities + suggestions, and prompts (BPE.prompt_id → prompts.id)
+  await Promise.all([
+    insertRows('fix_entity_suggestions', fixEntitySuggestions),
+    insertRows('brand_presence_executions', brandPresenceExecutions),
+  ]);
 }
 
 /**
