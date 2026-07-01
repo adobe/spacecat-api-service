@@ -39,6 +39,7 @@ import {
   requiredLlmFromQuery,
   optionalLlmFromQuery,
   parseMonthYM,
+  exactSnapshotDate,
   statsByLLMDateRange,
   slugHostFromBrandName,
   normalizeTopBrandsByDomainNameKey,
@@ -609,6 +610,30 @@ describe('grpc-utils', () => {
 
     it('returns null for whitespace-only month', () => {
       expect(parseMonthYM(sp('month=%20'))).to.be.null;
+    });
+  });
+
+  describe('exactSnapshotDate', () => {
+    it('returns the value for an exact YYYY-MM-DD date', () => {
+      expect(exactSnapshotDate(sp('date=2026-07-01'))).to.equal('2026-07-01');
+    });
+
+    it('returns undefined for a month-only YYYY-MM date', () => {
+      expect(exactSnapshotDate(sp('date=2026-07'))).to.be.undefined;
+    });
+
+    it('returns undefined when date param is missing', () => {
+      expect(exactSnapshotDate(sp(''))).to.be.undefined;
+    });
+
+    it('returns undefined for empty or whitespace-only date', () => {
+      expect(exactSnapshotDate(sp('date='))).to.be.undefined;
+      expect(exactSnapshotDate(sp('date=%20'))).to.be.undefined;
+    });
+
+    it('returns undefined for malformed dates', () => {
+      expect(exactSnapshotDate(sp('date=2026-7-1'))).to.be.undefined;
+      expect(exactSnapshotDate(sp('date=abc'))).to.be.undefined;
     });
   });
 
