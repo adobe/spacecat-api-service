@@ -111,7 +111,7 @@ describe('PageGroupsController', () => {
       const controller = PageGroupsController(ctx);
       const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
       expect(res.status).to.equal(200);
-      const body = JSON.parse(res.body);
+      const body = await res.json();
       expect(body).to.be.an('array');
       const patterns = body.map((g) => g.pattern);
       expect(patterns).to.include('/products/*');
@@ -122,7 +122,7 @@ describe('PageGroupsController', () => {
       const ctx = makeContext();
       const controller = PageGroupsController(ctx);
       const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
-      const body = JSON.parse(res.body);
+      const body = await res.json();
       // headings opp has no URLs (returns []) so only products + blog appear
       expect(body.length).to.equal(2);
     });
@@ -131,7 +131,7 @@ describe('PageGroupsController', () => {
       const ctx = makeContext();
       const controller = PageGroupsController(ctx);
       const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
-      const body = JSON.parse(res.body);
+      const body = await res.json();
       const products = body.find((g) => g.pattern === '/products/*');
       expect(products.pageCount).to.equal(3);
       expect(products.lockedPages).to.equal(1);
@@ -149,7 +149,7 @@ describe('PageGroupsController', () => {
       });
       const controller = PageGroupsController(ctx);
       const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
-      const body = JSON.parse(res.body);
+      const body = await res.json();
       expect(body[0].trafficLevel).to.equal('high');
     });
 
@@ -159,7 +159,7 @@ describe('PageGroupsController', () => {
       const controller = PageGroupsController(ctx);
       const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
       expect(res.status).to.equal(200);
-      const body = JSON.parse(res.body);
+      const body = await res.json();
       expect(body).to.deep.equal([]);
     });
 
@@ -167,7 +167,7 @@ describe('PageGroupsController', () => {
       const ctx = makeContext();
       const controller = PageGroupsController(ctx);
       const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
-      const body = JSON.parse(res.body);
+      const body = await res.json();
       expect(body[0].pageCount).to.be.gte(body[body.length - 1].pageCount);
     });
   });
