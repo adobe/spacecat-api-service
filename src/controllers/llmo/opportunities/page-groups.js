@@ -71,7 +71,7 @@ function PageGroupsController(ctx) {
       (o) => EXPERIMENTABLE_TYPES.has(o.getType()),
     );
 
-    // cluster: pattern → { pageCount, lockedPages }
+    // cluster: pattern → { pageCount, lockedPages, suggestions }
     const clusters = new Map();
 
     await Promise.all(experimentable.map(async (opp) => {
@@ -81,10 +81,13 @@ function PageGroupsController(ctx) {
         if (url) {
           const pattern = toPathPattern(url);
           const isLocked = suggestion.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS';
-          const existing = clusters.get(pattern) ?? { pageCount: 0, lockedPages: 0 };
+          const existing = clusters.get(pattern)
+            ?? { pageCount: 0, lockedPages: 0, suggestions: [] };
+          existing.suggestions.push(suggestion);
           clusters.set(pattern, {
             pageCount: existing.pageCount + 1,
             lockedPages: existing.lockedPages + (isLocked ? 1 : 0),
+            suggestions: existing.suggestions,
           });
         }
       }
@@ -92,14 +95,30 @@ function PageGroupsController(ctx) {
 
     const groups = [...clusters.entries()]
       .sort(([, a], [, b]) => b.pageCount - a.pageCount)
-      .map(([pattern, { pageCount, lockedPages }]) => ({
-        id: pattern.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, ''),
-        pattern,
-        pageCount,
-        // eslint-disable-next-line no-nested-ternary
-        trafficLevel: pageCount >= 80 ? 'high' : pageCount >= 30 ? 'medium' : 'low',
-        lockedPages,
-      }));
+      .map(([pattern, { pageCount, lockedPages, suggestions: clusterSuggestions }]) => {
+        // Aggregate W6 personas from stored suggestion data; empty if W6 hasn't run
+        const personaFreq = new Map();
+        for (const s of clusterSuggestions) {
+          for (const p of (s.getData()?.personas ?? [])) {
+            const existing = personaFreq.get(p.id) ?? { persona: p, count: 0 };
+            personaFreq.set(p.id, { persona: p, count: existing.count + 1 });
+          }
+        }
+        const topPersonas = [...personaFreq.values()]
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5)
+          .map(({ persona }) => persona);
+
+        return {
+          id: pattern.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, ''),
+          pattern,
+          pageCount,
+          // eslint-disable-next-line no-nested-ternary
+          trafficLevel: pageCount >= 80 ? 'high' : pageCount >= 30 ? 'medium' : 'low',
+          lockedPages,
+          topPersonas, // [] until W6 has run for this site
+        };
+      });
 
     return ok(groups);
   };

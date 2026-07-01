@@ -170,5 +170,33 @@ describe('PageGroupsController', () => {
       const body = await res.json();
       expect(body[0].pageCount).to.be.gte(body[body.length - 1].pageCount);
     });
+
+    it('includes topPersonas aggregated from suggestion.data.personas', async () => {
+      const ctx = makeContext();
+      ctx.dataAccess.Suggestion.allByOpportunityId = sinon.stub().resolves([
+        {
+          getData: () => ({
+            url: 'https://example.com/products/ps',
+            personas: [{
+              id: 'tech', name: 'Technical', trafficShare: 0.6, focus: 'APIs', samplePrompts: [],
+            }],
+          }),
+        },
+      ]);
+      const controller = PageGroupsController(ctx);
+      const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
+      const body = await res.json();
+      const group = body.find((g) => g.pattern === '/products/*');
+      expect(group.topPersonas).to.have.length(1);
+      expect(group.topPersonas[0].name).to.equal('Technical');
+    });
+
+    it('returns empty topPersonas when no personas stored yet', async () => {
+      const ctx = makeContext();
+      const controller = PageGroupsController(ctx);
+      const res = await controller.getPageGroups({ params: { siteId: VALID_SITE_ID } });
+      const body = await res.json();
+      expect(body[0].topPersonas).to.deep.equal([]);
+    });
   });
 });
