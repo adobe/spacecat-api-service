@@ -131,30 +131,6 @@ async function loadController(supportStubs = {}) {
 }
 
 describe('StateAccessMappingsController', () => {
-  describe('dev-env blocker (state-layer endpoints kept dev-only for now)', () => {
-    const HANDLERS = [
-      'listMappings', 'listHistory', 'createMapping', 'patchMapping', 'deleteMapping',
-      'getProductCapabilities', 'getUserCapabilities', 'getAuditLogs',
-    ];
-
-    HANDLERS.forEach((name) => {
-      it(`${name} returns 404 when AWS_ENV is not dev`, async () => {
-        const { Controller } = await loadController();
-        const ctx = makeContext({ awsEnv: 'prod' });
-        const res = await Controller(ctx)[name](ctx);
-        expect(res.status).to.equal(404);
-      });
-    });
-
-    it('missing env (AWS_ENV undefined) also 404s', async () => {
-      const { Controller } = await loadController();
-      const ctx = makeContext();
-      delete ctx.env;
-      const res = await Controller(ctx).listMappings(ctx);
-      expect(res.status).to.equal(404);
-    });
-  });
-
   describe('preamble / common gates', () => {
     it('listMappings returns 503 when postgrest is unavailable', async () => {
       const { Controller } = await loadController({

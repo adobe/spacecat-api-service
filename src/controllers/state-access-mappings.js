@@ -35,9 +35,7 @@ import {
 
 // Inlined deliberately: the shared `normalizeImsOrgId` ships in
 // `@adobe/spacecat-shared-http-utils` (spacecat-shared#1717) but is not yet in
-// the version this repo depends on. Swap to the import in the same follow-up
-// PR that bumps http-utils and attaches `facsWrapper` (see the dev-only-blocker
-// note at the bottom of this file) — both depend on that published version.
+// the version this repo depends on. Swap to the import when http-utils is bumped.
 function normalizeImsOrgId(orgIdent, authSrc = 'AdobeOrg') {
   if (!orgIdent || typeof orgIdent !== 'string') {
     return orgIdent;
@@ -1194,26 +1192,15 @@ function StateAccessMappingsController(context) {
     }
   }
 
-  // ── Temporary dev-only blocker ──────────────────────────────────────────
-  // `facsWrapper` now fronts the FACS-governed product routes (attached in
-  // `src/index.js`) and is the permanent enforcement layer, but the state-layer
-  // management endpoints are kept dev-only for now until they are ready for
-  // production exposure. In any other environment every handler responds 404,
-  // fully hiding the staged feature. Remove the `devOnly` wrapper (and this
-  // `isDevEnv` read) when these endpoints graduate to prod — the controller's own
-  // `can_manage_users` / `can_view` gating is the permanent authorization layer.
-  const isDevEnv = context.env?.AWS_ENV === 'dev';
-  const devOnly = (handler) => (...args) => (isDevEnv ? handler(...args) : notFound());
-
   return {
-    listMappings: devOnly(listMappings),
-    listHistory: devOnly(listHistory),
-    createMapping: devOnly(createMapping),
-    patchMapping: devOnly(patchMapping),
-    deleteMapping: devOnly(deleteMapping),
-    getProductCapabilities: devOnly(getProductCapabilities),
-    getUserCapabilities: devOnly(getUserCapabilities),
-    getAuditLogs: devOnly(getAuditLogs),
+    listMappings,
+    listHistory,
+    createMapping,
+    patchMapping,
+    deleteMapping,
+    getProductCapabilities,
+    getUserCapabilities,
+    getAuditLogs,
   };
 }
 
