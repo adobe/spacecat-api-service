@@ -1,3 +1,10 @@
+## [1.613.3](https://github.com/adobe/spacecat-api-service/compare/v1.613.2...v1.613.3) (2026-07-01)
+
+
+### Bug Fixes
+
+* **sites-resolve:** preserve no_entitlement_for_product for WAITING_FOR_IP_ALLOWLISTING when caller is internal ([#2690](https://github.com/adobe/spacecat-api-service/issues/2690)) ([e53872a](https://github.com/adobe/spacecat-api-service/commit/e53872a6e6b475bdee7bb835d103af72bc4cf1e9))
+
 ## [1.613.2](https://github.com/adobe/spacecat-api-service/compare/v1.613.1...v1.613.2) (2026-07-01)
 
 
