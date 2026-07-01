@@ -1,3 +1,10 @@
+## [1.613.1](https://github.com/adobe/spacecat-api-service/compare/v1.613.0...v1.613.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* ChatGPT missing from AI Visibility Model filter | LLMO-5933 ([#2729](https://github.com/adobe/spacecat-api-service/issues/2729)) ([59ced71](https://github.com/adobe/spacecat-api-service/commit/59ced719e0b1e6522010c319aa251efd3e20c208))
+
 # [1.613.0](https://github.com/adobe/spacecat-api-service/compare/v1.612.0...v1.613.0) (2026-07-01)
 
 
