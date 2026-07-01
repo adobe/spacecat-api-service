@@ -82,7 +82,12 @@ v2-brands-for-org:
       '400':
         $ref: './responses.yaml#/400'
       '403':
-        description: User does not have access to this organization
+        description: |
+          Forbidden. Either the user does not have access to this organization, OR
+          a Semrush-mode create (a picked `semrushMarket` or `generatePrompts`) was
+          requested while the org-wide serenity feature flag (`LLMO/serenity`) is
+          inactive — provisioning a sub-workspace is refused until the org's rollout
+          flag is on (body message: "Serenity is not active for this organization").
       '404':
         $ref: './responses.yaml#/404-organization-not-found-with-id'
       '409':
@@ -176,7 +181,13 @@ v2-brand-for-org:
       '400':
         $ref: './responses.yaml#/400'
       '403':
-        description: User does not have access to this organization
+        description: |
+          Forbidden. Either the user does not have access to this organization, OR
+          the edit would re-sync a sub-workspace brand to Semrush (a URL, competitor,
+          or alias change on a brand carrying a `semrushWorkspaceId`) while the
+          org-wide serenity feature flag (`LLMO/serenity`) is inactive — the edit is
+          refused rather than left to drift (body message: "Serenity is not active
+          for this organization").
       '404':
         description: Organization or brand not found
       '409':
