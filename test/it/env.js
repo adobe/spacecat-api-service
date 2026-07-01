@@ -27,11 +27,21 @@ export function buildEnv(publicKeyB64) {
     // AWS_SESSION_TOKEN is cleared so that the CI configure-aws-credentials step's real
     // STS token does not leak into MinIO requests (MinIO validates or rejects STS tokens).
     AWS_REGION: 'us-east-1',
+    // Deployment env. The state-access-mapping endpoints are dev-only until
+    // facsWrapper fronts them (they 404 elsewhere), so the IT server must boot
+    // as 'dev' for that suite to exercise the real handlers.
+    AWS_ENV: 'dev',
     AWS_ACCESS_KEY_ID: 'minioadmin',
     AWS_SECRET_ACCESS_KEY: 'minioadmin',
     AWS_SESSION_TOKEN: '',
     AWS_ENDPOINT_URL_S3: `http://localhost:${process.env.IT_MINIO_PORT || '9100'}`,
     S3_BUCKET_NAME: 'spacecat-it-test',
+
+    // ASO redirect overlay endpoint (GET /config/:service/redirects.txt). The
+    // bucket name encodes the deployment env (dev); the controller reads from it
+    // with the Lambda's own role after resolving the service to an entitled site.
+    S3_ASO_OVERLAYS_BUCKET: 'spacecat-dev-aso-overlays',
+    ASO_OVERLAY_API_KEY: 'it-aso-overlay-key',
 
     // IMS client (eager, hard-throws per-request). NB: hostname only, no
     // scheme — ImsClient builds URLs as `https://${IMS_HOST}${endpoint}`,
@@ -75,6 +85,11 @@ export function buildEnv(publicKeyB64) {
     AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-audits',
     S3_CONFIG_BUCKET: 'dummy-config-bucket',
 
+    // LLMO Cloudflare onboarding — GET .../cloudflare/config returns this verbatim to the
+    // browser PKCE flow. Other cloudflare endpoints call the external Cloudflare API and are
+    // not exercised by the IT suite (no external HTTP mocking).
+    CLOUDFLARE_CLIENT_ID: 'it-cloudflare-client-id',
+
     // Consumers (S2S) — allow ORG_1 IMS org for seeding and IT tests
     S2S_ALLOWED_IMS_ORG_IDS: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
 
@@ -83,5 +98,23 @@ export function buildEnv(publicKeyB64) {
     POSTGREST_URL: `http://localhost:${process.env.IT_POSTGREST_PORT || '3300'}`,
     POSTGREST_SCHEMA: 'public',
     POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
+
+    // ── Serenity E2E: Semrush vendor mocks ──────────────────────────────────
+    // NONE of the vars below require Vault / deployed-env config: SEMRUSH_USERS_BASE_URL
+    // falls back to SEMRUSH_PROJECTS_BASE_URL when unset, and the rest are IT-only.
+    // Point the two serenity transport gateways at the mock containers. The
+    // User Manager origin is split out via SEMRUSH_USERS_BASE_URL (api-service#2656)
+    // so the two mocks need no path-routing reverse proxy. Both serve self-signed
+    // HTTPS, so the dev server trusts them via NODE_TLS_REJECT_UNAUTHORIZED=0
+    // (scoped to this IT process — never a deployed setting).
+    SEMRUSH_PROJECTS_BASE_URL: `https://localhost:${process.env.IT_PE_MOCK_PORT || '8443'}`,
+    SEMRUSH_USERS_BASE_URL: `https://localhost:${process.env.IT_UM_MOCK_PORT || '8444'}`,
+    NODE_TLS_REJECT_UNAUTHORIZED: '0',
+    // Test-only escape hatch: accept the harness's non-IMS JWT on /serenity/*.
+    // Sound only against the mocks, which ignore the forwarded bearer. No
+    // deployed environment sets this (it is never written to Vault).
+    SERENITY_ALLOW_NON_IMS_AUTH: 'true',
+    // Lets the net-zero cleanup delete a sub-workspace it created in the mock.
+    SERENITY_ALLOW_WORKSPACE_DELETE: 'true',
   };
 }

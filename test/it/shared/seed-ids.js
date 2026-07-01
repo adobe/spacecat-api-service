@@ -37,9 +37,36 @@ export const SITE_2_BASE_URL = 'https://site2.example.com';
 export const SITE_3_ID = '55555555-5555-4555-9555-555555555555';
 export const SITE_3_BASE_URL = 'https://site3-denied.example.com';
 
+// Serenity market-mirror Site (ORG_1): a Site that mirrors a Semrush market,
+// linked to BRAND_1 via a `brand_sites` row tagged type='serenity'. It is a
+// pure backend linkage — it must NOT surface in the brand's urls[] / siteIds.
+export const MARKET_SITE_1_ID = '5e111111-1111-4111-b111-1111111111fe';
+export const MARKET_SITE_1_BASE_URL = 'https://semrush-market.example.fr';
+
 // ── Brands ──
 
 export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
+
+// Serenity Semrush vendor-mock seed alignment. BRAND_1 is in subworkspace mode
+// (brands.semrush_workspace_id set); pointing it at the workspace the Project
+// Engine / User Manager mocks seed (`MOCK_SEED=workspace-with-data` /
+// `parent-with-child`) lets the brand-level read endpoints return live seeded
+// data instead of only 404ing. The mock seeds one project under this workspace
+// with a model (gpt-4o), a prompt, and a benchmark/market.
+export const SERENITY_MOCK_WORKSPACE_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
+
+// ── FACS state-layer managers (hybrid-model §8.3) ──
+// The brandManager persona holds state-layer `llmo/can_manage_users` on
+// MANAGED_BRAND_ID only (seeded in facs-access-mappings.js). It has an EMPTY
+// JWT facs_permissions set, so its management authority is purely state-layer
+// and resource-scoped. UNMANAGED_BRAND_ID is a brand it does NOT manage.
+export const BRAND_MANAGER_SUBJECT = 'brand-manager@AdobeID';
+export const MANAGED_BRAND_ID = 'b0000001-0000-4000-8000-000000000001';
+export const UNMANAGED_BRAND_ID = 'b0000002-0000-4000-8000-000000000002';
+// A pre-seeded binding on the UNMANAGED brand, used to assert the brandManager
+// cannot PATCH / DELETE bindings on resources it does not manage.
+export const UNMANAGED_MAPPING_ID = 'aa000002-0000-4000-8000-000000000002';
 
 // ── Audits ──
 

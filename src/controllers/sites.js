@@ -31,6 +31,7 @@ import {
   isNonEmptyObject,
   canonicalizeUrl,
   composeBaseURL,
+  getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -56,6 +57,7 @@ import {
   logSiteOrphanedAfterCreate,
   resolveProductCode,
 } from '../support/tier-provisioning.js';
+import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -826,6 +828,56 @@ function SitesController(ctx, log, env) {
       return badRequest('Request body required');
     }
 
+    // A site's URL is immutable once it backs a Semrush-managed brand. That brand's
+    // tracked domain lives on its Semrush projects/markets, which have no
+    // domain-update path (the domain is set only at project-create time), so
+    // letting the SpaceCat site URL drift would desync the site from its Semrush
+    // projects. Only the URL is gated here — every other site field stays editable.
+    // The brand lookup runs only when a URL change is actually requested, so the
+    // common patch path (no baseURL) pays no extra query.
+    //
+    // TODO (~2026-07-07): Semrush is expected to support changing a project's
+    // primary URL — which is its main (own-brand, `main_brand: true`) benchmark
+    // domain, see ensureOwnBrandBenchmark in support/serenity/brand-urls.js — in
+    // ~2 weeks (heads-up received 2026-06-23). Once available, relax this guard to
+    // propagate the new URL to each market's main benchmark (and republish) instead
+    // of blocking the edit.
+    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+      const postgrestClient = context.dataAccess?.services?.postgrestClient;
+      if (postgrestClient?.from) {
+        // Two ways a site can back a Semrush-managed brand, both immutable:
+        //  - the brand's OWN primary site (brands.site_id) — getBrandBySite, or
+        //  - a Semrush market mirror linked via brand_sites (type='serenity'),
+        //    which a serenity brand shell (no brands.site_id) reaches ONLY here.
+        // The lookups can throw on a transient PostgREST error; map that to a 5xx
+        // rather than letting it escape this catch-less handler as an opaque 500.
+        let attachedToSemrushBrand = false;
+        try {
+          const attachedBrand = await getBrandBySite(
+            site.getOrganizationId(),
+            site.getId(),
+            postgrestClient,
+            log,
+          );
+          attachedToSemrushBrand = hasText(attachedBrand?.semrushWorkspaceId)
+            || await isSemrushMarketMirrorSite(
+              site.getOrganizationId(),
+              site.getId(),
+              postgrestClient,
+            );
+        } catch (lookupError) {
+          log.error('updateSite: failed to resolve Semrush-brand attachment for URL-immutability guard', {
+            siteId: site.getId(),
+            error: lookupError?.message,
+          });
+          return internalServerError('Could not verify whether this site URL is editable; please retry');
+        }
+        if (attachedToSemrushBrand) {
+          return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
+        }
+      }
+    }
+
     let updates = false;
     if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.getIsLive()) {
       site.toggleLive();
@@ -1152,15 +1204,22 @@ function SitesController(ctx, log, env) {
         ),
       ]);
 
+      // Locale-specific sites (e.g. https://example.com/de) have no RUM domain key
+      // of their own — `domain` resolves to the main domain. Narrow the RUM result
+      // to the locale subtree by its path prefix; null for whole-domain sites.
+      const pathPrefix = getBaseURLPathPrefix(site.getBaseURL());
+
       // Fetch current and previous RUM metrics in parallel
       const [current, previous] = await Promise.all([
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: thirtyDaysAgo.toISOString(),
           endTime: todayUTC.toISOString(),
         }),
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: sixtyDaysAgo.toISOString(),
           endTime: thirtyDaysAgo.toISOString(),
         }),

@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 /**
  * Serenity prompt-tag taxonomy — the single source of truth for the
  * `dimension:value` tag strings attached to prompts (and registered as the tag
@@ -23,6 +25,7 @@ export const TAG_DIMENSION = Object.freeze({
   SOURCE: 'source',
   INTENT: 'intent',
   TYPE: 'type',
+  CATEGORY: 'category',
 });
 
 // `source:<value>` — who authored the prompt.
@@ -32,13 +35,23 @@ export const SOURCE_TAG = Object.freeze({
 });
 
 // `intent:<value>` — the searcher intent the prompt represents.
+//
+// These are the Semrush AIO intent TARGETS, the shared vocabulary that the
+// mysticat-data-service customer-onboarding script also registers as a project's
+// tag taxonomy (its `DEFAULT_PROJECT_TAGS`). They are NOT the raw data-service
+// intent buckets persisted in `prompts.intent` (those — informational /
+// instructional / comparative / transactional / planning / delegation — live in
+// `src/support/intent.js` and are unchanged here). The DRS-bucket → Semrush-target
+// mapping is the onboarding script's `INTENT_MAP` (mysticat-data-service
+// `scripts/customer_onboarding/tags.py`; see mysticat-data-service PR #737).
+// `Navigational` has no DRS source bucket but is part of the Semrush vocabulary,
+// so it belongs in the taxonomy even though no generated prompt is tagged with it.
 export const INTENT_TAG = Object.freeze({
-  INFORMATIONAL: 'intent:informational',
-  INSTRUCTIONAL: 'intent:instructional',
-  COMPARATIVE: 'intent:comparative',
-  TRANSACTIONAL: 'intent:transactional',
-  PLANNING: 'intent:planning',
-  DELEGATION: 'intent:delegation',
+  INFORMATIONAL: 'intent:Informational',
+  TASK: 'intent:Task',
+  COMMERCIAL: 'intent:Commercial',
+  TRANSACTIONAL: 'intent:Transactional',
+  NAVIGATIONAL: 'intent:Navigational',
 });
 
 // `type:<value>` — whether the prompt mentions the brand.
@@ -47,13 +60,31 @@ export const TYPE_TAG = Object.freeze({
   NON_BRANDED: 'type:non-branded',
 });
 
-/** Builds the `topic:<NAME>` tag for a topic name. */
-export function topicTag(name) {
-  return `${TAG_DIMENSION.TOPIC}:${name}`;
+/** Builds the `<dimension>:<NAME>` tag string for a dimension + free-form value. */
+export function tagFor(dimension, name) {
+  return `${dimension}:${name}`;
 }
 
+/** Builds the `topic:<NAME>` tag for a topic name. */
+export function topicTag(name) {
+  return tagFor(TAG_DIMENSION.TOPIC, name);
+}
+
+/**
+ * The tag dimensions a caller may freely create values under (the open
+ * taxonomies). The closed taxonomies — `source` / `intent` / `type` — have a
+ * fixed value enum registered as {@link PROJECT_STANDARD_TAGS}, so callers must
+ * NOT mint arbitrary values under them; only `topic` and `category` accept
+ * customer-authored values. The create-tag endpoint validates the requested
+ * `type` against this list, which is what bounds the allowed tag prefixes.
+ */
+export const CREATABLE_TAG_DIMENSIONS = Object.freeze([
+  TAG_DIMENSION.CATEGORY,
+  TAG_DIMENSION.TOPIC,
+]);
+
 // Tags applied to EVERY AI-generated prompt on top of its `topic:<NAME>` tag:
-// `source:ai` (AI-authored) plus the default `intent:informational` (the most
+// `source:ai` (AI-authored) plus the default `intent:Informational` (the most
 // common intent for brand-topic prompts; re-classification can refine it
 // later). `type:` is classified per prompt at generation time (branded vs
 // non-branded — see the handler), so it is NOT seeded here.

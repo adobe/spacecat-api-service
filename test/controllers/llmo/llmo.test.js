@@ -187,6 +187,7 @@ describe('LlmoController', () => {
         }
       },
       getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+      // eslint-disable-next-line no-use-before-define
     },
   });
 
@@ -7274,6 +7275,29 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('same base domain');
+    });
+
+    it('should return 400 when staging domain does not have same path as that of prod site', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('pathname scope');
+    });
+
+    it('should accept staging domain which has same path as that of prod site', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
+      stageConfigContext.data = { stagingDomains: ['https://staging.lovesac.com/docs'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('https://staging.lovesac.com/docs');
     });
 
     it('should return 403 when not LLMO administrator', async () => {

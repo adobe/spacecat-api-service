@@ -27,6 +27,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { EntitlementDto } from '../dto/entitlement.js';
+import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
@@ -48,7 +49,7 @@ function EntitlementsController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { Entitlement, Organization } = dataAccess;
+  const { Entitlement, Organization, Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -127,9 +128,78 @@ function EntitlementsController(ctx) {
     }
   };
 
+  /**
+   * Ensures an entitlement (org-level) and a site enrollment exist for the given
+   * site and product. Mirrors the Slack `ensure entitlement site` command: if the
+   * site's organization has no entitlement for the product, one is created with
+   * default free-trial quotas; then the site enrollment linking the site to that
+   * entitlement is created. The operation is idempotent — repeating the call
+   * returns the same entitlement + enrollment without duplicating rows.
+   *
+   * Admin-only. The route is intentionally absent from
+   * `routes/required-capabilities.js` and listed in `INTERNAL_ROUTES` so S2S
+   * consumers are denied by default (matches the parallel
+   * `POST /organizations/:organizationId/entitlements` admin-only contract).
+   *
+   * Distinct from `POST /sites/:siteId/site-enrollments`
+   * (SiteEnrollmentsController.createPlgEnrollment), which is a narrower,
+   * ASO-only, summit-PLG-gated path that refuses to create the org entitlement
+   * when missing. This endpoint is the general-purpose Slack equivalent: any
+   * supported product, creates the entitlement when missing, no PLG handler
+   * gate.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Created entitlement + site enrollment response.
+   */
+  const createSiteEntitlement = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can ensure entitlements for a site');
+    }
+    const { siteId } = context.params;
+    const {
+      productCode,
+      tier = FREE_TRIAL_TIER,
+    } = context.data || {};
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (typeof productCode !== 'string' || !VALID_PRODUCT_CODES.has(productCode)) {
+      return badRequest(`Invalid product code. Must be one of: ${[...VALID_PRODUCT_CODES].join(', ')}`);
+    }
+    if (typeof tier !== 'string' || !Object.values(EntitlementModel.TIERS).includes(tier)) {
+      return badRequest(`Invalid tier. Must be one of: ${Object.values(EntitlementModel.TIERS).join(', ')}`);
+    }
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      // TierClient.createForSite resolves the site's owning organization and
+      // returns a client bound to (site, organization, productCode). Its
+      // .createEntitlement(tier) is the same idempotent path the Slack command
+      // uses: creates the org entitlement if missing, then the site enrollment;
+      // updates a non-PAID tier if the request asks for a different one;
+      // returns existing rows on repeat calls.
+      const tierClient = await TierClient.createForSite(
+        context,
+        site,
+        productCode,
+      );
+      const { entitlement, siteEnrollment } = await tierClient.createEntitlement(tier);
+      return created({
+        entitlement: EntitlementDto.toJSON(entitlement),
+        siteEnrollment: SiteEnrollmentDto.toJSON(siteEnrollment),
+      });
+    } catch (e) {
+      context.log.error(`Error ensuring entitlement for site ${siteId}: ${e.message}`);
+      return internalServerError('Failed to ensure entitlement for site');
+    }
+  };
+
   return {
     getByOrganizationID,
     createEntitlement,
+    createSiteEntitlement,
   };
 }
 

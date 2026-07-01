@@ -658,9 +658,14 @@ function parseFilterDimensionsSiteQuery(context) {
 }
 
 /**
- * True if the brand is tied to the site via legacy `brands.site_id` or `brand_sites` (M2M).
- * When `preloadedBrandSiteId` is passed (including `null`), skips the initial `brands` lookup — use
- * when the caller already selected `site_id` on the same brand row.
+ * True if the brand is tied to the site via `brands.site_id` (canonical primary
+ * site mapping) or `brand_sites` (M:N for additional touched sites). Per LLMO-4837,
+ * `brands.site_id` is the authoritative primary-site reference (not deprecated);
+ * `brand_sites` covers citations / localised variants.
+ *
+ * When `preloadedBrandSiteId` is passed (including `null`), skips the initial
+ * `brands` lookup — use when the caller already selected `site_id` on the same
+ * brand row.
  * @param {string|null|undefined} [preloadedBrandSiteId] - Known brands.site_id, else query DB
  * @internal Exported for tests
  */
@@ -671,8 +676,8 @@ export async function brandLinkedToSite(
   siteId,
   preloadedBrandSiteId,
 ) {
-  let legacySiteId = preloadedBrandSiteId;
-  if (legacySiteId === undefined) {
+  let primarySiteId = preloadedBrandSiteId;
+  if (primarySiteId === undefined) {
     const { data: rows, error } = await client
       .from('brands')
       .select('site_id')
@@ -682,9 +687,9 @@ export async function brandLinkedToSite(
     if (error || !rows?.length) {
       return false;
     }
-    legacySiteId = rows[0].site_id;
+    primarySiteId = rows[0].site_id;
   }
-  if (legacySiteId === siteId) {
+  if (primarySiteId === siteId) {
     return true;
   }
   const { data: links } = await client

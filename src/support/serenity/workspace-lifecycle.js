@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../utils.js';
@@ -123,23 +125,50 @@ function familyItems(family) {
 }
 
 /**
- * Ambiguous-create recovery (design §6): a timed-out createSubworkspace is
- * ambiguous (no idempotency key). List the parent's family, match the exact
- * title, and adopt a `created`, project-empty subworkspace. Multiple matches → fail
- * with an alert, never guess.
+ * Finds the one adoptable same-title child in the parent's family, or `null` when
+ * none exists. "Adoptable" means a `created`, project-empty sub-workspace.
+ *
+ * Status filter (issue #2718): a Semrush child create can be 200-acked and then
+ * fail provisioning asynchronously, leaving a stub permanently stuck at
+ * `status: 'not ready'` ("invalid subscription") that we cannot delete. Such a
+ * zombie also has `projectCount 0`, so a title+empty-only match would (a) adopt
+ * it as the brand's workspace (then immediately re-time-out at pollUntilCreated)
+ * and (b) once ≥2 accumulate, inflate the multiple-match `409` and wedge the
+ * brand. Considering ONLY `status === 'created'` entries makes accumulated
+ * zombies invisible to the matcher, breaking that snowball. The live family
+ * endpoint always returns a status, so the strict equality is safe.
+ *
+ * Shared by both adoption paths so the match/ambiguity/empty rules live in one
+ * place: the proactive create-or-adopt check (returns the match to reuse, or
+ * null → create) and the 504 timeout recovery (null → no-match error).
+ *
+ * @param {object} transport
+ * @param {string} parentWorkspaceId
+ * @param {string} title
+ * @param {object} log
+ * @returns {Promise<object|null>} the sole adoptable family entry, or null.
  */
-async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
+async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log) {
   const family = await transport.listWorkspaceFamily(parentWorkspaceId);
   const items = familyItems(family);
-  const matches = items.filter((w) => w?.title === title);
+  const matches = items.filter((w) => w?.title === title && w?.status === 'created');
   if (matches.length === 0) {
-    throw new ErrorWithStatusCode(
-      `Ambiguous subworkspace create for '${title}' and no family match to adopt`,
-      502,
-    );
+    // Surface filtered-out non-`created` same-title stubs (Semrush ack-then-fail
+    // zombies) so their accumulation is visible in logs without a manual family
+    // query — they are the exact failure mode this status filter absorbs (#2718).
+    const ignored = items.filter((w) => w?.title === title && w?.status !== 'created');
+    if (ignored.length > 0) {
+      log?.info?.('ensureSubworkspace: ignoring non-created same-title family stub(s)', {
+        parentWorkspaceId,
+        title,
+        ignoredCount: ignored.length,
+        ignoredStatuses: [...new Set(ignored.map((w) => w?.status))],
+      });
+    }
+    return null;
   }
   if (matches.length > 1) {
-    log?.error?.('ensureSubworkspace: ambiguous create — multiple family matches, refusing to guess', {
+    log?.error?.('ensureSubworkspace: ambiguous create — multiple created family matches, refusing to guess', {
       parentWorkspaceId,
       title,
       matchIds: matches.map((m) => m?.id),
@@ -159,11 +188,11 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
       502,
     );
   }
-  // Defense-in-depth: adopt ONLY a genuinely empty sub-workspace. A timed-out
-  // create has not yet created any projects (projects are created only after
-  // the workspace settles to `created`), so a non-empty match is NOT our
-  // interrupted create — adopting it would graft this brand onto an
-  // already-provisioned workspace. Refuse rather than risk contamination.
+  // Defense-in-depth: adopt ONLY a genuinely empty sub-workspace. An interrupted
+  // create has not yet created any projects (projects are created only after the
+  // workspace settles to `created`), so a non-empty match is NOT our create —
+  // adopting it would graft this brand onto an already-provisioned workspace.
+  // Refuse rather than risk contamination.
   const adoptedListing = await transport.listProjects(adoptedId);
   const projectCount = Array.isArray(adoptedListing?.items) ? adoptedListing.items.length : 0;
   if (projectCount > 0) {
@@ -178,11 +207,30 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
       502,
     );
   }
-  log?.info?.('ensureSubworkspace: adopted subworkspace after ambiguous create', {
+  log?.info?.('ensureSubworkspace: adopted same-title family match', {
     parentWorkspaceId,
     title,
     adoptedId,
   });
+  return adopted;
+}
+
+/**
+ * Ambiguous-create recovery (design §6): a timed-out createSubworkspace is
+ * ambiguous (no idempotency key). List the parent's family, match the exact
+ * title, and adopt a `created`, project-empty subworkspace. No match → fail (the
+ * create was attempted, so a missing entry is an error here, unlike the proactive
+ * path where it just means "create one"). Multiple matches → fail with an alert,
+ * never guess.
+ */
+async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
+  const adopted = await findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log);
+  if (!adopted) {
+    throw new ErrorWithStatusCode(
+      `Ambiguous subworkspace create for '${title}' and no family match to adopt`,
+      502,
+    );
+  }
   return adopted;
 }
 
@@ -207,7 +255,7 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  * @param {number} marketCount - sizing input for the allocation.
  * @param {object} log
  * @param {object} [timing] - injectable poll timing for tests.
- * @param {function} [reloadPointer] - optional async () => string|null that
+ * @param {function|null} [reloadPointer] - optional async () => string|null that
  *   re-reads the brand's CURRENT semrush_workspace_id from the data layer.
  *   When supplied, the create path uses it as a last-update concurrency guard
  *   (see below) so a parallel activation cannot orphan a resourced workspace.
@@ -253,26 +301,35 @@ export async function ensureSubworkspace(
   }
 
   const title = subworkspaceTitle(brand);
-  let created;
-  try {
-    // Carve a fixed allocation (CREATE_ALLOCATION) onto the child so it has the
-    // metered quota to take prompts and publish. marketCount does not size the
-    // create — the allocation is flat (1 project, 500 prompts). If the parent
-    // pool can't cover it the create 422s "insufficient available units".
-    created = await transport.createSubworkspace(
-      parentWorkspaceId,
-      title,
-      CREATE_ALLOCATION,
-    );
-  } catch (e) {
-    // 504 = our transport's timeout signal → ambiguous create, recover by
-    // adoption. The transport timeout is a SerenityTransportError (status 504),
-    // NOT an ErrorWithStatusCode — guard on that so a 504 from our own poll
-    // helper (an ErrorWithStatusCode) re-throws instead of re-entering adoption.
-    if (!(e instanceof ErrorWithStatusCode) && e?.status === 504) {
-      created = await adoptFromFamily(transport, parentWorkspaceId, title, log);
-    } else {
-      throw e;
+  // Idempotent create-or-adopt (issue #2718): a retry after a partial
+  // provisioning failure must NOT spawn a duplicate same-title stub (titles embed
+  // the brand-id suffix, so a retry collides on title). Check the parent family
+  // for an existing `created`, empty same-title child FIRST and reuse it; only
+  // create when none exists. Failed `not ready` zombies are filtered out by the
+  // status check in findAdoptableFamilyMatch, so they are never reused and never
+  // inflate the ambiguity 409.
+  let created = await findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log);
+  if (!created) {
+    try {
+      // Carve a fixed allocation (CREATE_ALLOCATION) onto the child so it has the
+      // metered quota to take prompts and publish. marketCount does not size the
+      // create — the allocation is flat (1 project, 500 prompts). If the parent
+      // pool can't cover it the create 422s "insufficient available units".
+      created = await transport.createSubworkspace(
+        parentWorkspaceId,
+        title,
+        CREATE_ALLOCATION,
+      );
+    } catch (e) {
+      // 504 = our transport's timeout signal → ambiguous create, recover by
+      // adoption. The transport timeout is a SerenityTransportError (status 504),
+      // NOT an ErrorWithStatusCode — guard on that so a 504 from our own poll
+      // helper (an ErrorWithStatusCode) re-throws instead of re-entering adoption.
+      if (!(e instanceof ErrorWithStatusCode) && e?.status === 504) {
+        created = await adoptFromFamily(transport, parentWorkspaceId, title, log);
+      } else {
+        throw e;
+      }
     }
   }
 

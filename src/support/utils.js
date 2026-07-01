@@ -568,13 +568,22 @@ export async function findDeliveryType(url) {
 }
 
 /**
- * Error class with a status code property.
+ * Error class with a status code property. An optional machine-readable `code`
+ * may be assigned by callers after construction (e.g. serenity handlers tag
+ * errors with `ERROR_CODES.*` for downstream branching).
  * @extends Error
  */
 export class ErrorWithStatusCode extends Error {
+  /**
+   * @param {string} message human-readable error message
+   * @param {number} status HTTP status code to surface
+   */
   constructor(message, status) {
     super(message);
+    /** @type {number} */
     this.status = status;
+    /** @type {string|undefined} */
+    this.code = undefined;
   }
 }
 
@@ -677,7 +686,26 @@ export function getImsUserToken(context) {
  */
 export function getImsUserTokenStrict(context) {
   const authInfo = context?.attributes?.authInfo;
-  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+  // Local/automated-E2E escape hatch — mirrors the serenity controller's
+  // requireImsBearer. When SERENITY_ALLOW_NON_IMS_AUTH is set, trust the present
+  // bearer even if the authInfo is not IMS-typed: locally `SKIP_AUTH=true`
+  // injects a mock (non-IMS) admin authInfo, and these flows forward the bearer
+  // to the Semrush vendor MOCK, which ignores it. NO deployed environment sets
+  // this flag (it is never written to Vault), so production auth is unaffected —
+  // the real Semrush gateway still validates the forwarded token end to end.
+  //
+  // Defense-in-depth: the hatch is HARD-DISABLED in production regardless of the
+  // flag, so an accidental SERENITY_ALLOW_NON_IMS_AUTH in prod can never open the
+  // gate — prod always fails closed and requires real IMS auth. Both AWS_ENV and
+  // ENV are checked because the codebase reads prod from either.
+  const isProd = context?.env?.AWS_ENV === 'prod' || context?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && context?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  // Fail closed: forward the bearer upstream ONLY for a caller we can positively
+  // confirm authenticated via IMS (or when the escape hatch is explicitly set).
+  // A missing/non-standard authInfo (no getType) is treated as "not IMS" and
+  // refused, rather than falling through to proxy an unverified bearer to the
+  // Semrush gateway.
+  if (!allowNonIms && (typeof authInfo?.getType !== 'function' || authInfo.getType() !== 'ims')) {
     throw new ErrorWithStatusCode('IMS authentication required', STATUS_UNAUTHORIZED);
   }
   return getImsUserToken(context);

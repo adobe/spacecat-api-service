@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { resolveLocation } from './locations.js';
@@ -103,6 +105,10 @@ export function projectToSlice(project, brandId) {
     updatedAt: project?.updated_at ?? project?.published_at ?? null,
     status: mapPublishStatus(project?.publish_status),
     semrushProjectId: hasText(project?.id) ? String(project.id) : null,
+    // The project's domain (its primary URL host) — surfaced so the market
+    // overview can show it. Echoed at the project's top level on the v1 read
+    // view (the same field brand-urls re-sync reads back). Null when absent.
+    domain: hasText(project?.domain) ? String(project.domain) : null,
   };
 }
 
