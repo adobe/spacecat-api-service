@@ -133,7 +133,7 @@ async function loadController(supportStubs = {}) {
 describe('StateAccessMappingsController', () => {
   describe('dev-env blocker (temporary, until facsWrapper is attached)', () => {
     const HANDLERS = [
-      'listMappings', 'listHistory', 'createMapping', 'patchMapping',
+      'listMappings', 'listHistory', 'createMapping', 'patchMapping', 'deleteMapping',
       'getProductCapabilities', 'getUserCapabilities', 'getAuditLogs',
     ];
 
@@ -198,6 +198,15 @@ describe('StateAccessMappingsController', () => {
       });
       const ctx = makeContext({ body: {} });
       const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(503);
+    });
+
+    it('deleteMapping returns 503 when postgrest is unavailable', async () => {
+      const { Controller } = await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).deleteMapping(ctx);
       expect(res.status).to.equal(503);
     });
 
@@ -541,6 +550,32 @@ describe('StateAccessMappingsController', () => {
       expect(body.updatedAt).to.equal('2026-01-01T00:00:00Z');
     });
 
+    it('injects the baseline can_view when the request omits it', async () => {
+      const created = makeRow();
+      const createStub = sinon.stub().resolves({ created: [created], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        body: { ...validBody, grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      // The stored set is the request set PLUS the baseline llmo/can_view.
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['llmo/can_configure', 'llmo/can_view']);
+    });
+
+    it('does not duplicate can_view when the request already includes it', async () => {
+      const created = makeRow();
+      const createStub = sinon.stub().resolves({ created: [created], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        body: { ...validBody, grantedCapabilities: ['llmo/can_view', 'llmo/can_configure'] },
+      });
+      await Controller(ctx).createMapping(ctx);
+      const stored = createStub.firstCall.args[1].grantedCapabilities;
+      expect(stored.filter((c) => c === 'llmo/can_view')).to.have.lengthOf(1);
+    });
+
     it('emits a create audit event (allow) on success', async () => {
       const row = makeRow();
       const { Controller, stubs } = await loadController({
@@ -558,6 +593,24 @@ describe('StateAccessMappingsController', () => {
         mappingId: row.id,
       });
       expect(event.actorId).to.equal(CALLER_USER);
+    });
+
+    it('audits the persisted capabilities incl. the auto-injected can_view', async () => {
+      const row = makeRow();
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+      });
+      const ctx = makeContext({
+        body: { ...validBody, grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      // Records what the subject actually received, not the raw request.
+      expect(event.grantedCapabilities).to.have.members([
+        'llmo/can_configure',
+        'llmo/can_view',
+      ]);
     });
 
     it('still returns 201 when the audit write fails (logs a warning, not failure)', async () => {
@@ -648,21 +701,33 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(400);
     });
 
-    it('allows emptying the capability set (active row that grants nothing)', async () => {
-      const updated = makeRow({ granted_capabilities: [] });
+    it('returns 400 when grantedCapabilities is empty (emptying is done via DELETE)', async () => {
       const { Controller, stubs } = await loadController({
-        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(makeRow()),
       });
       const ctx = makeContext({
         pathParams: { id: VALID_UUID_MAPPING },
         body: { grantedCapabilities: [] },
       });
       const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(400);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('injects the baseline can_view when the request omits it', async () => {
+      const updated = makeRow({ granted_capabilities: ['llmo/can_configure', 'llmo/can_view'] });
+      const updateStub = sinon.stub().resolves(updated);
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(200);
-      const body = await res.json();
-      expect(body.grantedCapabilities).to.deep.equal([]);
-      expect(stubs.updateFacsAccessMappingCapabilities.firstCall.args[1].grantedCapabilities)
-        .to.deep.equal([]);
+      expect(updateStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['llmo/can_configure', 'llmo/can_view']);
     });
 
     it('returns 200 with the updated row (via the capability-edit RPC helper)', async () => {
@@ -707,6 +772,25 @@ describe('StateAccessMappingsController', () => {
       expect(event.grantedCapabilities).to.deep.equal(['llmo/can_view', 'llmo/can_configure']);
     });
 
+    it('audits the persisted capabilities incl. the auto-injected can_view', async () => {
+      const updated = makeRow({ granted_capabilities: ['llmo/can_configure', 'llmo/can_view'] });
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
+      const ctx = makeContext({
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      // Records what the subject actually received, not the raw request.
+      expect(event.grantedCapabilities).to.have.members([
+        'llmo/can_configure',
+        'llmo/can_view',
+      ]);
+    });
+
     it('does not emit an audit event and still 200s when audit write fails', async () => {
       const updated = makeRow();
       const ctx = makeContext({
@@ -743,6 +827,128 @@ describe('StateAccessMappingsController', () => {
         body: { grantedCapabilities: ['llmo/can_view'] },
       });
       const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(500);
+    });
+  });
+
+  describe('DELETE /state/access-mappings/:id (deleteMapping)', () => {
+    it('returns 400 when id is not a UUID', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ pathParams: { id: 'not-uuid' } });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('empties the capability set and returns 200', async () => {
+      const updated = makeRow({ granted_capabilities: [] });
+      const updateStub = sinon.stub().resolves(updated);
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.grantedCapabilities).to.deep.equal([]);
+      // Empties via the capability-edit RPC with [] (no tombstone/revoke).
+      expect(updateStub.firstCall.args[1].grantedCapabilities).to.deep.equal([]);
+    });
+
+    it('is idempotent: DELETE on an already-empty row returns 200 unchanged', async () => {
+      const alreadyEmpty = makeRow({ granted_capabilities: [] });
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(alreadyEmpty),
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.id).to.equal(alreadyEmpty.id);
+      expect(body.grantedCapabilities).to.deep.equal([]);
+      expect(body.revokedAt).to.equal(null);
+    });
+
+    it('emits an update_capabilities audit event (allow, empty caps)', async () => {
+      const updated = makeRow({ granted_capabilities: [] });
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      await Controller(ctx).deleteMapping(ctx);
+      expect(stubs.insertFacsAccessMappingAuditEvent.calledOnce).to.be.true;
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        operation: 'update_capabilities',
+        outcome: 'allow',
+        mappingId: updated.id,
+      });
+      expect(event.grantedCapabilities).to.deep.equal([]);
+    });
+
+    it('returns 404 when no active row matched', async () => {
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 without can_manage_users', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [], isAdmin: false, pathParams: { id: VALID_UUID_MAPPING },
+      });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('flow 8.3: 403s when a state-layer manager targets a row on an unmanaged resource', async () => {
+      const managerRow = makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: VALID_UUID_RES,
+        granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({ resource_id: 'cccccccc-cccc-4ccc-9ccc-cccccccccccc' }),
+        ),
+      });
+      const ctx = makeContext({
+        facsPermissions: [], isAdmin: false, pathParams: { id: VALID_UUID_MAPPING },
+      });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('flow 8.3: 404s when a state-layer manager targets a row that does not exist', async () => {
+      const managerRow = makeRow({
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        resource_id: VALID_UUID_RES,
+        granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+        getFacsAccessMappingById: sinon.stub().resolves(null),
+      });
+      const ctx = makeContext({
+        facsPermissions: [], isAdmin: false, pathParams: { id: VALID_UUID_MAPPING },
+      });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(404);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('returns 500 when the RPC helper throws', async () => {
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().rejects(new Error('db down')),
+      });
+      const ctx = makeContext({ pathParams: { id: VALID_UUID_MAPPING } });
+      const res = await Controller(ctx).deleteMapping(ctx);
       expect(res.status).to.equal(500);
     });
   });

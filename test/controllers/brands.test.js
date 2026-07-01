@@ -4656,6 +4656,9 @@ describe('Brands Controller', () => {
 
       async function buildController({
         provisionBrandSubworkspace, upsertBrand, ensureMarketSite,
+        // Serenity active by default (org-wide LLMO/serenity flag ON) so the
+        // Semrush-mode create reaches provisioning. The inactive case overrides this.
+        isSerenityActiveForOrg = sinon.stub().resolves(true),
       }) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
@@ -4664,6 +4667,7 @@ describe('Brands Controller', () => {
           '../../src/support/serenity/site-linkage.js': {
             ensureMarketSite: ensureMarketSite || sinon.stub().resolves('site-x'),
           },
+          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
           ...(upsertBrand ? { '../../src/support/brands-storage.js': { upsertBrand } } : {}),
         });
         return Mocked.default(context, loggerStub, mockEnv);
@@ -4699,6 +4703,37 @@ describe('Brands Controller', () => {
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
         expect(upsertArgs.semrushWorkspaceId).to.equal('ws-1');
+      });
+
+      it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const serenityActiveStub = sinon.stub().resolves(false);
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          isSerenityActiveForOrg: serenityActiveStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(403);
+        // The org is on the normal backend: no sub-workspace provisioned, no brand row.
+        expect(provisionStub.called).to.equal(false);
+        expect(upsertStub.called).to.equal(false);
+        // The gate must be asked about THIS org (2nd positional arg = spaceCatId),
+        // so a wiring slip (passing the wrong id) can't silently let a create through.
+        expect(serenityActiveStub).to.have.been.calledWith(
+          sinon.match.any,
+          ORGANIZATION_ID,
+          sinon.match.any,
+        );
       });
 
       it('mirrors the provisioned brand domain as a Site (+ brand_sites link) after the row is written', async () => {
@@ -4828,6 +4863,7 @@ describe('Brands Controller', () => {
             provisionBrandSubworkspace: provisionStub,
             releaseProvisionedWorkspace: releaseStub,
           },
+          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
           '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
         });
         const controller = Mocked.default(context, loggerStub, mockEnv);
@@ -5245,8 +5281,14 @@ describe('Brands Controller', () => {
     });
 
     describe('competitor self-reference guard + Semrush-mode gating (create)', () => {
-      async function buildCreateController({ upsertBrand, provisionBrandSubworkspace }) {
-        const mocks = { '../../src/support/brands-storage.js': { upsertBrand } };
+      async function buildCreateController({
+        upsertBrand, provisionBrandSubworkspace,
+        isSerenityActiveForOrg = sinon.stub().resolves(true),
+      }) {
+        const mocks = {
+          '../../src/support/brands-storage.js': { upsertBrand },
+          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
+        };
         if (provisionBrandSubworkspace) {
           mocks['../../src/support/serenity/brand-provisioning.js'] = { provisionBrandSubworkspace };
         }
@@ -5432,6 +5474,9 @@ describe('Brands Controller', () => {
       syncBrandAliasesAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       getBrandCompetitors = sinon.stub().resolves([]),
       getBrandById,
+      // Serenity active by default so a sync-field edit reaches the re-sync block.
+      // The inactive case overrides this to assert the gate rejects.
+      isSerenityActiveForOrg = sinon.stub().resolves(true),
     }) {
       // Only override getBrandById when a test supplies one; otherwise leave the
       // real export in place (partial esmock keeps the rest of the module real).
@@ -5447,6 +5492,7 @@ describe('Brands Controller', () => {
         // removedCompetitorDomains is left REAL so the diff logic is exercised.
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
+        '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
       });
       return Mocked.default(context, loggerStub, mockEnv);
     }
@@ -5486,6 +5532,69 @@ describe('Brands Controller', () => {
         { urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [] },
         'ws-9',
       );
+    });
+
+    it('rejects a sync-field edit with 403 when serenity is inactive and the brand has a sub-workspace (no row write, no re-sync)', async () => {
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' });
+      const syncStub = sinon.stub().resolves({});
+      const createTransportStub = sinon.stub().returns({ name: 't' });
+      const serenityActiveStub = sinon.stub().resolves(false);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: createTransportStub,
+        // Inactive org, but the brand still carries a backfilled workspace pointer.
+        getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' }),
+        isSerenityActiveForOrg: serenityActiveStub,
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(403);
+      // Rejected before the row write, so neither the DB nor Semrush is touched.
+      expect(updateBrandStub.called).to.equal(false);
+      expect(syncStub.called).to.equal(false);
+      expect(createTransportStub.called).to.equal(false);
+      // The gate must be asked about THIS org (2nd positional arg = spaceCatId).
+      expect(serenityActiveStub).to.have.been.calledWith(
+        sinon.match.any,
+        ORGANIZATION_ID,
+        sinon.match.any,
+      );
+    });
+
+    it('allows a sync-field edit when serenity is inactive but the brand is flat (no workspace) — plain backend update, no re-sync', async () => {
+      const updated = { id: BRAND_UUID, name: 'Updated Brand', urls: [{ value: 'https://acme.com' }] };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const syncStub = sinon.stub().resolves({});
+      const createTransportStub = sinon.stub().returns({ name: 't' });
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: createTransportStub,
+        getBrandById: sinon.stub().resolves({ id: BRAND_UUID }), // no semrushWorkspaceId → flat
+        isSerenityActiveForOrg: sinon.stub().resolves(false),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(updateBrandStub.calledOnce).to.equal(true);
+      // No workspace → the re-sync block never runs even though URLs changed.
+      expect(syncStub.called).to.equal(false);
+      expect(createTransportStub.called).to.equal(false);
     });
 
     it('forwards baseSiteId: null to storage so a pending brand can unset its primary URL (LLMO-5870)', async () => {
@@ -7907,10 +8016,12 @@ describe('Brands Controller — defensive branch coverage', () => {
   async function mountController({
     provisionBrandSubworkspace = stub().resolves({ semrushWorkspaceId: 'ws-1' }),
     upsertBrand = stub().resolves({ id: BRAND_UUID, name: 'New Brand' }),
+    isSerenityActiveForOrg = stub().resolves(true),
   } = {}) {
     const Mocked = await esmock('../../src/controllers/brands.js', {
       '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
       '../../src/support/brands-storage.js': { upsertBrand },
+      '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
     });
     const ctx = buildContext();
     return { controller: Mocked.default(ctx, loggerStub, mockEnv), ctx };

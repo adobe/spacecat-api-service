@@ -55,7 +55,12 @@ import {
   handleUpdatePromptSubworkspace,
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
+import {
+  handleCreateTag,
+  handleCreateTagSubworkspace,
+} from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
+import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -180,10 +185,36 @@ function mapError(e, log) {
  * missing OR if the caller authenticated by some other mechanism. The
  * upstream gateway only understands IMS user tokens; we refuse to forward
  * anything else.
+ *
+ * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
+ * we forward is validated AGAIN by the real Semrush gateway on every upstream
+ * call (it rejects an invalid/expired/forged token with 401/403, which the
+ * transport surfaces as a SerenityTransportError). This local check is only a
+ * fail-fast + shape guard so we do not forward a token Semrush will obviously
+ * reject; it never substitutes for the upstream's own validation.
+ *
+ * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` AND the
+ * runtime is not production, the IMS-type check is skipped so an authenticated
+ * NON-IMS caller (e.g. the
+ * locally-signed JWT the integration-test harness mints) can reach the
+ * handlers. This is sound because (a) production auth is unaffected — Semrush
+ * still validates the forwarded token end to end — and (b) the integration
+ * tests run against the Semrush vendor MOCKS, which intentionally do not
+ * validate the bearer, so the token's value never matters there, only that an
+ * authenticated identity is present. Mirrors `SERENITY_ALLOW_WORKSPACE_DELETE`
+ * in rest-transport.js: an explicit opt-in flag that NO deployed environment
+ * sets (it is never written to Vault `dx_mysticat/<env>/api-service`); it is
+ * for local + automated E2E only. The Authorization-header requirement still
+ * holds — a bearer must be present to forward upstream.
  */
 function requireImsBearer(ctx) {
   const authInfo = ctx?.attributes?.authInfo;
-  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+  // Hard-disable the escape hatch in production, mirroring getImsUserTokenStrict:
+  // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env, a non-IMS
+  // caller must never reach the handlers there.
+  const isProd = ctx?.env?.AWS_ENV === 'prod' || ctx?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  if (!allowNonIms && authInfo?.getType && authInfo.getType() !== 'ims') {
     throw new ErrorWithStatusCode(
       'Serenity proxy requires IMS authentication',
       401,
@@ -216,12 +247,21 @@ export function brandPointerReloader(ctx, brandUuid) {
   };
 }
 
+// Logged at most once per process: makes an accidental SERENITY_ALLOW_NON_IMS_AUTH
+// enablement in a deployed environment visible in the logs (the flag bypasses the
+// IMS-type gate — it must only ever be set for local/automated E2E).
+let warnedNonImsAuth = false;
+
 function SerenityController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
   }
   if (!log) {
     throw new Error('Log required');
+  }
+  if (!warnedNonImsAuth && (context?.env || env)?.SERENITY_ALLOW_NON_IMS_AUTH === 'true') {
+    warnedNonImsAuth = true;
+    log.warn('[serenity] SERENITY_ALLOW_NON_IMS_AUTH is enabled — the IMS-type auth gate is bypassed. This is test-only and must never be set in a deployed environment.');
   }
 
   /**
@@ -274,6 +314,18 @@ function SerenityController(context, log, env) {
           503,
         ),
       };
+    }
+    // Org-wide serenity rollout gate. Serenity is "active" for an org only when
+    // its `LLMO/serenity` feature flag is ON *and* a Semrush workspace resolves
+    // for the brand (the workspace half is enforced below by
+    // resolveBrandWorkspace). While the flag is OFF the org's UI keeps reading
+    // the normal backend data — even if a `semrush_workspace_id` has already
+    // been backfilled for rollout prep — so reject the serenity surface with a
+    // 404 (the same "no serenity for this org" contract the UI already handles
+    // for an org without a workspace). Checked before brand resolution so an
+    // inactive org never leaks brand existence.
+    if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
+      return { error: notFound('Serenity is not active for this organization') };
     }
     const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
     if (!brandUuid) {
@@ -639,6 +691,46 @@ function SerenityController(context, log, env) {
           log,
         );
       return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
+   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
+   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
+   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
+   * for one, is derived from the `category:` tags across a brand's markets.
+   * Dispatches by workspace mode, mirroring the tags/markets handlers.
+   */
+  const createTag = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      // authorize() guarantees brandUuid (404s a missing brand) and, in flat
+      // mode, a non-null workspaceId (404s 'no semrush_workspace_id'); assert
+      // the invariant for the typed handler, mirroring activate().
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        )
+        : await handleCreateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log);
     }
@@ -1224,6 +1316,7 @@ function SerenityController(context, log, env) {
     createMarket,
     deleteMarket,
     listTags,
+    createTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

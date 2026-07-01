@@ -370,13 +370,13 @@ describe('markets-subworkspace handlers', () => {
           generateTopics: true,
           topicCap: 1,
           standardTags: ['source:ai'],
-          projectTags: ['intent:informational', 'type:branded'],
+          projectTags: ['intent:Informational', 'type:branded'],
           publishMode: 'require',
         },
       );
       expect(res.status).to.equal(201);
       // project-level tag taxonomy registered (independent of prompts)
-      expect(transport.createProjectTags).to.have.been.calledOnceWith(WS, 'new-proj', ['intent:informational', 'type:branded']);
+      expect(transport.createProjectTags).to.have.been.calledOnceWith(WS, 'new-proj', ['intent:Informational', 'type:branded']);
       // models attached
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-2');
@@ -671,6 +671,135 @@ describe('markets-subworkspace handlers', () => {
         { id: 't-2', name: 'Topic B' },
       ]);
       expect(transport.listPromptsByTags).to.have.been.calledWith(WS, 'p-tag');
+    });
+
+    it('merges standalone tags (prompt-less categories) with prompt-derived ones, deduped by name', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 't-1', name: 'category:Running Shoes' }] }],
+        }),
+        // A standalone category created via createProjectTags that no prompt carries
+        // yet, plus one that IS already on a prompt (must not duplicate).
+        listProjectTags: sinon.stub().resolves({
+          items: [
+            { id: 't-9', name: 'category:Hiking Boots' },
+            { id: 't-1', name: 'category:Running Shoes' },
+          ],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([
+        { id: 't-1', name: 'category:Running Shoes' },
+        { id: 't-9', name: 'category:Hiking Boots' },
+      ]);
+      expect(transport.listProjectTags).to.have.been.calledWith(WS, 'p-tag');
+    });
+
+    it('keeps prompt-derived tags when the standalone tag list call fails (best-effort)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 't-1', name: 'category:Running Shoes' }] }],
+        }),
+        listProjectTags: sinon.stub().rejects(new Error('boom')),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+
+    it('upgrades a synthetic prompt-derived id to the canonical standalone id (no shadowing)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        // Prompt-derived tag arrives as a BARE STRING → synthetic id === name.
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: ['category:Running Shoes'] }],
+        }),
+        // Standalone listing carries the canonical upstream id for the same name;
+        // it must win over the synthetic id even though prompts are merged first.
+        listProjectTags: sinon.stub().resolves({
+          items: [{ id: 't-1', name: 'category:Running Shoes' }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+
+    it('keeps the first (prompt-derived) real id when both sources supply different real ids for a name', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 'prompt-id', name: 'category:Running Shoes' }] }],
+        }),
+        listProjectTags: sinon.stub().resolves({
+          items: [{ id: 'standalone-id', name: 'category:Running Shoes' }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      // Both ids are real (≠ name), so the synthetic-id upgrade does not fire and
+      // first-writer-wins holds: the prompt-derived id is kept deterministically.
+      expect(result.items).to.deep.equal([{ id: 'prompt-id', name: 'category:Running Shoes' }]);
+    });
+
+    it('warns when the standalone tag page ceiling is hit (possible truncation)', async () => {
+      const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
+      const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
+        // Every page is full → the walk never short-circuits and runs to the ceiling.
+        listProjectTags: sinon.stub().resolves({ items: fullPage }),
+      });
+      await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, warnLog);
+      expect(warnLog.warn).to.have.been.calledWithMatch(/page ceiling hit/);
+      expect(transport.listProjectTags.callCount).to.equal(50);
+    });
+
+    it('treats a standalone tag page with no items array as empty (defensive)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 't-1', name: 'category:Running Shoes' }] }],
+        }),
+        // Upstream page carries no items array — must be coerced to empty, not throw.
+        listProjectTags: sinon.stub().resolves(null),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+
+    it('falls back to the tag name as id when a standalone tag has no id', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
+        listProjectTags: sinon.stub().resolves({
+          items: [{ name: 'category:No Id Yet' }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 'category:No Id Yet', name: 'category:No Id Yet' }]);
+    });
+
+    it('paginates the standalone tag listing so categories beyond the first page are not dropped', async () => {
+      const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
+      const listProjectTags = sinon.stub();
+      listProjectTags.onFirstCall().resolves({ items: page1 });
+      listProjectTags.onSecondCall().resolves({ items: [{ id: 't-last', name: 'category:Last' }] });
+      // A short second page must end the walk; a third fetch would be an
+      // over-fetch bug — make it throw so the assertions below fail loudly
+      // rather than silently getting sinon's default undefined.
+      listProjectTags.onThirdCall().rejects(new Error('unexpected 3rd standalone page fetch'));
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
+        listProjectTags,
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      // A full first page (=== limit) forces a second fetch; a short page ends it.
+      expect(listProjectTags.callCount).to.equal(2);
+      expect(listProjectTags.secondCall.args).to.deep.equal([WS, 'p-tag', { page: 2, limit: 100 }]);
+      expect(result.items).to.have.lengthOf(101);
+      expect(result.items).to.deep.include({ id: 't-last', name: 'category:Last' });
     });
 
     it('returns an empty set when no slice matches (no upstream prompt call)', async () => {

@@ -836,14 +836,17 @@ export async function upsertBrand({
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
-  // Check if the brand already exists with a base site set.
-  // This prevents silently downgrading an active brand to pending when a caller
-  // re-upserts by name without passing baseSiteId.
+  // Check if a non-deleted brand already exists with this name. Soft-deleted
+  // brands are excluded (.neq('status', 'deleted')) so that creating a brand
+  // whose name matches a deleted record is treated as a fresh create — the
+  // caller gets the expected new brand instead of a resurrected row that
+  // inherits the deleted brand's site_id and anchoring state (LLMO-5919).
   const { data: existing, error: existingError } = await postgrestClient
     .from('brands')
     .select('id, site_id, status')
     .eq('organization_id', organizationId)
     .eq('name', brand.name)
+    .neq('status', 'deleted')
     .maybeSingle();
 
   // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a query
@@ -940,17 +943,25 @@ export async function upsertBrand({
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
   // overwrote mongodb.com -> learn.mongodb.com and merck.com -> keytruda.com).
-  if (!anchoredBySemrush && hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
-    row.site_id = brand.baseSiteId;
-  } else if (
-    !anchoredBySemrush
-    && hasText(brand.baseSiteId)
-    && hasText(existing?.site_id)
-    && existing.site_id !== brand.baseSiteId
-  ) {
-    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
-      + `(org ${organizationId}) — primary site is immutable `
-      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+  // LLMO-5919: soft-deleted brands are now excluded from `existing` (see filter
+  // above), so `existing === null` covers both fresh creates and resurrections.
+  // In both cases we always write an explicit site_id — or null to clear the
+  // deleted brand's stale anchor so it cannot survive the ON CONFLICT UPDATE
+  // and collide with whichever brand now owns that site.
+  if (!anchoredBySemrush) {
+    if (existing === null) {
+      row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
+    } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
+      row.site_id = brand.baseSiteId;
+    } else if (
+      hasText(brand.baseSiteId)
+      && hasText(existing.site_id)
+      && existing.site_id !== brand.baseSiteId
+    ) {
+      log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+        + `(org ${organizationId}) — primary site is immutable `
+        + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+    }
   }
 
   const { data: upserted, error } = await postgrestClient

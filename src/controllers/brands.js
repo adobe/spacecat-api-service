@@ -66,6 +66,7 @@ import { createSerenityTransport, SerenityTransportError } from '../support/sere
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
+import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import {
   buildReservedDomains,
   dropReservedCompetitors,
@@ -1495,6 +1496,16 @@ function BrandsController(ctx, log, env) {
       // would 400 for a missing primary URL, or worse, provision a sub-workspace
       // for a brand never meant to have one). Presence is trusted ONLY for a draft.
       const isSemrushMode = hasSemrushMarket || generatePrompts || isSubworkspaceOnlyDraft;
+      // Serenity rollout gate. Provisioning a Semrush sub-workspace / project for a
+      // brand is a serenity-active operation. While serenity is inactive for the
+      // org, refuse a Semrush-mode create rather than provision upstream: the
+      // flag-gated UI won't request it, and an org still on the normal backend data
+      // must not get a sub-workspace before its rollout flag is flipped on. The
+      // helper is only consulted on the Semrush-mode path, so a plain (flat) create
+      // is unaffected. (Effective gate is flag AND workspace, same as /serenity/*.)
+      if (isSemrushMode && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+        return forbidden('Serenity is not active for this organization');
+      }
       if (isSemrushMode) {
         let market;
         let languageCode;
@@ -1751,6 +1762,27 @@ function BrandsController(ctx, log, env) {
       // Brand aliases (the extra names the brand is known by) re-sync to every
       // market's project brand_names + own-brand benchmark on edit.
       const aliasesTouched = updates.brandAliases !== undefined;
+
+      // Serenity rollout gate. An edit that changes URL sources / competitors /
+      // aliases re-syncs onto the brand's Semrush projects (the block near the end
+      // of this handler), but ONLY for a sub-workspace brand. While serenity is
+      // inactive for the org that re-sync must not run — even if a
+      // semrush_workspace_id was backfilled for rollout prep — so reject the edit
+      // (rather than silently skip the sync and let the brand drift) when it would
+      // touch Semrush. A flat-mode brand (no workspace) edits the same fields as
+      // plain backend data and is unaffected; the brand read only happens on the
+      // inactive path, so the common active path pays nothing extra.
+      const touchesSemrushSync = updates.urls !== undefined
+        || updates.socialAccounts !== undefined
+        || updates.earnedContent !== undefined
+        || competitorsTouched
+        || aliasesTouched;
+      if (touchesSemrushSync && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+        const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        if (hasText(current?.semrushWorkspaceId)) {
+          return forbidden('Serenity is not active for this organization');
+        }
+      }
 
       // LLMO-5645: a region must not be removed from a brand while prompts still
       // use it — DRS schedules off each prompt's `regions`, so dropping a brand
