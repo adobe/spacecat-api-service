@@ -58,6 +58,7 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -347,7 +348,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, Organization, Site,
+    Audit, Organization, PlgOnboarding, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -1735,6 +1736,20 @@ function SitesController(ctx, log, env) {
       { 'x-error': message },
     );
 
+    const isOrgWaitingForIpAllowlisting = async (org) => {
+      if (productCode !== ASO_PRODUCT_CODE) {
+        return false;
+      }
+      try {
+        const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
+        const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
+        return Array.isArray(records) && records.some((r) => r.getStatus() === waitingStatus);
+      } catch (e) {
+        log.warn('[resolveSite] PlgOnboarding lookup failed, treating as not waiting', e);
+        return false;
+      }
+    };
+
     // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
     // independent of which org's data is being requested via organizationId/imsOrg.
     // We translate it to a Spacecat UUID once, up front, so the per-path remap can
@@ -1767,6 +1782,17 @@ function SitesController(ctx, log, env) {
 
       const tierClient = TierClient.createForOrg(context, org, productCode);
       const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+      // Internal caller viewing a customer with no customer-visible entitlement
+      // (none yet, or PRE_ONBOARD) who is mid-PLG-onboarding (WAITING_FOR_IP_ALLOWLISTING):
+      // preserve no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+      const hasCustomerVisibleEntitlement = entitlement
+        && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+      if (callerIsInternal && !hasCustomerVisibleEntitlement
+        && await isOrgWaitingForIpAllowlisting(org)) {
+        log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for org=${org.getId()}`);
+        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+      }
 
       if (!entitlement) {
         if (callerIsInternal) {
@@ -1813,11 +1839,21 @@ function SitesController(ctx, log, env) {
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
               // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
-              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
-              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              // - No customer-visible entitlement (none, or PRE_ONBOARD) + WAITING:
+              //   return no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+              // - No entitlement + not WAITING: return site_not_enrolled
+              // - Non-customer tier + not WAITING: skip tier check, let enrollment decide
               //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
               // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
               // Customer callers are completely unaffected by this block.
+              const hasCustomerVisibleEntitlement = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (callerIsInternal && !hasCustomerVisibleEntitlement
+                && await isOrgWaitingForIpAllowlisting(organization)) {
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for siteId=${siteId}`);
+                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+              }
+
               if (!entitlement) {
                 if (callerIsInternal) {
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);

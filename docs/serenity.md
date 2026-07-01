@@ -144,6 +144,7 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
 | GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice | `listSerenityTags` |
+| POST | `/serenity/tags` | Register an open-dimension (`category`/`topic`) tag on one slice; body is `{ type, name, geoTargetId, languageCode }` | `createSerenityTag` |
 | GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
 | PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
 | POST | `/serenity/activate` | Activate the brand into sub-workspace mode (ensure sub-workspace + publish supplied markets) | `activateSerenityBrand` |

@@ -1,3 +1,31 @@
+## [1.613.3](https://github.com/adobe/spacecat-api-service/compare/v1.613.2...v1.613.3) (2026-07-01)
+
+
+### Bug Fixes
+
+* **sites-resolve:** preserve no_entitlement_for_product for WAITING_FOR_IP_ALLOWLISTING when caller is internal ([#2690](https://github.com/adobe/spacecat-api-service/issues/2690)) ([e53872a](https://github.com/adobe/spacecat-api-service/commit/e53872a6e6b475bdee7bb835d103af72bc4cf1e9))
+
+## [1.613.2](https://github.com/adobe/spacecat-api-service/compare/v1.613.1...v1.613.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* gap-topics empty on first day of month | LLMO-5963 ([#2734](https://github.com/adobe/spacecat-api-service/issues/2734)) ([fb7c153](https://github.com/adobe/spacecat-api-service/commit/fb7c153d6be43036189747ca991d492bdce1b0df))
+
+## [1.613.1](https://github.com/adobe/spacecat-api-service/compare/v1.613.0...v1.613.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* ChatGPT missing from AI Visibility Model filter | LLMO-5933 ([#2729](https://github.com/adobe/spacecat-api-service/issues/2729)) ([59ced71](https://github.com/adobe/spacecat-api-service/commit/59ced719e0b1e6522010c319aa251efd3e20c208))
+
+# [1.613.0](https://github.com/adobe/spacecat-api-service/compare/v1.612.0...v1.613.0) (2026-07-01)
+
+
+### Features
+
+* **serenity:** brand categories (generic createTag + standalone-tag read-back) + edit-flow fixes ([#2730](https://github.com/adobe/spacecat-api-service/issues/2730)) ([dc0bab1](https://github.com/adobe/spacecat-api-service/commit/dc0bab17c8b7a854fc952d932aeb88f72e9be077)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.612.0](https://github.com/adobe/spacecat-api-service/compare/v1.611.1...v1.612.0) (2026-06-30)
 
 

@@ -120,6 +120,8 @@ describe('SerenityController', () => {
     handleCreatePromptsSubworkspace: sinon.stub(),
     handleUpdatePromptSubworkspace: sinon.stub(),
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
+    handleCreateTag: sinon.stub(),
+    handleCreateTagSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
@@ -217,6 +219,10 @@ describe('SerenityController', () => {
         handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
       },
+      '../../src/support/serenity/handlers/tags.js': {
+        handleCreateTag: handlers.handleCreateTag,
+        handleCreateTagSubworkspace: handlers.handleCreateTagSubworkspace,
+      },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
         decommissionBrandWorkspace: decommissionStub,
@@ -303,6 +309,27 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
         authType: 'jwt', bearer: null, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    // The escape hatch is hard-disabled in production (AWS_ENV or ENV === 'prod'),
+    // mirroring getImsUserTokenStrict — a non-IMS caller must never slip through
+    // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env.
+    it('401s a non-IMS caller with the flag set when AWS_ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', AWS_ENV: 'prod' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    it('401s a non-IMS caller with the flag set when ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', ENV: 'prod' },
       });
       const response = await controller.listPrompts(ctx);
       expect(response.status).to.equal(401);
@@ -889,6 +916,48 @@ describe('SerenityController', () => {
       expect(handlers.handleBulkDeletePrompts).to.have.been.calledOnce;
       expect(handlers.handleBulkDeletePromptsSubworkspace).to.not.have.been.called;
     });
+
+    it('createTag routes to the flat handler in flat mode and returns its status', async () => {
+      handlers.handleCreateTag.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
+      expect(response.status).to.equal(201);
+      const body = await readBody(response);
+      expect(body.tag).to.equal('category:Footwear');
+      expect(handlers.handleCreateTag).to.have.been.calledOnce;
+      expect(handlers.handleCreateTag.firstCall.args[4]).to.deep.equal({});
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag returns the authorize() error (403) and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: {
+          type: 'category', name: 'Footwear', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleCreateTag).to.not.have.been.called;
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag maps a handler 400 (bad body) through mapError', async () => {
+      handlers.handleCreateTag.rejects(new ErrorWithStatusCode('name is required', 400));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: { type: 'category', geoTargetId: 2840, languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const body = await readBody(response);
+      expect(body.message).to.match(/name is required/);
+    });
   });
 
   describe('controller surface', () => {
@@ -903,6 +972,7 @@ describe('SerenityController', () => {
       expect(controller.createMarket).to.be.a('function');
       expect(controller.deleteMarket).to.be.a('function');
       expect(controller.listTags).to.be.a('function');
+      expect(controller.createTag).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
 
@@ -1148,6 +1218,23 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleUpdatePromptSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleUpdatePrompt).to.not.have.been.called;
+    });
+
+    it('createTag routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleCreateTagSubworkspace.resolves({
+        status: 201,
+        body: {
+          geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
+      expect(response.status).to.equal(201);
+      expect(handlers.handleCreateTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[2]).to.deep.equal({});
+      expect(handlers.handleCreateTag).to.not.have.been.called;
     });
 
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
