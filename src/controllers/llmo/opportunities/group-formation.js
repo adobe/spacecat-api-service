@@ -62,6 +62,21 @@ function deriveBaselineMetrics(suggestions) {
   };
 }
 
+/** Aggregate top N personas by frequency from a set of suggestions. */
+function aggregatePersonas(suggestions, maxPersonas = 5) {
+  const freq = new Map();
+  for (const s of suggestions) {
+    for (const p of (s.getData()?.personas ?? [])) {
+      const existing = freq.get(p.id) ?? { persona: p, count: 0 };
+      freq.set(p.id, { persona: p, count: existing.count + 1 });
+    }
+  }
+  return [...freq.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, maxPersonas)
+    .map(({ persona }) => persona);
+}
+
 /** Check if a URL's pathname matches the given glob pattern (e.g. "/products/*"). */
 function urlMatchesPattern(url, pattern) {
   try {
@@ -151,6 +166,7 @@ function GroupFormationController(ctx) {
       pageCount: chunk.length,
       samplePages: chunk.slice(0, 3).map((s) => s.getData().url),
       baseline: deriveBaselineMetrics(chunk),
+      personas: aggregatePersonas(chunk), // [] until W6 has run
       variantId: null,
       currentCitationRate: null,
       finalCitationRate: null,
@@ -165,6 +181,7 @@ function GroupFormationController(ctx) {
       pageCount: holdoutSuggestions.length,
       samplePages: holdoutSuggestions.slice(0, 3).map((s) => s.getData().url),
       baseline: deriveBaselineMetrics(holdoutSuggestions),
+      personas: aggregatePersonas(holdoutSuggestions), // [] until W6 has run
       variantId: null,
       currentCitationRate: null,
       finalCitationRate: null,

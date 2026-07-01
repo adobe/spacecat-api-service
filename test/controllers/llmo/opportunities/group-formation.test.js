@@ -177,5 +177,42 @@ describe('GroupFormationController', () => {
       const body = await res.json();
       expect(body).to.deep.equal([]);
     });
+
+    it('includes personas aggregated from suggestion.data.personas', async () => {
+      const urls = makeUrls(60);
+      const ctx = makeContext(urls);
+      ctx.dataAccess.Suggestion.allByOpportunityId = sinon.stub().resolves(
+        urls.map((url) => ({
+          getData: () => ({
+            url,
+            personas: [
+              {
+                id: 'tech', name: 'Technical', trafficShare: 0.6, focus: 'APIs', samplePrompts: [],
+              },
+            ],
+          }),
+        })),
+      );
+      const controller = GroupFormationController(ctx);
+      const res = await controller.createGroupings({
+        params: { siteId: VALID_SITE_ID },
+        data: { pageGroupPattern: PATTERN, testGroupCount: 2 },
+      });
+      const body = await res.json();
+      const testGroup = body.find((g) => g.role === 'test');
+      expect(testGroup.personas).to.have.length.greaterThan(0);
+      expect(testGroup.personas[0].name).to.equal('Technical');
+    });
+
+    it('returns empty personas when W6 has not run yet', async () => {
+      const ctx = makeContext(makeUrls(60));
+      const controller = GroupFormationController(ctx);
+      const res = await controller.createGroupings({
+        params: { siteId: VALID_SITE_ID },
+        data: { pageGroupPattern: PATTERN, testGroupCount: 2 },
+      });
+      const body = await res.json();
+      expect(body[0].personas).to.deep.equal([]);
+    });
   });
 });
