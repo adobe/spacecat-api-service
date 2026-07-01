@@ -1003,7 +1003,9 @@ function BrandsController(ctx, log, env) {
       // may view via a state-layer grant. Absent flag (admin / internal org /
       // non-ReBAC org / org-wide viewer) => full list.
       const facs = context.attributes?.facs;
-      if (facs?.enabled) {
+      const hasFACSCapability = facs?.enabled
+        && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+      if (facs?.enabled && !hasFACSCapability) {
         const viewable = await listViewableResourceIds(postgrestClient, {
           imsOrgId: organization.getImsOrgId(),
           product: facs.product,

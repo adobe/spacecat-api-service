@@ -339,7 +339,9 @@ function OrganizationsController(ctx, env) {
     // internal org / non-ReBAC org / org-wide viewer) => full list.
     let visibleOwnSites = filteredSites;
     const facs = context.attributes?.facs;
-    if (facs?.enabled) {
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    if (facs?.enabled && !hasFACSCapability) {
       const unavailable = requirePostgrestForFacsMappings(context);
       if (unavailable) {
         return unavailable;

@@ -1028,6 +1028,25 @@ describe('Organizations Controller', () => {
       });
       expect(result.status).to.equal(503);
     });
+
+    it('skips filter when JWT carries the federal can_view grant', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      // Keep is_admin: true so hasAccess passes; add facs_permissions to trigger the bypass.
+      context.attributes.authInfo.withProfile({
+        email: 'test@example.com',
+        is_admin: true,
+        facs_permissions: ['abcd/can_view'],
+      });
+      // No postgrestClient needed — the bypass should skip the state-layer query entirely.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(200);
+      const resultSites = await result.json();
+      expect(resultSites).to.be.an('array').with.lengthOf(2);
+    });
   });
 
   it('gets all sites of an organization for non belonging organization', async () => {

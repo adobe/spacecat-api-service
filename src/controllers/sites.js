@@ -58,6 +58,8 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -1658,12 +1660,73 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    const facs = context.attributes?.facs;
+    // FACS federal grant: if the JWT carries <product>/can_view, the caller has an
+    // org-wide federal view capability — no state-layer filter needed.
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
-    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    //           OrganizationDto, SiteDto, facs, hasFACSCapability, Site — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
       const args = [org, productCode, context, ctx, accessControlUtil];
+
+      // FACS path: state-layer filter active — find first site the caller can actually view.
+      if (facs?.enabled && !hasFACSCapability) {
+        const unavailable = requirePostgrestForFacsMappings(context);
+        if (unavailable) {
+          return unavailable;
+        }
+
+        const viewable = await listViewableResourceIds(
+          context.dataAccess.services.postgrestClient,
+          {
+            imsOrgId: org.getImsOrgId(),
+            product: facs.product,
+            resourceType: 'site',
+            subjectId: facs.subjectId,
+          },
+        );
+
+        // Check admin-configured default site first; only use it if the caller can view it.
+        const defaultData = await resolveOrgDefaultSite(...args);
+        if (defaultData && viewable.has(defaultData.site.id)) {
+          return ok({ data: defaultData });
+        }
+
+        // Scan all enrolled sites and return the first one the caller can view.
+        const tierClient = TierClient.createForOrg(context, org, productCode);
+        const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+
+        if (!entitlement) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            failureDetails,
+          );
+        }
+
+        if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+          if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+            return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+          }
+          log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+        }
+
+        const firstViewableEnrollment = enrollments?.find((e) => viewable.has(e.getSiteId()));
+        if (!firstViewableEnrollment) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        const firstViewableSite = await Site.findById(firstViewableEnrollment.getSiteId());
+        if (!firstViewableSite) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        return ok({ data: await buildResolveData(org, firstViewableSite, context) });
+      }
+
+      // Non-FACS path (admin / internal / JWT federal grant / LD-off): existing logic.
       const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });
@@ -1739,6 +1802,25 @@ function SitesController(ctx, log, env) {
 
               if (!enrollments?.length) {
                 return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+              }
+
+              if (facs?.enabled && !hasFACSCapability) {
+                const unavailable = requirePostgrestForFacsMappings(context);
+                if (unavailable) {
+                  return unavailable;
+                }
+                const viewable = await listViewableResourceIds(
+                  context.dataAccess.services.postgrestClient,
+                  {
+                    imsOrgId: organization.getImsOrgId(),
+                    product: facs.product,
+                    resourceType: 'site',
+                    subjectId: facs.subjectId,
+                  },
+                );
+                if (!viewable.has(site.getId())) {
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                }
               }
 
               return ok({ data: await buildResolveData(organization, site, context) });
