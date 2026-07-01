@@ -577,6 +577,7 @@ const routeFacsCapabilities = {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
