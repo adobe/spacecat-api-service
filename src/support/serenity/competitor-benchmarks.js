@@ -216,16 +216,27 @@ export async function syncCompetitorBenchmarksForProject(
     if (b?.main_brand !== true && hasText(b?.id)) {
       competitorByDomain.set(domain, {
         id: String(b.id),
+        name: hasText(b?.brand_name) ? b.brand_name : '',
         aliases: Array.isArray(b?.brand_aliases) ? b.brand_aliases : [],
       });
     }
   }
 
   const toCreate = desired.filter((c) => !presentDomains.has(c.domain));
-  // Update an existing competitor benchmark only when its alias set drifted.
+  // Update an existing competitor benchmark when its display name OR its alias
+  // set drifted. The benchmark is keyed by domain, so a rename that keeps the
+  // same URL (e.g. "test1234" → "test12345" on test1234.de) would otherwise
+  // never re-sync — leaving the upstream brand_name stale vs the brand row.
   const toUpdate = desired.filter((c) => {
     const existing = competitorByDomain.get(c.domain);
-    return existing && !sameAliasSet(existing.aliases, c.aliases);
+    if (!existing) {
+      return false;
+    }
+    // Re-sync only when the upstream benchmark carries a name that differs from
+    // the desired one (a genuine rename). An absent upstream name is left alone
+    // rather than backfilled, so a benchmark we did not name is never touched.
+    const nameDrifted = existing.name !== '' && existing.name !== c.name;
+    return nameDrifted || !sameAliasSet(existing.aliases, c.aliases);
   });
   const toDelete = [...removedSet]
     .map((d) => competitorByDomain.get(d)?.id)
