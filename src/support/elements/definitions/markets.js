@@ -84,10 +84,12 @@ export function transformMarketsToFilterDimensions(raw, brandSemrushProjects = [
   return (raw?.blocks?.value ?? []).map((item) => {
     const semrushProjectId = item.value ?? null;
     const project = projectMap.get(semrushProjectId) ?? {};
+    const label = item.label ?? '';
+    const id = label.includes('-') ? label.split('-')[0] : null;
     return {
-      id: null,
+      id,
       semrush_project_id: semrushProjectId,
-      label: item.label ?? '',
+      label,
       spacecat_brand_id: project.brandId ?? null,
       geoTargetId: project.geoTargetId ?? null,
       languageCode: project.languageCode ?? null,

@@ -20,6 +20,7 @@
  * @param {string} [params.comparisonStartDate] - Comparison period start (YYYY-MM-DD).
  * @param {string} [params.comparisonEndDate] - Comparison period end (YYYY-MM-DD).
  * @param {string} [params.model='search-gpt'] - AI model filter value.
+ * @param {string} [params.projectId] - Semrush project UUID to scope tags to a specific market.
  */
 export function buildTopicsPayload({
   startDate,
@@ -27,8 +28,10 @@ export function buildTopicsPayload({
   comparisonStartDate,
   comparisonEndDate,
   model = 'search-gpt',
+  projectId,
 } = {}) {
   return {
+    ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
     filters: {
       simple: {
@@ -104,7 +107,7 @@ export function transformCategoriesToFilterDimensions(raw) {
  * @returns {FilterDimensionItem[]}
  */
 export function transformIntentsToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'intent:').map((label) => ({ id: label, label }));
+  return extractByPrefix(raw, 'intent:').map((label) => ({ id: label.toUpperCase(), label }));
 }
 
 /**

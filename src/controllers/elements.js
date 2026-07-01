@@ -16,7 +16,7 @@ import {
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { listBrands as listSpacecatBrands } from '../support/brands-storage.js';
+import { listBrands as listSpacecatBrands, getBrandById } from '../support/brands-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
@@ -170,8 +170,27 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { brandName } = ctx?.params ?? {};
-      const result = await buildService(ctx).getMarkets(auth.workspaceId, { brand: brandName });
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const [brand, rawProjects] = await Promise.all([
+        getBrandById(spaceCatId, brandId, postgrestClient),
+        BrandSemrushProject ? BrandSemrushProject.allByBrandId(brandId) : Promise.resolve([]),
+      ]);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      const brandSemrushProjects = rawProjects.map((p) => ({
+        brandId: p.getBrandId(),
+        semrushProjectId: p.getSemrushProjectId(),
+        geoTargetId: p.getGeoTargetId(),
+        languageCode: p.getLanguageCode(),
+      }));
+      const result = await buildService(ctx).getMarkets(
+        auth.workspaceId,
+        { brand: brand.name },
+        brandSemrushProjects,
+      );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -188,7 +207,53 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const result = await buildService(ctx).getMarkets(auth.workspaceId, {});
+      const { spaceCatId } = ctx?.params ?? {};
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
+      const brandSemrushProjects = BrandSemrushProject
+        ? (await Promise.all(
+          spacecatBrands.map((b) => BrandSemrushProject.allByBrandId(b.id)),
+        )).flat().map((p) => ({
+          brandId: p.getBrandId(),
+          semrushProjectId: p.getSemrushProjectId(),
+          geoTargetId: p.getGeoTargetId(),
+          languageCode: p.getLanguageCode(),
+        }))
+        : [];
+      const result = await buildService(ctx).getMarkets(auth.workspaceId, {}, brandSemrushProjects);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/:brandId/topics
+   * Returns topics scoped to the brand's Semrush project.
+   * Resolves the projectId from brand_to_semrush_projects and passes it to the Elements API.
+   */
+  const listBrandTopics = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const brand = await getBrandById(spaceCatId, brandId, postgrestClient);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const projects = BrandSemrushProject
+        ? await BrandSemrushProject.allByBrandId(brandId)
+        : [];
+      const projectId = projects[0]?.getSemrushProjectId();
+      const result = await buildService(ctx).getTopics(auth.workspaceId, {
+        ...extractQuery(ctx),
+        ...(projectId && { projectId }),
+      });
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -257,6 +322,7 @@ export default function ElementsController(context, log, env) {
     listMarkets,
     listAllMarkets,
     listTopics,
+    listBrandTopics,
     listUrlInspectorFilterDimensions,
   };
 }

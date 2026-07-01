@@ -16,7 +16,6 @@ import {
   transformBrandsResponse,
   transformBrandsToFilterDimensions,
   buildMarketsPayload,
-  transformMarketsResponse,
   transformMarketsToFilterDimensions,
   buildTopicsPayload,
   transformTopicsResponse,
@@ -54,17 +53,18 @@ export function createElementsService(transport) {
     /**
      * Fetches available markets (location+language projects) for a brand.
      * Powers the market/region filter dropdown (filter dimensions, row 2).
-     * The returned `id` values are Semrush project UUIDs — pass as `projectIds`
-     * in subsequent brand-scoped element calls.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} params - Query parameters; requires `params.brand` (brand name).
-     * @returns {Promise<import('./definitions/markets.js').Market[]>}
+     * @param {object} params - Query parameters; `params.brand` scopes to a brand.
+     * @param {Array<{brandId:string, semrushProjectId:string, geoTargetId:number,
+     *   languageCode:string}>} [brandSemrushProjects=[]] - BrandSemrushProject rows
+     *   used to enrich each market entry with SpaceCat metadata.
+     * @returns {Promise<import('./definitions/markets.js').FilterDimensionRegion[]>}
      */
-    async getMarkets(workspaceId, params) {
+    async getMarkets(workspaceId, params, brandSemrushProjects = []) {
       const payload = buildMarketsPayload(params);
       const raw = await transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, payload);
-      return transformMarketsResponse(raw);
+      return transformMarketsToFilterDimensions(raw, brandSemrushProjects);
     },
 
     /**
