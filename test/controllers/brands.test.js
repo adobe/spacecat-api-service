@@ -6403,6 +6403,7 @@ describe('Brands Controller', () => {
         urls: [],
       },
       updateBrandResult = { id: BRAND_UUID },
+      setBrandStatusResult = { id: BRAND_UUID },
       getPromptStatsResult = { branded: 0, unbranded: 0, intents: {} },
       fakeDrsClient = {
         isConfigured: () => true,
@@ -6417,6 +6418,9 @@ describe('Brands Controller', () => {
       const updateBrandStub = typeof updateBrandResult === 'function'
         ? updateBrandResult
         : sinon.stub().resolves(updateBrandResult);
+      const setBrandStatusStub = typeof setBrandStatusResult === 'function'
+        ? setBrandStatusResult
+        : sinon.stub().resolves(setBrandStatusResult);
       const getPromptStatsStub = typeof getPromptStatsResult === 'function'
         ? getPromptStatsResult
         : sinon.stub().resolves(getPromptStatsResult);
@@ -6449,6 +6453,7 @@ describe('Brands Controller', () => {
         '../../src/support/brands-storage.js': {
           getBrandById: getBrandByIdStub,
           updateBrand: updateBrandStub,
+          setBrandStatus: setBrandStatusStub,
           getBrandCompetitors: sinon.stub().resolves([]),
           listBrands: sinon.stub().resolves([]),
           upsertBrand: sinon.stub().resolves({}),
@@ -6473,6 +6478,7 @@ describe('Brands Controller', () => {
         controller: Mocked.default(context, loggerStub, mockEnv),
         getBrandByIdStub,
         updateBrandStub,
+        setBrandStatusStub,
         getPromptStatsStub,
         resolveBrandUuidStub,
         postLlmoAlertStub,
@@ -6699,7 +6705,7 @@ describe('Brands Controller', () => {
         submitPromptGenerationJob: submitJobStub,
         createBrandPresenceSchedule: scheduleStub,
       };
-      const { controller, updateBrandStub } = await buildActivateController({
+      const { controller, updateBrandStub, setBrandStatusStub } = await buildActivateController({
         getBrandByIdResult: {
           id: BRAND_UUID,
           name: 'Acme',
@@ -6727,10 +6733,10 @@ describe('Brands Controller', () => {
         scheduleId: 'sch-1',
       });
 
-      // updateBrand must be called with status:active + baseSiteId
-      expect(updateBrandStub).to.have.been.calledOnce;
-      const updateArg = updateBrandStub.firstCall.args[0];
-      expect(updateArg.updates).to.deep.include({ status: 'active', baseSiteId: SITE_ID });
+      // Anchored brand: no anchor write needed; promotion goes through setBrandStatus.
+      expect(updateBrandStub).to.not.have.been.called;
+      expect(setBrandStatusStub).to.have.been.calledOnce;
+      expect(setBrandStatusStub.firstCall.args[0]).to.include({ status: 'active' });
 
       // submitPromptGenerationJob must carry source:'brand-activation', region, siteId, imsOrgId
       expect(submitJobStub).to.have.been.calledOnce;
@@ -6983,28 +6989,65 @@ describe('Brands Controller', () => {
     });
 
     // -------------------------------------------------------------------------
-    // 12. updateBrand throws with .status = 409 → 409 response
+    // 12. base-site anchor write hits a unique conflict → 409
     // -------------------------------------------------------------------------
 
-    it('returns 409 when updateBrand throws a conflict error', async () => {
+    it('returns 409 when the base-site anchor write hits a unique conflict', async () => {
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(sites[0]);
       const conflictError = new Error('brands_base_site_unique constraint');
       conflictError.status = 409;
       const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID,
+          name: 'Acme',
+          baseSiteId: null,
+          baseUrl: null,
+          pendingSemrushProvisioning: { primaryUrl: 'https://site1.com' },
+          region: [],
+          status: 'pending',
+          urls: [],
+        },
         updateBrandResult: sinon.stub().rejects(conflictError),
       });
 
       const response = await controller.activateBrandForOrg(buildActivateRequest());
       expect(response.status).to.equal(409);
+
+      delete mockDataAccess.Site.findByBaseURL;
     });
 
     // -------------------------------------------------------------------------
-    // 13. updateBrand returns null → 404
+    // 13. concurrent delete → 404 (on either the anchor write or the promote)
     // -------------------------------------------------------------------------
 
-    it('returns 404 when updateBrand resolves null (concurrent delete)', async () => {
-      const { controller } = await buildActivateController({ updateBrandResult: null });
+    it('returns 404 when setBrandStatus resolves null (concurrent delete during promote)', async () => {
+      const { controller } = await buildActivateController({ setBrandStatusResult: null });
       const response = await controller.activateBrandForOrg(buildActivateRequest());
       expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when the anchor write resolves null (concurrent delete before promote)', async () => {
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(sites[0]);
+      const { controller, setBrandStatusStub } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID,
+          name: 'Acme',
+          baseSiteId: null,
+          baseUrl: null,
+          pendingSemrushProvisioning: { primaryUrl: 'https://site1.com' },
+          region: [],
+          status: 'pending',
+          urls: [],
+        },
+        updateBrandResult: null,
+      });
+
+      const response = await controller.activateBrandForOrg(buildActivateRequest());
+      expect(response.status).to.equal(404);
+      // Anchor failed → never reached the promote step.
+      expect(setBrandStatusStub).to.not.have.been.called;
+
+      delete mockDataAccess.Site.findByBaseURL;
     });
 
     // -------------------------------------------------------------------------
@@ -7186,7 +7229,7 @@ describe('Brands Controller', () => {
         submitPromptGenerationJob: submitJobStub,
         createBrandPresenceSchedule: scheduleStub,
       };
-      const { controller, updateBrandStub, postLlmoAlertStub } = await buildActivateController({
+      const { controller, setBrandStatusStub, postLlmoAlertStub } = await buildActivateController({
         fakeDrsClient: fakeDrs,
       });
 
@@ -7202,7 +7245,7 @@ describe('Brands Controller', () => {
         status: 'active',
         baseSiteId: SITE_ID,
       });
-      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(setBrandStatusStub).to.have.been.calledOnce;
       expect(scheduleStub).to.not.have.been.called; // short-circuited by the throw
       // The client body carries no upstream detail; the real error goes to ops.
       const warnCall = postLlmoAlertStub.getCalls().find(

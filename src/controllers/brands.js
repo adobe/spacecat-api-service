@@ -2111,6 +2111,7 @@ function BrandsController(ctx, log, env) {
       // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
       // not a declared activation anchor, so guessing one would be wrong.
       let { baseSiteId, baseUrl } = brand;
+      const alreadyAnchored = hasText(baseSiteId);
       if (!hasText(baseSiteId)) {
         const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
         const site = hasText(primaryUrl)
@@ -2131,17 +2132,35 @@ function BrandsController(ctx, log, env) {
         baseUrl = site.getBaseURL();
       }
 
-      // 2) Activate — status=active + baseSiteId in the SAME write. baseSiteId is
-      // immutable-from-null in storage; a brands_base_site_unique violation throws
-      // with status 409 (mapped by createErrorResponse).
-      const updated = await updateBrand({
+      // 2) Anchor + promote as two sanctioned steps (LLMO-5587):
+      //   (a) Anchor the base site via updateBrand — a field write, NOT a status change
+      //       (the brand stays pending). Only needed when the brand wasn't already
+      //       anchored; baseSiteId is immutable-from-null in storage and a
+      //       brands_base_site_unique collision surfaces as 409 (via createErrorResponse).
+      //   (b) Promote pending → active via setBrandStatus, the sanctioned
+      //       status-transition path. updateBrand deliberately refuses status demotions
+      //       (#2637), so all status changes route through setBrandStatus (#2621) — the
+      //       generic write primitive is reserved for field updates.
+      if (!alreadyAnchored) {
+        const anchored = await updateBrand({
+          organizationId: spaceCatId,
+          brandId: brandUuid,
+          updates: { baseSiteId },
+          postgrestClient,
+          updatedBy,
+        });
+        if (!anchored) {
+          return notFound(`Brand not found: ${brandId}`);
+        }
+      }
+      const promoted = await setBrandStatus({
         organizationId: spaceCatId,
         brandId: brandUuid,
-        updates: { status: 'active', baseSiteId },
+        status: 'active',
         postgrestClient,
         updatedBy,
       });
-      if (!updated) {
+      if (!promoted) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
