@@ -235,6 +235,14 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('invalidRequest');
     });
+
+    it('POST /serenity/tags 400s when type is not a creatable dimension', async () => {
+      const res = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'intent', name: 'Whatever', geoTargetId: 2840, languageCode: 'en',
+      });
+      expect(res.status).to.equal(400);
+      expect(res.body.message).to.match(/type must be one of/i);
+    });
   });
 
   describe('Serenity API — sub-workspace lifecycle (mutating, live mock)', () => {
@@ -280,6 +288,18 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       const res = await getHttpClient().admin.get(`${base}/tags?geoTargetId=${US_GEO}&languageCode=en`);
       expect(res.status).to.equal(200);
       expect(res.body.items).to.be.an('array');
+    });
+
+    it('POST /serenity/tags registers a category tag on the market (201)', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'category', name: 'Footwear', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(201);
+      expect(res.body.type).to.equal('category');
+      expect(res.body.tag).to.equal('category:Footwear');
+      expect(res.body.geoTargetId).to.equal(US_GEO);
+      expect(res.body.languageCode).to.equal('en');
     });
 
     it('POST /serenity/activate provisions + publishes, then deactivate decommissions', async () => {
