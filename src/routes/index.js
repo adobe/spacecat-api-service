@@ -238,8 +238,8 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/serenity/brands': elementsController.listBrands,
     'GET /v2/orgs/:spaceCatId/serenity/all/markets': elementsController.listAllMarkets,
     'GET /v2/orgs/:spaceCatId/serenity/:brandId/markets': elementsController.listMarkets,
-    'GET /v2/orgs/:spaceCatId/serenity/topics': elementsController.listTopics,
-    'GET /v2/orgs/:spaceCatId/serenity/:brandId/topics': elementsController.listBrandTopics,
+    'GET /v2/orgs/:spaceCatId/serenity/tags': elementsController.listTags,
+    'GET /v2/orgs/:spaceCatId/serenity/:brandId/tags': elementsController.listBrandTags,
     'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,

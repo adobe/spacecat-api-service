@@ -13,7 +13,6 @@
 import { ELEMENT_IDS } from './element-ids.js';
 import {
   buildBrandsPayload,
-  transformBrandsResponse,
   transformBrandsToFilterDimensions,
   buildMarketsPayload,
   transformMarketsToFilterDimensions,
@@ -42,12 +41,14 @@ export function createElementsService(transport) {
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query parameters from the SpaceCat API request.
-     * @returns {Promise<import('./definitions/brands.js').Brand[]>}
+     * @param {Array<{id: string, name: string}>} [spacecatBrands=[]] - SpaceCat brands for the org,
+     *   used to resolve `spacecat_brand_id` on each brand entry by name match.
+     * @returns {Promise<Array<{id: null, label: string, spacecat_brand_id: string|null}>>}
      */
-    async getBrands(workspaceId, params) {
+    async getBrands(workspaceId, params, spacecatBrands = []) {
       const payload = buildBrandsPayload(params);
       const raw = await transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, payload);
-      return transformBrandsResponse(raw);
+      return transformBrandsToFilterDimensions(raw, spacecatBrands);
     },
 
     /**

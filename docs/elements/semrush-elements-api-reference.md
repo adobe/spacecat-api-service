@@ -257,8 +257,8 @@ All endpoints below use `authorizeOrg`. Where a `:brandId` appears in the path, 
 | GET | `/v2/orgs/:spaceCatId/serenity/brands` | `listBrands` | All brands in the workspace |
 | GET | `/v2/orgs/:spaceCatId/serenity/all/markets` | `listAllMarkets` | All markets across the workspace (no brand filter) |
 | GET | `/v2/orgs/:spaceCatId/serenity/:brandId/markets` | `listMarkets` | Markets for a specific SpaceCat brand |
-| GET | `/v2/orgs/:spaceCatId/serenity/topics` | `listTopics` | All topic/category tags in the workspace |
-| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/topics` | `listBrandTopics` | Topics scoped to a brand's Semrush project |
+| GET | `/v2/orgs/:spaceCatId/serenity/tags` | `listTags` | All tags in the workspace |
+| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/tags` | `listBrandTags` | Tags aggregated across all of a brand's Semrush projects |
 | GET | `/v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | All filter dimensions for the URL Inspector dashboard |
 
 ---
@@ -276,7 +276,7 @@ All endpoints below use `authorizeOrg`. Where a `:brandId` appears in the path, 
 |---|---|---|
 | `model` | No | AI model filter (default: `search-gpt`) |
 
-**`listBrandTopics` additional behaviour:** resolves `BrandSemrushProject.allByBrandId(brandId)`, takes the first row's `semrushProjectId`, and passes it as `project_id` in the Topics element payload to scope tags to that brand's market.
+**`listBrandTags` additional behaviour:** resolves `BrandSemrushProject.allByBrandId(brandId)`, fetches tags for every project in parallel, then deduplicates by `value`. Falls back to workspace-wide tags if no rows exist.
 
 ---
 
@@ -284,10 +284,9 @@ All endpoints below use `authorizeOrg`. Where a `:brandId` appears in the path, 
 ```json
 [
   {
-    "name": "Adobe",
-    "count": 60,
-    "faviconDomain": "adobe.com",
-    "defaultSelected": true
+    "id": null,
+    "label": "Adobe",
+    "spacecat_brand_id": "3e3556f0-6494-4e8f-858f-01f2c358861a"
   }
 ]
 ```

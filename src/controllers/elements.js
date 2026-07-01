@@ -151,7 +151,11 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const result = await buildService(ctx).getBrands(auth.workspaceId, extractQuery(ctx));
+      const { spaceCatId } = ctx?.params ?? {};
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
+      const result = await buildService(ctx)
+        .getBrands(auth.workspaceId, extractQuery(ctx), spacecatBrands);
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -229,11 +233,11 @@ export default function ElementsController(context, log, env) {
   };
 
   /**
-   * GET /v2/orgs/:spaceCatId/serenity/:brandId/topics
-   * Returns topics scoped to the brand's Semrush project.
-   * Resolves the projectId from brand_to_semrush_projects and passes it to the Elements API.
+   * GET /v2/orgs/:spaceCatId/serenity/:brandId/tags
+   * Returns all tags across all of the brand's Semrush projects, deduplicated by value.
+   * Resolves projectIds from brand_to_semrush_projects and fetches each in parallel.
    */
-  const listBrandTopics = async (ctx) => {
+  const listBrandTags = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
       if (auth.error) {
@@ -249,11 +253,27 @@ export default function ElementsController(context, log, env) {
       const projects = BrandSemrushProject
         ? await BrandSemrushProject.allByBrandId(brandId)
         : [];
-      const projectId = projects[0]?.getSemrushProjectId();
-      const result = await buildService(ctx).getTopics(auth.workspaceId, {
-        ...extractQuery(ctx),
-        ...(projectId && { projectId }),
-      });
+      const service = buildService(ctx);
+      const queryParams = extractQuery(ctx);
+      let result;
+      if (projects.length === 0) {
+        result = await service.getTopics(auth.workspaceId, queryParams);
+      } else {
+        const perProject = await Promise.all(
+          projects.map((p) => service.getTopics(
+            auth.workspaceId,
+            { ...queryParams, projectId: p.getSemrushProjectId() },
+          )),
+        );
+        const seen = new Set();
+        result = perProject.flat().filter((topic) => {
+          if (seen.has(topic.value)) {
+            return false;
+          }
+          seen.add(topic.value);
+          return true;
+        });
+      }
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -261,10 +281,10 @@ export default function ElementsController(context, log, env) {
   };
 
   /**
-   * GET /v2/orgs/:spaceCatId/serenity/topics
-   * Returns all topic and category tags available in the workspace.
+   * GET /v2/orgs/:spaceCatId/serenity/tags
+   * Returns all tags available in the workspace.
    */
-  const listTopics = async (ctx) => {
+  const listTags = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
       if (auth.error) {
@@ -321,8 +341,8 @@ export default function ElementsController(context, log, env) {
     listBrands,
     listMarkets,
     listAllMarkets,
-    listTopics,
-    listBrandTopics,
+    listTags,
+    listBrandTags,
     listUrlInspectorFilterDimensions,
   };
 }

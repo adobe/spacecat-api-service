@@ -18,8 +18,8 @@ SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence
 1. [List Brands](#1-list-brands)
 2. [List All Markets](#2-list-all-markets)
 3. [List Markets for a Brand](#3-list-markets-for-a-brand)
-4. [List Topics (workspace-wide)](#4-list-topics-workspace-wide)
-5. [List Topics for a Brand](#5-list-topics-for-a-brand)
+4. [List Tags (workspace-wide)](#4-list-tags-workspace-wide)
+5. [List Tags for a Brand](#5-list-tags-for-a-brand)
 6. [List URL Inspector Filter Dimensions](#6-list-url-inspector-filter-dimensions)
 7. [Supported Models](#7-supported-models)
 
@@ -46,33 +46,30 @@ Returns all brands tracked in the Semrush workspace for this org. Powers the bra
 
 ### What it returns
 
-A list of brand objects as stored in the Semrush workspace. Each entry reflects one tracked brand.
+A list of brand objects enriched with the matching SpaceCat brand ID. `spacecat_brand_id` is resolved via case-insensitive name match against SpaceCat brands for the org, and is `null` when no match is found.
 
 ### Response example
 
 ```json
 [
   {
-    "name": "Adobe",
-    "count": 60,
-    "faviconDomain": "adobe.com",
-    "defaultSelected": true
+    "id": null,
+    "label": "Adobe",
+    "spacecat_brand_id": "3e3556f0-6494-4e8f-858f-01f2c358861a"
   },
   {
-    "name": "Adobe Express",
-    "count": 12,
-    "faviconDomain": "adobe.com",
-    "defaultSelected": false
+    "id": null,
+    "label": "Adobe Express",
+    "spacecat_brand_id": null
   }
 ]
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | string | Brand display name as stored in Semrush |
-| `count` | number | Total mention count across the workspace |
-| `faviconDomain` | string | Domain used to render the brand favicon |
-| `defaultSelected` | boolean | Whether Semrush pre-selects this brand in its own UI |
+| `id` | null | Always `null` — Semrush has no stable brand ID |
+| `label` | string | Brand display name as stored in Semrush |
+| `spacecat_brand_id` | string \| null | SpaceCat brand UUID matched by name (case-insensitive), or `null` if unmatched |
 
 ---
 
@@ -174,11 +171,11 @@ Same shape as [List All Markets](#2-list-all-markets), filtered to the given bra
 
 ---
 
-## 4. List Topics (workspace-wide)
+## 4. List Tags (workspace-wide)
 
-**`GET /v2/orgs/:spaceCatId/serenity/topics`**
+**`GET /v2/orgs/:spaceCatId/serenity/tags`**
 
-Returns all topic and category tags available in the workspace. Optionally scoped to a specific Semrush project via `projectId`.
+Returns all tags available in the workspace. Optionally scoped to a specific Semrush project via `projectId`.
 
 ### Parameters
 
@@ -217,11 +214,11 @@ A list of tag objects. Each tag has a colon-separated `value` from Semrush (`typ
 
 ---
 
-## 5. List Topics for a Brand
+## 5. List Tags for a Brand
 
-**`GET /v2/orgs/:spaceCatId/serenity/:brandId/topics`**
+**`GET /v2/orgs/:spaceCatId/serenity/:brandId/tags`**
 
-Returns topics scoped to a brand's primary Semrush project. The `projectId` is resolved automatically from `brand_to_semrush_projects` — no need to pass it manually.
+Returns all tags across all of the brand's Semrush projects, aggregated and deduplicated. Project IDs are resolved automatically from `brand_to_semrush_projects` — no need to pass them manually.
 
 ### Parameters
 
@@ -239,7 +236,7 @@ Returns topics scoped to a brand's primary Semrush project. The `projectId` is r
 
 ### What it returns
 
-Same shape as [List Topics](#4-list-topics-workspace-wide), scoped to the brand's first `BrandSemrushProject` row. If no `BrandSemrushProject` row exists for the brand, the call falls back to workspace-wide topics (no `project_id` filter applied).
+Same shape as [List Tags](#4-list-tags-workspace-wide). Fetches tags for every `BrandSemrushProject` row for the brand in parallel, then deduplicates by `value`. If no `BrandSemrushProject` row exists, falls back to workspace-wide tags (no `project_id` filter applied).
 
 ### Response example
 
