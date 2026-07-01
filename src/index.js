@@ -110,6 +110,7 @@ import StateAccessMappingsController from './controllers/state-access-mappings.j
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
 import SerenityController from './controllers/serenity.js';
+import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
@@ -288,6 +289,7 @@ async function run(request, context) {
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
     const serenityController = SerenityController(context, log, context.env);
+    const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
 
     const routeHandlers = getRouteHandlers(
@@ -351,6 +353,7 @@ async function run(request, context) {
       agenticCategoriesController,
       agenticPageTypesController,
       serenityController,
+      elementsController,
       proxyController,
       redirectsController,
     );

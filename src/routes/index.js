@@ -106,6 +106,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
+ * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -171,6 +172,7 @@ export default function getRouteHandlers(
   agenticCategoriesController,
   agenticPageTypesController,
   serenityController,
+  elementsController,
   proxyController,
   redirectsController,
 ) {
@@ -233,6 +235,13 @@ export default function getRouteHandlers(
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
     'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
+    // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
+    'GET /v2/orgs/:spaceCatId/serenity/brands': elementsController.listBrands,
+    'GET /v2/orgs/:spaceCatId/serenity/all/markets': elementsController.listAllMarkets,
+    'GET /v2/orgs/:spaceCatId/serenity/:brandId/markets': elementsController.listMarkets,
+    'GET /v2/orgs/:spaceCatId/serenity/tags': elementsController.listTags,
+    'GET /v2/orgs/:spaceCatId/serenity/:brandId/tags': elementsController.listBrandTags,
+    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
