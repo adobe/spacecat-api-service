@@ -15,6 +15,7 @@
 import { randomUUID } from 'crypto';
 
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import {
   badRequest,
   notFound,
@@ -25,6 +26,7 @@ import {
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
+  composeBaseURL,
   hasText,
   isNonEmptyObject,
   isValidUUID,
@@ -75,6 +77,8 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
+import { postLlmoAlert } from './llmo/llmo-onboarding.js';
+import { hasPaidLlmoEntitlement } from '../support/llmo-paid-gate.js';
 import { createIntentClassifier } from '../support/intent-classifier.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
@@ -2039,6 +2043,288 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Activates a brand: sets it `active` with a resolved `baseSiteId` in the SAME
+   * write, optionally generates AI prompts (a direct `prompt_generation_base_url`
+   * DRS job with `source: 'brand-activation'` — never Brandalf, never the
+   * `llmo-customer-analysis` cascade), and ensures the recurring brand-presence
+   * schedule when prompts exist. Explicit, customer-triggered (LLMO-5605).
+   *
+   * The brand must already exist (create it first via POST .../brands). Returns
+   * `200` quickly: the brand is `active` synchronously; prompts generate
+   * asynchronously (the `200` carries `promptGenerationJobId`, not finished prompts).
+   *
+   * @param {object} context - The request context (`params`, `data.generatePrompts`).
+   * @returns {Promise<Response>} 200 `{ brandId, status, baseSiteId,
+   *   promptGenerationJobId?, scheduleId? }`; 400/403/404/409 per the contract.
+   */
+  const activateBrandForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const { generatePrompts } = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (typeof generatePrompts !== 'boolean') {
+        return badRequest('generatePrompts is required and must be a boolean');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+
+      // Auth — same gate as Piece 1: membership + explicit PAID. PAID is stricter
+      // than the platform's any-tier "LLMO-enabled" bar; entitlements have no status
+      // column (getStatus() is an unbacked stub; revocation = row delete), so a PAID
+      // row is the "paying" signal. No separate admin requirement — mirrors Piece 1,
+      // which omits it so paying non-admin members aren't 403'd.
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      if (!await hasPaidLlmoEntitlement(context, organization)) {
+        return forbidden('A paid LLMO entitlement is required to activate a brand');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // brandId is UUID-validated by the shared param guard in index.js before the
+      // controller runs, so resolveBrandUuid's name-lookup branch is unreachable here —
+      // fetch directly. getBrandById org-scopes (organization_id + id) and returns null
+      // → 404 (the safety net even if that validation were bypassed), so no resolve is
+      // needed.
+      const brand = await getBrandById(spaceCatId, brandId, postgrestClient);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      // Do not resurrect a soft-deleted brand via activation (parity with the /status
+      // sibling, which guards the same with .neq('status', 'deleted')). Treat deleted
+      // as gone.
+      if (brand.status === 'deleted') {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      const brandUuid = brand.id;
+
+      // Idempotent / one-shot: activating an already-active brand is a no-op. Return the
+      // current state without re-running updateBrand, prompt-gen, or the schedule — a
+      // genuine retry after a COMPLETED prompt-gen job would otherwise submit a dup
+      // (listJobs dedup only catches QUEUED/RUNNING). Activate is promote-only.
+      if (brand.status === 'active') {
+        return createResponse({
+          brandId: brandUuid,
+          status: 'active',
+          baseSiteId: brand.baseSiteId,
+        }, 200);
+      }
+
+      // Promote-only: only a pending brand can be activated. deleted → 404 and active →
+      // 200 no-op are handled above; reject any other state explicitly (e.g. a future
+      // suspended/draft) rather than silently activating it.
+      if (brand.status !== 'pending') {
+        return badRequest(`Cannot activate a brand in status '${brand.status}'`);
+      }
+
+      // 1) Resolve the brand's onboarded primary site — the prompt-gen base URL and
+      // the baseSiteId to anchor on. An already-sited brand carries baseSiteId (and
+      // usually baseUrl); a pending brand resolves from its stashed Semrush primary URL.
+      // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
+      // not a declared activation anchor, so guessing one would be wrong.
+      let { baseSiteId, baseUrl } = brand;
+      const alreadyAnchored = hasText(baseSiteId);
+      if (!hasText(baseSiteId)) {
+        const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
+        const site = hasText(primaryUrl)
+          ? await Site.findByBaseURL(composeBaseURL(primaryUrl))
+          : null;
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
+        baseSiteId = site.getId();
+        baseUrl = site.getBaseURL();
+      } else if (!hasText(baseUrl)) {
+        // baseSiteId is set but the base_site embed didn't carry a URL — re-look up the
+        // site by id so prompt-gen never submits with an empty base_url.
+        const site = await Site.findById(baseSiteId);
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
+        baseUrl = site.getBaseURL();
+      }
+
+      // 2) Anchor + promote as two sanctioned steps (LLMO-5587):
+      //   (a) Anchor the base site via updateBrand — a field write, NOT a status change
+      //       (the brand stays pending). Only needed when the brand wasn't already
+      //       anchored; baseSiteId is immutable-from-null in storage and a
+      //       brands_base_site_unique collision surfaces as 409 (via createErrorResponse).
+      //   (b) Promote pending → active via setBrandStatus, the sanctioned
+      //       status-transition path. updateBrand deliberately refuses status demotions
+      //       (#2637), so all status changes route through setBrandStatus (#2621) — the
+      //       generic write primitive is reserved for field updates.
+      if (!alreadyAnchored) {
+        const anchored = await updateBrand({
+          organizationId: spaceCatId,
+          brandId: brandUuid,
+          updates: { baseSiteId },
+          postgrestClient,
+          updatedBy,
+        });
+        if (!anchored) {
+          return notFound(`Brand not found: ${brandId}`);
+        }
+      }
+      const promoted = await setBrandStatus({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        status: 'active',
+        postgrestClient,
+        updatedBy,
+      });
+      if (!promoted) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      // The brand is now active (committed above). Prompt generation and the
+      // brand-presence schedule are best-effort async side-effects — a DRS failure must
+      // NOT fail the activation. We run EVERYTHING after the commit in a guarded block
+      // (DRS client construction included): on error we degrade to 200 with the brand
+      // active (plus whatever ids succeeded) and alert ops with the real error so it's
+      // never lost (#4). Keeping DRS errors inside this block also means they never reach
+      // createErrorResponse, so raw upstream detail can't leak to the client (#5).
+      let promptGenerationJobId;
+      let scheduleId;
+      let sideEffectError;
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        const drsConfigured = drsClient.isConfigured();
+        // 3) Optional prompt generation (async). Best-effort dedup: reuse any in-flight
+        // brand-activation prompt-gen job for this site rather than submitting a dup.
+        // This listJobs → status check is NOT atomic (TOCTOU) — two truly-concurrent
+        // activations could both submit; acceptable since a human double-click sees the
+        // first as RUNNING, and the weekly schedule has real 409 dedup. Note the
+        // source='brand-activation' filter depends on the DRS source-filter deploy;
+        // until it lands, dedup widens to all base-url prompt-gen jobs for the site.
+        if (generatePrompts) {
+          if (drsConfigured) {
+            const inFlight = await drsClient.listJobs({
+              siteId: baseSiteId,
+              providerId: 'prompt_generation_base_url',
+              source: 'brand-activation',
+            });
+            const existing = (inFlight || []).find(
+              (job) => job.status === 'QUEUED' || job.status === 'RUNNING',
+            );
+            if (existing) {
+              promptGenerationJobId = existing.job_id;
+              log.info(`Reusing in-flight prompt-gen job ${existing.job_id} (brand ${brandUuid})`);
+            } else {
+              const region = Array.isArray(brand.region) ? brand.region[0] : undefined;
+              const job = await drsClient.submitPromptGenerationJob({
+                baseUrl,
+                brandName: brand.name,
+                // DRS defaults audience to "General Consumers" when absent; pass it
+                // explicitly to satisfy the required PromptGenerationParams type without
+                // changing behaviour.
+                audience: 'General Consumers',
+                siteId: baseSiteId,
+                imsOrgId: organization.getImsOrgId(),
+                ...(hasText(region) ? { region } : {}),
+                source: 'brand-activation',
+              });
+              promptGenerationJobId = job?.job_id;
+            }
+          } else {
+            log.warn('DRS client not configured; skipping prompt generation');
+          }
+        }
+
+        // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
+        // when prompts were generated now or the brand already has prompts (a promptless
+        // schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule POSTs and
+        // tolerates a 409 dedup.
+        let hasExistingPrompts = false;
+        if (!generatePrompts && drsConfigured) {
+          // Only worth computing when we could actually schedule — skip the DB roundtrip
+          // when DRS is unavailable (no schedule would be created regardless).
+          const stats = await getPromptStats({
+            organizationId: spaceCatId,
+            brandUuid,
+            postgrestClient,
+          });
+          hasExistingPrompts = (stats.branded + stats.unbranded) > 0;
+        }
+        if ((generatePrompts || hasExistingPrompts) && drsConfigured) {
+          const schedule = await drsClient.createBrandPresenceSchedule({
+            siteId: baseSiteId,
+            brandId: brandUuid,
+            orgId: spaceCatId,
+          });
+          scheduleId = schedule?.scheduleId;
+        }
+      } catch (error) {
+        sideEffectError = error;
+        log.error(
+          `Brand ${brandUuid} activated, but prompt-gen/schedule failed for org ${spaceCatId}:`,
+          error,
+        );
+      }
+
+      const responseBody = {
+        brandId: brandUuid,
+        status: 'active',
+        baseSiteId,
+        ...(promptGenerationJobId ? { promptGenerationJobId } : {}),
+        ...(scheduleId ? { scheduleId } : {}),
+      };
+
+      // The activation alert is also best-effort. postLlmoAlert already swallows its own
+      // Slack errors, but we wrap it defensively so an alert failure can never escape to
+      // the outer catch and turn an already-committed activation into a 5xx.
+      try {
+        if (sideEffectError) {
+          // Activation succeeded; only the async side-effects failed. Surface the real
+          // error to ops (the offending party) — the client still gets 200 (#4).
+          await postLlmoAlert(
+            `:warning: Brand activated, but prompt-gen/schedule failed — ${brand.name} `
+            + `(${brandUuid}) in org ${spaceCatId} [site=${baseSiteId}, `
+            + `generatePrompts=${generatePrompts}]: ${sideEffectError.message}`,
+            context,
+          );
+        } else {
+          await postLlmoAlert(
+            `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
+            + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
+            + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
+            context,
+          );
+        }
+      } catch (alertError) {
+        log.error(`Brand ${brandUuid} activated; activation alert failed:`, alertError);
+      }
+
+      return createResponse(responseBody, 200);
+    } catch (error) {
+      log.error(`Error activating brand ${brandId} for organization ${spaceCatId}:`, error);
+      await postLlmoAlert(
+        `:x: Brand activation failed — brand ${brandId} in org ${spaceCatId}: ${error.message}`,
+        context,
+      );
+      return createErrorResponse(error);
+    }
+  };
+
   // Explicit, intentful brand status transition (approve -> active, move-to-pending ->
   // pending). This is the sanctioned path for an active->pending demotion: the generic
   // PATCH /brands/:brandId refuses that transition (LLMO-5587), routing intent here.
@@ -2116,6 +2402,7 @@ function BrandsController(ctx, log, env) {
     createBrandForOrg,
     updateBrandForOrg,
     deleteBrandForOrg,
+    activateBrandForOrg,
     transitionBrandStatusForOrg,
     listPromptsByBrand,
     getPromptByBrandAndId,

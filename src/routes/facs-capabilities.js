@@ -540,6 +540,7 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'llmo/can_configure',
