@@ -259,6 +259,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/bot-blocker:
     $ref: './bot-blocker-api.yaml#/bot-blocker'
+  /sites/{siteId}/entitlements:
+    $ref: './entitlements-api.yaml#/ensure-entitlement-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
@@ -632,6 +634,38 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-bootstrap-url'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/connect:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-connect'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/distributions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-distributions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/prerequisites:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-prerequisites'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/origins:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-origins'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/behaviors:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-behaviors'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-origin:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-origin'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-function:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-function'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-cache:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-cache'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-lambda:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-lambda'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/lambda-status:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-lambda-status'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-associations:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-associations'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/verify:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-verify'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/plan:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:

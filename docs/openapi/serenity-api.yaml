@@ -89,7 +89,7 @@ v2-serenity-prompts:
             schema: { $ref: './schemas.yaml#/SerenityPromptListResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or workspace not found.
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -119,7 +119,7 @@ v2-serenity-prompts:
             schema: { $ref: './schemas.yaml#/SerenityCreatePromptsResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or workspace not found.
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -180,7 +180,7 @@ v2-serenity-prompt-by-id:
             schema: { $ref: './schemas.yaml#/SerenityPrompt' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, slice, or prompt not found.
+        description: Organization, brand, slice, or prompt not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -230,7 +230,7 @@ v2-serenity-prompts-bulk-delete:
             schema: { $ref: './schemas.yaml#/SerenityBulkDeletePromptsResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or workspace not found.
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -273,7 +273,7 @@ v2-serenity-markets:
             schema: { $ref: './schemas.yaml#/SerenityMarketListResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or workspace not found.
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -307,7 +307,7 @@ v2-serenity-markets:
       '400':
         description: Bad request (unknown market, malformed languageCode, missing field).
       '404':
-        description: Organization has no workspace.
+        description: Organization has no workspace, or serenity is not active for the organization.
       '409':
         description: A market already exists for this (brandId, geoTargetId, languageCode) slice.
       '502':
@@ -365,7 +365,7 @@ v2-serenity-market-by-slice:
             schema: { $ref: './schemas.yaml#/SerenityMarketDetail' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, workspace, or market slice not found.
+        description: Organization, brand, workspace, or market slice not found, or serenity is not active for the organization.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -390,7 +390,7 @@ v2-serenity-market-by-slice:
         description: Market removed (or never existed; idempotent).
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or workspace not found.
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '500': { $ref: './responses.yaml#/500' }
       '502':
         description: Upstream non-404 failure; DB row was NOT removed.
@@ -440,7 +440,7 @@ v2-serenity-tags:
             schema: { $ref: './schemas.yaml#/SerenityTagListResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or workspace not found.
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -517,7 +517,7 @@ v2-serenity-activate:
             schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or parent workspace not found.
+        description: Organization, brand, or parent workspace not found, or serenity is not active for the organization.
       '409':
         description: >-
           Misconfiguration: the brand's sub-workspace equals the organization
@@ -574,7 +574,7 @@ v2-serenity-deactivate:
             schema: { $ref: './schemas.yaml#/SerenityDeactivateResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization or brand not found.
+        description: Organization or brand not found, or serenity is not active for the organization.
       '409':
         description: >-
           Refused to protect dependents: the brand's sub-workspace equals the
@@ -644,7 +644,7 @@ v2-serenity-models:
             schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, or workspace not found.
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -678,7 +678,7 @@ v2-serenity-models:
             schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
-        description: Organization, brand, workspace, or market slice not found.
+        description: Organization, brand, workspace, or market slice not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
         content:
