@@ -110,6 +110,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} prerenderValidationController - Prerender validation compare controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -177,6 +178,7 @@ export default function getRouteHandlers(
   serenityController,
   proxyController,
   redirectsController,
+  prerenderValidationController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -777,6 +779,9 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt-research/brands-export': aiVisibilityController.getV1PromptResearchBrandsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': aiVisibilityController.getV1PromptResearchSourceDomainsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/topics-export': aiVisibilityController.getV1PromptResearchTopicsExport,
+
+    // Prerender Validation
+    'POST /prerender-validation/compare': prerenderValidationController.compare,
   };
 
   // Initialization of static and dynamic routes
