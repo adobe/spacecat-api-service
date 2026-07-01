@@ -31,6 +31,7 @@ import {
   isNonEmptyObject,
   canonicalizeUrl,
   composeBaseURL,
+  getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -1204,15 +1205,22 @@ function SitesController(ctx, log, env) {
         ),
       ]);
 
+      // Locale-specific sites (e.g. https://example.com/de) have no RUM domain key
+      // of their own — `domain` resolves to the main domain. Narrow the RUM result
+      // to the locale subtree by its path prefix; null for whole-domain sites.
+      const pathPrefix = getBaseURLPathPrefix(site.getBaseURL());
+
       // Fetch current and previous RUM metrics in parallel
       const [current, previous] = await Promise.all([
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: thirtyDaysAgo.toISOString(),
           endTime: todayUTC.toISOString(),
         }),
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: sixtyDaysAgo.toISOString(),
           endTime: thirtyDaysAgo.toISOString(),
         }),

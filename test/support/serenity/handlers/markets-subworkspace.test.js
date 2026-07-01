@@ -370,13 +370,13 @@ describe('markets-subworkspace handlers', () => {
           generateTopics: true,
           topicCap: 1,
           standardTags: ['source:ai'],
-          projectTags: ['intent:informational', 'type:branded'],
+          projectTags: ['intent:Informational', 'type:branded'],
           publishMode: 'require',
         },
       );
       expect(res.status).to.equal(201);
       // project-level tag taxonomy registered (independent of prompts)
-      expect(transport.createProjectTags).to.have.been.calledOnceWith(WS, 'new-proj', ['intent:informational', 'type:branded']);
+      expect(transport.createProjectTags).to.have.been.calledOnceWith(WS, 'new-proj', ['intent:Informational', 'type:branded']);
       // models attached
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-2');

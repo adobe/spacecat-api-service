@@ -624,6 +624,11 @@ export async function getPromptById({
  * categoryId, topicId, ... }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
+ *   Optional best-effort intent classifier; applied only to prompts that change
+ *   text without an explicit intent. Non-fatal: a null result leaves intent unset.
+ * @param {number} [params.classifyIntentBatchTimeoutMs] - Cap on the classifier
+ *   batch (ms); the upsert proceeds without intent once it elapses.
  * @returns {Promise<{created: number, updated: number, prompts: object[]}>}
  */
 export async function upsertPrompts({

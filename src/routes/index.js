@@ -74,6 +74,7 @@ function isStaticRoute(routePattern) {
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
  * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
+ * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -137,6 +138,7 @@ export default function getRouteHandlers(
   fixesController,
   llmoController,
   llmoCloudflareController,
+  llmoCloudFrontController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -430,6 +432,7 @@ export default function getRouteHandlers(
     'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
     'POST /state/access-mappings': stateAccessMappingsController.createMapping,
     'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'DELETE /state/access-mappings/:id': stateAccessMappingsController.deleteMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
     'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
     'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
@@ -506,6 +509,22 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url': llmoCloudFrontController.createBootstrapUrl,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect': llmoCloudFrontController.connect,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions': llmoCloudFrontController.listDistributions,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites': llmoCloudFrontController.checkPrerequisites,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins': llmoCloudFrontController.fetchOrigins,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors': llmoCloudFrontController.fetchBehaviors,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin': llmoCloudFrontController.createOrigin,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function': llmoCloudFrontController.createRoutingFunction,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache': llmoCloudFrontController.applyCache,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda': llmoCloudFrontController.createLambda,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status': llmoCloudFrontController.fetchLambdaStatus,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations': llmoCloudFrontController.applyAssociations,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify': llmoCloudFrontController.verifyRouting,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': llmoCloudFrontController.deploy,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': llmoCloudFrontController.plan,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': llmoCloudFrontController.getPermissions,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
@@ -517,7 +536,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': llmoCloudflareController.listAccounts,
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes': llmoCloudflareController.addRoute,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': llmoCloudflareController.addRoute,
 
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
@@ -637,6 +656,7 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'POST /sites/:siteId/entitlements': entitlementController.createSiteEntitlement,
     'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
       featureFlagsController.putByOrganizationProductAndName,

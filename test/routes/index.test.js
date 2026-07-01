@@ -348,6 +348,25 @@ describe('getRouteHandlers', () => {
     addRoute: () => null,
   };
 
+  const mockLlmoCloudFrontController = {
+    createBootstrapUrl: () => null,
+    connect: () => null,
+    listDistributions: () => null,
+    checkPrerequisites: () => null,
+    fetchOrigins: () => null,
+    fetchBehaviors: () => null,
+    createOrigin: () => null,
+    createRoutingFunction: () => null,
+    applyCache: () => null,
+    createLambda: () => null,
+    fetchLambdaStatus: () => null,
+    applyAssociations: () => null,
+    verifyRouting: () => null,
+    deploy: () => null,
+    plan: () => null,
+    getPermissions: () => null,
+  };
+
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
   };
@@ -378,6 +397,7 @@ describe('getRouteHandlers', () => {
   const mockEntitlementController = {
     getByOrganizationID: () => null,
     createEntitlement: () => null,
+    createSiteEntitlement: () => null,
   };
 
   const mockReportsController = {
@@ -531,6 +551,7 @@ describe('getRouteHandlers', () => {
     listHistory: sinon.stub(),
     createMapping: sinon.stub(),
     patchMapping: sinon.stub(),
+    deleteMapping: sinon.stub(),
     getProductCapabilities: sinon.stub(),
     getUserCapabilities: sinon.stub(),
     getAuditLogs: sinon.stub(),
@@ -599,6 +620,7 @@ describe('getRouteHandlers', () => {
       mockFixesController,
       mockLlmoController,
       mockLlmoCloudflareController,
+      mockLlmoCloudFrontController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -800,6 +822,7 @@ describe('getRouteHandlers', () => {
 
     const expectedDynamicRouteKeys = [
       'PATCH /state/access-mappings/:id',
+      'DELETE /state/access-mappings/:id',
       'GET /user/capabilities/:resourceId',
       'GET /organizations/:organizationId/permission/audit-logs',
       'GET /audits/latest/:auditType',
@@ -1112,6 +1135,22 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
       'POST /sites/:siteId/llmo/edge-optimize-config/stage',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'GET /sites/:siteId/llmo/probes/edge-optimize',
       'GET /sites/:siteId/llmo/strategy',
@@ -1121,7 +1160,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
-      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
@@ -1132,6 +1171,7 @@ describe('getRouteHandlers', () => {
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
+      'POST /sites/:siteId/entitlements',
       'GET /organizations/:organizationId/feature-flags',
       'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
       'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -1239,6 +1279,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.createEntitlement);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['POST /sites/:siteId/entitlements'].handler).to.equal(mockEntitlementController.createSiteEntitlement);
+    expect(dynamicRoutes['POST /sites/:siteId/entitlements'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.putByOrganizationProductAndName);
     expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].paramNames).to.deep.equal(['organizationId', 'product', 'flagName']);
     expect(dynamicRoutes['DELETE /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.deleteByOrganizationProductAndName);
