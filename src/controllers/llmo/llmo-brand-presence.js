@@ -18,6 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cachedOk } from '../../support/cached-response.js';
+import { getIntentsByPromptIds } from '../../support/prompts-storage.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -2196,8 +2197,23 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
+      // Enrich only the returned page with per-prompt intent from the prompts
+      // table (1:1 with prompt_id; executions carry only prompt_id). Done after
+      // pagination so the .in() lookup is bounded to the page (≤ pageSize),
+      // never the full rawRows set. Non-fatal + intent-column-absent safe.
+      const intentByPromptId = await getIntentsByPromptIds({
+        promptIds: paged.map((item) => item.promptId),
+        organizationId,
+        postgrestClient: client,
+        log: ctx.log,
+      });
+      const pagedItems = paged.map((item) => ({
+        ...item,
+        userIntent: intentByPromptId.get(item.promptId) || '',
+      }));
+
       return cachedOk({
-        items: paged,
+        items: pagedItems,
         totalCount,
         topic: topicResponseLabel,
         topicId: topicIdResponse,
