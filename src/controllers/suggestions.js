@@ -27,6 +27,7 @@ import {
   isValidUUID,
   isValidUrl,
   isWithinSiteScope,
+  isPathPatternWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 
 import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
@@ -34,7 +35,6 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
-import { isPathPatternWithinSiteScope } from '../utils/path-scope.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
