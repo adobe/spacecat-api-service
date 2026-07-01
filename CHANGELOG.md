@@ -1,3 +1,10 @@
+# [1.615.0](https://github.com/adobe/spacecat-api-service/compare/v1.614.0...v1.615.0) (2026-07-01)
+
+
+### Features
+
+* return per-prompt userIntent in topic-prompts endpoint | LLMO-5950 ([#2735](https://github.com/adobe/spacecat-api-service/issues/2735)) ([5043c91](https://github.com/adobe/spacecat-api-service/commit/5043c91cc3fbe4b3ffde8a5e44dc3a70ec1fb1a3))
+
 # [1.614.0](https://github.com/adobe/spacecat-api-service/compare/v1.613.4...v1.614.0) (2026-07-01)
 
 
