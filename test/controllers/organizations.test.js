@@ -971,6 +971,84 @@ describe('Organizations Controller', () => {
     expect(resultSites[1]).to.have.property('id', 'site2');
   });
 
+  describe('getSitesForOrganization — ReBAC collection filter', () => {
+    // Minimal chained PostgREST stub; resolves every read to the given rows.
+    function fakeFacsPostgrest(rows) {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        is: () => builder,
+        order: () => builder,
+        range: () => builder,
+        then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+      };
+      return { from: () => builder };
+    }
+
+    function setupBothSitesPass() {
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0], sites[1]]);
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'abcd',
+        getTier: () => 'FREE_TRIAL',
+      });
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getId: () => 'e1', getEntitlementId: () => 'entitlement-123', getSiteId: () => 'site1' },
+        { getId: () => 'e2', getEntitlementId: () => 'entitlement-123', getSiteId: () => 'site2' },
+      ]);
+    }
+
+    it('filters own sites to the ReBAC-viewable set when facs flag is set', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([
+          { resource_id: 'site1', granted_capabilities: ['abcd/can_view'] },
+        ]),
+      };
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      const resultSites = await result.json();
+      expect(result.status).to.equal(200);
+      // site2 is dropped — the caller has no can_view grant on it.
+      expect(resultSites).to.be.an('array').with.lengthOf(1);
+      expect(resultSites[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns 503 when the facs flag is set but PostgREST is unavailable', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      // No context.dataAccess.services → postgrest guard trips.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(503);
+    });
+
+    it('skips filter when JWT carries the federal can_view grant', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      // Keep is_admin: true so hasAccess passes; add facs_permissions to trigger the bypass.
+      context.attributes.authInfo.withProfile({
+        email: 'test@example.com',
+        is_admin: true,
+        facs_permissions: ['abcd/can_view'],
+      });
+      // No postgrestClient needed — the bypass should skip the state-layer query entirely.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(200);
+      const resultSites = await result.json();
+      expect(resultSites).to.be.an('array').with.lengthOf(2);
+    });
+  });
+
   it('gets all sites of an organization for non belonging organization', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Site.allByOrganizationId.resolves(sites);

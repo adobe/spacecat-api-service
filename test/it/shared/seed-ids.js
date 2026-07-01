@@ -47,6 +47,16 @@ export const MARKET_SITE_1_BASE_URL = 'https://semrush-market.example.fr';
 
 export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
 
+// ── Brand Presence (topic-prompts intent enrichment) ──
+// A prompt row carrying an `intent`, plus a brand_presence_executions row that
+// references it, so the topic-prompts endpoint can be asserted to enrich
+// `userIntent` from the prompts table. See seed-data/prompts.js +
+// seed-data/brand-presence-executions.js.
+export const BP_PROMPT_1_ID = 'b9111111-1111-4111-b111-111111111111';
+export const BP_EXECUTION_1_ID = 'be111111-1111-4111-b111-111111111111';
+export const BP_TOPIC_1_NAME = 'IntentITTopic';
+export const BP_PROMPT_1_INTENT = 'informational';
+
 // Serenity Semrush vendor-mock seed alignment. BRAND_1 is in subworkspace mode
 // (brands.semrush_workspace_id set); pointing it at the workspace the Project
 // Engine / User Manager mocks seed (`MOCK_SEED=workspace-with-data` /
