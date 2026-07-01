@@ -599,6 +599,10 @@ describe('getRouteHandlers', () => {
     getRedirects: sinon.stub(),
   };
 
+  const mockPrerenderValidationController = {
+    compare: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -665,6 +669,7 @@ describe('getRouteHandlers', () => {
       mockSerenityController,
       mockProxyController,
       mockRedirectsController,
+      mockPrerenderValidationController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -754,6 +759,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers',
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
+      'POST /prerender-validation/compare',
       'GET /v2/regions',
     );
 
@@ -829,6 +835,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
+    expect(staticRoutes['POST /prerender-validation/compare']).to.equal(mockPrerenderValidationController.compare);
 
     const expectedDynamicRouteKeys = [
       'PATCH /state/access-mappings/:id',
