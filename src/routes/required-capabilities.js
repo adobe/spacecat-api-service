@@ -241,6 +241,10 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/permission/audit-logs',
   'GET /product/capabilities',
   'GET /user/capabilities/:resourceId',
+
+  // Comparative Experiments (GarageWeek POC) — UI only, not yet required by S2S consumers
+  'GET /sites/:siteId/page-groups',
+  'POST /sites/:siteId/comparative-experiments/groupings',
 ];
 
 /**
