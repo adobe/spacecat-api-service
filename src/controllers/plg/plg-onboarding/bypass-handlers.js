@@ -205,6 +205,7 @@ export async function bypassDomainAlreadyAssigned({ onboarding, siteConfig }, co
 export async function bypassNonProdDomain({ onboarding }, context) {
   const { ok } = context;
   onboarding.setSteps({ ...(onboarding.getSteps() || {}), nonProdCheckBypassed: true });
+  await onboarding.save();
   const result = await performAsoPlgOnboarding(
     {
       domain: onboarding.getDomain(),
