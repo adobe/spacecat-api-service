@@ -2567,6 +2567,64 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
     });
 
+    it('filters brands to the ReBAC-viewable set when facs flag is set', async () => {
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/brands-storage.js': {
+          listBrands: sinon.stub().resolves([{ id: 'brandA', name: 'A' }, { id: 'brandB', name: 'B' }]),
+        },
+        '../../src/support/state-access-mapping-utils.js': {
+          listViewableResourceIds: sinon.stub().resolves(new Set(['brandA'])),
+        },
+      });
+      const controller = Mocked(context, loggerStub, mockEnv);
+      const response = await controller.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+        attributes: {
+          ...context.attributes,
+          facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
+        },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // brandB is dropped — the caller has no can_view grant on it.
+      expect(body.brands).to.be.an('array').with.lengthOf(1);
+      expect(body.brands[0]).to.have.property('id', 'brandA');
+    });
+
+    it('skips brand filter when JWT carries the federal can_view grant', async () => {
+      const listViewableStub = sinon.stub().resolves(new Set(['brandA']));
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/brands-storage.js': {
+          listBrands: sinon.stub().resolves([{ id: 'brandA', name: 'A' }, { id: 'brandB', name: 'B' }]),
+        },
+        '../../src/support/state-access-mapping-utils.js': {
+          listViewableResourceIds: listViewableStub,
+        },
+      });
+      const controller = Mocked(context, loggerStub, mockEnv);
+      const response = await controller.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+        attributes: {
+          ...context.attributes,
+          facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ email: 'test@example.com', facs_permissions: ['llmo/can_view'] }),
+        },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // Both brands returned — the state-layer filter is bypassed.
+      expect(body.brands).to.be.an('array').with.lengthOf(2);
+      expect(listViewableStub).to.not.have.been.called;
+    });
+
     it('returns 404 when organization not found', async () => {
       mockDataAccess.Organization.findById = sinon.stub().resolves(null);
       brandsController = BrandsController(context, loggerStub, mockEnv);

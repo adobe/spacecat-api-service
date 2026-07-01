@@ -142,6 +142,56 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
 }
 
 /**
+ * Builds the set of `resource_id`s the caller may **view** for a product +
+ * resource type — the union of org-scoped and user-scoped active bindings whose
+ * `granted_capabilities` include `<product>/can_view`. Used by ReBAC-filtered
+ * collection endpoints (list-sites, list-brands) to narrow results to the
+ * resources a resource-scoped caller can see.
+ *
+ * Org-scoped grants always apply; the user-scoped read runs only when a
+ * `subjectId` is known (a missing subjectId must NOT widen the query — without
+ * the `subject_id` filter PostgREST would return every user's bindings). Bounded
+ * by `MAX_LIST_LIMIT` per subject scope, mirroring the list endpoints.
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.imsOrgId      - REQUIRED. Canonical caller org id.
+ * @param {string} args.product       - REQUIRED. Uppercase product code.
+ * @param {string} args.resourceType  - REQUIRED. e.g. 'site' | 'brand'.
+ * @param {string} [args.subjectId]   - Caller's canonical user id (JWT sub).
+ * @returns {Promise<Set<string>>} resource_ids the caller may view.
+ */
+export async function listViewableResourceIds(postgrestClient, {
+  imsOrgId, product, resourceType, subjectId,
+}) {
+  const viewCapability = `${product.toLowerCase()}/can_view`;
+  const subjectScopes = [{ subjectType: 'org', subjectId: imsOrgId }];
+  if (subjectId) {
+    subjectScopes.push({ subjectType: 'user', subjectId });
+  }
+  const pages = await Promise.all(subjectScopes.map((scope) => listFacsAccessMappings(
+    postgrestClient,
+    {
+      imsOrgId,
+      product,
+      resourceType,
+      subjectType: scope.subjectType,
+      subjectId: scope.subjectId,
+      limit: MAX_LIST_LIMIT,
+    },
+  )));
+  const ids = new Set();
+  for (const rows of pages) {
+    for (const row of rows) {
+      if ((row.granted_capabilities ?? []).includes(viewCapability)) {
+        ids.add(row.resource_id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
  * Fetches a single **active** binding by primary key, scoped to the caller's
  * org + product. Used to authorize PATCH / DELETE before mutating: the caller's
  * management authority is evaluated against the row's `resource_id`

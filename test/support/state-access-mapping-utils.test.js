@@ -22,6 +22,7 @@ import {
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
+  listViewableResourceIds,
 } from '../../src/support/state-access-mapping-utils.js';
 
 /**
@@ -860,6 +861,65 @@ describe('state-access-mapping-utils helpers', () => {
       } catch (e) {
         expect(e.message).to.equal('updateFacsAccessMappingCapabilities failed: permission denied');
       }
+    });
+  });
+
+  describe('listViewableResourceIds', () => {
+    it('returns resource_ids granted can_view, skipping rows without it', async () => {
+      const client = fakePostgrestClient({
+        readResult: {
+          data: [
+            { resource_id: 'r-view', granted_capabilities: ['llmo/can_configure', 'llmo/can_view'] },
+            { resource_id: 'r-noview', granted_capabilities: ['llmo/can_configure'] },
+            { resource_id: 'r-null', granted_capabilities: null },
+          ],
+          error: null,
+        },
+      });
+      const ids = await listViewableResourceIds(client, {
+        imsOrgId: 'ORG@AdobeOrg',
+        product: 'LLMO',
+        resourceType: 'brand',
+        subjectId: 'user@AdobeID',
+      });
+      expect(ids).to.be.instanceOf(Set);
+      expect([...ids]).to.deep.equal(['r-view']);
+      // user + org scopes => two reads.
+      expect(client.fromCalls).to.have.lengthOf(2);
+    });
+
+    it('queries only the org scope when subjectId is absent', async () => {
+      const client = fakePostgrestClient({
+        readResult: {
+          data: [{ resource_id: 'r-org', granted_capabilities: ['aso/can_view'] }],
+          error: null,
+        },
+      });
+      const ids = await listViewableResourceIds(client, {
+        imsOrgId: 'ORG@AdobeOrg',
+        product: 'ASO',
+        resourceType: 'site',
+      });
+      expect([...ids]).to.deep.equal(['r-org']);
+      // org scope only => a single read.
+      expect(client.fromCalls).to.have.lengthOf(1);
+    });
+
+    it('dedupes a resource granted via both org and user scope', async () => {
+      const client = fakePostgrestClient({
+        readResult: {
+          data: [{ resource_id: 'shared', granted_capabilities: ['llmo/can_view'] }],
+          error: null,
+        },
+      });
+      const ids = await listViewableResourceIds(client, {
+        imsOrgId: 'ORG@AdobeOrg',
+        product: 'LLMO',
+        resourceType: 'brand',
+        subjectId: 'user@AdobeID',
+      });
+      // Both scopes resolve to the same row; the Set collapses the duplicate.
+      expect([...ids]).to.deep.equal(['shared']);
     });
   });
 });
