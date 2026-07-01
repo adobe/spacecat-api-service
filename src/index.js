@@ -82,6 +82,7 @@ import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import PageGroupsController from './controllers/llmo/opportunities/page-groups.js';
+import GroupFormationController from './controllers/llmo/opportunities/group-formation.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
@@ -261,6 +262,7 @@ async function run(request, context) {
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const pageGroupsController = PageGroupsController(context);
+    const groupFormationController = GroupFormationController(context);
     const fanoutReportController = FanoutReportController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
@@ -324,6 +326,7 @@ async function run(request, context) {
       llmoMysticatController,
       llmoOpportunitiesController,
       pageGroupsController,
+      groupFormationController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,

@@ -77,6 +77,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} pageGroupsController - The page groups controller.
+ * @param {Object} groupFormationController - The group formation controller.
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
@@ -143,6 +144,7 @@ export default function getRouteHandlers(
   llmoMysticatController,
   llmoOpportunitiesController,
   pageGroupsController,
+  groupFormationController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -336,6 +338,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/page-groups': pageGroupsController.getPageGroups,
+    'POST /sites/:siteId/comparative-experiments/groupings': groupFormationController.createGroupings,
     'GET /sites/:siteId/geo-experiments': suggestionsController.listGeoExperiments,
     'GET /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.getGeoExperiment,
     'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.patchGeoExperiment,
