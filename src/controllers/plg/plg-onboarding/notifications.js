@@ -17,10 +17,12 @@ export const REVIEW_REASONS = {
   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
   AEM_SITE_CHECK: 'AEM_SITE_CHECK',
   DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
+  NON_PROD_DOMAIN: 'NON_PROD_DOMAIN',
 };
 
 export const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 export const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
+export const NON_PROD_DOMAIN = 'appears to be a non-production domain (contains qa, stage, or dev subdomain).';
 
 /**
  * Derives the review check key from the onboarding record's current state.
@@ -38,6 +40,9 @@ export function deriveCheckKey(onboarding) {
   }
   if (waitlistReason.includes(DOMAIN_ALREADY_ASSIGNED)) {
     return REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED;
+  }
+  if (waitlistReason.includes(NON_PROD_DOMAIN)) {
+    return REVIEW_REASONS.NON_PROD_DOMAIN;
   }
 
   return null;

@@ -24,6 +24,7 @@ import {
 import {
   DOMAIN_ALREADY_ASSIGNED,
   DOMAIN_ALREADY_ONBOARDED_IN_ORG,
+  NON_PROD_DOMAIN,
   persistAndNotify,
   postPlgOnboardingNotification,
 } from './notifications.js';
@@ -422,6 +423,22 @@ async function handlePreonboardedFastPath({
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
+const NON_PROD_LABEL_PATTERN = /(?:^|-)(qa|stage|staging|dev|development)(\d+)?(?:-|$)/i;
+
+/**
+ * Returns true if the domain contains a non-production subdomain label (qa, stage, staging,
+ * dev, development), including hyphenated variants like experience-qa or dev-preview.
+ * Only non-TLD labels are checked to avoid false-positives on legitimate production TLDs
+ * like .dev or .stage.
+ */
+function isNonProdDomain(domain) {
+  const hostPart = domain.split('/')[0];
+  const labels = hostPart.split('.');
+  // Exclude the TLD (last label) — .dev is a valid production gTLD
+  const subdomainLabels = labels.slice(0, -1);
+  return subdomainLabels.some((label) => NON_PROD_LABEL_PATTERN.test(label));
+}
+
 export async function performAsoPlgOnboarding({
   domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
@@ -498,6 +515,14 @@ export async function performAsoPlgOnboarding({
   onboarding.setUpdatedBy(callerIdentity);
   if (isFromAsoUI(context)) {
     onboarding.setCreatedBy(callerIdentity);
+  }
+
+  if (!onboarding.getSteps()?.nonProdCheckBypassed && isNonProdDomain(domain)) {
+    log.info(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    await persistAndNotify(onboarding, context);
+    return onboarding;
   }
 
   const terminalFromGuard = await handleExistingOnboardedDomain({
