@@ -2181,13 +2181,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const rawRows = data || [];
       const topicResponseLabel = topicLabelForDetailResponse(rawRows, topicName);
       const topicIdResponse = topicIdForDetailResponse(rawRows, topicName);
-      // Enrich with per-prompt intent from the prompts table (1:1 with prompt_id;
-      // executions carry only prompt_id). Non-fatal + intent-column-absent safe.
-      const intentByPromptId = await getIntentsByPromptIds({
-        promptIds: rawRows.map((r) => r.prompt_id),
-        postgrestClient: client,
-      });
-      let items = buildPromptDetails(rawRows, intentByPromptId);
+      let items = buildPromptDetails(rawRows);
 
       // When a search query is provided, filter to only prompts whose text
       // matches — mirroring the original brand presence client-side behaviour
@@ -2204,8 +2198,21 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
+      // Enrich only the returned page with per-prompt intent from the prompts
+      // table (1:1 with prompt_id; executions carry only prompt_id). Done after
+      // pagination so the .in() lookup is bounded to the page (≤ pageSize),
+      // never the full rawRows set. Non-fatal + intent-column-absent safe.
+      const intentByPromptId = await getIntentsByPromptIds({
+        promptIds: paged.map((item) => item.promptId),
+        postgrestClient: client,
+      });
+      const pagedItems = paged.map((item) => ({
+        ...item,
+        userIntent: intentByPromptId.get(item.promptId) || '',
+      }));
+
       return cachedOk({
-        items: paged,
+        items: pagedItems,
         totalCount,
         topic: topicResponseLabel,
         topicId: topicIdResponse,
