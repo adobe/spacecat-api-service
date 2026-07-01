@@ -1,3 +1,10 @@
+# [1.613.0](https://github.com/adobe/spacecat-api-service/compare/v1.612.0...v1.613.0) (2026-07-01)
+
+
+### Features
+
+* **serenity:** brand categories (generic createTag + standalone-tag read-back) + edit-flow fixes ([#2730](https://github.com/adobe/spacecat-api-service/issues/2730)) ([dc0bab1](https://github.com/adobe/spacecat-api-service/commit/dc0bab17c8b7a854fc952d932aeb88f72e9be077)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.612.0](https://github.com/adobe/spacecat-api-service/compare/v1.611.1...v1.612.0) (2026-06-30)
 
 
