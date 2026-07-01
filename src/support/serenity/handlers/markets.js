@@ -641,14 +641,91 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
 }
 
 /**
+ * Read one LEVEL of a project's STANDALONE AIO tag tree (the `/aio/tags` surface),
+ * shaped for the nested Categories view. `parentId === ''` returns the ROOTS (each
+ * carrying `childrenCount`); a non-empty `parentId` returns that tag's CHILDREN
+ * (each carrying a `path[]` breadcrumb up to its root). Reads the DRAFT view so a
+ * just-created, still-unpublished category is visible — the live view hides it
+ * until the project is published (verified live 2026-07-01). Pages through the
+ * level bounded by a ceiling, mirroring the standalone-tag walk.
+ *
+ * Unlike {@link listTagsForProject} (prompt-derived, flat, cached), this reads the
+ * registered standalone tags keyed by their upstream ids — the ids the nested
+ * create + re-parent endpoints operate on — so it is NOT cached (a just-created or
+ * re-parented tag must show immediately).
+ *
+ * @param {any} transport - Serenity transport.
+ * @param {string} semrushWorkspaceId - Semrush (sub-)workspace id.
+ * @param {string} projectId - AIO project id.
+ * @param {string} parentId - '' for roots, an upstream tag id for its children.
+ * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
+ * @returns {Promise<{ items: Array<{
+ *   id: string, name: string, parentId: string | null,
+ *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ * }> }>}
+ */
+export async function listProjectTagTree(transport, semrushWorkspaceId, projectId, parentId, log) {
+  const items = [];
+  const LIMIT = 100;
+  const PAGE_LIMIT = 50;
+  let page = 1;
+  while (page <= PAGE_LIMIT) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
+      parentId, page, limit: LIMIT, draft: true,
+    });
+    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    for (const t of batch) {
+      // AIOTag.id is required upstream; guard defensively and skip a malformed row.
+      if (t && typeof t.id === 'string' && t.id) {
+        items.push({
+          id: t.id,
+          name: typeof t.name === 'string' ? t.name : '',
+          parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
+          childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+          path: Array.isArray(t.path)
+            ? t.path.map((p) => ({
+              id: typeof p?.id === 'string' ? p.id : '',
+              name: typeof p?.name === 'string' ? p.name : '',
+            }))
+            : null,
+        });
+      }
+    }
+    if (batch.length < LIMIT) {
+      break;
+    }
+    if (page === PAGE_LIMIT) {
+      // Ceiling reached with a still-full last page: at least one more page went
+      // unread, so this tag level may be truncated. A missing category in the UI
+      // is a real symptom, so log it rather than stop silently.
+      log?.warn?.('listProjectTagTree: page ceiling hit; tag level may be truncated', {
+        semrushWorkspaceId, projectId, parentId, pages: PAGE_LIMIT, limit: LIMIT,
+      });
+      break;
+    }
+    page += 1;
+  }
+  return { items };
+}
+
+/**
  * GET /serenity/tags?geoTargetId=&languageCode= — unique tag names across
  * the slice's prompts. Required filters; one slice → one upstream call set.
  * Short-TTL cache to keep dashboard polling cheap.
  *
- * TODO: the tag set is computed by paginating the project's prompts and
- * aggregating distinct tag names in JS. This is an O(N) approximation —
- * for a project with N prompts we do ceil(N/200) upstream calls. Capped
- * at 50 pages (10k prompts); beyond that the tag set is silently
+ * NESTED-TREE MODE: when the request carries a `parentId` query param (present,
+ * even empty), the read switches to the standalone AIO tag TREE instead of the
+ * prompt-derived list — `parentId=''` returns the root categories (each with
+ * `childrenCount`), a tag id returns that category's children (each with a
+ * `path[]` breadcrumb). This is the read the nested Categories view drills with,
+ * and the level the id-keyed create/re-parent endpoints operate on. Absent
+ * `parentId` preserves the legacy flat, prompt-derived behavior below.
+ *
+ * TODO: the (legacy) prompt-derived tag set is computed by paginating the
+ * project's prompts and aggregating distinct tag names in JS. This is an O(N)
+ * approximation — for a project with N prompts we do ceil(N/200) upstream calls.
+ * Capped at 50 pages (10k prompts); beyond that the tag set is silently
  * truncated and a `warn` log fires (see TAG_PAGE_LIMIT in
  * `listTagsForProject`). When/if Semrush exposes a dedicated tags endpoint
  * (`GET /v1/workspaces/{ws}/projects/{pid}/tags`), this whole loop
@@ -679,10 +756,20 @@ export async function handleListTags(
   if (!row) {
     return { items: [] };
   }
+  const projectId = row.getSemrushProjectId();
+  if (query?.parentId !== undefined) {
+    return listProjectTagTree(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      String(query.parentId),
+      log,
+    );
+  }
   return listTagsForProject(
     transport,
     semrushWorkspaceId,
-    row.getSemrushProjectId(),
+    projectId,
     { brandId, geoTargetId, languageCode },
     log,
   );

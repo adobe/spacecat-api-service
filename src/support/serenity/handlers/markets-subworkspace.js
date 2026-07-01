@@ -23,6 +23,7 @@ import {
   resolveLanguageId,
   defaultMarketName,
   listTagsForProject,
+  listProjectTagTree,
   listGlobalModelCatalog,
   listSliceModels,
   syncModelsForProject,
@@ -597,6 +598,11 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
     return { items: [] };
   }
   const projectId = String(project.id);
+  // NESTED-TREE MODE (parity with flat handleListTags): a `parentId` query param
+  // drills the standalone AIO tag tree instead of the prompt-derived merge below.
+  if (query?.parentId !== undefined) {
+    return listProjectTagTree(transport, workspaceId, projectId, String(query.parentId), log);
+  }
   // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
   // prompt vocabulary) OR standalone (registered via createProjectTags but not yet
   // carried by any prompt — e.g. a just-created, still-empty `category:<NAME>`).

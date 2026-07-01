@@ -673,6 +673,36 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.listPromptsByTags).to.have.been.calledWith(WS, 'p-tag');
     });
 
+    it('parentId drills the standalone tree (draft view) instead of the prompt merge', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub(),
+        listProjectTags: sinon.stub().resolves({
+          page: 1,
+          total: 1,
+          items: [{
+            id: 'child-1',
+            name: 'category:Sneakers',
+            parent_id: 'root-1',
+            children_count: 0,
+            path: [{ id: 'root-1', name: 'category:Footwear' }],
+          }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en', parentId: 'root-1' }, log);
+      expect(result.items).to.deep.equal([{
+        id: 'child-1',
+        name: 'category:Sneakers',
+        parentId: 'root-1',
+        childrenCount: 0,
+        path: [{ id: 'root-1', name: 'category:Footwear' }],
+      }]);
+      expect(transport.listPromptsByTags).to.not.have.been.called;
+      expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(WS, 'p-tag', {
+        parentId: 'root-1', page: 1, limit: 100, draft: true,
+      });
+    });
+
     it('merges standalone tags (prompt-less categories) with prompt-derived ones, deduped by name', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
