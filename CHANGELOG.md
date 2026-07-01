@@ -1,3 +1,24 @@
+# [1.614.0](https://github.com/adobe/spacecat-api-service/compare/v1.613.4...v1.614.0) (2026-07-01)
+
+
+### Features
+
+* add ive support for summarization opportunity ([#2736](https://github.com/adobe/spacecat-api-service/issues/2736)) ([67977c0](https://github.com/adobe/spacecat-api-service/commit/67977c0ca4e76cc60db70aab46a50a3136bbbf0e))
+
+## [1.613.4](https://github.com/adobe/spacecat-api-service/compare/v1.613.3...v1.613.4) (2026-07-01)
+
+
+### Bug Fixes
+
+* remove ims user token dependency to create promise token while creating fixes ([#2732](https://github.com/adobe/spacecat-api-service/issues/2732)) ([9ac67ac](https://github.com/adobe/spacecat-api-service/commit/9ac67ac717cfba5a93d4d38793db9738a9fd1af4))
+
+## [1.613.3](https://github.com/adobe/spacecat-api-service/compare/v1.613.2...v1.613.3) (2026-07-01)
+
+
+### Bug Fixes
+
+* **sites-resolve:** preserve no_entitlement_for_product for WAITING_FOR_IP_ALLOWLISTING when caller is internal ([#2690](https://github.com/adobe/spacecat-api-service/issues/2690)) ([e53872a](https://github.com/adobe/spacecat-api-service/commit/e53872a6e6b475bdee7bb835d103af72bc4cf1e9))
+
 ## [1.613.2](https://github.com/adobe/spacecat-api-service/compare/v1.613.1...v1.613.2) (2026-07-01)
 
 
