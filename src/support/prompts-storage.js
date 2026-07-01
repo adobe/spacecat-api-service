@@ -104,6 +104,40 @@ async function withMissingIntentFallback(postgrestClient, run) {
 }
 
 /**
+ * Loads `intent` for a set of prompts by their `prompts.id` (uuid) values.
+ * Used to enrich reads (e.g. brand-presence executions) that carry a `prompt_id`
+ * FK but not intent itself. Degrades gracefully in intent-column-absent
+ * environments via withMissingIntentFallback, and treats any other error as a
+ * non-fatal miss (empty Map) so callers never fail a request over this enrichment.
+ *
+ * @param {object} params
+ * @param {Array<string>} params.promptIds - prompts.id (uuid) values; nullish/dupes are ignored
+ * @param {object} params.postgrestClient - PostgREST client
+ * @returns {Promise<Map<string, string>>} Map of promptId -> intent (only non-empty intents)
+ */
+export async function getIntentsByPromptIds({ promptIds, postgrestClient }) {
+  const ids = [...new Set((promptIds || []).filter(Boolean))];
+  if (!ids.length || !postgrestClient?.from) {
+    return new Map();
+  }
+  const run = (includeIntent) => postgrestClient
+    .from('prompts')
+    .select(includeIntent ? 'id, intent' : 'id')
+    .in('id', ids);
+  const { data, error } = await withMissingIntentFallback(postgrestClient, run);
+  if (error) {
+    return new Map();
+  }
+  const map = new Map();
+  (data || []).forEach((r) => {
+    if (r.intent) {
+      map.set(String(r.id), r.intent);
+    }
+  });
+  return map;
+}
+
+/**
  * Resolves brandId (path param) to Postgres brands.id (uuid).
  * Tries: 1) valid uuid lookup, 2) case-insensitive name lookup.
  *

@@ -5074,6 +5074,27 @@ describe('llmo-brand-presence', () => {
       expect(item.promptId).to.equal('');
     });
 
+    it('defaults userIntent to empty string when no intent map is provided', () => {
+      const rows = [makeExecRow({ prompt_id: 'p1' })];
+      expect(buildPromptDetails(rows)[0].userIntent).to.equal('');
+    });
+
+    it('maps userIntent from the intent map keyed by prompt_id', () => {
+      const rows = [makeExecRow({ prompt_id: 'p1' })];
+      const intentByPromptId = new Map([['p1', 'Informational']]);
+      expect(buildPromptDetails(rows, intentByPromptId)[0].userIntent).to.equal('Informational');
+    });
+
+    it('leaves userIntent empty when prompt_id is absent from the intent map or null', () => {
+      const rows = [
+        makeExecRow({ prompt: 'q1', prompt_id: 'missing' }),
+        makeExecRow({ prompt: 'q2', prompt_id: null }),
+      ];
+      const intentByPromptId = new Map([['p1', 'Informational']]);
+      const result = buildPromptDetails(rows, intentByPromptId);
+      expect(result.every((i) => i.userIntent === '')).to.equal(true);
+    });
+
     it('deduplicates by prompt|region_code keeping latest execution', () => {
       const rows = [
         makeExecRow({
@@ -5546,6 +5567,28 @@ describe('llmo-brand-presence', () => {
       expect(body.items[0].topicId).to.equal(topicUuid);
       expect(body.items[0].promptId).to.equal('prompt-row-uuid');
       expect(body.totalCount).to.equal(1);
+    });
+
+    it('enriches items with userIntent looked up by prompt_id', async () => {
+      // The chainable mock returns the same rows for both the executions query
+      // and the prompts intent lookup, so a row whose id === prompt_id and which
+      // carries `intent` exercises the getIntentsByPromptIds -> DTO join.
+      const rows = [
+        makeDetailRow({
+          prompt: 'q1', prompt_id: 'p1', id: 'p1', intent: 'Commercial',
+        }),
+      ];
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items[0].userIntent).to.equal('Commercial');
     });
 
     it('returns empty items when no data', async () => {

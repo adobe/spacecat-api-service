@@ -29,6 +29,7 @@ import {
   normalizeIntent,
   isMissingIntentColumnError,
   findPromptsBlockingRegionRemoval,
+  getIntentsByPromptIds,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -3252,6 +3253,57 @@ describe('prompts-storage', () => {
   // intent migration). Writing/reading `intent` there 500s with a missing-
   // column error; the storage layer detects this per-client (WeakMap) and
   // retries without intent so prompts still persist/read.
+  describe('getIntentsByPromptIds', () => {
+    const MISSING_INTENT = { code: '42703', message: 'column prompts.intent does not exist' };
+    const makeClient = (result) => ({
+      from: () => ({ select: () => ({ in: () => thenable(result) }) }),
+    });
+
+    it('returns an empty Map for empty/nullish ids or no client', async () => {
+      const client = makeClient({});
+      const sizeFor = async (args) => (await getIntentsByPromptIds(args)).size;
+      expect(await sizeFor({ promptIds: [], postgrestClient: client })).to.equal(0);
+      expect(await sizeFor({ promptIds: [null, undefined], postgrestClient: client })).to.equal(0);
+      expect(await sizeFor({ promptIds: ['p1'], postgrestClient: {} })).to.equal(0);
+    });
+
+    it('maps intent by id, dedupes ids, and skips null/empty intents', async () => {
+      const inStub = sinon.stub().returns(thenable({
+        data: [
+          { id: 'p1', intent: 'Commercial' },
+          { id: 'p2', intent: null },
+          { id: 'p3', intent: '' },
+        ],
+        error: null,
+      }));
+      const client = { from: () => ({ select: () => ({ in: inStub }) }) };
+      const map = await getIntentsByPromptIds({
+        promptIds: ['p1', 'p1', 'p2', 'p3', null], postgrestClient: client,
+      });
+      expect(map.get('p1')).to.equal('Commercial');
+      expect(map.has('p2')).to.equal(false);
+      expect(map.has('p3')).to.equal(false);
+      // Deduped to the 3 distinct non-null ids.
+      expect(inStub.firstCall.args[1]).to.deep.equal(['p1', 'p2', 'p3']);
+    });
+
+    it('returns an empty Map (non-fatal) on a generic query error', async () => {
+      const client = makeClient({ data: null, error: { message: 'DB exploded' } });
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client });
+      expect(map.size).to.equal(0);
+    });
+
+    it('degrades without throwing when the intent column is absent', async () => {
+      const inStub = sinon.stub();
+      inStub.onFirstCall().returns(thenable({ data: null, error: MISSING_INTENT }));
+      inStub.onSecondCall().returns(thenable({ data: [{ id: 'p1' }], error: null }));
+      const client = { from: () => ({ select: () => ({ in: inStub }) }) };
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client });
+      expect(map.size).to.equal(0);
+      expect(inStub.callCount).to.equal(2);
+    });
+  });
+
   describe('intent column best-effort fallback', () => {
     const MISSING_INTENT_INSERT = {
       code: 'PGRST204',

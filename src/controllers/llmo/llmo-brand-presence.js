@@ -18,6 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cachedOk } from '../../support/cached-response.js';
+import { getIntentsByPromptIds } from '../../support/prompts-storage.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -1939,7 +1940,7 @@ export function aggregateTopicData(rows) {
  * @returns {Array<Object>} PromptDetail-compatible objects
  * @internal Exported for testing
  */
-export function buildPromptDetails(rows) {
+export function buildPromptDetails(rows, intentByPromptId = new Map()) {
   const promptMap = new Map();
 
   rows.forEach((row) => {
@@ -1985,6 +1986,7 @@ export function buildPromptDetails(rows) {
       sentiment: r.sentiment || '',
       errorCode: r.error_code || '',
       origin: r.origin || '',
+      userIntent: (r.prompt_id != null && intentByPromptId.get(String(r.prompt_id))) || '',
     };
   });
 }
@@ -2179,7 +2181,13 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const rawRows = data || [];
       const topicResponseLabel = topicLabelForDetailResponse(rawRows, topicName);
       const topicIdResponse = topicIdForDetailResponse(rawRows, topicName);
-      let items = buildPromptDetails(rawRows);
+      // Enrich with per-prompt intent from the prompts table (1:1 with prompt_id;
+      // executions carry only prompt_id). Non-fatal + intent-column-absent safe.
+      const intentByPromptId = await getIntentsByPromptIds({
+        promptIds: rawRows.map((r) => r.prompt_id),
+        postgrestClient: client,
+      });
+      let items = buildPromptDetails(rawRows, intentByPromptId);
 
       // When a search query is provided, filter to only prompts whose text
       // matches — mirroring the original brand presence client-side behaviour
