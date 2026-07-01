@@ -10,39 +10,26 @@
  * governing permissions and limitations under the License.
  */
 
+import { DEFAULT_ELEMENT_MODEL, ELEMENT_MODELS } from '../constants.js';
+
 /**
  * Builds the payload for the Topics (Tags) filter-dimensions element (row 3).
  * Returns all available topic and category tags — powers the Topics/Tags filter dropdown.
  *
- * @param {object} params
- * @param {string} params.startDate - ISO date string (YYYY-MM-DD).
- * @param {string} params.endDate - ISO date string (YYYY-MM-DD).
- * @param {string} [params.comparisonStartDate] - Comparison period start (YYYY-MM-DD).
- * @param {string} [params.comparisonEndDate] - Comparison period end (YYYY-MM-DD).
- * @param {string} [params.model='search-gpt'] - AI model filter value.
+ * @param {object} [params]
+ * @param {string} [params.model] - AI model filter value. Must be one of {@link ELEMENT_MODELS};
+ *   falls back to {@link DEFAULT_ELEMENT_MODEL} if omitted or unrecognised.
  * @param {string} [params.projectId] - Semrush project UUID to scope tags to a specific market.
  */
-export function buildTopicsPayload({
-  startDate,
-  endDate,
-  comparisonStartDate,
-  comparisonEndDate,
-  model = 'search-gpt',
-  projectId,
-} = {}) {
+export function buildTopicsPayload({ model, projectId } = {}) {
+  const resolvedModel = ELEMENT_MODELS.includes(model) ? model : DEFAULT_ELEMENT_MODEL;
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
     filters: {
-      simple: {
-        start_date: startDate,
-        end_date: endDate,
-        ...(comparisonStartDate && { comparison_start_date: comparisonStartDate }),
-        ...(comparisonEndDate && { comparison_end_date: comparisonEndDate }),
-      },
       advanced: {
         op: 'and',
-        filters: [{ op: 'eq', val: model, col: 'CBF_model' }],
+        filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }],
       },
     },
   };

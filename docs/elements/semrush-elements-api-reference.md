@@ -40,12 +40,13 @@ SpaceCat wraps these as standard `GET` REST endpoints, hiding the POST/payload c
 |---|---|---|
 | Org (`spaceCatId`) | Workspace (`workspaceId`) | `resolveWorkspaceId(ctx, spaceCatId)` in `workspace-resolver.js` |
 | Brand (`brandId`) | Subworkspace (`subworkspaceId`) | `resolveBrandSubworkspaceId(ctx, brandId)` in `workspace-resolver.js` |
-| Location + Language | Project (`projectId`) | Returned by the Markets element (row 2) as `id`; clients pass as `?projectIds=` |
+| Location + Language | Project (`projectId`) | Returned by `listMarkets`/`listAllMarkets` as `semrush_project_id`; pass as `?projectIds=` in Phase 2 calls |
 
 **Important invariants:**
 - `elementId` UUIDs are Semrush-assigned and **never change** regardless of org, brand, or environment.
 - `workspaceId` is org-scoped and read from the Organisation's `semrush_workspace_id` field.
-- `projectId` values are discovered at runtime by calling the Markets endpoint for a brand. Clients should call `listMarkets` first, then pass the returned `id` values as `projectIds` to subsequent brand-scoped endpoints.
+- `projectId` values are discovered at runtime via `listMarkets` (brand-scoped) or `listAllMarkets` (all workspace markets). Use the returned `semrush_project_id` field as `projectIds` in Phase 2 brand-scoped calls.
+- SpaceCat stores the `brandId → semrushProjectId` mapping in `brand_to_semrush_projects` (`BrandSemrushProject` entity). This table is used to enrich markets and filter-dimension regions with `spacecat_brand_id`, `geoTargetId`, and `languageCode`.
 
 ---
 
@@ -159,11 +160,10 @@ Each file exports exactly **two functions**:
 
 **Example — `brands.js`:**
 ```js
-export function buildBrandsPayload({ startDate, endDate, model = 'search-gpt' }) {
+export function buildBrandsPayload({ model = 'search-gpt' } = {}) {
   return {
     comparison_data_formatting: 'union',
     filters: {
-      simple: { start_date: startDate, end_date: endDate },
       advanced: { op: 'and', filters: [{ op: 'eq', val: model, col: 'CBF_model' }] },
     },
   };
@@ -248,31 +248,37 @@ No service-to-service credentials are involved — the user's own IMS token is t
 
 ## SpaceCat Routes
 
-### Phase 1 — Org-scoped (workspace-level, implemented)
+### Org-scoped (workspace-level, implemented)
 
-These endpoints use `authorizeOrg` and do not require a `brandId`. They are the filter-dimension lookups that power dropdowns on first page load.
+All endpoints below use `authorizeOrg`. Where a `:brandId` appears in the path, the brand is validated to belong to the org via `getBrandById` — no separate auth helper is needed.
 
 | Method | Path | Controller | Description |
 |---|---|---|---|
 | GET | `/v2/orgs/:spaceCatId/serenity/brands` | `listBrands` | All brands in the workspace |
-| GET | `/v2/orgs/:spaceCatId/serenity/markets` | `listMarkets` | Markets for a brand (`?brand=Adobe`) |
+| GET | `/v2/orgs/:spaceCatId/serenity/all/markets` | `listAllMarkets` | All markets across the workspace (no brand filter) |
+| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/markets` | `listMarkets` | Markets for a specific SpaceCat brand |
 | GET | `/v2/orgs/:spaceCatId/serenity/topics` | `listTopics` | All topic/category tags in the workspace |
+| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/topics` | `listBrandTopics` | Topics scoped to a brand's Semrush project |
+| GET | `/v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | All filter dimensions for the URL Inspector dashboard |
 
-**Query parameters — `listBrands` / `listTopics`:**
+---
+
+**Query parameters — `listTopics` / `listBrandTopics`:**
 
 | Param | Required | Description |
 |---|---|---|
-| `startDate` | Yes | Primary period start (`YYYY-MM-DD`) |
-| `endDate` | Yes | Primary period end (`YYYY-MM-DD`) |
-| `comparisonStartDate` | No | Comparison period start |
-| `comparisonEndDate` | No | Comparison period end |
+| `model` | No | AI model filter (default: `search-gpt`) |
+| `projectId` | No | Semrush project UUID — scopes tags to a specific market (`listTopics` only; auto-resolved in `listBrandTopics`) |
+
+**Query parameters — `listBrands`:**
+
+| Param | Required | Description |
+|---|---|---|
 | `model` | No | AI model filter (default: `search-gpt`) |
 
-**Query parameters — `listMarkets`:**
+**`listBrandTopics` additional behaviour:** resolves `BrandSemrushProject.allByBrandId(brandId)`, takes the first row's `semrushProjectId`, and passes it as `project_id` in the Topics element payload to scope tags to that brand's market.
 
-| Param | Required | Description |
-|---|---|---|
-| `brand` | Yes | Brand name as stored in Semrush (e.g. `Adobe`) |
+---
 
 **Response shape — `listBrands`:**
 ```json
@@ -286,20 +292,32 @@ These endpoints use `authorizeOrg` and do not require a `brandId`. They are the 
 ]
 ```
 
-**Response shape — `listMarkets`:**
+---
+
+**Response shape — `listMarkets` / `listAllMarkets`:**
+
+Both endpoints return the same shape. `listMarkets` scopes the Semrush call to the brand (via the brand's name as `CBF_ws_brand`); `listAllMarkets` omits the filter and returns all workspace markets.
+
+Each entry is enriched from `brand_to_semrush_projects` — fields are `null` when no matching row exists.
+
 ```json
 [
   {
-    "id": "b558a5e8-d9cb-4ace-907d-825eb4f9c0db",
+    "id": "US",
+    "semrush_project_id": "b558a5e8-d9cb-4ace-907d-825eb4f9c0db",
     "label": "US-en",
-    "iconName": "US",
-    "defaultSelected": true
+    "spacecat_brand_id": "3e3556f0-6494-4e8f-858f-01f2c358861a",
+    "geoTargetId": 2840,
+    "languageCode": "en"
   }
 ]
 ```
-> The `id` field is the Semrush **project UUID**. Pass these as `?projectIds=uuid1,uuid2` in Phase 2 brand-scoped calls.
 
-**Response shape — `listTopics`:**
+> `id` is extracted from the label — the part before the first `-` (e.g. `"US-en"` → `"US"`). `semrush_project_id` is the Semrush project UUID. Pass it as `projectId` in subsequent calls.
+
+---
+
+**Response shape — `listTopics` / `listBrandTopics`:**
 ```json
 [
   { "value": "category:Firefly", "type": "category", "name": "Firefly" },
@@ -309,9 +327,54 @@ These endpoints use `authorizeOrg` and do not require a `brandId`. They are the 
 
 ---
 
+**Response shape — `listUrlInspectorFilterDimensions`:**
+
+Fetches Brands, Topics, and Markets elements in parallel (three upstream calls). Brands and regions are enriched with SpaceCat metadata.
+
+```json
+{
+  "brands": [
+    {
+      "id": null,
+      "label": "Adobe",
+      "spacecat_brand_id": "3e3556f0-6494-4e8f-858f-01f2c358861a"
+    }
+  ],
+  "regions": [
+    {
+      "id": "AU",
+      "semrush_project_id": "5f0e8c91-dbd5-4b96-91e4-803fc920a589",
+      "label": "AU-en",
+      "spacecat_brand_id": "3e3556f0-6494-4e8f-858f-01f2c358861a",
+      "geoTargetId": 2036,
+      "languageCode": "en"
+    }
+  ],
+  "topics": [
+    { "id": null, "label": "2026 Calendar" }
+  ],
+  "categories": [
+    { "id": null, "label": "ACN - Acrobat" }
+  ],
+  "page_intents": [
+    { "id": "COMMERCIAL", "label": "commercial" }
+  ],
+  "origins": [
+    { "id": "human", "label": "human" }
+  ]
+}
+```
+
+> `brands.spacecat_brand_id` is resolved by case-insensitive name match against SpaceCat brands for the org.
+> `regions` are enriched from `brand_to_semrush_projects` joined on `semrushProjectId`.
+> `page_intents.id` is uppercased; `label` is kept as-is from Semrush.
+> `regions.id` and `brands.id` are `null` — use `semrush_project_id` / `spacecat_brand_id` as stable identifiers.
+
+---
+
 ### Phase 2 — Brand-scoped (subworkspace-level, not yet implemented)
 
-These endpoints use `authorizeBrand` and require `:brandId` in the path. Callers first call `listMarkets` to discover project UUIDs, then pass them as `?projectIds=uuid1,uuid2`.
+These endpoints will use `authorizeBrand` and require `:brandId` in the path. Callers first call `listMarkets` or `listAllMarkets` to discover `semrush_project_id` values, then pass them as `?projectIds=uuid1,uuid2`.
 
 | Method | Path | Description |
 |---|---|---|
