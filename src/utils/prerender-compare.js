@@ -126,8 +126,8 @@ export async function comparePage(url, s3Client, GetObjectCommand, s3Bucket, log
   const [s3Text, lambdaText, s3WordCountResult, lambdaWordCountResult] = await Promise.all([
     Promise.resolve(stripTagsToText(s3Html)),
     Promise.resolve(stripTagsToText(lambdaHtml)),
-    Promise.resolve(extractWordCount(s3Html)).then((r) => r?.word_count ?? 0),
-    Promise.resolve(extractWordCount(lambdaHtml)).then((r) => r?.word_count ?? 0),
+    Promise.resolve(extractWordCount(s3Html)).then((r) => r.word_count),
+    Promise.resolve(extractWordCount(lambdaHtml)).then((r) => r.word_count),
   ]);
 
   const s3WordCount = s3WordCountResult;

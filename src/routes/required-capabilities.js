@@ -245,6 +245,9 @@ export const INTERNAL_ROUTES = [
   // Comparative Experiments (GarageWeek POC) — UI only, not yet required by S2S consumers
   'GET /sites/:siteId/page-groups',
   'POST /sites/:siteId/comparative-experiments/groupings',
+
+  // Prerender Validation — internal audit-worker only, not for S2S consumers
+  'POST /prerender-validation/compare',
 ];
 
 /**

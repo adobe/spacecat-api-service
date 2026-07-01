@@ -780,7 +780,7 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': aiVisibilityController.getV1PromptResearchSourceDomainsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/topics-export': aiVisibilityController.getV1PromptResearchTopicsExport,
 
-    // Prerender Validation
+    // Prerender Validation — internal audit-worker only, authenticated via S2S token
     'POST /prerender-validation/compare': prerenderValidationController.compare,
   };
 
