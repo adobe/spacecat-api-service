@@ -5074,27 +5074,6 @@ describe('llmo-brand-presence', () => {
       expect(item.promptId).to.equal('');
     });
 
-    it('defaults userIntent to empty string when no intent map is provided', () => {
-      const rows = [makeExecRow({ prompt_id: 'p1' })];
-      expect(buildPromptDetails(rows)[0].userIntent).to.equal('');
-    });
-
-    it('maps userIntent from the intent map keyed by prompt_id', () => {
-      const rows = [makeExecRow({ prompt_id: 'p1' })];
-      const intentByPromptId = new Map([['p1', 'Informational']]);
-      expect(buildPromptDetails(rows, intentByPromptId)[0].userIntent).to.equal('Informational');
-    });
-
-    it('leaves userIntent empty when prompt_id is absent from the intent map or null', () => {
-      const rows = [
-        makeExecRow({ prompt: 'q1', prompt_id: 'missing' }),
-        makeExecRow({ prompt: 'q2', prompt_id: null }),
-      ];
-      const intentByPromptId = new Map([['p1', 'Informational']]);
-      const result = buildPromptDetails(rows, intentByPromptId);
-      expect(result.every((i) => i.userIntent === '')).to.equal(true);
-    });
-
     it('deduplicates by prompt|region_code keeping latest execution', () => {
       const rows = [
         makeExecRow({
@@ -5589,6 +5568,32 @@ describe('llmo-brand-presence', () => {
 
       const body = await result.json();
       expect(body.items[0].userIntent).to.equal('Commercial');
+    });
+
+    it('bounds the intent lookup to the paginated page, not all rows', async () => {
+      // 5 distinct prompts, pageSize 2 → only the 2 returned prompt_ids should be
+      // looked up (proves enrichment runs after pagination, not over all rawRows).
+      const rows = [];
+      for (let i = 0; i < 5; i += 1) {
+        rows.push(makeDetailRow({
+          prompt: `q${i}`, prompt_id: `p${i}`, id: `p${i}`, intent: `intent${i}`,
+        }));
+      }
+      mockContext.params.topicId = 'T';
+      mockContext.data = { page: '0', pageSize: '2' };
+      const client = createChainableMock({ data: rows, error: null });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items).to.have.lengthOf(2);
+      expect(body.items.map((i) => i.userIntent)).to.deep.equal(['intent0', 'intent1']);
+      // Only the intent lookup uses `.in('id', ...)`; assert it received just the
+      // page's prompt_ids, not all 5.
+      const inCall = client.in.getCalls().find((c) => c.args[0] === 'id');
+      expect(inCall.args[1]).to.deep.equal(['p0', 'p1']);
     });
 
     it('returns empty items when no data', async () => {

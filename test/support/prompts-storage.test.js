@@ -3255,12 +3255,17 @@ describe('prompts-storage', () => {
   // retries without intent so prompts still persist/read.
   describe('getIntentsByPromptIds', () => {
     const MISSING_INTENT = { code: '42703', message: 'column prompts.intent does not exist' };
-    const makeClient = (result) => ({
-      from: () => ({ select: () => ({ in: () => thenable(result) }) }),
+    // `.in()` result is awaitable and also chains `.eq()` (for the org predicate).
+    const clientReturning = (result, inStub) => ({
+      from: () => ({
+        select: () => ({
+          in: inStub || (() => ({ ...thenable(result), eq: () => thenable(result) })),
+        }),
+      }),
     });
 
     it('returns an empty Map for empty/nullish ids or no client', async () => {
-      const client = makeClient({});
+      const client = clientReturning({ data: [], error: null });
       const sizeFor = async (args) => (await getIntentsByPromptIds(args)).size;
       expect(await sizeFor({ promptIds: [], postgrestClient: client })).to.equal(0);
       expect(await sizeFor({ promptIds: [null, undefined], postgrestClient: client })).to.equal(0);
@@ -3276,7 +3281,7 @@ describe('prompts-storage', () => {
         ],
         error: null,
       }));
-      const client = { from: () => ({ select: () => ({ in: inStub }) }) };
+      const client = clientReturning(null, inStub);
       const map = await getIntentsByPromptIds({
         promptIds: ['p1', 'p1', 'p2', 'p3', null], postgrestClient: client,
       });
@@ -3287,18 +3292,48 @@ describe('prompts-storage', () => {
       expect(inStub.firstCall.args[1]).to.deep.equal(['p1', 'p2', 'p3']);
     });
 
-    it('returns an empty Map (non-fatal) on a generic query error', async () => {
-      const client = makeClient({ data: null, error: { message: 'DB exploded' } });
-      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client });
-      expect(map.size).to.equal(0);
+    it('scopes the lookup by organizationId when provided', async () => {
+      const eqStub = sinon.stub().returns(
+        thenable({ data: [{ id: 'p1', intent: 'Commercial' }], error: null }),
+      );
+      const inStub = sinon.stub().returns({ eq: eqStub });
+      const client = clientReturning(null, inStub);
+      const map = await getIntentsByPromptIds({
+        promptIds: ['p1'], organizationId: 'org-1', postgrestClient: client,
+      });
+      expect(map.get('p1')).to.equal('Commercial');
+      expect(eqStub.calledOnceWithExactly('organization_id', 'org-1')).to.equal(true);
     });
 
-    it('returns an empty Map when the intent column is absent (no retry)', async () => {
+    it('chunks large id lists into multiple bounded queries', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: [], error: null }));
+      const client = clientReturning(null, inStub);
+      const ids = Array.from({ length: 250 }, (_, i) => `p${i}`);
+      await getIntentsByPromptIds({ promptIds: ids, postgrestClient: client });
+      // 250 ids / 100 per batch → 3 queries, each within the chunk size.
+      expect(inStub.callCount).to.equal(3);
+      expect(inStub.getCalls().map((c) => c.args[1].length)).to.deep.equal([100, 100, 50]);
+    });
+
+    it('logs at debug (not warn) when the intent column is absent, and does not retry', async () => {
       const inStub = sinon.stub().returns(thenable({ data: null, error: MISSING_INTENT }));
-      const client = { from: () => ({ select: () => ({ in: inStub }) }) };
-      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client });
+      const client = clientReturning(null, inStub);
+      const log = { debug: sinon.stub(), warn: sinon.stub() };
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client, log });
       expect(map.size).to.equal(0);
       expect(inStub.callCount).to.equal(1);
+      expect(log.debug.called).to.equal(true);
+      expect(log.warn.called).to.equal(false);
+    });
+
+    it('logs at warn (not debug) on a non-missing-column error, returning empty', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: null, error: { message: 'timeout' } }));
+      const client = clientReturning(null, inStub);
+      const log = { debug: sinon.stub(), warn: sinon.stub() };
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client, log });
+      expect(map.size).to.equal(0);
+      expect(log.warn.called).to.equal(true);
+      expect(log.debug.called).to.equal(false);
     });
   });
 

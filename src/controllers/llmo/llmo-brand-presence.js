@@ -1940,7 +1940,7 @@ export function aggregateTopicData(rows) {
  * @returns {Array<Object>} PromptDetail-compatible objects
  * @internal Exported for testing
  */
-export function buildPromptDetails(rows, intentByPromptId = new Map()) {
+export function buildPromptDetails(rows) {
   const promptMap = new Map();
 
   rows.forEach((row) => {
@@ -1986,7 +1986,6 @@ export function buildPromptDetails(rows, intentByPromptId = new Map()) {
       sentiment: r.sentiment || '',
       errorCode: r.error_code || '',
       origin: r.origin || '',
-      userIntent: (r.prompt_id != null && intentByPromptId.get(String(r.prompt_id))) || '',
     };
   });
 }
@@ -2204,7 +2203,9 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       // never the full rawRows set. Non-fatal + intent-column-absent safe.
       const intentByPromptId = await getIntentsByPromptIds({
         promptIds: paged.map((item) => item.promptId),
+        organizationId,
         postgrestClient: client,
+        log: ctx.log,
       });
       const pagedItems = paged.map((item) => ({
         ...item,

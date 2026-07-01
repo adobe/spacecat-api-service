@@ -11,7 +11,6 @@
  */
 
 import {
-  ORG_1_ID,
   BRAND_1_ID,
   SITE_1_ID,
   BP_PROMPT_1_ID,
@@ -24,10 +23,13 @@ import {
 // 2026_06 partition (present in the pinned mysticat-data-service IT image) and
 // the test queries an explicit startDate/endDate around it so the assertion is
 // not time-dependent. model matches the endpoint's DEFAULT_MODEL ('chatgpt-free').
+//
+// organization_id and dedupe_hash are intentionally omitted: BEFORE INSERT
+// triggers derive them (bpe_set_organization_id from site_id; trg_bpe_dedupe_hash
+// computes the md5 dedupe_hash), so any values supplied here would be dead.
 export const brandPresenceExecutions = [
   {
     id: BP_EXECUTION_1_ID,
-    organization_id: ORG_1_ID,
     brand_id: BRAND_1_ID,
     site_id: SITE_1_ID,
     prompt_id: BP_PROMPT_1_ID,
@@ -43,6 +45,5 @@ export const brandPresenceExecutions = [
     citations: false,
     visibility_score: 80,
     sentiment: 'positive',
-    dedupe_hash: 'bp-intent-it-dedupe-1',
   },
 ];
