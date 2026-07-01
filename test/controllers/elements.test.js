@@ -411,6 +411,22 @@ describe('ElementsController', () => {
       const [, , projects] = serviceStub.getMarkets.firstCall.args;
       expect(projects).to.deep.equal([]);
     });
+
+    it('returns auth error when org is not found', async () => {
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listMarkets(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates service errors through mapError', async () => {
+      serviceStub.getMarkets.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listMarkets(ctx);
+      expect(res.status).to.equal(502);
+    });
   });
 
   // ─── listAllMarkets ───────────────────────────────────────────────────────
@@ -461,6 +477,22 @@ describe('ElementsController', () => {
       const [, , projects] = serviceStub.getMarkets.firstCall.args;
       expect(projects).to.deep.equal([]);
     });
+
+    it('returns auth error when org is not found', async () => {
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listAllMarkets(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates service errors through mapError', async () => {
+      serviceStub.getMarkets.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listAllMarkets(ctx);
+      expect(res.status).to.equal(502);
+    });
   });
 
   // ─── listTags ─────────────────────────────────────────────────────────────
@@ -490,6 +522,22 @@ describe('ElementsController', () => {
       await ctrl.listTags(ctx);
       const [, params] = serviceStub.getTopics.firstCall.args;
       expect(params.model).to.equal('gpt-5');
+    });
+
+    it('returns auth error when org is not found', async () => {
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listTags(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates service errors through mapError', async () => {
+      serviceStub.getTopics.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listTags(ctx);
+      expect(res.status).to.equal(502);
     });
   });
 
@@ -564,6 +612,22 @@ describe('ElementsController', () => {
       const [, params] = serviceStub.getTopics.firstCall.args;
       expect(params.projectId).to.equal('proj-1');
     });
+
+    it('returns auth error when org is not found', async () => {
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listBrandTags(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates service errors through mapError', async () => {
+      serviceStub.getTopics.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listBrandTags(ctx);
+      expect(res.status).to.equal(502);
+    });
   });
 
   // ─── listUrlInspectorFilterDimensions ─────────────────────────────────────
@@ -629,6 +693,23 @@ describe('ElementsController', () => {
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
       expect(params.model).to.equal('perplexity');
+    });
+
+    it('returns auth error when org is not found', async () => {
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates service errors through mapError', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(502);
     });
   });
 
