@@ -60,6 +60,7 @@ import {
   handleCreateTagSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
+import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -308,6 +309,18 @@ function SerenityController(context, log, env) {
           503,
         ),
       };
+    }
+    // Org-wide serenity rollout gate. Serenity is "active" for an org only when
+    // its `LLMO/serenity` feature flag is ON *and* a Semrush workspace resolves
+    // for the brand (the workspace half is enforced below by
+    // resolveBrandWorkspace). While the flag is OFF the org's UI keeps reading
+    // the normal backend data — even if a `semrush_workspace_id` has already
+    // been backfilled for rollout prep — so reject the serenity surface with a
+    // 404 (the same "no serenity for this org" contract the UI already handles
+    // for an org without a workspace). Checked before brand resolution so an
+    // inactive org never leaks brand existence.
+    if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
+      return { error: notFound('Serenity is not active for this organization') };
     }
     const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
     if (!brandUuid) {

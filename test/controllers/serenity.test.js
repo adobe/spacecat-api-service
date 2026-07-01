@@ -128,6 +128,7 @@ describe('SerenityController', () => {
   let clearBrandWorkspaceCacheStub;
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
+  let isSerenityActiveStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
@@ -146,6 +147,10 @@ describe('SerenityController', () => {
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
     });
+    // Default: serenity active (org-wide LLMO/serenity flag ON) so every
+    // existing assertion that drives a brand-level route reaches its handler.
+    // The "serenity inactive" describe overrides this to false.
+    isSerenityActiveStub = sinon.stub().resolves(true);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -221,6 +226,9 @@ describe('SerenityController', () => {
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
         decommissionBrandWorkspace: decommissionStub,
+      },
+      '../../src/support/serenity/serenity-active.js': {
+        isSerenityActiveForOrg: isSerenityActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -338,6 +346,32 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listPrompts(fakeContext());
       expect(response.status).to.equal(404);
+    });
+
+    it('404s when serenity is not active for the org (rollout flag OFF), before brand resolution', async () => {
+      // Org-wide LLMO/serenity flag OFF → the serenity surface is inactive and
+      // the UI falls back to the normal backend. The gate fires BEFORE brand
+      // resolution, so an inactive org never leaks brand existence.
+      isSerenityActiveStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(404);
+      const body = await readBody(response);
+      expect(body.message).to.match(/serenity is not active/i);
+      expect(isSerenityActiveStub).to.have.been.calledWith(sinon.match.any, ORG);
+      expect(resolveBrandUuidStub).to.not.have.been.called;
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+    });
+
+    it('reaches the handler when serenity is active (flag ON) and a workspace resolves', async () => {
+      // The happy-path composition: flag ON (default stub) + a resolved
+      // workspace ⇒ the route is served.
+      handlers.handleListPrompts.resolves({ items: [], total: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(isSerenityActiveStub).to.have.been.calledOnce;
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
     });
   });
 
