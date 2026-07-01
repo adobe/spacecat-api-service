@@ -406,7 +406,13 @@ export class FixesController {
       if (!site || !opportunity) {
         return null;
       }
-      const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      const headerToken = this.#ctx.pathInfo?.headers?.['x-promise-token'];
+      let promiseTokenResponse;
+      if (hasText(headerToken)) {
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      }
       const imsAccessToken = await exchangePromiseToken(
         this.#ctx,
         promiseTokenResponse.promise_token,
