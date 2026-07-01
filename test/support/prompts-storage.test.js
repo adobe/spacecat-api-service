@@ -3293,14 +3293,12 @@ describe('prompts-storage', () => {
       expect(map.size).to.equal(0);
     });
 
-    it('degrades without throwing when the intent column is absent', async () => {
-      const inStub = sinon.stub();
-      inStub.onFirstCall().returns(thenable({ data: null, error: MISSING_INTENT }));
-      inStub.onSecondCall().returns(thenable({ data: [{ id: 'p1' }], error: null }));
+    it('returns an empty Map when the intent column is absent (no retry)', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: null, error: MISSING_INTENT }));
       const client = { from: () => ({ select: () => ({ in: inStub }) }) };
       const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client });
       expect(map.size).to.equal(0);
-      expect(inStub.callCount).to.equal(2);
+      expect(inStub.callCount).to.equal(1);
     });
   });
 

@@ -106,9 +106,10 @@ async function withMissingIntentFallback(postgrestClient, run) {
 /**
  * Loads `intent` for a set of prompts by their `prompts.id` (uuid) values.
  * Used to enrich reads (e.g. brand-presence executions) that carry a `prompt_id`
- * FK but not intent itself. Degrades gracefully in intent-column-absent
- * environments via withMissingIntentFallback, and treats any other error as a
+ * FK but not intent itself. Any error — including a missing `intent` column — is a
  * non-fatal miss (empty Map) so callers never fail a request over this enrichment.
+ * No missing-column retry is needed here: this helper's only output is intent, so a
+ * column-absent environment simply yields an empty Map, same as the error path.
  *
  * @param {object} params
  * @param {Array<string>} params.promptIds - prompts.id (uuid) values; nullish/dupes are ignored
@@ -120,11 +121,10 @@ export async function getIntentsByPromptIds({ promptIds, postgrestClient }) {
   if (!ids.length || !postgrestClient?.from) {
     return new Map();
   }
-  const run = (includeIntent) => postgrestClient
+  const { data, error } = await postgrestClient
     .from('prompts')
-    .select(includeIntent ? 'id, intent' : 'id')
+    .select('id, intent')
     .in('id', ids);
-  const { data, error } = await withMissingIntentFallback(postgrestClient, run);
   if (error) {
     return new Map();
   }
