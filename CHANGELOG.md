@@ -1,3 +1,10 @@
+## [1.613.2](https://github.com/adobe/spacecat-api-service/compare/v1.613.1...v1.613.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* gap-topics empty on first day of month | LLMO-5963 ([#2734](https://github.com/adobe/spacecat-api-service/issues/2734)) ([fb7c153](https://github.com/adobe/spacecat-api-service/commit/fb7c153d6be43036189747ca991d492bdce1b0df))
+
 ## [1.613.1](https://github.com/adobe/spacecat-api-service/compare/v1.613.0...v1.613.1) (2026-07-01)
 
 
