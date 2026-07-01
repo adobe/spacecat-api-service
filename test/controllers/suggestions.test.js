@@ -7288,6 +7288,30 @@ describe('Suggestions Controller', () => {
         expect(body.suggestions[0].message).to.include('outside the scope');
       });
 
+      it('rejects a regular suggestion whose URL matches the pathname but not the host', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const wrongHostSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://attacker.example/kings/page',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'wrong host prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([wrongHostSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
+      });
+
       it('logs a warning and passes suggestions through when the site base URL is unparseable', async () => {
         site.getBaseURL = sandbox.stub().returns('not a valid base url');
         const sugg = {

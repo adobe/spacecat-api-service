@@ -26,6 +26,7 @@ import {
   isInteger,
   isValidUUID,
   isValidUrl,
+  isWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 
 import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
@@ -33,6 +34,7 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
+import { isPathPatternWithinSiteScope } from '../utils/path-scope.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -1824,30 +1826,6 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn(`[edge-deploy] site ${apexBaseUrl} has unparseable baseURL '${siteBaseURL}', skipping scope guard`);
     }
 
-    // A pattern is trusted as scoped to siteBasePath only when it is an exact match or uses
-    // the `/*` pathname-prefix convention (see @adobe/spacecat-shared-tokowaka-client's
-    // buildUrlMatcher). Any other pattern is compiled as a regex and matched against the full
-    // URL downstream, so a literal `startsWith` check on the pattern text is not sound —
-    // e.g. `/kings/.*|/wolves/.*` starts with `/kings` but, once compiled, also matches
-    // `/wolves/...` via the `|` alternation. We fail closed for anything we cannot verify.
-    const isPatternInScope = (pattern) => {
-      if (typeof pattern !== 'string') {
-        return false;
-      }
-      if (pattern === siteBasePath) {
-        return true;
-      }
-      if (pattern.endsWith('/*')) {
-        const prefix = pattern.slice(0, -2);
-        return prefix === siteBasePath || prefix.startsWith(`${siteBasePath}/`);
-      }
-      // eslint-disable-next-line no-useless-escape
-      if (/[|()\[\]^$+*?\\.]/.test(pattern)) {
-        return false;
-      }
-      return pattern.startsWith(`${siteBasePath}/`);
-    };
-
     // Returns false when a suggestion's URL or allowedRegexPatterns fall outside the
     // site's registered base path (e.g. a suggestion for /wolves on a /kings subpath site).
     // Root-level sites (pathname === '/') pass all suggestions through.
@@ -1862,18 +1840,21 @@ function SuggestionsController(ctx, sqs, env) {
         if (!isNonEmptyArray(patterns)) {
           return true;
         }
-        return patterns.every(isPatternInScope);
+        return patterns.every((pattern) => isPathPatternWithinSiteScope(pattern, siteBaseURL));
       }
       const url = getSuggestionUrl(data, opportunity);
       if (!url) {
         return true;
       }
       try {
-        const { pathname } = new URL(url);
-        return pathname === siteBasePath || pathname.startsWith(`${siteBasePath}/`);
+        // eslint-disable-next-line no-new
+        new URL(url);
       } catch {
+        // Not an absolute URL — isWithinSiteScope would otherwise treat it as a relative
+        // pathname and reject it; there's nothing reliable to scope-check, so let it through.
         return true;
       }
+      return isWithinSiteScope(url, siteBaseURL);
     };
 
     // Check each requested suggestion (basic validation only)
