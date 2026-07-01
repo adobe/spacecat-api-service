@@ -129,6 +129,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       const bad = [
+        { ...validBody, name: undefined },
         { ...validBody, name: '   ' },
         { ...validBody, name: 'x'.repeat(101) },
         { ...validBody, name: 'topic:smuggled' },

@@ -314,6 +314,27 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(401);
     });
 
+    // The escape hatch is hard-disabled in production (AWS_ENV or ENV === 'prod'),
+    // mirroring getImsUserTokenStrict — a non-IMS caller must never slip through
+    // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env.
+    it('401s a non-IMS caller with the flag set when AWS_ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', AWS_ENV: 'prod' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    it('401s a non-IMS caller with the flag set when ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', ENV: 'prod' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
     it('400s when :brandId is not a UUID (the new guard)', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({ brandId: 'adobe-brand-name' });
@@ -904,15 +925,26 @@ describe('SerenityController', () => {
         },
       });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
+      expect(response.status).to.equal(201);
+      const body = await readBody(response);
+      expect(body.tag).to.equal('category:Footwear');
+      expect(handlers.handleCreateTag).to.have.been.calledOnce;
+      expect(handlers.handleCreateTag.firstCall.args[4]).to.deep.equal({});
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag returns the authorize() error (403) and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createTag(fakeContext({
         data: {
           type: 'category', name: 'Footwear', geoTargetId: 2840, languageCode: 'en',
         },
       }));
-      expect(response.status).to.equal(201);
-      const body = await readBody(response);
-      expect(body.tag).to.equal('category:Footwear');
-      expect(handlers.handleCreateTag).to.have.been.calledOnce;
+      expect(response.status).to.equal(403);
+      expect(handlers.handleCreateTag).to.not.have.been.called;
       expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
     });
 
@@ -1196,14 +1228,12 @@ describe('SerenityController', () => {
         },
       });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.createTag(fakeContext({
-        data: {
-          type: 'category', name: 'Footwear', geoTargetId: 2840, languageCode: 'en',
-        },
-      }));
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
       expect(response.status).to.equal(201);
       expect(handlers.handleCreateTagSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[2]).to.deep.equal({});
       expect(handlers.handleCreateTag).to.not.have.been.called;
     });
 

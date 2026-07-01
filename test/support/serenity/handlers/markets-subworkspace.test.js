@@ -725,11 +725,70 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
     });
 
+    it('keeps the first (prompt-derived) real id when both sources supply different real ids for a name', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 'prompt-id', name: 'category:Running Shoes' }] }],
+        }),
+        listProjectTags: sinon.stub().resolves({
+          items: [{ id: 'standalone-id', name: 'category:Running Shoes' }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      // Both ids are real (≠ name), so the synthetic-id upgrade does not fire and
+      // first-writer-wins holds: the prompt-derived id is kept deterministically.
+      expect(result.items).to.deep.equal([{ id: 'prompt-id', name: 'category:Running Shoes' }]);
+    });
+
+    it('warns when the standalone tag page ceiling is hit (possible truncation)', async () => {
+      const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
+      const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
+        // Every page is full → the walk never short-circuits and runs to the ceiling.
+        listProjectTags: sinon.stub().resolves({ items: fullPage }),
+      });
+      await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, warnLog);
+      expect(warnLog.warn).to.have.been.calledWithMatch(/page ceiling hit/);
+      expect(transport.listProjectTags.callCount).to.equal(50);
+    });
+
+    it('treats a standalone tag page with no items array as empty (defensive)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: [{ id: 't-1', name: 'category:Running Shoes' }] }],
+        }),
+        // Upstream page carries no items array — must be coerced to empty, not throw.
+        listProjectTags: sinon.stub().resolves(null),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+
+    it('falls back to the tag name as id when a standalone tag has no id', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
+        listProjectTags: sinon.stub().resolves({
+          items: [{ name: 'category:No Id Yet' }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 'category:No Id Yet', name: 'category:No Id Yet' }]);
+    });
+
     it('paginates the standalone tag listing so categories beyond the first page are not dropped', async () => {
       const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
       const listProjectTags = sinon.stub();
       listProjectTags.onFirstCall().resolves({ items: page1 });
       listProjectTags.onSecondCall().resolves({ items: [{ id: 't-last', name: 'category:Last' }] });
+      // A short second page must end the walk; a third fetch would be an
+      // over-fetch bug — make it throw so the assertions below fail loudly
+      // rather than silently getting sinon's default undefined.
+      listProjectTags.onThirdCall().rejects(new Error('unexpected 3rd standalone page fetch'));
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
         listPromptsByTags: sinon.stub().resolves({ items: [] }),

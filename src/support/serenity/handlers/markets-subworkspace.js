@@ -547,9 +547,10 @@ export async function handleDeleteMarketSubworkspace(
  * @param {any} transport - Serenity transport.
  * @param {string} workspaceId - Semrush (sub-)workspace id.
  * @param {string} projectId - AIO project id.
+ * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
  * @returns {Promise<{ items: Array<{ id?: string, name?: string }> }>}
  */
-async function listStandaloneProjectTags(transport, workspaceId, projectId) {
+async function listStandaloneProjectTags(transport, workspaceId, projectId, log) {
   const items = [];
   const LIMIT = 100;
   const PAGE_LIMIT = 50;
@@ -560,6 +561,15 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId) {
     const batch = Array.isArray(resp?.items) ? resp.items : [];
     items.push(...batch);
     if (batch.length < LIMIT) {
+      break;
+    }
+    if (page === PAGE_LIMIT) {
+      // Ceiling reached with a still-full last page: at least one more page went
+      // unread, so the standalone set may be truncated. A missing category in the
+      // UI is a real symptom, so log it rather than stop silently.
+      log?.warn?.('listStandaloneProjectTags: page ceiling hit; standalone tag set may be truncated', {
+        workspaceId, projectId, pages: PAGE_LIMIT, limit: LIMIT,
+      });
       break;
     }
     page += 1;
@@ -596,7 +606,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   const [fromPrompts, standalone] = await Promise.all([
     listTagsForProject(transport, workspaceId, projectId, { geoTargetId, languageCode }, log),
     Promise.resolve()
-      .then(() => listStandaloneProjectTags(transport, workspaceId, projectId))
+      .then(() => listStandaloneProjectTags(transport, workspaceId, projectId, log))
       .catch((e) => {
         log?.warn?.('handleListTagsSubworkspace: standalone tag list failed (non-fatal)', {
           workspaceId, projectId, error: e?.message,
@@ -605,7 +615,9 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
       }),
   ]);
   const byName = new Map();
-  const all = [...(fromPrompts?.items || []), ...(standalone?.items || [])];
+  // listTagsForProject and listStandaloneProjectTags (and its catch) each always
+  // resolve `{ items: [...] }`, so no defensive `?.`/`|| []` is needed here.
+  const all = [...fromPrompts.items, ...standalone.items];
   for (const t of all) {
     if (t && hasText(t.name)) {
       const id = hasText(t.id) ? String(t.id) : t.name;
