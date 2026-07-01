@@ -1694,6 +1694,10 @@ function SitesController(ctx, log, env) {
         if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
           return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
         }
+        if (callerIsInternal && await isOrgWaitingForIpAllowlisting(org)) {
+          log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected (tier=${entitlement.getTier()}), preserving no_entitlement_for_product for org=${org.getId()}`);
+          return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+        }
         log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
       }
 
@@ -1728,8 +1732,10 @@ function SitesController(ctx, log, env) {
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
               // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
-              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
-              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              // - No entitlement OR non-customer tier (e.g. PRE_ONBOARD) + WAITING:
+              //   return no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+              // - No entitlement + not WAITING: return site_not_enrolled
+              // - Non-customer tier + not WAITING: skip tier check, let enrollment decide
               //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
               // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
               // Customer callers are completely unaffected by this block.
@@ -1748,6 +1754,10 @@ function SitesController(ctx, log, env) {
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
                 if (!callerIsInternal) {
                   return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+                }
+                if (await isOrgWaitingForIpAllowlisting(organization)) {
+                  log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected (tier=${entitlement.getTier()}), preserving no_entitlement_for_product for siteId=${siteId}`);
+                  return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
                 }
                 log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
               }

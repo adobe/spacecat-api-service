@@ -6938,6 +6938,30 @@ describe('Sites Controller', () => {
         expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
+      it('internal caller, PRE_ONBOARD + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product (PLG wizard preserved)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
       it('internal caller, PRE_ONBOARD + enrolled → 200 (tier check skipped, site shown)', async () => {
         context.data = {
           siteId: SITE_IDS[0],
@@ -7226,6 +7250,28 @@ describe('Sites Controller', () => {
         };
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
         mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      it('internal caller, organizationId path: PRE_ONBOARD + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          site: null,
+        });
         mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
           { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
         ]);
