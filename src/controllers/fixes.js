@@ -406,7 +406,15 @@ export class FixesController {
       if (!site || !opportunity) {
         return null;
       }
-      const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      const headerToken = this.#ctx.pathInfo?.headers?.['x-promise-token'];
+      let promiseTokenResponse;
+      if (hasText(headerToken)) {
+        log.info('[document-path-enrichment] using promise token from x-promise-token header');
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        log.info('[document-path-enrichment] no x-promise-token header, creating promise token via IMS');
+        promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      }
       const imsAccessToken = await exchangePromiseToken(
         this.#ctx,
         promiseTokenResponse.promise_token,

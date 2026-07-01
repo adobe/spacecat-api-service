@@ -184,14 +184,6 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(400);
     });
 
-    it('falls back to the cloudflareToken in query/body when the header is absent', async () => {
-      mockContext.pathInfo.headers = {};
-      mockContext.data = { cloudflareToken: CF_TOKEN };
-      mockCfClient.listAccounts.resolves([{ id: ACCOUNT_ID, name: 'Test Account' }]);
-      const res = await controller.listAccounts(mockContext);
-      expect(res.status).to.equal(200);
-    });
-
     it('returns 404 when site is not found', async () => {
       mockContext.dataAccess.Site.findById.resolves(null);
       const res = await controller.listAccounts(mockContext);
@@ -243,6 +235,31 @@ describe('LlmoCloudflareController', () => {
 
     it('treats a null zone list as empty', async () => {
       mockCfClient.listZones.resolves(null);
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([]);
+    });
+
+    it('returns only zones whose registrable domain matches the site domain', async () => {
+      // Site base URL is https://www.example.com -> registrable domain example.com.
+      const match = { id: ZONE_ID, name: 'example.com' };
+      const subdomainZone = { id: 'z2', name: 'shop.example.com' }; // registrable = example.com
+      const otherTld = { id: 'z3', name: 'example.net' };
+      const unrelated = { id: 'z4', name: 'other.com' };
+      const noName = { id: 'z5' }; // exercises the hasText(zone.name) guard
+      mockCfClient.listZones.resolves([match, subdomainZone, otherTld, unrelated, noName]);
+
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([match, subdomainZone]);
+    });
+
+    it('returns no zones when the site host has no registrable domain (PSL miss)', async () => {
+      mockSite.getBaseURL = () => 'http://localhost';
+      mockCfClient.listZones.resolves([{ id: ZONE_ID, name: 'example.com' }, { id: 'z2', name: 'localhost' }]);
+
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(200);
       const body = await res.json();
@@ -400,17 +417,6 @@ describe('LlmoCloudflareController', () => {
         alreadyDeployed: true,
       });
       expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
-    });
-
-    it('accepts the cloudflareToken from the body when the header is absent', async () => {
-      mockContext.pathInfo.headers = {};
-      mockContext.data = {
-        accountId: ACCOUNT_ID, targetHost: TARGET_HOST, cloudflareToken: CF_TOKEN,
-      };
-      mockCfClient.deployWorkerScript.resolves();
-      mockCfClient.setWorkerSecret.resolves();
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(200);
     });
 
     it('fetches the worker script from a pinned commit SHA with a timeout', async () => {
