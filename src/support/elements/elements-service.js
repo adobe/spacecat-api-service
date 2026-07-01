@@ -17,6 +17,7 @@ import {
   transformBrandsToFilterDimensions,
   buildMarketsPayload,
   transformMarketsResponse,
+  transformMarketsToFilterDimensions,
   buildTopicsPayload,
   transformTopicsResponse,
   transformTopicsForFilterDimensions,
@@ -82,19 +83,27 @@ export function createElementsService(transport) {
 
     /**
      * Fetches filter dimensions for the URL Inspector dashboard.
-     * Currently returns topics; future iterations will add categories, intents, and sources.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query parameters (startDate, endDate, model, etc.).
-     * @returns {Promise<{topics: import('./definitions/topics.js').FilterDimensionTopic[]}>}
+     * @param {Array<{id: string, name: string}>} [spacecatBrands=[]] - SpaceCat brands for the org,
+     *   used to resolve `spacecat_brand_id` on each brand entry by name match.
+     * @returns {Promise<object>}
      */
-    async getUrlInspectorFilterDimensions(workspaceId, params) {
-      const [rawTopics, rawBrands] = await Promise.all([
+    async getUrlInspectorFilterDimensions(
+      workspaceId,
+      params,
+      spacecatBrands = [],
+      brandSemrushProjects = [],
+    ) {
+      const [rawTopics, rawBrands, rawMarkets] = await Promise.all([
         transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, buildTopicsPayload(params)),
         transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
+        transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, buildMarketsPayload({})),
       ]);
       return {
-        brands: transformBrandsToFilterDimensions(rawBrands),
+        brands: transformBrandsToFilterDimensions(rawBrands, spacecatBrands),
+        regions: transformMarketsToFilterDimensions(rawMarkets, brandSemrushProjects),
         topics: transformTopicsForFilterDimensions(rawTopics),
         categories: transformCategoriesToFilterDimensions(rawTopics),
         page_intents: transformIntentsToFilterDimensions(rawTopics),

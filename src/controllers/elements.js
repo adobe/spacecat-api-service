@@ -16,6 +16,7 @@ import {
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
+import { listBrands as listSpacecatBrands } from '../support/brands-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
@@ -178,6 +179,23 @@ export default function ElementsController(context, log, env) {
   };
 
   /**
+   * GET /v2/orgs/:spaceCatId/serenity/all/markets
+   * Returns all markets across the workspace with no brand filter.
+   */
+  const listAllMarkets = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const result = await buildService(ctx).getMarkets(auth.workspaceId, {});
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
    * GET /v2/orgs/:spaceCatId/serenity/topics
    * Returns all topic and category tags available in the workspace.
    */
@@ -205,8 +223,29 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const result = await buildService(ctx)
-        .getUrlInspectorFilterDimensions(auth.workspaceId, extractQuery(ctx));
+      const { spaceCatId } = ctx?.params ?? {};
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+
+      const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
+
+      const brandSemrushProjects = BrandSemrushProject
+        ? (await Promise.all(
+          spacecatBrands.map((b) => BrandSemrushProject.allByBrandId(b.id)),
+        )).flat().map((p) => ({
+          brandId: p.getBrandId(),
+          semrushProjectId: p.getSemrushProjectId(),
+          geoTargetId: p.getGeoTargetId(),
+          languageCode: p.getLanguageCode(),
+        }))
+        : [];
+
+      const result = await buildService(ctx).getUrlInspectorFilterDimensions(
+        auth.workspaceId,
+        extractQuery(ctx),
+        spacecatBrands,
+        brandSemrushProjects,
+      );
       return ok(result);
     } catch (e) {
       return mapError(e, log);
@@ -216,6 +255,7 @@ export default function ElementsController(context, log, env) {
   return {
     listBrands,
     listMarkets,
+    listAllMarkets,
     listTopics,
     listUrlInspectorFilterDimensions,
   };

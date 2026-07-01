@@ -236,6 +236,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
     // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
     'GET /v2/orgs/:spaceCatId/serenity/brands': elementsController.listBrands,
+    'GET /v2/orgs/:spaceCatId/serenity/all/markets': elementsController.listAllMarkets,
     'GET /v2/orgs/:spaceCatId/serenity/:brandName/markets': elementsController.listMarkets,
     'GET /v2/orgs/:spaceCatId/serenity/topics': elementsController.listTopics,
     'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,

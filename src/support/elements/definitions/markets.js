@@ -16,9 +16,13 @@
  * Each market corresponds to one location + language combination.
  *
  * @param {object} params
- * @param {string} params.brand - Brand name to scope the lookup (e.g. "Adobe").
+ * @param {string} [params.brand] - Brand name to scope the lookup (e.g. "Adobe").
+ *   When omitted, returns all markets across the workspace with no brand filter.
  */
 export function buildMarketsPayload({ brand } = {}) {
+  if (!brand) {
+    return { comparison_data_formatting: 'union' };
+  }
   return {
     comparison_data_formatting: 'union',
     filters: {
@@ -40,6 +44,13 @@ export function buildMarketsPayload({ brand } = {}) {
  */
 
 /**
+ * @typedef {object} FilterDimensionRegion
+ * @property {null} id - Always null; no stable SpaceCat region ID exists.
+ * @property {string} semrush_project_id - Semrush project UUID for this market.
+ * @property {string} label - Human-readable market label (e.g. "AU-en").
+ */
+
+/**
  * Transforms the raw Semrush Markets element response into typed Market objects.
  * The `id` value is the Semrush project UUID — clients use these as `projectIds`
  * in subsequent brand-scoped element calls.
@@ -54,4 +65,32 @@ export function transformMarketsResponse(raw) {
     iconName: item.iconName ?? '',
     defaultSelected: item.defaultSelected === 1,
   }));
+}
+
+/**
+ * Transforms the raw Semrush Markets element response into URL Inspector filter-dimension regions.
+ * Each entry is enriched with SpaceCat brand and project metadata when a matching
+ * BrandSemrushProject row exists (joined on semrushProjectId).
+ *
+ * @param {object} raw - Raw response from the Elements API.
+ * @param {object[]} [brandSemrushProjects=[]] - Flattened BrandSemrushProject rows for the org,
+ *   each with { brandId, semrushProjectId, geoTargetId, languageCode }.
+ * @returns {FilterDimensionRegion[]}
+ */
+export function transformMarketsToFilterDimensions(raw, brandSemrushProjects = []) {
+  const projectMap = new Map(
+    brandSemrushProjects.map((p) => [p.semrushProjectId, p]),
+  );
+  return (raw?.blocks?.value ?? []).map((item) => {
+    const semrushProjectId = item.value ?? null;
+    const project = projectMap.get(semrushProjectId) ?? {};
+    return {
+      id: null,
+      semrush_project_id: semrushProjectId,
+      label: item.label ?? '',
+      spacecat_brand_id: project.brandId ?? null,
+      geoTargetId: project.geoTargetId ?? null,
+      languageCode: project.languageCode ?? null,
+    };
+  });
 }

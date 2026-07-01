@@ -70,14 +70,23 @@ export function transformBrandsResponse(raw) {
 
 /**
  * Transforms the raw Semrush Brands element response into URL Inspector filter-dimension brands.
- * Both `id` and `label` are set to the brand name.
+ * `id` is always null (Semrush has no stable brand ID); `spacecat_brand_id` is resolved by
+ * case-insensitive name matching against the caller-supplied SpaceCat brands list.
  *
  * @param {object} raw - Raw response from the Elements API.
- * @returns {import('./topics.js').FilterDimensionItem[]}
+ * @param {Array<{id: string, name: string}>} [spacecatBrands=[]] - SpaceCat brands for this org.
+ * @returns {Array<{id: null, label: string, spacecat_brand_id: string|null}>}
  */
-export function transformBrandsToFilterDimensions(raw) {
-  return (raw?.blocks?.value ?? []).map((item) => ({
-    id: item.value ?? null,
-    label: item.value ?? '',
-  }));
+export function transformBrandsToFilterDimensions(raw, spacecatBrands = []) {
+  const brandIdByName = new Map(
+    spacecatBrands.map((b) => [String(b.name ?? '').toLowerCase(), b.id]),
+  );
+  return (raw?.blocks?.value ?? []).map((item) => {
+    const label = item.value ?? '';
+    return {
+      id: null,
+      label,
+      spacecat_brand_id: brandIdByName.get(label.toLowerCase()) ?? null,
+    };
+  });
 }
