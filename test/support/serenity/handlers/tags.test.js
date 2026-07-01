@@ -125,13 +125,15 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
-    it('400s when name is missing, too long, or contains a colon', async () => {
+    it('400s when name is missing, too long, contains a colon, or has control characters', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       const bad = [
         { ...validBody, name: '   ' },
         { ...validBody, name: 'x'.repeat(101) },
         { ...validBody, name: 'topic:smuggled' },
+        { ...validBody, name: 'bad\u0000name' },
+        { ...validBody, name: 'tab\there' },
       ];
       for (const body of bad) {
         // eslint-disable-next-line no-await-in-loop

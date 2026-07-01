@@ -72,6 +72,14 @@ function parseCreateTagBody(body) {
   if (rawName.includes(':')) {
     throw new ErrorWithStatusCode('name must not contain ":"', 400);
   }
+  // Reject C0/C1-adjacent control characters (incl. DEL): unprintable chars have
+  // no legitimate place in a customer-authored tag value and cause UI + upstream
+  // confusion. Zero-width joiners (U+200C/U+200D) are intentionally NOT banned —
+  // they are legitimate in some scripts and emoji sequences.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F]/.test(rawName)) {
+    throw new ErrorWithStatusCode('name must not contain control characters', 400);
+  }
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   if (geoTargetId === null) {
     throw new ErrorWithStatusCode('geoTargetId must be a positive integer', 400);

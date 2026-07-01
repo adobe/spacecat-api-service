@@ -708,6 +708,41 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
     });
 
+    it('upgrades a synthetic prompt-derived id to the canonical standalone id (no shadowing)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        // Prompt-derived tag arrives as a BARE STRING → synthetic id === name.
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: ['category:Running Shoes'] }],
+        }),
+        // Standalone listing carries the canonical upstream id for the same name;
+        // it must win over the synthetic id even though prompts are merged first.
+        listProjectTags: sinon.stub().resolves({
+          items: [{ id: 't-1', name: 'category:Running Shoes' }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+
+    it('paginates the standalone tag listing so categories beyond the first page are not dropped', async () => {
+      const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
+      const listProjectTags = sinon.stub();
+      listProjectTags.onFirstCall().resolves({ items: page1 });
+      listProjectTags.onSecondCall().resolves({ items: [{ id: 't-last', name: 'category:Last' }] });
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
+        listProjectTags,
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      // A full first page (=== limit) forces a second fetch; a short page ends it.
+      expect(listProjectTags.callCount).to.equal(2);
+      expect(listProjectTags.secondCall.args).to.deep.equal([WS, 'p-tag', { page: 2, limit: 100 }]);
+      expect(result.items).to.have.lengthOf(101);
+      expect(result.items).to.deep.include({ id: 't-last', name: 'category:Last' });
+    });
+
     it('returns an empty set when no slice matches (no upstream prompt call)', async () => {
       const transport = makeTransport();
       const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);

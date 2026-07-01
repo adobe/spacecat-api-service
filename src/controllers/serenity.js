@@ -193,8 +193,9 @@ function mapError(e, log) {
  * fail-fast + shape guard so we do not forward a token Semrush will obviously
  * reject; it never substitutes for the upstream's own validation.
  *
- * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` the
- * IMS-type check is skipped so an authenticated NON-IMS caller (e.g. the
+ * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` AND the
+ * runtime is not production, the IMS-type check is skipped so an authenticated
+ * NON-IMS caller (e.g. the
  * locally-signed JWT the integration-test harness mints) can reach the
  * handlers. This is sound because (a) production auth is unaffected — Semrush
  * still validates the forwarded token end to end — and (b) the integration
@@ -208,7 +209,11 @@ function mapError(e, log) {
  */
 function requireImsBearer(ctx) {
   const authInfo = ctx?.attributes?.authInfo;
-  const allowNonIms = ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  // Hard-disable the escape hatch in production, mirroring getImsUserTokenStrict:
+  // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env, a non-IMS
+  // caller must never reach the handlers there.
+  const isProd = ctx?.env?.AWS_ENV === 'prod' || ctx?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
   if (!allowNonIms && authInfo?.getType && authInfo.getType() !== 'ims') {
     throw new ErrorWithStatusCode(
       'Serenity proxy requires IMS authentication',

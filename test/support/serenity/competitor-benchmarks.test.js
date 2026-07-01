@@ -253,6 +253,25 @@ describe('competitor-benchmarks helpers', () => {
       });
     });
 
+    it('does NOT re-sync when the upstream brand_name is empty, even if the desired name differs', async () => {
+      // An absent upstream name is left alone rather than backfilled — a benchmark
+      // we did not name is never touched, so an operator's direct upstream rename
+      // is not clobbered by a drifting desired name.
+      const transport = makeTransport([
+        {
+          id: 'rival', main_brand: false, domain: 'test1234.de', brand_name: '',
+        },
+      ]);
+      const competitors = [
+        { name: 'test12345', url: 'https://www.test1234.de', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(result.changed).to.equal(false);
+      expect(result.updated).to.equal(0);
+    });
+
     it('does NOT update when the name and alias set are unchanged', async () => {
       const transport = makeTransport([
         {

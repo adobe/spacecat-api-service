@@ -538,6 +538,36 @@ export async function handleDeleteMarketSubworkspace(
 }
 
 /**
+ * Page through a project's STANDALONE AIO tags (registered via createProjectTags,
+ * not necessarily carried by any prompt). `listProjectTags` is page-based
+ * (page/limit); walk until a short page ends it, bounded by a page ceiling for an
+ * unexpectedly huge set — mirroring `listTagsForProject`'s prompt-page walk so
+ * standalone categories beyond the first page are not silently dropped.
+ *
+ * @param {any} transport - Serenity transport.
+ * @param {string} workspaceId - Semrush (sub-)workspace id.
+ * @param {string} projectId - AIO project id.
+ * @returns {Promise<{ items: Array<{ id?: string, name?: string }> }>}
+ */
+async function listStandaloneProjectTags(transport, workspaceId, projectId) {
+  const items = [];
+  const LIMIT = 100;
+  const PAGE_LIMIT = 50;
+  let page = 1;
+  while (page <= PAGE_LIMIT) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listProjectTags(workspaceId, projectId, { page, limit: LIMIT });
+    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    items.push(...batch);
+    if (batch.length < LIMIT) {
+      break;
+    }
+    page += 1;
+  }
+  return { items };
+}
+
+/**
  * GET /serenity/tags (subworkspace) — unique tag names across the slice's prompts.
  * Resolves the slice's project from the live listing, then reuses the shared
  * project-keyed tag aggregation (cache + pagination + truncation guard). A
@@ -566,7 +596,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   const [fromPrompts, standalone] = await Promise.all([
     listTagsForProject(transport, workspaceId, projectId, { geoTargetId, languageCode }, log),
     Promise.resolve()
-      .then(() => transport.listProjectTags(workspaceId, projectId))
+      .then(() => listStandaloneProjectTags(transport, workspaceId, projectId))
       .catch((e) => {
         log?.warn?.('handleListTagsSubworkspace: standalone tag list failed (non-fatal)', {
           workspaceId, projectId, error: e?.message,
@@ -577,8 +607,19 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   const byName = new Map();
   const all = [...(fromPrompts?.items || []), ...(standalone?.items || [])];
   for (const t of all) {
-    if (t && hasText(t.name) && !byName.has(t.name)) {
-      byName.set(t.name, { id: hasText(t.id) ? String(t.id) : t.name, name: t.name });
+    if (t && hasText(t.name)) {
+      const id = hasText(t.id) ? String(t.id) : t.name;
+      const existing = byName.get(t.name);
+      if (!existing) {
+        byName.set(t.name, { id, name: t.name });
+      } else if (existing.id === existing.name && id !== t.name) {
+        // Upgrade a synthetic (id === name) entry — e.g. a prompt-derived tag that
+        // arrived as a bare string — to the canonical upstream id once the
+        // standalone listing supplies it, regardless of merge order. Prevents a
+        // synthetic id from shadowing the real one just because the prompt-derived
+        // entry was seen first.
+        existing.id = id;
+      }
     }
   }
   return { items: [...byName.values()] };
