@@ -165,15 +165,22 @@ async function seed() {
     insertRows('audit_urls', auditUrls),
     insertRows('sentiment_guidelines', sentimentGuidelines),
     insertRows('brand_sites', brandSites),
-    // prompts.brand_id → brands.id, organization_id → organizations.id
-    insertRows('prompts', prompts),
   ]);
 
-  // Level 4: depend on fix_entities + suggestions, and prompts (BPE.prompt_id → prompts.id)
-  await Promise.all([
-    insertRows('fix_entity_suggestions', fixEntitySuggestions),
-    insertRows('brand_presence_executions', brandPresenceExecutions),
-  ]);
+  // Level 4: depend on fix_entities + suggestions
+  await insertRows('fix_entity_suggestions', fixEntitySuggestions);
+}
+
+/**
+ * Optional per-test fixture: a prompt carrying an `intent` plus a
+ * brand_presence_executions row referencing it. NOT part of the baseline seed —
+ * other suites (e.g. categories-prompts) count prompts under ORG_1/BRAND_1 and
+ * assume an empty baseline, so this is seeded only by the topic-prompts IT after
+ * resetPostgres(). Cleared by the next suite's clearData (organizations CASCADE).
+ */
+export async function seedBrandPresenceIntentFixture() {
+  await insertRows('prompts', prompts); // FK: BPE.prompt_id → prompts.id
+  await insertRows('brand_presence_executions', brandPresenceExecutions);
 }
 
 /**

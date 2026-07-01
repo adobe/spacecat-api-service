@@ -11,7 +11,7 @@
  */
 
 import { ctx } from './harness.js';
-import { resetPostgres } from './seed.js';
+import { resetPostgres, seedBrandPresenceIntentFixture } from './seed.js';
 import brandPresenceTopicPromptsTests from '../shared/tests/brand-presence-topic-prompts.js';
 
-brandPresenceTopicPromptsTests(() => ctx.httpClient, resetPostgres);
+brandPresenceTopicPromptsTests(() => ctx.httpClient, resetPostgres, seedBrandPresenceIntentFixture);

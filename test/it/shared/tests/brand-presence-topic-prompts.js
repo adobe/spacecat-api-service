@@ -34,10 +34,15 @@ import {
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
+ * @param {() => Promise<void>} seedFixture - Seeds the prompt + execution fixture
+ *   (kept out of the baseline so other suites' prompt counts are unaffected)
  */
-export default function brandPresenceTopicPromptsTests(getHttpClient, resetData) {
+export default function brandPresenceTopicPromptsTests(getHttpClient, resetData, seedFixture) {
   describe('Brand Presence — topic-prompts intent enrichment', () => {
-    before(() => resetData());
+    before(async () => {
+      await resetData();
+      await seedFixture();
+    });
 
     const topicPromptsPath = (query) => {
       const qs = new URLSearchParams(query).toString();
