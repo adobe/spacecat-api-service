@@ -7188,17 +7188,68 @@ describe('Suggestions Controller', () => {
         expect(body.suggestions[0].message).to.include('outside the scope');
       });
 
-      it('passes all suggestions through for a root-level site', async () => {
-        site.getBaseURL = sandbox.stub().returns('https://example.com');
-        const anyUrlSugg = {
+      it('rejects a domain-wide suggestion when only some allowedRegexPatterns are in scope', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const mixedPatternSugg = {
           ...edgeSuggestions[0],
           getData: () => ({
-            url: 'https://example.com/any/path',
-            recommendedAction: 'New Heading Title',
-            prompts: [{ prompt: 'any prompt', regions: ['US'] }],
+            url: 'https://example.com',
+            isDomainWide: true,
+            allowedRegexPatterns: ['/kings/page', '/wolves/page'],
+            prompts: [{ prompt: 'mixed prompt', regions: ['US'] }],
           }),
         };
-        mockSuggestion.allByOpportunityId.resolves([anyUrlSugg]);
+        mockSuggestion.allByOpportunityId.resolves([mixedPatternSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
+      });
+
+      it('rejects a path suggestion whose allowedRegexPatterns point to a different subpath', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const wrongPathPatternSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com',
+            isDomainWide: false,
+            allowedRegexPatterns: ['/wolves/*'],
+            prompts: [{ prompt: 'wolves path prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([wrongPathPatternSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
+      });
+
+      it('accepts a domain-wide suggestion whose allowedRegexPatterns are within the subpath site scope', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        const inScopePatternSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com',
+            isDomainWide: true,
+            allowedRegexPatterns: ['/kings/*'],
+            prompts: [{ prompt: 'kings prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([inScopePatternSugg]);
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
@@ -7210,7 +7261,34 @@ describe('Suggestions Controller', () => {
         expect(body.suggestions[0]?.message).to.not.include('outside the scope');
       });
 
-      it('passes suggestion through when site base URL is unparseable', async () => {
+      it('rejects an allowedRegexPatterns entry that uses regex alternation to escape the site scope', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+        // Textually starts with the site's base path, but as a compiled regex (the actual
+        // downstream evaluation via buildUrlMatcher) it also matches /wolves/... via `|`.
+        const alternationBypassSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com',
+            isDomainWide: true,
+            allowedRegexPatterns: ['/kings/.*|/wolves/.*'],
+            prompts: [{ prompt: 'bypass prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([alternationBypassSugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
+      });
+
+      it('logs a warning and passes suggestions through when the site base URL is unparseable', async () => {
         site.getBaseURL = sandbox.stub().returns('not a valid base url');
         const sugg = {
           ...edgeSuggestions[0],
@@ -7221,6 +7299,29 @@ describe('Suggestions Controller', () => {
           }),
         };
         mockSuggestion.allByOpportunityId.resolves([sugg]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          env: {},
+        });
+        const body = await response.json();
+        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
+        expect(context.log.warn.calledWithMatch(/unparseable baseURL/)).to.equal(true);
+      });
+
+      it('passes all suggestions through for a root-level site', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com');
+        const anyUrlSugg = {
+          ...edgeSuggestions[0],
+          getData: () => ({
+            url: 'https://example.com/any/path',
+            recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'any prompt', regions: ['US'] }],
+          }),
+        };
+        mockSuggestion.allByOpportunityId.resolves([anyUrlSugg]);
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,

@@ -1814,17 +1814,44 @@ function SuggestionsController(ctx, sqs, env) {
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
 
+    // siteBasePath is constant for the whole batch — resolve it once instead of
+    // re-parsing site.getBaseURL() inside isSuggestionInScope for every suggestion.
+    const siteBaseURL = site.getBaseURL();
+    let siteBasePath;
+    try {
+      siteBasePath = new URL(siteBaseURL).pathname;
+    } catch {
+      context.log.warn(`[edge-deploy] site ${apexBaseUrl} has unparseable baseURL '${siteBaseURL}', skipping scope guard`);
+    }
+
+    // A pattern is trusted as scoped to siteBasePath only when it is an exact match or uses
+    // the `/*` pathname-prefix convention (see @adobe/spacecat-shared-tokowaka-client's
+    // buildUrlMatcher). Any other pattern is compiled as a regex and matched against the full
+    // URL downstream, so a literal `startsWith` check on the pattern text is not sound —
+    // e.g. `/kings/.*|/wolves/.*` starts with `/kings` but, once compiled, also matches
+    // `/wolves/...` via the `|` alternation. We fail closed for anything we cannot verify.
+    const isPatternInScope = (pattern) => {
+      if (typeof pattern !== 'string') {
+        return false;
+      }
+      if (pattern === siteBasePath) {
+        return true;
+      }
+      if (pattern.endsWith('/*')) {
+        const prefix = pattern.slice(0, -2);
+        return prefix === siteBasePath || prefix.startsWith(`${siteBasePath}/`);
+      }
+      // eslint-disable-next-line no-useless-escape
+      if (/[|()\[\]^$+*?\\.]/.test(pattern)) {
+        return false;
+      }
+      return pattern.startsWith(`${siteBasePath}/`);
+    };
+
     // Returns false when a suggestion's URL or allowedRegexPatterns fall outside the
     // site's registered base path (e.g. a suggestion for /wolves on a /kings subpath site).
     // Root-level sites (pathname === '/') pass all suggestions through.
     const isSuggestionInScope = (suggestion) => {
-      const siteBaseURL = site.getBaseURL();
-      let siteBasePath;
-      try {
-        siteBasePath = new URL(siteBaseURL).pathname;
-      } catch {
-        return true;
-      }
       if (!siteBasePath || siteBasePath === '/') {
         return true;
       }
@@ -1835,8 +1862,7 @@ function SuggestionsController(ctx, sqs, env) {
         if (!isNonEmptyArray(patterns)) {
           return true;
         }
-        const scopePrefix = `${siteBasePath}/`;
-        return patterns.every((p) => p === siteBasePath || p.startsWith(scopePrefix));
+        return patterns.every(isPatternInScope);
       }
       const url = getSuggestionUrl(data, opportunity);
       if (!url) {
