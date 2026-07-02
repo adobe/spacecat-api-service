@@ -84,7 +84,7 @@ function classifyUpsertError(error) {
  * @param {{
  *   brandId: string|null|undefined,
  *   semrushProjectId: string|null|undefined,
- *   geoTargetId: number,
+ *   geoTargetId: number|null|undefined,
  *   languageCode: string|null|undefined,
  * }} slice
  * @param {any} [log]

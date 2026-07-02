@@ -542,6 +542,11 @@ export async function handleCreateMarketSubworkspace(
  * already-vanished project is left un-tombstoned — accepted,
  * reconcile-recoverable drift (implementation plan §3.2/§11).
  *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
+ * @param {string|number|null} geoTargetId - the market's Google Ads Geo Target id.
+ * @param {string|null} languageCode - the market's BCP-47 language code.
+ * @param {object} log - logger.
  * @param {object} [options]
  * @param {any} [options.dataAccess]
  */

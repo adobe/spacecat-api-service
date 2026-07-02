@@ -86,7 +86,7 @@ export function initialMarketProjectName(market, languageCode) {
  *   semrushSubWorkspaceId: string,
  *   published: boolean,
  *   projectId: string,
- *   geoTargetId: number,
+ *   geoTargetId: number | null,
  *   languageCode: string,
  * }>} the new sub-workspace id, whether the initial market was published, and
  *   the initial market's identity — deliberately NOT written to
@@ -240,7 +240,10 @@ export async function provisionBrandSubworkspace(context, {
     semrushSubWorkspaceId: capturedWorkspaceId,
     published: Boolean(resultBody.published),
     projectId: String(resultBody.projectId || ''),
-    geoTargetId: Number(resultBody.geoTargetId) || 0,
+    // Absent stays null (not 0) so upsertMappingRow's `!geoTargetId` guard
+    // rejects an unresolvable slice explicitly rather than persisting a
+    // sentinel value.
+    geoTargetId: resultBody.geoTargetId != null ? Number(resultBody.geoTargetId) : null,
     languageCode: String(resultBody.languageCode || resolvedLanguageCode),
   };
 }

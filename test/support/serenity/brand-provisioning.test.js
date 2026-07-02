@@ -85,7 +85,7 @@ describe('provisionBrandSubworkspace', () => {
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
     expect(result).to.deep.equal({
-      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: 0, languageCode: 'en',
+      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
     });
   });
 
@@ -116,7 +116,7 @@ describe('provisionBrandSubworkspace', () => {
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
     expect(result).to.deep.equal({
-      semrushSubWorkspaceId: NEW_WS, published: true, projectId: '', geoTargetId: 0, languageCode: 'en',
+      semrushSubWorkspaceId: NEW_WS, published: true, projectId: '', geoTargetId: null, languageCode: 'en',
     });
   });
 
@@ -132,7 +132,7 @@ describe('provisionBrandSubworkspace', () => {
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
     expect(result).to.deep.equal({
-      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: 0, languageCode: 'en',
+      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
     });
   });
 

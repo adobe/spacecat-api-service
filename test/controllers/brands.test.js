@@ -4907,10 +4907,11 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(201);
-        expect(linkSiteToLiveRowsStub).to.have.been.calledOnceWith(
+        expect(linkSiteToLiveRowsStub).to.have.been.calledOnceWithExactly(
           mockDataAccess,
           provisionStub.firstCall.args[1].brandId,
           'site-x',
+          loggerStub,
         );
         expect(linkSiteToLiveRowsStub.calledAfter(ensureSiteStub)).to.equal(true);
       });

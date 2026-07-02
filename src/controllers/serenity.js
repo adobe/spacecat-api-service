@@ -603,7 +603,10 @@ function SerenityController(context, log, env) {
             // auth.brandUuid is an already-persisted brand row here (loadBrand
             // above), so the mapping-row upsert's FK to brands is satisfied —
             // see mapping-rows.js upsertMappingRow doc.
-            dataAccess: ctx.dataAccess,
+            // Narrowed to the one model the mapping-row helpers touch (defense
+            // in depth: this options bag flows into markets-subworkspace.js and
+            // shouldn't carry access to unrelated tables).
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -664,7 +667,9 @@ function SerenityController(context, log, env) {
           geoTargetId,
           languageCode,
           log,
-          { dataAccess: ctx.dataAccess },
+          // Narrowed to the one model the mapping-row helpers touch — see the
+          // create-market call site above for the same rationale.
+          { dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject } },
         )
         : handleDeleteMarket(
           transport,
@@ -1081,7 +1086,9 @@ function SerenityController(context, log, env) {
               competitors,
               // `brand` was loaded via loadBrand above — an already-persisted
               // row, so the mapping-row upsert's FK to brands is satisfied.
-              dataAccess: ctx.dataAccess,
+              // Narrowed to the one model the mapping-row helpers touch — see
+              // the single-market create call site for the same rationale.
+              dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
             },
           );
         } catch (e) {

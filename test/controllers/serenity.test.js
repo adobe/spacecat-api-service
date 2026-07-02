@@ -1102,7 +1102,7 @@ describe('SerenityController', () => {
           brandAliases: ['Acme Inc', 'ACME'],
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
-          dataAccess: ctx.dataAccess,
+          dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
         });
     });
 
@@ -1685,7 +1685,7 @@ describe('SerenityController', () => {
         brandAliases: ['Acme Inc'],
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
-        dataAccess: ctx.dataAccess,
+        dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       expect(firstCall.args[7]).to.deep.equal(expectedOpts);
