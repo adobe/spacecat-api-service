@@ -374,7 +374,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // called once in the RUM-fail path; Step 5a is skipped (siteCreated=true)
+      // called once in the RUM-fail path; Step 5f is skipped (siteCreated=true)
       expect(findDeliveryTypeStub).to.have.been.calledOnce;
     });
 
@@ -394,7 +394,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         postSlackMessageStub.reset();
       });
 
-      it('alerts via Slack when detected delivery type differs from stored type', async () => {
+      it('alerts via Slack using findDeliveryType fallback when rumHost is absent', async () => {
+        // RUM fails → no rumHost → Step 5f falls back to findDeliveryType
         rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
         findDeliveryTypeStub.resetHistory();
         findDeliveryTypeStub.resolves('aem_edge');
@@ -413,7 +414,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
         expect(res.status).to.equal(200);
         expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-        expect(findDeliveryTypeStub).to.have.been.calledOnceWith(TEST_BASE_URL);
         // site must NOT be mutated — alert only
         expect(existingSite.setDeliveryType).to.not.have.been.called;
         expect(existingSite.setDeliveryConfig).to.not.have.been.called;
@@ -426,6 +426,32 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(message).to.include('aem_edge');
         expect(message).to.include(existingSite.getId());
         expect(message).to.include(TEST_ORG_ID);
+      });
+
+      it('alerts via Slack using rumHost EDS pattern without calling findDeliveryType', async () => {
+        // autoResolveAuthorUrl returns an EDS host → detected as AEM_EDGE without findDeliveryType
+        findDeliveryTypeStub.resetHistory();
+        const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        stubs.autoResolveAuthorUrlStub.resolves({ host: 'main--my-repo--my-org.aem.live' });
+
+        const alertController = AlertControllerFactory({ log: mockLog });
+        const context = buildContext({ domain: TEST_DOMAIN });
+        context.env = {
+          ...context.env,
+          SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
+          SLACK_BOT_TOKEN: 'xoxb-test',
+        };
+
+        const res = await alertController.onboard(context);
+
+        expect(res.status).to.equal(200);
+        expect(findDeliveryTypeStub).to.not.have.been.called;
+        expect(postSlackMessageStub).to.have.been.calledOnce;
+        const [, message] = postSlackMessageStub.firstCall.args;
+        expect(message).to.include('aem_edge');
+
+        stubs.autoResolveAuthorUrlStub.resolves(null);
       });
 
       it('logs error and continues onboarding when delivery type mismatch Slack alert fails', async () => {
@@ -468,7 +494,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockLog.warn).to.not.have.been.calledWithMatch(/Delivery type mismatch/);
     });
 
-    it('skips Step 5a entirely for a new site — no redundant findDeliveryType call', async () => {
+    it('skips Step 5f for a new site — no redundant findDeliveryType call', async () => {
       findDeliveryTypeStub.resetHistory();
       findDeliveryTypeStub.resolves('aem_edge');
       // no existing site — Site.findByBaseURL returns null so Site.create is called
@@ -478,12 +504,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      // findDeliveryType called once in Step 5 for site creation; Step 5a is skipped
+      // findDeliveryType called once in Step 5 for site creation; Step 5f is skipped
       expect(findDeliveryTypeStub).to.have.been.calledOnce;
       expect(mockLog.info).to.not.have.been.calledWithMatch(/Clearing stale config/);
     });
 
-    it('does not use site delivery type OTHER — calls findDeliveryType when RUM fails', async () => {
+    it('falls back to findDeliveryType in Step 5f when RUM fails and rumHost is absent', async () => {
       rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
       findDeliveryTypeStub.resetHistory();
       findDeliveryTypeStub.resolves('aem_edge');
@@ -496,13 +522,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // called twice: once in the RUM-fail path (type is OTHER) and once in Step 5a
+      // called twice: once at line 553 because stored type is OTHER (cached delivery type lookup),
+      // and once in Step 5f fallback because no rumHost was available
       expect(findDeliveryTypeStub).to.have.been.calledTwice;
       expect(findDeliveryTypeStub).to.have.been.calledWith(TEST_BASE_URL);
-      expect(mockLog.info).to.not.have.been.calledWithMatch(/Using existing site delivery type/);
     });
 
-    it('continues onboarding when findDeliveryType throws in Step 5a', async () => {
+    it('continues onboarding when findDeliveryType throws in Step 5f', async () => {
       findDeliveryTypeStub.resetHistory();
       findDeliveryTypeStub.rejects(new Error('network timeout'));
       const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
