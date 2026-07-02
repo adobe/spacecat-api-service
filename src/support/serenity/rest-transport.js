@@ -917,8 +917,27 @@ export function createSerenityTransport({ env, imsToken }) {
      * responsible for interpreting the response shape.
      */
     async queryBrandPresenceResults(semrushWorkspaceId, elementId, renderData) {
-      const url = `${root}/apis/v4-raw/external-api/v1/workspaces/${enc(semrushWorkspaceId)}/products/ai/elements/${enc(elementId)}`;
-      return request('POST', url, imsToken, { render_data: renderData });
+      const url = `${root}/apis/v4-raw/external-api/v1/workspaces/${encodeURIComponent(semrushWorkspaceId)}/products/ai/elements/${encodeURIComponent(elementId)}`;
+      const token = authToken();
+      const timeoutFetch = createTimeoutFetch(DEFAULT_TIMEOUT_MS);
+      const response = await timeoutFetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ render_data: renderData }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new SerenityTransportError(
+          response.status,
+          `Semrush POST ${url} failed: ${response.status}`,
+          body,
+        );
+      }
+      return response.json().catch(() => null);
     },
   };
 }
