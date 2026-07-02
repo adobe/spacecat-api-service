@@ -233,8 +233,8 @@ function requireImsBearer(ctx) {
 
 /**
  * Builds an async reload callback that re-reads the brand's CURRENT
- * semrush_workspace_id from the data layer. ensureSubworkspace uses it as a
- * lost-update concurrency guard so a parallel activation cannot orphan a
+ * semrush_sub_workspace_id from the data layer. ensureSubworkspace uses it as
+ * a lost-update concurrency guard so a parallel activation cannot orphan a
  * freshly-created, resourced sub-workspace.
  */
 export function brandPointerReloader(ctx, brandUuid) {
@@ -244,7 +244,7 @@ export function brandPointerReloader(ctx, brandUuid) {
       return null;
     }
     const fresh = await Brand.findById(brandUuid);
-    return fresh?.getSemrushWorkspaceId?.() ?? null;
+    return fresh?.getSemrushSubWorkspaceId?.() ?? null;
   };
 }
 
@@ -276,7 +276,7 @@ function SerenityController(context, log, env) {
    *
    * Returns either `{ error: Response }` or
    * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
-   *   - `mode` is 'subworkspace' when brands.semrush_workspace_id is set, else 'flat'
+   *   - `mode` is 'subworkspace' when brands.semrush_sub_workspace_id is set, else 'flat'
    *   - `workspaceId` is the workspace handlers call upstream (subworkspace ws in subworkspace
    *     mode, org parent in flat mode)
    *   - `parentWorkspaceId` is the org parent (needed for subworkspace create/activate)
@@ -320,9 +320,9 @@ function SerenityController(context, log, env) {
     // its `LLMO/serenity` feature flag is ON *and* a Semrush workspace resolves
     // for the brand (the workspace half is enforced below by
     // resolveBrandWorkspace). While the flag is OFF the org's UI keeps reading
-    // the normal backend data — even if a `semrush_workspace_id` has already
-    // been backfilled for rollout prep — so reject the serenity surface with a
-    // 404 (the same "no serenity for this org" contract the UI already handles
+    // the normal backend data — even if a `semrush_sub_workspace_id` has
+    // already been backfilled for rollout prep — so reject the serenity
+    // surface with a 404 (the same "no serenity for this org" contract the UI already handles
     // for an org without a workspace). Checked before brand resolution so an
     // inactive org never leaks brand existence.
     if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
@@ -1252,7 +1252,7 @@ function SerenityController(context, log, env) {
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
    * (design flow 6): delete every project and release the allocation back to
    * the parent pool, then DISCONNECT the brand by clearing its
-   * semrush_workspace_id pointer. The sub-workspace itself is NEVER deleted
+   * semrush_sub_workspace_id pointer. The sub-workspace itself is NEVER deleted
    * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
    * is left empty and unowned. Clearing the pointer flips the brand back to
    * flat mode, so a future activate allocates a fresh sub-workspace. Sets
@@ -1268,7 +1268,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
-      const subworkspaceId = brand.getSemrushWorkspaceId?.();
+      const subworkspaceId = brand.getSemrushSubWorkspaceId?.();
       if (hasText(subworkspaceId)) {
         await decommissionBrandWorkspace(
           transport,
@@ -1287,7 +1287,7 @@ function SerenityController(context, log, env) {
         // keep routing to the already-emptied sub-workspace for the full
         // positive-TTL window (the upstream is empty the moment decommission
         // returns).
-        brand.setSemrushWorkspaceId?.(null);
+        brand.setSemrushSubWorkspaceId?.(null);
         clearBrandWorkspaceCache();
         // Every project the brand owned is gone now that decommission emptied
         // the sub-workspace — tombstone the brand's live mapping rows
@@ -1304,7 +1304,7 @@ function SerenityController(context, log, env) {
           // Non-atomic seam: the sub-workspace was already decommissioned
           // (emptied + allocation released) upstream, but persisting the
           // cleared pointer / pending status failed. The state is divergent —
-          // brands.semrush_workspace_id still points at the now-empty
+          // brands.semrush_sub_workspace_id still points at the now-empty
           // sub-workspace and status is not 'pending'. A re-activate converges
           // (the re-grant path re-uses the emptied workspace), so this
           // self-heals, but emit a DISTINCT, greppable token so the orphan is

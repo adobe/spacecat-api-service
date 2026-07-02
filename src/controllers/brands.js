@@ -1545,7 +1545,7 @@ function BrandsController(ctx, log, env) {
           // project later (stored in brands.pending_semrush_provisioning). The primary
           // URL otherwise lives only on the Semrush side, so a site-less draft
           // would have nowhere to keep it. The row lands as 'pending' because it
-          // has no anchor (no site_id, no semrush_workspace_id) — see
+          // has no anchor (no site_id, no semrush_sub_workspace_id) — see
           // upsertBrand's anchor check.
           const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
             .map((u) => (typeof u === 'string' ? u : u?.value))
@@ -1635,7 +1635,7 @@ function BrandsController(ctx, log, env) {
             // payload (the brand row isn't written yet).
             competitors: brandData.competitors,
           }, log);
-          provisionedWorkspaceId = provisioned.semrushWorkspaceId;
+          provisionedWorkspaceId = provisioned.semrushSubWorkspaceId;
           provisionedInitialMarket = {
             projectId: provisioned.projectId,
             geoTargetId: provisioned.geoTargetId,
@@ -1670,7 +1670,7 @@ function BrandsController(ctx, log, env) {
         updatedBy,
         log,
         forceBrandId: provisionedBrandId,
-        semrushWorkspaceId: provisionedWorkspaceId,
+        semrushSubWorkspaceId: provisionedWorkspaceId,
       });
 
       // When a Semrush sub-workspace + initial market were provisioned, write the
@@ -1807,7 +1807,7 @@ function BrandsController(ctx, log, env) {
       // aliases re-syncs onto the brand's Semrush projects (the block near the end
       // of this handler), but ONLY for a sub-workspace brand. While serenity is
       // inactive for the org that re-sync must not run — even if a
-      // semrush_workspace_id was backfilled for rollout prep — so reject the edit
+      // semrush_sub_workspace_id was backfilled for rollout prep — so reject the edit
       // (rather than silently skip the sync and let the brand drift) when it would
       // touch Semrush. A flat-mode brand (no workspace) edits the same fields as
       // plain backend data and is unaffected; the brand read only happens on the
@@ -1819,7 +1819,7 @@ function BrandsController(ctx, log, env) {
         || aliasesTouched;
       if (touchesSemrushSync && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
         const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
-        if (hasText(current?.semrushWorkspaceId)) {
+        if (hasText(current?.semrushSubWorkspaceId)) {
           return forbidden('Serenity is not active for this organization');
         }
       }
@@ -1869,8 +1869,8 @@ function BrandsController(ctx, log, env) {
       // When the competitor guard below lists a Semrush brand's projects pre-write,
       // it stashes the listing here so the post-commit re-sync can reuse it instead
       // of listing the same workspace a second time — the project set is stable
-      // across the brand-row write (which never re-points semrush_workspace_id), so
-      // a single competitor edit lists projects ONCE across both the guard and sync.
+      // across the brand-row write (which never re-points semrush_sub_workspace_id),
+      // so a single competitor edit lists projects ONCE across both the guard and sync.
       let prefetchedProjects = null;
       if (competitorsToGuard) {
         const brandState = await getBrandById(spaceCatId, brandUuid, postgrestClient);
@@ -1879,12 +1879,12 @@ function BrandsController(ctx, log, env) {
         const brandOwnUrls = [brandState?.baseUrl, ...websiteUrls];
 
         let reservedDomains;
-        if (hasText(brandState?.semrushWorkspaceId)) {
+        if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
           const imsToken = getImsUserTokenStrict(context);
           const transport = createSerenityTransport({ env: context.env, imsToken });
-          prefetchedProjects = await resolveProjects(transport, brandState.semrushWorkspaceId);
+          prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
           reservedDomains = buildReservedDomains(
             prefetchedProjects.map((p) => p?.domain),
             brandOwnUrls,
@@ -1934,7 +1934,7 @@ function BrandsController(ctx, log, env) {
       // benchmarks), surfaced on the response so the UI can warn the operator.
       const rejectedAliases = [];
       if ((urlsTouched || competitorsTouched || aliasesTouched)
-        && hasText(updated.semrushWorkspaceId)) {
+        && hasText(updated.semrushSubWorkspaceId)) {
         // Forward only an IMS user token upstream (matches the create path +
         // the rest of /serenity/*): PATCH /brands is organization:write and thus
         // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
@@ -1953,7 +1953,7 @@ function BrandsController(ctx, log, env) {
           // breadcrumb below rather than escaping to the generic outer catch.
           const sharedProjects = await resolveProjects(
             transport,
-            updated.semrushWorkspaceId,
+            updated.semrushSubWorkspaceId,
             prefetchedProjects,
           );
           if (urlsTouched) {
@@ -1964,7 +1964,7 @@ function BrandsController(ctx, log, env) {
                 socialAccounts: updated.socialAccounts,
                 earnedContent: updated.earnedContent,
               },
-              updated.semrushWorkspaceId,
+              updated.semrushSubWorkspaceId,
               log,
               sharedProjects,
             );
@@ -1975,7 +1975,7 @@ function BrandsController(ctx, log, env) {
               transport,
               updated.competitors,
               removed,
-              updated.semrushWorkspaceId,
+              updated.semrushSubWorkspaceId,
               log,
               // Reserve the brand's own website URLs (every market/project domain
               // is reserved from the project listing) so a competitor can't be one
@@ -1990,7 +1990,7 @@ function BrandsController(ctx, log, env) {
               transport,
               updated.brandAliases,
               updated.name,
-              updated.semrushWorkspaceId,
+              updated.semrushSubWorkspaceId,
               log,
               sharedProjects,
             );
@@ -2003,7 +2003,7 @@ function BrandsController(ctx, log, env) {
           // diagnosable, then rethrow to the handler's catch.
           log.error('serenity: brand-edit Semrush re-sync failed after row commit', {
             brandId,
-            semrushWorkspaceId: updated.semrushWorkspaceId,
+            semrushSubWorkspaceId: updated.semrushSubWorkspaceId,
             urlsTouched,
             competitorsTouched,
             aliasesTouched,
@@ -2019,7 +2019,7 @@ function BrandsController(ctx, log, env) {
         // which aliases are not being tracked.
         log.warn('serenity: Semrush rejected some brand/competitor aliases on re-sync', {
           brandId,
-          semrushWorkspaceId: updated.semrushWorkspaceId,
+          semrushSubWorkspaceId: updated.semrushSubWorkspaceId,
           rejected: rejectedAliases,
         });
         return ok({ ...updated, semrushRejectedAliases: rejectedAliases });

@@ -241,16 +241,17 @@ function mapDbBrandToV2(row) {
     name: row.name,
     baseSiteId: row.base_site?.id || row.site_id || null,
     baseUrl: row.base_site?.base_url || null,
-    // Read-only: the brand's own Semrush sub-workspace (dual-mode). Null for
-    // brands still in flat mode (no sub-workspace minted yet). Consumers use it
-    // to scope per-brand Semrush views to the sub-workspace.
+    // DEPRECATED (serenity-docs brand-semrush-mapping-maintenance.md §10
+    // rename, write-of-record cutover): read-only BC mirror of
+    // semrushSubWorkspaceId below, maintained by the mysticat-data-service
+    // brands_sync_semrush_workspace_id trigger. Kept for any consumer still
+    // reading this field directly; new/updated consumers should read
+    // semrushSubWorkspaceId instead.
     semrushWorkspaceId: row.semrush_workspace_id || null,
-    // TRANSITIONAL (serenity-docs brand-semrush-mapping-maintenance.md §10
-    // rename, expand phase): read-only mirror of semrushWorkspaceId above,
-    // maintained by the mysticat-data-service brands_sync_semrush_sub_workspace_id
-    // trigger. Additive — semrushWorkspaceId remains the field every consumer
-    // (internal and external) reads until they cut over; this is exposed early
-    // so new/updated consumers can start reading the correctly-named field.
+    // Read-only: the brand's own Semrush sub-workspace (dual-mode) — the
+    // write-of-record column. Null for brands still in flat mode (no
+    // sub-workspace minted yet). Consumers use it to scope per-brand Semrush
+    // views to the sub-workspace.
     semrushSubWorkspaceId: row.semrush_sub_workspace_id || null,
     // Read-only: deferred Semrush provisioning data for a pending (draft) brand
     // (serenity dual-mode). Object { primaryUrl, markets: [{ market,
@@ -813,7 +814,7 @@ export async function isSemrushMarketMirrorSite(organizationId, siteId, postgres
  * @param {object} [params.log] - Logger (defaults to console).
  * @param {string|null} [params.forceBrandId] - Pre-generated brand id to persist
  *   (serenity-first provisioning); null lets the DB generate it.
- * @param {string|null} [params.semrushWorkspaceId] - Provisioned sub-workspace
+ * @param {string|null} [params.semrushSubWorkspaceId] - Provisioned sub-workspace
  *   pointer to persist atomically with the row; null keeps the brand in flat mode.
  * @returns {Promise<object>} Created/updated brand in V2 config shape
  */
@@ -831,7 +832,7 @@ export async function upsertBrand({
   // stays in flat mode). These are explicit params, NOT read from `brand`, so a
   // client-supplied id can never force a row id.
   forceBrandId = null,
-  semrushWorkspaceId = null,
+  semrushSubWorkspaceId = null,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -867,12 +868,12 @@ export async function upsertBrand({
 
   // An active brand must be anchored by either a SpaceCat base site OR a Semrush
   // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
-  // its sub-workspace (semrush_workspace_id, set on the serenity-first create
+  // its sub-workspace (semrush_sub_workspace_id, set on the serenity-first create
   // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
   // DB constraint. Respect persisted site_id on the update path.
   const hasAnchor = hasText(brand.baseSiteId)
     || hasText(existing?.site_id)
-    || hasText(semrushWorkspaceId);
+    || hasText(semrushSubWorkspaceId);
   const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
@@ -911,8 +912,8 @@ export async function upsertBrand({
   if (hasText(forceBrandId)) {
     row.id = forceBrandId;
   }
-  if (hasText(semrushWorkspaceId)) {
-    row.semrush_workspace_id = semrushWorkspaceId;
+  if (hasText(semrushSubWorkspaceId)) {
+    row.semrush_sub_workspace_id = semrushSubWorkspaceId;
   }
 
   const brandContext = normalizeNullableText(brand.brandContext, 'brandContext');
@@ -939,12 +940,12 @@ export async function upsertBrand({
     row.pending_semrush_provisioning = pendingSemrushProvisioning;
   }
 
-  // A Semrush-anchored create (serenity-first, semrushWorkspaceId set) is NEVER
-  // anchored by a SpaceCat site: its primary URL is the Semrush project domain,
-  // which may coincidentally match an onboarded site. Setting site_id from that
-  // match would collide with the site's existing primary brand (409
+  // A Semrush-anchored create (serenity-first, semrushSubWorkspaceId set) is
+  // NEVER anchored by a SpaceCat site: its primary URL is the Semrush project
+  // domain, which may coincidentally match an onboarded site. Setting site_id
+  // from that match would collide with the site's existing primary brand (409
   // brands_base_site_unique) — so ignore baseSiteId entirely on this path.
-  const anchoredBySemrush = hasText(semrushWorkspaceId);
+  const anchoredBySemrush = hasText(semrushSubWorkspaceId);
 
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing

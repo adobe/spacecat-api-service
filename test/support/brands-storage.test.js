@@ -339,7 +339,7 @@ describe('brands-storage', () => {
       expect(acme.siteId).to.equal('shared-site');
     });
 
-    it('maps semrush_workspace_id to semrushWorkspaceId (sub-workspace), null when absent', async () => {
+    it('maps semrush_workspace_id to semrushWorkspaceId (deprecated BC mirror), null when absent', async () => {
       const subWsRow = makeBrandRow({ semrush_workspace_id: 'ws-sub-123' });
       const subWsQuery = createChainableQuery({ data: subWsRow, error: null });
       const subWsResult = await getBrandById(
@@ -359,7 +359,7 @@ describe('brands-storage', () => {
       expect(flatResult.semrushWorkspaceId).to.equal(null);
     });
 
-    it('maps semrush_sub_workspace_id to semrushSubWorkspaceId (transitional mirror), null when absent', async () => {
+    it('maps semrush_sub_workspace_id to semrushSubWorkspaceId (write-of-record), null when absent', async () => {
       const mirroredRow = makeBrandRow({ semrush_sub_workspace_id: 'ws-sub-123' });
       const mirroredQuery = createChainableQuery({ data: mirroredRow, error: null });
       const mirroredResult = await getBrandById(
@@ -997,15 +997,15 @@ describe('brands-storage', () => {
         brand: { name: 'Test' },
         postgrestClient: client,
         forceBrandId: 'forced-id',
-        semrushWorkspaceId: 'ws-9999',
+        semrushSubWorkspaceId: 'ws-9999',
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.id).to.equal('forced-id');
-      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-9999');
+      expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-9999');
     });
 
-    it('omits id and semrush_workspace_id from the row when not provided (default create)', async () => {
+    it('omits id and semrush_sub_workspace_id from the row when not provided (default create)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1022,10 +1022,10 @@ describe('brands-storage', () => {
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row).to.not.have.property('id');
-      expect(brandsUpsert.row).to.not.have.property('semrush_workspace_id');
+      expect(brandsUpsert.row).to.not.have.property('semrush_sub_workspace_id');
     });
 
-    it('keeps the brand active without a site_id when a semrush_workspace_id anchors it', async () => {
+    it('keeps the brand active without a site_id when a semrush_sub_workspace_id anchors it', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1038,12 +1038,12 @@ describe('brands-storage', () => {
         organizationId: ORG_ID,
         brand: { name: 'Test', status: 'active' }, // no baseSiteId
         postgrestClient: client,
-        semrushWorkspaceId: 'ws-1',
+        semrushSubWorkspaceId: 'ws-1',
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.status).to.equal('active');
-      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-1');
+      expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
       expect(brandsUpsert.row).to.not.have.property('site_id');
     });
 
@@ -1062,16 +1062,16 @@ describe('brands-storage', () => {
         // another brand; a semrush-anchored brand must NOT claim it as site_id.
         brand: { name: 'Test', status: 'active', baseSiteId: 'collides-with-other-brand' },
         postgrestClient: client,
-        semrushWorkspaceId: 'ws-1',
+        semrushSubWorkspaceId: 'ws-1',
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row).to.not.have.property('site_id');
-      expect(brandsUpsert.row.semrush_workspace_id).to.equal('ws-1');
+      expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
       expect(brandsUpsert.row.status).to.equal('active');
     });
 
-    it('downgrades to pending when neither site_id nor semrush_workspace_id anchors the brand', async () => {
+    it('downgrades to pending when neither site_id nor semrush_sub_workspace_id anchors the brand', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },

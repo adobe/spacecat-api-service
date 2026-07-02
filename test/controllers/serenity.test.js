@@ -44,8 +44,8 @@ function makeBrandModel(overrides = {}) {
     // all-or-nothing path keys off this status (a non-pending brand is never
     // downgraded on a partial failure).
     getStatus: () => 'pending',
-    getSemrushWorkspaceId: () => 'subworkspace-ws-1',
-    setSemrushWorkspaceId: sinon.stub(),
+    getSemrushSubWorkspaceId: () => 'subworkspace-ws-1',
+    setSemrushSubWorkspaceId: sinon.stub(),
     setStatus: sinon.stub(),
     save: sinon.stub().resolves(),
     ...overrides,
@@ -1988,7 +1988,7 @@ describe('SerenityController', () => {
     });
 
     it('deactivate decommissions the subworkspace, clears the pointer, and sets the brand pending', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
@@ -2000,13 +2000,13 @@ describe('SerenityController', () => {
         { enforceLinkedGuard: false },
       );
       // The pointer is cleared (disconnect) — never the workspace deleted.
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
       expect(brand.save).to.have.been.called;
     });
 
     it('deactivate tombstones the brand\'s mapping rows after decommission', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({ brand });
       const response = await controller.deactivate(ctx);
@@ -2015,7 +2015,7 @@ describe('SerenityController', () => {
     });
 
     it('deactivate does NOT tombstone when the brand has no subworkspace (no-op decommission)', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
@@ -2023,7 +2023,7 @@ describe('SerenityController', () => {
     });
 
     it('deactivate enables the linked-sub-workspace guard when the env flag is set', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({
         brand,
@@ -2040,13 +2040,13 @@ describe('SerenityController', () => {
     });
 
     it('deactivate is a no-op decommission for a brand with no subworkspace', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
       expect(decommissionStub).to.not.have.been.called;
       // Nothing to disconnect — the pointer is already null.
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('pending');
     });
 
@@ -2054,14 +2054,14 @@ describe('SerenityController', () => {
       // The upstream is already emptied by decommission; a failed save must not
       // leave the resolver routing to the emptied sub-workspace for the TTL, and
       // the non-atomic seam must emit a distinct, alertable marker.
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       brand.save = sinon.stub().rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(500);
       expect(decommissionStub).to.have.been.called;
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       // cache was invalidated BEFORE the save threw.
       expect(clearBrandWorkspaceCacheStub).to.have.been.called;
       // distinct, greppable token so the orphaned state is alertable.
@@ -2072,7 +2072,7 @@ describe('SerenityController', () => {
       // No subworkspace → the decommission block is skipped, but the status save
       // still runs (and here fails). The divergence log's decommissionedWorkspaceId
       // must be null (the `: null` side of hasText(subworkspaceId) ? ... : null).
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
       brand.save = sinon.stub().rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
@@ -2091,12 +2091,12 @@ describe('SerenityController', () => {
       // decommission throws mid-flow (e.g. a non-404 delete error): the brand
       // must NOT be disconnected (pointer kept) and NOT set pending, so the
       // partial-failure state is recoverable rather than silently half-applied.
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       decommissionStub.rejects(new ErrorWithStatusCode('upstream delete failed', 502));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(502);
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
     });
@@ -2352,7 +2352,7 @@ describe('SerenityController', () => {
       decommissionStub.resolves();
       const controllerEnv = { SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD: 'true' };
       const controller = SerenityController({ env: {} }, fakeLog(), controllerEnv);
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'sub-ws' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'sub-ws' });
       const ctx = fakeContext({ brand });
       delete ctx.env; // forces the || env fallback at line 907
       const response = await controller.deactivate(ctx);
@@ -2371,7 +2371,7 @@ describe('SerenityController', () => {
       decommissionStub.resolves();
       const saveError = new Error('DB connection lost');
       const brand = makeBrandModel({
-        getSemrushWorkspaceId: () => 'sub-ws',
+        getSemrushSubWorkspaceId: () => 'sub-ws',
         save: sinon.stub().rejects(saveError),
       });
       const log = fakeLog();
@@ -2533,7 +2533,7 @@ describe('brandPointerReloader', () => {
   it('returns the brand current semrush_workspace_id when present', async () => {
     const ctx = {
       dataAccess: {
-        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => 'ws-current' }) },
+        Brand: { findById: sinon.stub().resolves({ getSemrushSubWorkspaceId: () => 'ws-current' }) },
       },
     };
     expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal('ws-current');
@@ -2542,7 +2542,7 @@ describe('brandPointerReloader', () => {
   it('returns null when the brand has no pointer', async () => {
     const ctx = {
       dataAccess: {
-        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => null }) },
+        Brand: { findById: sinon.stub().resolves({ getSemrushSubWorkspaceId: () => null }) },
       },
     };
     expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal(null);

@@ -83,7 +83,7 @@ export function initialMarketProjectName(market, languageCode) {
  *   Best-effort: a failed sync is logged and skipped, never aborts provisioning.
  * @param {object} [log]
  * @returns {Promise<{
- *   semrushWorkspaceId: string,
+ *   semrushSubWorkspaceId: string,
  *   published: boolean,
  *   projectId: string,
  *   geoTargetId: number,
@@ -139,8 +139,8 @@ export async function provisionBrandSubworkspace(context, {
   const brandStub = {
     getId: () => brandId,
     getName: () => brandName,
-    getSemrushWorkspaceId: () => undefined,
-    setSemrushWorkspaceId: (id) => { capturedWorkspaceId = id; },
+    getSemrushSubWorkspaceId: () => undefined,
+    setSemrushSubWorkspaceId: (id) => { capturedWorkspaceId = id; },
     save: async () => {},
   };
 
@@ -237,7 +237,7 @@ export async function provisionBrandSubworkspace(context, {
   /** @type {any} */
   const resultBody = result.body || {};
   return {
-    semrushWorkspaceId: capturedWorkspaceId,
+    semrushSubWorkspaceId: capturedWorkspaceId,
     published: Boolean(resultBody.published),
     projectId: String(resultBody.projectId || ''),
     geoTargetId: Number(resultBody.geoTargetId) || 0,

@@ -76,8 +76,8 @@ function makeBrand({ workspaceId = WS } = {}) {
   return {
     getId: () => BRAND,
     getName: () => 'Adobe Express',
-    getSemrushWorkspaceId: () => ws,
-    setSemrushWorkspaceId: (v) => { ws = v; },
+    getSemrushSubWorkspaceId: () => ws,
+    setSemrushSubWorkspaceId: (v) => { ws = v; },
     save: sinon.stub().resolves(),
   };
 }

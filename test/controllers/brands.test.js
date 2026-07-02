@@ -4739,7 +4739,7 @@ describe('Brands Controller', () => {
       }
 
       it('provisions the sub-workspace then creates the brand bound to it (201)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -4767,12 +4767,12 @@ describe('Brands Controller', () => {
         expect(upsertStub.calledAfter(provisionStub)).to.equal(true);
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
-        expect(upsertArgs.semrushWorkspaceId).to.equal('ws-1');
+        expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-1');
       });
 
       it('writes the mapping row for the initial market after the brand row is persisted', async () => {
         const provisionStub = sinon.stub().resolves({
-          semrushWorkspaceId: 'ws-1', projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
+          semrushSubWorkspaceId: 'ws-1', projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
         });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const upsertMappingRowStub = sinon.stub().resolves();
@@ -4806,7 +4806,7 @@ describe('Brands Controller', () => {
       });
 
       it('does NOT write a mapping row when provisioning returns no initial project id', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const upsertMappingRowStub = sinon.stub().resolves();
         const controller = await buildController({
@@ -4828,7 +4828,7 @@ describe('Brands Controller', () => {
       });
 
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const serenityActiveStub = sinon.stub().resolves(false);
         const controller = await buildController({
@@ -4859,7 +4859,7 @@ describe('Brands Controller', () => {
       });
 
       it('mirrors the provisioned brand domain as a Site (+ brand_sites link) after the row is written', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const ensureSiteStub = sinon.stub().resolves('site-x');
         const controller = await buildController({
@@ -4887,7 +4887,7 @@ describe('Brands Controller', () => {
       });
 
       it('links the mirrored site onto the mapping row after ensureMarketSite resolves', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const ensureSiteStub = sinon.stub().resolves('site-x');
         const linkSiteToLiveRowsStub = sinon.stub().resolves();
@@ -4916,7 +4916,7 @@ describe('Brands Controller', () => {
       });
 
       it('does NOT mirror a Site for a pending (draft) brand — nothing is provisioned yet', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const ensureSiteStub = sinon.stub().resolves('site-x');
         const controller = await buildController({
@@ -4939,7 +4939,7 @@ describe('Brands Controller', () => {
       });
 
       it('forwards the brand URL sources (urls + social + earned) to provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -4964,7 +4964,7 @@ describe('Brands Controller', () => {
       });
 
       it('forwards the brand competitors to provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -5005,7 +5005,7 @@ describe('Brands Controller', () => {
       });
 
       it('releases the orphaned sub-workspace when the brand row write fails after provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-orphan' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-orphan' });
         const releaseStub = sinon.stub().resolves();
         // A routine post-provision DB failure (e.g. unique-constraint 409).
         const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
@@ -5037,7 +5037,7 @@ describe('Brands Controller', () => {
       });
 
       it('returns 400 when semrushMarket lacks a languageCode', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
 
         const response = await controller.createBrandForOrg({
@@ -5053,7 +5053,7 @@ describe('Brands Controller', () => {
       });
 
       it('returns 400 when semrushModelIds is missing or empty and generatePrompts is true', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
 
         // generatePrompts:true → a prompt-generating project, which needs a model.
@@ -5075,7 +5075,7 @@ describe('Brands Controller', () => {
       });
 
       it('returns 400 when generatePrompts is true but no market/language was supplied', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
 
         // generatePrompts true signals Semrush mode even with no semrushMarket, but
@@ -5097,7 +5097,7 @@ describe('Brands Controller', () => {
       });
 
       it('provisions WITHOUT models when generatePrompts is false (model-less project allowed)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -5124,7 +5124,7 @@ describe('Brands Controller', () => {
       });
 
       it('returns 400 when no primary URL is present to derive a domain', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
 
         const response = await controller.createBrandForOrg({
@@ -5140,7 +5140,7 @@ describe('Brands Controller', () => {
       });
 
       it('does NOT provision when no semrushMarket is supplied (flat create)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
 
         const response = await controller.createBrandForOrg({
@@ -5156,7 +5156,7 @@ describe('Brands Controller', () => {
       });
 
       it('saves a pending draft WITHOUT a primary URL: no provisioning, market stashed (201)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -5188,12 +5188,12 @@ describe('Brands Controller', () => {
           generatePrompts: false,
         });
         // A draft is never bound to a workspace at create time.
-        expect(upsertArgs.semrushWorkspaceId).to.equal(null);
+        expect(upsertArgs.semrushSubWorkspaceId).to.equal(null);
         expect(upsertArgs.forceBrandId).to.equal(null);
       });
 
       it('stashes the primary URL on a pending draft when one was entered (still no provisioning)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -5224,7 +5224,7 @@ describe('Brands Controller', () => {
       it('stashes the primary URL from a bare STRING url entry on a pending draft', async () => {
         // The wizard may send `urls` as plain strings rather than { value }
         // objects; the pending primaryUrl resolution must accept either shape.
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -5254,7 +5254,7 @@ describe('Brands Controller', () => {
       });
 
       it('seeds the initial market modelIds from semrushModelIds on a pending draft (no provisioning)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
@@ -5286,7 +5286,7 @@ describe('Brands Controller', () => {
       });
 
       it('still requires market and languageCode even for a pending draft', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
 
         const response = await controller.createBrandForOrg({
@@ -5510,7 +5510,7 @@ describe('Brands Controller', () => {
         // generatePrompts:false with no semrushMarket must be created as a plain
         // brand — never pulled into Semrush provisioning.
         const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-x' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
         const controller = await buildCreateController({
           upsertBrand: upsertStub,
           provisionBrandSubworkspace: provisionStub,
@@ -5531,7 +5531,7 @@ describe('Brands Controller', () => {
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
         // Plain row written, not bound to any Semrush workspace.
-        expect(upsertStub.firstCall.firstArg.semrushWorkspaceId).to.equal(null);
+        expect(upsertStub.firstCall.firstArg.semrushSubWorkspaceId).to.equal(null);
         expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.equal(undefined);
       });
 
@@ -5540,7 +5540,7 @@ describe('Brands Controller', () => {
         // with generatePrompts:false and no market is a legitimate
         // sub-workspace-only Semrush draft and must stash deferred provisioning.
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'Draft', status: 'pending' });
-        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-x' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
         const controller = await buildCreateController({
           upsertBrand: upsertStub,
           provisionBrandSubworkspace: provisionStub,
@@ -5652,7 +5652,7 @@ describe('Brands Controller', () => {
       const updated = {
         id: BRAND_UUID,
         name: 'Updated Brand',
-        semrushWorkspaceId: 'ws-9',
+        semrushSubWorkspaceId: 'ws-9',
         urls: [{ value: 'https://acme.com' }],
         socialAccounts: [],
         earnedContent: [],
@@ -5686,7 +5686,7 @@ describe('Brands Controller', () => {
     });
 
     it('rejects a sync-field edit with 403 when serenity is inactive and the brand has a sub-workspace (no row write, no re-sync)', async () => {
-      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' });
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9' });
       const syncStub = sinon.stub().resolves({});
       const createTransportStub = sinon.stub().returns({ name: 't' });
       const serenityActiveStub = sinon.stub().resolves(false);
@@ -5695,7 +5695,7 @@ describe('Brands Controller', () => {
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
         // Inactive org, but the brand still carries a backfilled workspace pointer.
-        getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' }),
+        getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9' }),
         isSerenityActiveForOrg: serenityActiveStub,
       });
 
@@ -5729,7 +5729,7 @@ describe('Brands Controller', () => {
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
-        getBrandById: sinon.stub().resolves({ id: BRAND_UUID }), // no semrushWorkspaceId → flat
+        getBrandById: sinon.stub().resolves({ id: BRAND_UUID }), // no semrushSubWorkspaceId → flat
         isSerenityActiveForOrg: sinon.stub().resolves(false),
       });
 
@@ -5770,7 +5770,7 @@ describe('Brands Controller', () => {
       const updated = {
         id: BRAND_UUID,
         name: 'Updated Brand',
-        semrushWorkspaceId: 'ws-9',
+        semrushSubWorkspaceId: 'ws-9',
         brandAliases: [{ name: 'Acme', regions: [] }, { name: 'Acme DE', regions: ['de'] }],
       };
       const updateBrandStub = sinon.stub().resolves(updated);
@@ -5805,7 +5805,7 @@ describe('Brands Controller', () => {
       const updated = {
         id: BRAND_UUID,
         name: 'Updated Brand',
-        semrushWorkspaceId: 'ws-9',
+        semrushSubWorkspaceId: 'ws-9',
         brandAliases: [{ name: 'bogus', regions: [] }],
       };
       const rejected = [{
@@ -5832,7 +5832,7 @@ describe('Brands Controller', () => {
     });
 
     it('does NOT re-sync when the edit touches no URL field', async () => {
-      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: 'ws-9' });
+      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9' });
       const syncStub = sinon.stub().resolves({});
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
@@ -5856,7 +5856,8 @@ describe('Brands Controller', () => {
     it('strips pendingSemrushProvisioning from a PATCH when the brand is NOT pending (no runtime injection)', async () => {
       // The describe-level postgrest mock resolves the brand with status:'active',
       // so the pending-only guard strips the stash an attacker tried to inject.
-      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
+      const updateBrandStub = sinon.stub()
+        .resolves({ id: BRAND_UUID, semrushSubWorkspaceId: null });
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: sinon.stub().resolves({}),
@@ -5893,7 +5894,8 @@ describe('Brands Controller', () => {
         eq: sandbox.stub().returnsThis(),
         maybeSingle: sandbox.stub().resolves({ data: { status: 'pending' }, error: null }),
       }));
-      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
+      const updateBrandStub = sinon.stub()
+        .resolves({ id: BRAND_UUID, semrushSubWorkspaceId: null });
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: sinon.stub().resolves({}),
@@ -5927,7 +5929,8 @@ describe('Brands Controller', () => {
         eq: sandbox.stub().returnsThis(),
         maybeSingle: sandbox.stub().resolves({ data: { status: 'pending' }, error: null }),
       }));
-      const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, semrushWorkspaceId: null });
+      const updateBrandStub = sinon.stub()
+        .resolves({ id: BRAND_UUID, semrushSubWorkspaceId: null });
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: sinon.stub().resolves({}),
@@ -5956,7 +5959,11 @@ describe('Brands Controller', () => {
 
     it('does NOT re-sync a flat-mode brand (no sub-workspace) even when URLs change', async () => {
       const updateBrandStub = sinon.stub().resolves({
-        id: BRAND_UUID, semrushWorkspaceId: null, urls: [], socialAccounts: [], earnedContent: [],
+        id: BRAND_UUID,
+        semrushSubWorkspaceId: null,
+        urls: [],
+        socialAccounts: [],
+        earnedContent: [],
       });
       const syncStub = sinon.stub().resolves({});
       const controller = await buildUpdateController({
@@ -5980,7 +5987,7 @@ describe('Brands Controller', () => {
 
     it('hard-fails the edit when the brand-URL re-sync fails', async () => {
       const updateBrandStub = sinon.stub().resolves({
-        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
       const err = new Error('upstream boom');
       err.status = 502;
@@ -6006,7 +6013,7 @@ describe('Brands Controller', () => {
 
     it('rejects a non-IMS caller on the brand-edit re-sync (never forwards the bearer upstream)', async () => {
       const updateBrandStub = sinon.stub().resolves({
-        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
       const syncStub = sinon.stub().resolves({});
       const createTransportStub = sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) });
@@ -6033,7 +6040,7 @@ describe('Brands Controller', () => {
 
     it('redacts the gateway URL from a Semrush upstream error on brand-edit re-sync', async () => {
       const updateBrandStub = sinon.stub().resolves({
-        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
       const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
       const syncStub = sinon.stub().rejects(
@@ -6068,7 +6075,7 @@ describe('Brands Controller', () => {
     // the message ternary; the 502 sides are covered by the redaction test above).
     it('maps a 401 Semrush upstream error to HTTP 401 + generic auth message', async () => {
       const updateBrandStub = sinon.stub().resolves({
-        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
       const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
       const syncStub = sinon.stub().rejects(
@@ -6101,7 +6108,7 @@ describe('Brands Controller', () => {
       const updated = {
         id: BRAND_UUID,
         name: 'Updated Brand',
-        semrushWorkspaceId: 'ws-9',
+        semrushSubWorkspaceId: 'ws-9',
         competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }],
       };
       const updateBrandStub = sinon.stub().resolves(updated);
@@ -6144,7 +6151,7 @@ describe('Brands Controller', () => {
 
     it('does NOT re-sync competitors when the edit leaves them untouched', async () => {
       const updateBrandStub = sinon.stub().resolves({
-        id: BRAND_UUID, semrushWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
       const ciSyncStub = sinon.stub().resolves({});
       const getBrandCompetitorsStub = sinon.stub().resolves([]);
@@ -6413,7 +6420,7 @@ describe('Brands Controller', () => {
 
     describe('competitor self-reference guard', () => {
       it('strips a self-referential competitor on a FLAT brand update (own website URL)', async () => {
-        // Flat brand (no semrushWorkspaceId): reserved domains = primary + own
+        // Flat brand (no semrushSubWorkspaceId): reserved domains = primary + own
         // website URLs. A competitor whose domain is one of those must be dropped
         // before persist (it would benchmark the brand against itself).
         const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
@@ -6421,7 +6428,7 @@ describe('Brands Controller', () => {
           id: BRAND_UUID,
           baseUrl: 'https://acme.com',
           urls: [{ value: 'https://shop.acme.com' }],
-          semrushWorkspaceId: undefined,
+          semrushSubWorkspaceId: undefined,
         });
         const controller = await buildUpdateController({
           updateBrand: updateBrandStub,
@@ -6459,7 +6466,7 @@ describe('Brands Controller', () => {
         const updated = {
           id: BRAND_UUID,
           name: 'Semrush Brand',
-          semrushWorkspaceId: 'ws-7',
+          semrushSubWorkspaceId: 'ws-7',
           competitors: [{ name: 'Real Rival', url: 'https://rival.com' }],
         };
         const updateBrandStub = sinon.stub().resolves(updated);
@@ -6467,7 +6474,7 @@ describe('Brands Controller', () => {
           id: BRAND_UUID,
           baseUrl: null,
           urls: [],
-          semrushWorkspaceId: 'ws-7',
+          semrushSubWorkspaceId: 'ws-7',
         });
         const listProjectsStub = sinon.stub().resolves({
           items: [{ domain: 'market-de.acme.com' }, { domain: 'market-fr.acme.com' }],
@@ -6512,7 +6519,7 @@ describe('Brands Controller', () => {
         const updated = {
           id: BRAND_UUID,
           name: 'Flat Brand',
-          semrushWorkspaceId: null,
+          semrushSubWorkspaceId: null,
           urls: [{ value: 'https://new.acme.com' }],
           socialAccounts: [],
           earnedContent: [],
@@ -6524,7 +6531,7 @@ describe('Brands Controller', () => {
           baseUrl: 'https://acme.com',
           // Stored urls differ from the incoming ones; the guard must ignore these.
           urls: [{ value: 'https://old.acme.com' }],
-          semrushWorkspaceId: undefined,
+          semrushSubWorkspaceId: undefined,
         });
         const controller = await buildUpdateController({
           updateBrand: updateBrandStub,
@@ -6562,7 +6569,7 @@ describe('Brands Controller', () => {
           id: BRAND_UUID,
           baseUrl: 'https://acme.com',
           // No `urls` key → brandState?.urls is undefined → `|| []` fallback.
-          semrushWorkspaceId: undefined,
+          semrushSubWorkspaceId: undefined,
         });
         const controller = await buildUpdateController({
           updateBrand: updateBrandStub,
@@ -6597,7 +6604,7 @@ describe('Brands Controller', () => {
         const updated = {
           id: BRAND_UUID,
           name: 'Updated Brand',
-          semrushWorkspaceId: 'ws-9',
+          semrushSubWorkspaceId: 'ws-9',
           brandAliases: [{ name: 'Acme', regions: [] }],
         };
         const updateBrandStub = sinon.stub().resolves(updated);
@@ -7216,7 +7223,7 @@ describe('Brands Controller — defensive branch coverage', () => {
   }
 
   async function mountController({
-    provisionBrandSubworkspace = stub().resolves({ semrushWorkspaceId: 'ws-1' }),
+    provisionBrandSubworkspace = stub().resolves({ semrushSubWorkspaceId: 'ws-1' }),
     upsertBrand = stub().resolves({ id: BRAND_UUID, name: 'New Brand' }),
     isSerenityActiveForOrg = stub().resolves(true),
   } = {}) {
@@ -7259,7 +7266,7 @@ describe('Brands Controller — defensive branch coverage', () => {
   // strings (region-less), keeps `regions`, and filters entries without a name.
   // The create handler region-clamps them to the initial market downstream.
   it('brandAliases: normalizes objects + strings to { name, regions } and filters blanks', async () => {
-    const provisionStub = stub().resolves({ semrushWorkspaceId: 'ws-1' });
+    const provisionStub = stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
     const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
     const { controller, ctx } = await mountController({
       provisionBrandSubworkspace: provisionStub,
@@ -7321,7 +7328,7 @@ describe('Brands Controller — defensive branch coverage', () => {
   // test above (space URL is an object entry). Adding an explicit test where the
   // object yields a valid hostname to cover the non-throw path of line 93.
   it('brandDomainFromPayload object-url: extracts hostname from {value} entry (line 93 u?.value branch)', async () => {
-    const provisionStub = stub().resolves({ semrushWorkspaceId: 'ws-1' });
+    const provisionStub = stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
     const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
     const { controller, ctx } = await mountController({
       provisionBrandSubworkspace: provisionStub,
