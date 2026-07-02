@@ -2070,10 +2070,10 @@ function SuggestionsController(ctx, sqs, env) {
         } else {
           promptSources = validSuggestions;
         }
-        urls = promptSources
+        urls = [...new Set(promptSources
           .filter((s) => !domainWideSuggestionIds.has(s.getId()))
           .map((s) => s.getData()?.url)
-          .filter(Boolean);
+          .filter(Boolean))];
         const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
         if (prompts.length === 0) {
           context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);

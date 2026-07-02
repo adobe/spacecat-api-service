@@ -641,6 +641,78 @@ describe('Projects Controller', () => {
     });
   });
 
+  describe('getSitesByProjectId — ReBAC collection filter', () => {
+    function fakeFacsPostgrest(rows) {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        is: () => builder,
+        order: () => builder,
+        range: () => builder,
+        then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+      };
+      return { from: () => builder };
+    }
+
+    it('filters project sites to the ReBAC-viewable set when facs flag is set', async () => {
+      // Organization.findById must return an org with a valid IMS org ID.
+      mockDataAccess.Organization.findById.resolves({ getImsOrgId: () => 'test-ims-org@AdobeOrg' });
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+        dataAccess: {
+          ...mockDataAccess,
+          services: {
+            postgrestClient: fakeFacsPostgrest([
+              { resource_id: 'site1', granted_capabilities: ['abcd/can_view'] },
+            ]),
+          },
+        },
+        attributes: {
+          ...context.attributes,
+          facs: { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' },
+        },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // site2 is dropped — the caller has no can_view grant on it.
+      expect(body).to.be.an('array').with.lengthOf(1);
+      expect(body[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns 503 when facs flag is set but PostgREST is unavailable', async () => {
+      // No services → postgrest guard trips.
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+        attributes: {
+          ...context.attributes,
+          facs: { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' },
+        },
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('skips filter when JWT carries the federal can_view grant', async () => {
+      // projectsController from beforeEach has is_admin: true → hasAccess passes.
+      // The per-request authInfo carries facs_permissions: ['abcd/can_view'] → filter bypassed.
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ email: 'test@example.com', is_admin: false, facs_permissions: ['abcd/can_view'] }),
+          facs: { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' },
+        },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // Both sites returned — state-layer query was not needed.
+      expect(body).to.be.an('array').with.lengthOf(2);
+    });
+  });
+
   describe('contains all controller functions', () => {
     const expectedFunctions = [
       'createProject',

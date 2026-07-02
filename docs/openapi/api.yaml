@@ -803,6 +803,8 @@ paths:
     $ref: './state-access-mappings-api.yaml#/product-capabilities'
   /user/capabilities/{resourceId}:
     $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
+  /organizations/{organizationId}/permission/audit-logs:
+    $ref: './state-access-mappings-api.yaml#/permission-audit-logs'
 
 components:
   securitySchemes:

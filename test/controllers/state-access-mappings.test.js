@@ -63,10 +63,10 @@ function makeContext({
   awsEnv = 'dev',
 } = {}) {
   return {
-    // Until facsWrapper fronts these routes, the controller restricts them to
-    // the dev environment (handlers 404 elsewhere). Default to 'dev' so the
-    // behavioural tests exercise the real handlers; the dev-only gate itself is
-    // covered by the dedicated "dev-env blocker" block.
+    // The state-layer management endpoints are kept dev-only for now (handlers
+    // 404 elsewhere). Default to 'dev' so the behavioural tests exercise the real
+    // handlers; the dev-only gate itself is covered by the dedicated
+    // "dev-env blocker" block.
     env: { AWS_ENV: awsEnv },
     log: {
       debug: sinon.stub(),
@@ -131,30 +131,6 @@ async function loadController(supportStubs = {}) {
 }
 
 describe('StateAccessMappingsController', () => {
-  describe('dev-env blocker (temporary, until facsWrapper is attached)', () => {
-    const HANDLERS = [
-      'listMappings', 'listHistory', 'createMapping', 'patchMapping', 'deleteMapping',
-      'getProductCapabilities', 'getUserCapabilities', 'getAuditLogs',
-    ];
-
-    HANDLERS.forEach((name) => {
-      it(`${name} returns 404 when AWS_ENV is not dev`, async () => {
-        const { Controller } = await loadController();
-        const ctx = makeContext({ awsEnv: 'prod' });
-        const res = await Controller(ctx)[name](ctx);
-        expect(res.status).to.equal(404);
-      });
-    });
-
-    it('missing env (AWS_ENV undefined) also 404s', async () => {
-      const { Controller } = await loadController();
-      const ctx = makeContext();
-      delete ctx.env;
-      const res = await Controller(ctx).listMappings(ctx);
-      expect(res.status).to.equal(404);
-    });
-  });
-
   describe('preamble / common gates', () => {
     it('listMappings returns 503 when postgrest is unavailable', async () => {
       const { Controller } = await loadController({

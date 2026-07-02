@@ -330,3 +330,90 @@ user-capabilities-by-resource:
         $ref: './responses.yaml#/503'
     security:
       - ims_key: []
+
+permission-audit-logs:
+  parameters:
+    - *xProductHeader
+    - in: path
+      name: organizationId
+      required: true
+      description: SpaceCat organization UUID. Its IMS org id is resolved server-side and used as the tenant-isolation key.
+      schema: { type: string, format: uuid }
+  get:
+    tags:
+      - state-access-mappings
+    summary: List the FACS state-mapping audit log for an organization
+    description: |
+      Returns the `facs_access_mapping_audit_events` for the org, scoped to the
+      product carried by the `x-product` header. Every create / patch / delete /
+      revoke on a state-layer binding is logged with its outcome; this is the
+      operation history behind the hybrid permission model.
+
+      Authority (hybrid-model §3): this is an **org-wide** read, admitted for a
+      FACS-layer `<product>/can_manage_users` holder (or admin) only — a
+      resource-scoped state-layer manager has no org-wide audit view and is
+      denied. Tenant isolation: a non-admin caller may read only their OWN org's
+      audit (the resolved org's IMS id must equal the caller's).
+
+      Pagination is cursor-based; page size defaults to 50 and is hard-capped at
+      200. Optional filters narrow the log by operation, outcome, resource,
+      actor, mapping, and time window.
+    operationId: listFacsPermissionAuditLogs
+    parameters:
+      - in: query
+        name: operation
+        description: Filter by operation kind (e.g. `create`, `patch`, `delete`, `revoke`).
+        schema: { type: string }
+      - in: query
+        name: outcome
+        description: Filter by outcome (e.g. `allowed`, `denied`).
+        schema: { type: string }
+      - in: query
+        name: resourceType
+        schema: { type: string }
+      - in: query
+        name: resourceId
+        schema: { type: string }
+      - in: query
+        name: actorId
+        description: Filter by the IMS ident of the acting caller.
+        schema: { type: string }
+      - in: query
+        name: mappingId
+        description: Filter by the affected access-mapping row id.
+        schema: { type: string, format: uuid }
+      - in: query
+        name: since
+        description: Lower bound (inclusive) on event time, ISO 8601.
+        schema: { type: string, format: date-time }
+      - in: query
+        name: until
+        description: Upper bound (exclusive) on event time, ISO 8601.
+        schema: { type: string, format: date-time }
+      - in: query
+        name: limit
+        schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      - in: query
+        name: cursor
+        schema: { type: string }
+    responses:
+      '200':
+        description: Page of audit events.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FacsAuditLogsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: []
