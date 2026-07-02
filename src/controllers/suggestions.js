@@ -26,6 +26,8 @@ import {
   isInteger,
   isValidUUID,
   isValidUrl,
+  isWithinSiteScope,
+  isPathPatternWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 
 import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
@@ -1756,7 +1758,8 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
-    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+    const siteBaseURL = site.getBaseURL();
+    const apexBaseUrl = getHostName(siteBaseURL) || siteBaseURL;
 
     if (!isValidUUID(opportunityId)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
@@ -1813,6 +1816,47 @@ function SuggestionsController(ctx, sqs, env) {
     const pathSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
+
+    // siteBasePath is constant for the whole batch — resolve it once instead of
+    // re-parsing site.getBaseURL() inside isSuggestionInScope for every suggestion.
+    let siteBasePath;
+    try {
+      siteBasePath = new URL(siteBaseURL).pathname;
+    } catch {
+      context.log.warn(`[edge-deploy] site ${apexBaseUrl} has unparseable baseURL '${siteBaseURL}', skipping scope guard`);
+    }
+
+    // Returns false when a suggestion's URL or allowedRegexPatterns fall outside the
+    // site's registered base path (e.g. a suggestion for /wolves on a /kings subpath site).
+    // Root-level sites (pathname === '/') pass all suggestions through.
+    const isSuggestionInScope = (suggestion) => {
+      if (!siteBasePath || siteBasePath === '/') {
+        return true;
+      }
+
+      const data = suggestion.getData();
+      if (isDomainWideSuggestion(suggestion) || isPathSuggestion(suggestion)) {
+        const patterns = data?.allowedRegexPatterns;
+        if (!isNonEmptyArray(patterns)) {
+          return true;
+        }
+        return patterns.every((pattern) => isPathPatternWithinSiteScope(pattern, siteBaseURL));
+      }
+      const url = getSuggestionUrl(data, opportunity);
+      if (!url) {
+        return true;
+      }
+      try {
+        // eslint-disable-next-line no-new
+        new URL(url);
+      } catch {
+        // Not an absolute URL — isWithinSiteScope would otherwise treat it as a relative
+        // pathname and reject it; there's nothing reliable to scope-check, so let it through.
+        return true;
+      }
+      return isWithinSiteScope(url, siteBaseURL);
+    };
+
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
@@ -1824,6 +1868,14 @@ function SuggestionsController(ctx, sqs, env) {
           index,
           message: 'Suggestion not found',
           statusCode: 404,
+        });
+      } else if (!isSuggestionInScope(suggestion)) {
+        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} URL is outside site scope`);
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion URL is outside the scope of the site base URL',
+          statusCode: 400,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
         context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);
