@@ -156,10 +156,10 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
-    it('400s when type is not in the creatable allow-list (closed taxonomy)', async () => {
+    it('400s when type is not a recognized open or closed dimension', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      for (const type of ['intent', 'source', 'type', 'bogus', '', undefined]) {
+      for (const type of ['bogus', '', undefined]) {
         // eslint-disable-next-line no-await-in-loop
         await expect(handler.handleCreateTag(
           transport,
@@ -208,6 +208,93 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
           handler.handleCreateTag(transport, dataAccess, BRAND, WORKSPACE, body, fakeLog()),
         ).to.be.rejected.then((err) => expect(err.status).to.equal(400));
       }
+    });
+  });
+
+  describe('handleCreateTag — closed dimensions (source/intent/type)', () => {
+    let handler;
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    it('creates a closed-dimension tag when it does not yet exist (200, created:true)', async () => {
+      const transport = makeTransport({
+        createProjectTags: sinon.stub().resolves([{ id: 'tag-source-ai', name: 'source:ai' }]),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        {
+          type: 'source', name: 'ai', geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({
+        tag: 'source:ai', id: 'tag-source-ai', parentId: null, created: true,
+      });
+      expect(transport.createProjectTags)
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['source:ai']);
+    });
+
+    it('resolves an EXISTING closed-dimension tag without creating a duplicate (200, created:false)', async () => {
+      const listProjectTags = sinon.stub();
+      listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: '' }))
+        .resolves({
+          page: 1, total: 1, items: [{ id: 'tag-intent-info', name: 'intent:Informational', children_count: 0 }],
+        });
+      const transport = makeTransport({ listProjectTags });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        {
+          type: 'intent', name: 'Informational', geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({
+        tag: 'intent:Informational', id: 'tag-intent-info', parentId: null, created: false,
+      });
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('400s a closed-dimension value not in the fixed enum', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        {
+          type: 'type', name: 'bogus-value', geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('400s a closed-dimension create that carries a parentId', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        {
+          type: 'source', name: 'ai', geoTargetId: 2840, languageCode: 'en', parentId: 'root-1',
+        },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.createProjectTags).to.not.have.been.called;
     });
   });
 
@@ -267,7 +354,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       await expect(handler.handleCreateTagSubworkspace(
         transport,
         WORKSPACE,
-        { ...validBody, type: 'intent' },
+        { ...validBody, type: 'bogus' },
         fakeLog(),
       )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
       expect(resolveProjectStub).to.not.have.been.called;
@@ -295,6 +382,32 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(res.body).to.include({ tag: 'Sneakers', id: 'child-1', parentId: 'parent-1' });
       expect(transport.createProjectTags)
         .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-sub-1', ['Sneakers'], { parentId: 'parent-1' });
+    });
+
+    it('resolves a closed-dimension tag (twin of the flat-mode fix)', async () => {
+      const resolveProjectStub = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const handler = await esmock('../../../../src/support/serenity/handlers/tags.js', {
+        '../../../../src/support/serenity/subworkspace-projects.js': {
+          resolveProject: resolveProjectStub,
+        },
+      });
+      const transport = makeTransport({
+        createProjectTags: sinon.stub().resolves([{ id: 'tag-type-branded', name: 'type:branded' }]),
+      });
+      const res = await handler.handleCreateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        {
+          type: 'type', name: 'branded', geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({
+        tag: 'type:branded', id: 'tag-type-branded', parentId: null, created: true,
+      });
+      expect(transport.createProjectTags)
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-sub-1', ['type:branded']);
     });
   });
 
@@ -531,6 +644,20 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       }
     });
 
+    it('400s a non-string, non-null parentId', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleUpdateTag(transport, dataAccess, BRAND, WORKSPACE, 'tag-1', { ...updateBody, parentId: 123 }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('treats a whitespace-only parentId the same as omission (not promote-to-root)', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await handler.handleUpdateTag(transport, dataAccess, BRAND, WORKSPACE, 'tag-1', { ...updateBody, parentId: '   ' }, fakeLog());
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', 'tag-1', { name: 'category:Footwear', parentId: undefined });
+    });
+
     it('404s (marketNotFound) when no project backs the slice', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess(null);
@@ -684,6 +811,55 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         'proj-1',
         'root-1',
         { name: 'category:FootwearRenamed', parentId: undefined },
+      );
+    });
+
+    it('forwards an explicit null parentId as promote-to-root (gate 1)', async () => {
+      const transport = makeChildTreeTransport('root-1', 'child-1', {
+        updateProjectTag: sinon.stub().resolves({ id: 'child-1', name: 'Sneakers', parent_id: null }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'child-1',
+        {
+          name: 'Sneakers', parentId: null, geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.body).to.include({ tag: 'Sneakers', parentId: null });
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        'child-1',
+        { name: 'Sneakers', parentId: null },
+      );
+    });
+
+    it('treats an explicit null parentId on a ROOT as a no-op (defensive, not live-verified)', async () => {
+      const transport = makeRootTreeTransport('root-1', {
+        updateProjectTag: sinon.stub().resolves({ id: 'root-1', name: 'category:Footwear' }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'root-1',
+        {
+          name: 'category:Footwear', parentId: null, geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        'root-1',
+        { name: 'category:Footwear', parentId: undefined },
       );
     });
   });

@@ -21,6 +21,8 @@ import { invalidateTagCacheForProject } from './markets.js';
 import {
   buildPromptDto,
   normalizePromptInput,
+  createOnePrompt,
+  parseUpdatePromptBody,
   mapLimit,
   publishAffected,
   DEFAULT_PAGE_LIMIT,
@@ -149,13 +151,7 @@ export async function handleCreatePromptsSubworkspace(transport, workspaceId, bo
     }
     const projectId = String(project.id);
     try {
-      const resp = await transport.createTaggedPrompts(
-        workspaceId,
-        projectId,
-        { [input.text]: input.tags },
-      );
-      const semrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
-        ? String(resp.ids[0]) : '';
+      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, input);
       return {
         created: {
           semrushPromptId,
@@ -163,6 +159,7 @@ export async function handleCreatePromptsSubworkspace(transport, workspaceId, bo
           languageCode: input.languageCode,
           text: input.text,
           tags: input.tags,
+          ...(input.tagIds !== undefined ? { tagIds: input.tagIds } : {}),
         },
         affectedProjectId: projectId,
       };
@@ -220,12 +217,11 @@ export async function handleUpdatePromptSubworkspace(
   body,
   log,
 ) {
-  if (!body || body.text === undefined || body.tags === undefined) {
-    return {
-      status: 400,
-      body: { error: 'missingFields', message: 'PATCH body must include both text and tags' },
-    };
+  const parsedBody = parseUpdatePromptBody(body);
+  if (!parsedBody.ok) {
+    return { status: parsedBody.status, body: parsedBody.body };
   }
+  const { text: nextText, tags: nextTags, tagIds: nextTagIds } = parsedBody;
   const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
   const languageCode = normalizeLanguageCode(body.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -250,11 +246,6 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
-  const nextText = String(body.text);
-  const nextTags = Array.isArray(body.tags)
-    ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
-    : [];
-
   try {
     await transport.deletePromptsByIds(workspaceId, projectId, [semrushPromptId]);
   } catch (e) {
@@ -275,13 +266,9 @@ export async function handleUpdatePromptSubworkspace(
     throw e;
   }
 
-  const resp = await transport.createTaggedPrompts(
-    workspaceId,
-    projectId,
-    { [nextText]: nextTags },
-  );
-  const newSemrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
-    ? String(resp.ids[0]) : '';
+  const newSemrushPromptId = await createOnePrompt(transport, workspaceId, projectId, {
+    text: nextText, tags: nextTags, tagIds: nextTagIds,
+  });
 
   invalidateTagCacheForProject(workspaceId, projectId);
 
@@ -295,6 +282,7 @@ export async function handleUpdatePromptSubworkspace(
       languageCode,
       text: nextText,
       tags: nextTags,
+      ...(nextTagIds !== undefined ? { tagIds: nextTagIds } : {}),
     },
   };
 }

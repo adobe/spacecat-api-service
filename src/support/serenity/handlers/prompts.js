@@ -184,6 +184,16 @@ export async function publishAffected(transport, semrushWorkspaceId, projectIds,
   return errors;
 }
 
+/**
+ * Normalizes one bulk-create/update prompt input. `tags` (names, the legacy
+ * write path via `aio/prompts/tagged`) and `tagIds` (upstream tag ids, the
+ * id-based write path via `aio/prompts`) are MUTUALLY EXCLUSIVE — at most one
+ * may be present, and `tagIds` when present must be non-empty. `tagIds` stays
+ * `undefined` when absent so the handler can branch on
+ * `input.tagIds !== undefined` to pick the write path; `tags` always
+ * defaults to `[]` (unused, not `undefined`) to keep the name-based path's
+ * existing contract unchanged.
+ */
 export function normalizePromptInput(input) {
   const text = String(input?.text || '').trim();
   const languageCode = normalizeLanguageCode(input?.languageCode);
@@ -191,11 +201,106 @@ export function normalizePromptInput(input) {
   const tags = Array.isArray(input?.tags)
     ? input.tags.map((t) => String(t || '').trim()).filter(Boolean)
     : [];
+  const tagIds = Array.isArray(input?.tagIds)
+    ? input.tagIds.map((t) => String(t || '').trim()).filter(Boolean)
+    : undefined;
   if (!text || languageCode === null || geoTargetId === null) {
     return null;
   }
+  if (tagIds !== undefined && (tags.length > 0 || tagIds.length === 0)) {
+    return null;
+  }
   return {
-    text, languageCode, geoTargetId, tags,
+    text, languageCode, geoTargetId, tags, tagIds,
+  };
+}
+
+/**
+ * Creates ONE prompt via whichever upstream write path `input` requests --
+ * id-based (`POST aio/prompts`, when `input.tagIds` is set -- serenity-docs#24)
+ * or the legacy name-based path (`POST aio/prompts/tagged`, when `input.tags`
+ * is used). Both {@link handleCreatePrompts}'s per-item fan-out and
+ * {@link handleUpdatePrompt}'s post-delete recreate call this, so the two
+ * upstream shapes are never duplicated across create and update.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {{ text: string, tags: string[], tagIds: string[] | undefined }} input
+ * @returns {Promise<string>} the new upstream prompt id, or '' if the
+ *   response carried none.
+ */
+export async function createOnePrompt(transport, semrushWorkspaceId, projectId, input) {
+  if (input.tagIds !== undefined) {
+    const resp = await transport.createPromptsByIds(
+      semrushWorkspaceId,
+      projectId,
+      [input.text],
+      input.tagIds,
+    );
+    return Array.isArray(resp?.items) && resp.items.length > 0 ? String(resp.items[0].id) : '';
+  }
+  const resp = await transport.createTaggedPrompts(
+    semrushWorkspaceId,
+    projectId,
+    { [input.text]: input.tags },
+  );
+  return Array.isArray(resp?.ids) && resp.ids.length > 0 ? String(resp.ids[0]) : '';
+}
+
+/**
+ * Validates + normalizes a PATCH prompt body's `text`/`tags`/`tagIds`, shared
+ * by {@link handleUpdatePrompt} and its subworkspace twin. `tags` (names) and
+ * `tagIds` (upstream ids) are mutually exclusive, mirroring
+ * {@link normalizePromptInput}; exactly one must be present. Returns either
+ * `{ ok: true, text, tags, tagIds }` or `{ ok: false, status, body }` (the
+ * caller returns the latter directly as the handler's 400 response).
+ *
+ * @param {object} body - the PATCH request body.
+ * @returns {{ ok: true, text: string, tags: string[], tagIds: string[] | undefined }
+ *   | { ok: false, status: number, body: object }}
+ */
+export function parseUpdatePromptBody(body) {
+  const hasTagsField = body?.tags !== undefined;
+  const hasTagIdsField = body?.tagIds !== undefined;
+  if (!body || body.text === undefined || (!hasTagsField && !hasTagIdsField)) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'missingFields',
+        message: 'PATCH body must include text and either tags or tagIds',
+      },
+    };
+  }
+  if (hasTagsField && hasTagIdsField) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: 'invalidRequest', message: 'tags and tagIds are mutually exclusive' },
+    };
+  }
+  const text = String(body.text);
+  if (hasTagIdsField) {
+    const tagIds = Array.isArray(body.tagIds)
+      ? body.tagIds.map((t) => String(t || '').trim()).filter(Boolean)
+      : [];
+    if (tagIds.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        body: { error: 'invalidRequest', message: 'tagIds must be a non-empty array' },
+      };
+    }
+    return {
+      ok: true, text, tags: [], tagIds,
+    };
+  }
+  const tags = Array.isArray(body.tags)
+    ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
+    : [];
+  return {
+    ok: true, text, tags, tagIds: undefined,
   };
 }
 
@@ -272,13 +377,12 @@ export async function handleCreatePrompts(
     }
     const projectId = project.getSemrushProjectId();
     try {
-      const resp = await transport.createTaggedPrompts(
+      const semrushPromptId = await createOnePrompt(
+        transport,
         semrushWorkspaceId,
         projectId,
-        { [input.text]: input.tags },
+        input,
       );
-      const semrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
-        ? String(resp.ids[0]) : '';
       return {
         created: {
           semrushPromptId,
@@ -286,6 +390,7 @@ export async function handleCreatePrompts(
           languageCode: input.languageCode,
           text: input.text,
           tags: input.tags,
+          ...(input.tagIds !== undefined ? { tagIds: input.tagIds } : {}),
         },
         affectedProjectId: projectId,
       };
@@ -347,17 +452,20 @@ export async function handleCreatePrompts(
 /**
  * PATCH /serenity/prompts/:semrushPromptId — replace.
  *
- * Body carries `{geoTargetId, languageCode, text, tags}`. All four are
- * required: the upstream provider has no in-place update (no GET-by-id
- * either), so the implementation is DELETE-then-CREATE and we treat the
- * payload as the full next state. Clients always have the existing
- * `text`/`tags` available locally (they were returned by the preceding
- * list call that rendered the edit form), so requiring both keeps the
- * server side a single straight line and removes the per-request
- * pagination that "preserve-on-omit" semantics would force.
+ * Body carries `{geoTargetId, languageCode, text, tags}` (name-based) or
+ * `{geoTargetId, languageCode, text, tagIds}` (id-based, mutually exclusive
+ * with `tags` -- see {@link parseUpdatePromptBody}). All are required: the
+ * upstream provider has no in-place update (no GET-by-id either), so the
+ * implementation is DELETE-then-CREATE and we treat the payload as the full
+ * next state. Clients always have the existing text/tags(-ids) available
+ * locally (they were returned by the preceding list call that rendered the
+ * edit form), so requiring both keeps the server side a single straight line
+ * and removes the per-request pagination that "preserve-on-omit" semantics
+ * would force.
  *
  * Contract:
- *   - body missing text or tags → 400 (missingFields).
+ *   - body missing text, or missing both tags and tagIds, or both present
+ *     → 400 (missingFields / invalidRequest).
  *   - slice missing on the brand → 404 (marketNotFound).
  *   - upstream DELETE returns 404 → 404 (promptNotFound).
  *   - upstream DELETE returns any other error → throw (handler-level
@@ -382,12 +490,11 @@ export async function handleUpdatePrompt(
   // `semrushPromptId` is validated as non-empty at the controller boundary
   // (serenity.js:259) before this handler is invoked over HTTP, so no
   // re-check here.
-  if (!body || body.text === undefined || body.tags === undefined) {
-    return {
-      status: 400,
-      body: { error: 'missingFields', message: 'PATCH body must include both text and tags' },
-    };
+  const parsedBody = parseUpdatePromptBody(body);
+  if (!parsedBody.ok) {
+    return { status: parsedBody.status, body: parsedBody.body };
   }
+  const { text: nextText, tags: nextTags, tagIds: nextTagIds } = parsedBody;
   const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
   const languageCode = normalizeLanguageCode(body.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -416,11 +523,6 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
-  const nextText = String(body.text);
-  const nextTags = Array.isArray(body.tags)
-    ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
-    : [];
-
   try {
     await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [semrushPromptId]);
   } catch (e) {
@@ -441,13 +543,9 @@ export async function handleUpdatePrompt(
     throw e;
   }
 
-  const resp = await transport.createTaggedPrompts(
-    semrushWorkspaceId,
-    projectId,
-    { [nextText]: nextTags },
-  );
-  const newSemrushPromptId = Array.isArray(resp?.ids) && resp.ids.length > 0
-    ? String(resp.ids[0]) : '';
+  const newSemrushPromptId = await createOnePrompt(transport, semrushWorkspaceId, projectId, {
+    text: nextText, tags: nextTags, tagIds: nextTagIds,
+  });
 
   invalidateTagCacheForProject(semrushWorkspaceId, projectId);
 
@@ -461,6 +559,7 @@ export async function handleUpdatePrompt(
       languageCode,
       text: nextText,
       tags: nextTags,
+      ...(nextTagIds !== undefined ? { tagIds: nextTagIds } : {}),
     },
   };
 }

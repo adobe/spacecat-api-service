@@ -445,6 +445,48 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('createPromptsByIds', () => {
+    it('POSTs to /v2/.../aio/prompts with { items, tag_ids } and returns the list wrapper', async () => {
+      fetchStub.resolves(fetchOk({
+        page: 1, total: 1, items: [{ id: 'new-prompt', name: 'What is Acrobat?' }], existing_count: 0,
+      }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.createPromptsByIds(WORKSPACE_ID, PROJECT_ID, ['What is Acrobat?'], ['tag-cat-1', 'tag-child-1']);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('POST');
+      expect(call.url).to.match(/\/aio\/prompts$/);
+      expect(JSON.parse(call.body)).to.deep.equal({
+        items: ['What is Acrobat?'], tag_ids: ['tag-cat-1', 'tag-child-1'],
+      });
+      expect(result.items).to.deep.equal([{ id: 'new-prompt', name: 'What is Acrobat?' }]);
+    });
+
+    it('surfaces an upstream 500 (unresolvable tag id) as a SerenityTransportError', async () => {
+      fetchStub.resolves(fetchFail(500, { message: 'unknown tag id: bogus' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.createPromptsByIds(WORKSPACE_ID, PROJECT_ID, ['x'], ['bogus']))
+        .to.be.rejected.then((err) => expect(err.status).to.equal(500));
+    });
+  });
+
+  describe('updatePromptTags', () => {
+    it('PUTs to /v2/.../aio/prompts/tags with { items }', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const items = [{ id: 'prompt-1', references: ['tag-1'], replace: false }];
+      await transport.updatePromptTags(WORKSPACE_ID, PROJECT_ID, items);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('PUT');
+      expect(call.url).to.match(/\/aio\/prompts\/tags$/);
+      expect(JSON.parse(call.body)).to.deep.equal({ items });
+    });
+  });
+
   describe('deletePromptsByIds', () => {
     it('DELETEs /v2/.../aio/prompts with body { ids }', async () => {
       fetchStub.resolves(fetchOk(null));
@@ -861,6 +903,18 @@ describe('Semrush REST transport', () => {
 
       const call = await callOf(fetchStub);
       expect(JSON.parse(call.body)).to.deep.equal({ name: 'category:Renamed' });
+    });
+
+    it('sends a literal null parent_id to promote a child to root (gate 1)', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'Sneakers', parent_id: null }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', {
+        name: 'Sneakers', parentId: null,
+      });
+
+      const call = await callOf(fetchStub);
+      expect(JSON.parse(call.body)).to.deep.equal({ name: 'Sneakers', parent_id: null });
     });
 
     it('surfaces an upstream 404 as a SerenityTransportError', async () => {

@@ -335,6 +335,61 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * POST /v2/.../aio/prompts — bulk-creates prompts by ID-BASED tag
+     * references (as opposed to {@link createTaggedPrompts}'s name-keyed
+     * shape). Body: { items: [text, ...], tag_ids: [id, ...] } — ONE shared
+     * `tag_ids` array applies to every text in `items` (unlike the name-based
+     * endpoint, there is no per-prompt tag list on this call).
+     *
+     * Response is a paginated LIST WRAPPER — `{ page, total, items: [{id,
+     * name}, ...], existing_count }` — NOT the vendored public swagger's
+     * single `model.StringIDName` (a known spec/live drift, verified live
+     * 2026-07-02). ATOMIC on an unresolvable tag id: live 500s and creates
+     * NOTHING, so every id in `tagIds` must already be a known-good upstream
+     * tag id (resolved/created by the caller first, never guessed).
+     * Text-dedupe mirrors `createTaggedPrompts`: a text already present is
+     * folded into `existing_count`, not re-created.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} items - prompt texts.
+     * @param {string[]} tagIds - upstream tag ids attached to EVERY item.
+     */
+    async createPromptsByIds(semrushWorkspaceId, projectId, items, tagIds) {
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items, tag_ids: tagIds },
+        },
+      ));
+    },
+
+    /**
+     * PUT /v2/.../aio/prompts/tags — batch-updates a prompt's tag
+     * REFERENCES (not its text). Body: { items: [{ id, references, replace
+     * }, ...] } (id = existing prompt id, references = tag ids). Per item:
+     * `replace: false` MERGES `references` onto the prompt's existing tag
+     * set; `replace: true` REPLACES the set with exactly `references`. An
+     * unknown prompt `id` is skipped SILENTLY — live 204s with no "not
+     * found" signal, so this call alone cannot confirm a prompt exists.
+     * Response: 204 No Content (`unwrap` resolves to `null`).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {Array<{ id: string, references: string[], replace: boolean }>} items
+     */
+    async updatePromptTags(semrushWorkspaceId, projectId, items) {
+      return unwrap('PUT', await projects.PUT(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tags',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items },
+        },
+      ));
+    },
+
+    /**
      * DELETE /v2/.../aio/prompts — deletes prompts by their Semrush ids in
      * this project. Body shape: { ids: [...] }.
      */
@@ -481,30 +536,38 @@ export function createSerenityTransport({ env, imsToken }) {
      * updated tag (200); an unknown `tagId` returns 404 `{message:'not found'}`
      * (both verified live 2026-07-01).
      *
-     * `name` is required by the upstream contract; `parentId` re-parents when
-     * non-empty. NOTE: an empty-string `parent_id` is a live NO-OP (does NOT
-     * promote a child to root — 200 but parent unchanged), so it is only sent
-     * when non-empty; promote-to-root is not supported upstream.
+     * `name` is required by the upstream contract. `parentId` has three
+     * meanings, all live-verified 2026-07-02 (serenity-docs#24 §3.1 gate 1):
+     * a non-empty string RE-PARENTS; explicit `null` PROMOTES a child to root
+     * (sent upstream as literal JSON `null`); `undefined` (or an empty string)
+     * OMITS `parent_id` from the body entirely, a no-op that preserves the
+     * current parent. Explicit `null` and omission are NOT interchangeable —
+     * only the former promotes.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
      * @param {string} tagId - upstream tag id to update.
      * @param {object} update
      * @param {string} update.name - the tag's (possibly renamed) full name.
-     * @param {string} [update.parentId] - new parent tag id (non-empty re-parents).
+     * @param {string | null} [update.parentId] - re-parent target, `null` to
+     *   promote to root, or omit to leave the current parent unchanged.
      */
     async updateProjectTag(semrushWorkspaceId, projectId, tagId, { name, parentId }) {
+      const body = { name };
+      if (parentId === null) {
+        body.parent_id = null;
+      } else if (typeof parentId === 'string' && parentId !== '') {
+        body.parent_id = parentId;
+      }
+      // parentId undefined or '' → parent_id omitted from body (no-op, preserves
+      // the current parent).
       return unwrap('PATCH', await projects.PATCH(
         '/v2/workspaces/{id}/projects/{project_id}/aio/tags/{tag_id}',
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId, tag_id: tagId },
           },
-          // Send parent_id only when re-parenting — empty is a live no-op. (typeof
-          // narrows `string | undefined` → `string`; hasText does not, per ADR-005.)
-          body: typeof parentId === 'string' && parentId !== ''
-            ? { name, parent_id: parentId }
-            : { name },
+          body,
         },
       ));
     },

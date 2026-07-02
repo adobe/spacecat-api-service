@@ -128,6 +128,24 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
+    it('creates a prompt by id-based tagIds via aio/prompts, not the name-based endpoint (twin of the flat-mode fix)', async () => {
+      const transport = makeTransport({
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-prompt-by-id', name: 'p' }], existing_count: 0,
+        }),
+      });
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-cat-1', 'tag-child-1'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.created).to.have.length(1);
+      expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt-by-id' });
+      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tag-child-1']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-cat-1', 'tag-child-1']);
+      expect(transport.createTaggedPrompts).to.not.have.been.called;
+    });
+
     it('skips inputs whose slice has no project (one listing, no per-input lookup)', async () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
@@ -252,6 +270,37 @@ describe('prompts-subworkspace handlers', () => {
         log,
       );
       expect(result.status).to.equal(400);
+    });
+
+    it('400s when both tags and tagIds are present (mutually exclusive)', async () => {
+      const result = await handleUpdatePromptSubworkspace(
+        makeTransport(),
+        WS,
+        'old-id',
+        {
+          text: 'new', tags: ['t'], tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+        },
+        log,
+      );
+      expect(result.status).to.equal(400);
+      expect(result.body.error).to.equal('invalidRequest');
+    });
+
+    it('replaces text+tagIds via the id-based endpoint (twin of the flat-mode fix)', async () => {
+      const transport = makeTransport({
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-prompt-by-id', name: 'new' }], existing_count: 0,
+        }),
+      });
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: ['tag-cat-1'], geoTargetId: 2840, languageCode: 'en',
+      }, log);
+      expect(result.status).to.equal(200);
+      expect(result.body.semrushPromptId).to.equal('new-prompt-by-id');
+      expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
+      expect(transport.deletePromptsByIds).to.have.been.calledWith(WS, 'p-us-en', ['old-id']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1']);
+      expect(transport.createTaggedPrompts).to.not.have.been.called;
     });
 
     it('400s when the slice key is invalid', async () => {

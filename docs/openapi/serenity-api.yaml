@@ -101,8 +101,10 @@ v2-serenity-prompts:
     summary: Bulk-create Serenity prompts
     description: |
       Creates up to 500 prompts in one call. Each input must carry
-      (geoTargetId, languageCode, text, tags?). Inputs are grouped by slice;
-      each affected upstream project is published once at the end.
+      (geoTargetId, languageCode, text) plus at most one of `tags` (names,
+      the legacy write path) or `tagIds` (upstream tag ids, the id-based
+      write path — serenity-docs#24). Inputs are grouped by slice; each
+      affected upstream project is published once at the end.
     operationId: createSerenityPrompts
     security:
       - ims_key: []
@@ -152,18 +154,21 @@ v2-serenity-prompt-by-id:
     tags: [serenity]
     summary: Update a Serenity prompt
     description: |
-      Body carries `{geoTargetId, languageCode, text, tags}`. All four fields
-      are required — the upstream provider has no in-place update (and no
+      Body carries `{geoTargetId, languageCode, text}` plus exactly one of
+      `tags` (names) or `tagIds` (upstream ids, the id-based write path —
+      serenity-docs#24). `geoTargetId`/`languageCode`/`text` are always
+      required — the upstream provider has no in-place update (and no
       GET-by-id), so the implementation is DELETE-old + POST-new + publish
       and the payload is treated as the full next state. Clients always
-      have `text`/`tags` available locally (from the list call that
-      rendered the edit form), which keeps this endpoint a single straight
-      line and avoids the per-request pagination "preserve-on-omit"
-      semantics would force.
+      have the current text/tags(-ids) available locally (from the list
+      call that rendered the edit form), which keeps this endpoint a
+      single straight line and avoids the per-request pagination
+      "preserve-on-omit" semantics would force.
 
-      An explicit empty `tags: []` clears tags. The response carries the
-      new `semrushPromptId` (the value changes on every upstream
-      re-create).
+      An explicit empty `tags: []` clears tags (not applicable to
+      `tagIds`, which must be non-empty when present). The response
+      carries the new `semrushPromptId` (the value changes on every
+      upstream re-create).
     operationId: updateSerenityPrompt
     security:
       - ims_key: []
@@ -463,17 +468,24 @@ v2-serenity-tags:
       '500': { $ref: './responses.yaml#/500' }
   post:
     tags: [serenity]
-    summary: Create a tag on one market
+    summary: Create (or, for a closed dimension, resolve) a tag on one market
     description: |
       Registers a `<type>:<name>` prompt tag on the market addressed by the
-      `(geoTargetId, languageCode)` slice. `type` must be one of the OPEN tag
-      dimensions — `category` or `topic` — that accept customer-authored values;
-      the closed taxonomies (`source` / `intent` / `type`) have a fixed value
-      enum and are not freely creatable. The "Categories" view, for example, is
-      the `category:` slice of these tags across a brand's markets.
+      `(geoTargetId, languageCode)` slice. `type` is one of the OPEN tag
+      dimensions (`category`, `topic`, customer-authored values — a duplicate
+      name at the same tree level is a hard upstream error, resolve-before-
+      create is the CALLER's job) or one of the CLOSED dimensions (`source`,
+      `intent`, `type` — a small fixed value enum; `name` must be one of that
+      enum's values). A closed-dimension create is resolve-OR-create
+      (idempotent): if the project already has that exact tag, its existing id
+      is returned (200, `created: false`) instead of attempting another create;
+      `parentId` is not allowed for a closed dimension (always a root). The
+      "Categories" view, for example, is the `category:` slice of the open-
+      dimension tags across a brand's markets.
 
-      Pass `parentId` (an upstream tag id from a prior list) to create the tag as
-      a 1-level nested child of that category; omit it for a root/flat tag.
+      Pass `parentId` (an upstream tag id from a prior list) to create an OPEN-
+      dimension tag as a 1-level nested child of that category; omit it for a
+      root/flat tag.
     operationId: createSerenityTag
     security:
       - ims_key: []
@@ -488,13 +500,16 @@ v2-serenity-tags:
             properties:
               type:
                 type: string
-                enum: [category, topic]
-                description: The open tag dimension to create a value under.
+                enum: [category, topic, source, intent, type]
+                description: The tag dimension. category/topic are open (customer-authored); source/intent/type are closed (fixed enum).
               name:
                 type: string
                 minLength: 1
                 maxLength: 100
-                description: Free-form tag value. Must not contain ':'.
+                description: |
+                  For an open dimension: a free-form value (must not contain
+                  ':'). For a closed dimension: must exactly match one of that
+                  dimension's fixed enum values.
               geoTargetId:
                 type: integer
                 minimum: 1
@@ -507,10 +522,29 @@ v2-serenity-tags:
                 type: string
                 description: |
                   Optional upstream tag id (from a prior tags list) to nest the
-                  new tag under as a 1-level child. Omit for a root/flat tag.
+                  new OPEN-dimension tag under as a 1-level child. Omit for a
+                  root/flat tag. Not allowed for a closed dimension.
     responses:
+      '200':
+        description: Closed-dimension tag resolved (already existed or was just created — see `created`).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brandId: { type: string, format: uuid }
+                geoTargetId: { type: integer }
+                languageCode: { type: string }
+                type: { type: string, enum: [source, intent, type] }
+                name: { type: string }
+                tag: { type: string, description: The full `<type>:<name>` string. }
+                id: { type: string, description: The tag's upstream id. }
+                parentId: { type: 'null', description: Always null — closed-dimension tags are always roots. }
+                created:
+                  type: boolean
+                  description: 'true if this call created the tag; false if it already existed.'
       '201':
-        description: Tag registered on the market's project.
+        description: OPEN-dimension tag registered on the market's project.
         content:
           application/json:
             schema:
@@ -573,16 +607,18 @@ v2-serenity-tag-by-id:
     description: |
       Updates a single AIO tag in place on the market addressed by the
       `(geoTargetId, languageCode)` slice — renames it and/or re-parents it under
-      another category (1-level nesting). `name` is required on every call; its
-      shape depends on the CURRENT tag: a root takes the full
-      `<dimension>:<value>` string, a child takes a BARE value (no dimension
-      prefix — mirrors tag creation). `parentId` re-parents when present; when
-      omitted on a child rename, the proxy resolves and re-sends the child's
-      CURRENT `parentId` itself (never omits it for a child — omission silently
-      promotes a child to root upstream), so the parent is safely left
-      unchanged either way. Note that promoting a child back to a root is not
-      supported upstream. An unknown `tagId` is NOT a 404 — it surfaces as 502,
-      like every serenity proxy write against an upstream error.
+      another category (1-level nesting), or promotes a child back to a root.
+      `name` is required on every call; its shape depends on the CURRENT tag: a
+      root takes the full `<dimension>:<value>` string, a child takes a BARE
+      value (no dimension prefix — mirrors tag creation). `parentId` has three
+      meanings: a re-parent target id RE-PARENTS the tag; explicit JSON `null`
+      PROMOTES a child to root; omitting the field entirely leaves the parent
+      unchanged (for a child, the proxy resolves and re-sends its CURRENT
+      `parentId` itself rather than omitting it from the upstream call — an
+      omitted `parent_id` silently promotes a child to root upstream, so
+      omission and explicit `null` are NOT interchangeable). An unknown
+      `tagId` is NOT a 404 — it surfaces as 502, like every serenity proxy
+      write against an upstream error.
     operationId: updateSerenityTag
     security:
       - ims_key: []
@@ -605,12 +641,14 @@ v2-serenity-tag-by-id:
                   (currently nested under a parent), a BARE value with no
                   dimension prefix, mirroring how children are created.
               parentId:
-                type: string
+                type: [string, 'null']
                 description: |
-                  Optional upstream tag id to re-parent this tag under. Omit to
-                  leave the parent unchanged (safe for both a root and a child
-                  — the proxy resolves and preserves a child's current parent
-                  server-side rather than omitting it from the upstream call).
+                  An upstream tag id RE-PARENTS this tag under it. Explicit
+                  JSON `null` PROMOTES a child to root. Omit the field
+                  entirely to leave the parent unchanged (safe for both a root
+                  and a child — the proxy resolves and preserves a child's
+                  current parent server-side rather than omitting it from the
+                  upstream call). `null` and omission are NOT interchangeable.
               geoTargetId:
                 type: integer
                 minimum: 1
