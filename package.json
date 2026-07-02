@@ -87,7 +87,7 @@
     "@adobe/spacecat-shared-brand-client": "1.4.0",
     "@adobe/spacecat-shared-cloudflare-client": "1.2.1",
     "@adobe/spacecat-shared-content-client": "1.8.24",
-    "@adobe/spacecat-shared-data-access": "https://gist.github.com/tathagat2241/baa0d24fc1d1b06a50238574767b273d/raw/43d71f553d033c2bbe2488c170b1833030ff3aa8/adobe-spacecat-shared-data-access-3.79.0.tgz",
+    "@adobe/spacecat-shared-data-access": "3.80.0",
     "@adobe/spacecat-shared-drs-client": "1.12.1",
     "@adobe/spacecat-shared-gpt-client": "1.6.23",
     "@adobe/spacecat-shared-http-utils": "1.31.0",
