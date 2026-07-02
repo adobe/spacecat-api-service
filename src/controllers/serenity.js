@@ -58,6 +58,8 @@ import {
 import {
   handleCreateTag,
   handleCreateTagSubworkspace,
+  handleUpdateTag,
+  handleUpdateTagSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
@@ -736,6 +738,48 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * PATCH /serenity/tags/:tagId — rename and/or re-parent a single AIO tag in
+   * place (the nested Categories edit path). `tagId` is the upstream tag id from a
+   * prior tags list; the body carries the tag's full `name` (required upstream)
+   * and an optional `parentId` to re-parent. An unknown tagId surfaces upstream as
+   * a 404. Dispatches by workspace mode, mirroring createTag / updatePrompt.
+   */
+  const updateTag = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          ctx.data || {},
+          log,
+        )
+        : await handleUpdateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const listModels = async (ctx) => {
     try {
       const imsToken = requireImsBearer(ctx);
@@ -1317,6 +1361,7 @@ function SerenityController(context, log, env) {
     deleteMarket,
     listTags,
     createTag,
+    updateTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

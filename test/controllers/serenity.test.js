@@ -122,6 +122,8 @@ describe('SerenityController', () => {
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
     handleCreateTag: sinon.stub(),
     handleCreateTagSubworkspace: sinon.stub(),
+    handleUpdateTag: sinon.stub(),
+    handleUpdateTagSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
@@ -222,6 +224,8 @@ describe('SerenityController', () => {
       '../../src/support/serenity/handlers/tags.js': {
         handleCreateTag: handlers.handleCreateTag,
         handleCreateTagSubworkspace: handlers.handleCreateTagSubworkspace,
+        handleUpdateTag: handlers.handleUpdateTag,
+        handleUpdateTagSubworkspace: handlers.handleUpdateTagSubworkspace,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
@@ -958,6 +962,44 @@ describe('SerenityController', () => {
       const body = await readBody(response);
       expect(body.message).to.match(/name is required/);
     });
+
+    it('updateTag requires the :tagId path param', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: {} }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+    });
+
+    it('updateTag forwards tagId + body to the flat handler and returns its status', async () => {
+      handlers.handleUpdateTag.resolves({
+        status: 200,
+        body: {
+          brandId: BRAND, tagId: 'tag-1', tag: 'category:Footwear', parentId: 'root-1',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({
+        params: { tagId: 'tag-1' },
+        data: {
+          name: 'category:Footwear', parentId: 'root-1', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body).to.include({ tagId: 'tag-1', parentId: 'root-1' });
+      expect(handlers.handleUpdateTag).to.have.been.calledOnce;
+      expect(handlers.handleUpdateTag.firstCall.args[4]).to.equal('tag-1');
+      expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('updateTag returns the authorize error without throwing (auth.error short-circuit)', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+      expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
   });
 
   describe('controller surface', () => {
@@ -1235,6 +1277,22 @@ describe('SerenityController', () => {
       expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleCreateTagSubworkspace.firstCall.args[2]).to.deep.equal({});
       expect(handlers.handleCreateTag).to.not.have.been.called;
+    });
+
+    it('updateTag routes to the subworkspace handler with the brand workspace + tagId', async () => {
+      handlers.handleUpdateTagSubworkspace.resolves({
+        status: 200,
+        body: {
+          geoTargetId: 2840, languageCode: 'en', tagId: 'tag-1', tag: 'category:Footwear', parentId: null,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdateTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[2]).to.equal('tag-1');
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
     });
 
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
