@@ -2143,7 +2143,6 @@ function BrandsController(ctx, log, env) {
       // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
       // not a declared activation anchor, so guessing one would be wrong.
       let { baseSiteId, baseUrl } = brand;
-      const alreadyAnchored = hasText(baseSiteId);
       if (!hasText(baseSiteId)) {
         const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
         const site = hasText(primaryUrl)
@@ -2164,35 +2163,20 @@ function BrandsController(ctx, log, env) {
         baseUrl = site.getBaseURL();
       }
 
-      // 2) Anchor + promote as two sanctioned steps (LLMO-5587):
-      //   (a) Anchor the base site via updateBrand — a field write, NOT a status change
-      //       (the brand stays pending). Only needed when the brand wasn't already
-      //       anchored; baseSiteId is immutable-from-null in storage and a
-      //       brands_base_site_unique collision surfaces as 409 (via createErrorResponse).
-      //   (b) Promote pending → active via setBrandStatus, the sanctioned
-      //       status-transition path. updateBrand deliberately refuses status demotions
-      //       (#2637), so all status changes route through setBrandStatus (#2621) — the
-      //       generic write primitive is reserved for field updates.
-      if (!alreadyAnchored) {
-        const anchored = await updateBrand({
-          organizationId: spaceCatId,
-          brandId: brandUuid,
-          updates: { baseSiteId },
-          postgrestClient,
-          updatedBy,
-        });
-        if (!anchored) {
-          return notFound(`Brand not found: ${brandId}`);
-        }
-      }
-      const promoted = await setBrandStatus({
+      // 2) Activate — set status=active + baseSiteId in a SINGLE atomic write.
+      // updateBrand supports promote-to-active directly: its status guard refuses only
+      // active→pending demotions (#2637, LLMO-5587), never a promotion, and the
+      // active-has-site invariant is satisfied because baseSiteId is set in the same
+      // patch. A brands_base_site_unique violation throws with status 409 (mapped by
+      // createErrorResponse).
+      const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
-        status: 'active',
+        updates: { status: 'active', baseSiteId },
         postgrestClient,
         updatedBy,
       });
-      if (!promoted) {
+      if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
@@ -2317,10 +2301,17 @@ function BrandsController(ctx, log, env) {
       return createResponse(responseBody, 200);
     } catch (error) {
       log.error(`Error activating brand ${brandId} for organization ${spaceCatId}:`, error);
-      await postLlmoAlert(
-        `:x: Brand activation failed — brand ${brandId} in org ${spaceCatId}: ${error.message}`,
-        context,
-      );
+      // Guard the failure alert too: postLlmoAlert already swallows its own Slack errors,
+      // but we never want an alert failure on the error path to replace the intended
+      // status (e.g. a 409/400) with an unhandled-rejection 500.
+      try {
+        await postLlmoAlert(
+          `:x: Brand activation failed — brand ${brandId} in org ${spaceCatId}: ${error.message}`,
+          context,
+        );
+      } catch (alertError) {
+        log.error(`Failed to post activation-failure alert for brand ${brandId}:`, alertError);
+      }
       return createErrorResponse(error);
     }
   };
