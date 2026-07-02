@@ -17,20 +17,25 @@ import {
   ORG_2_ID, // has no entitlements
   ORG_3_ID, // has a PAID LLMO entitlement
   NON_EXISTENT_ORG_ID,
+  ACTIVATE_SITE_ID, // onboarded ORG_3 site the pending brand promotes onto
+  ACTIVATE_PENDING_BRAND_ID, // pending brand anchored to ACTIVATE_SITE_ID
+  ACTIVATE_CONFLICT_BRAND_ID, // pending brand that resolves to the same site → 409
 } from '../seed-ids.js';
 
 /**
  * Shared integration tests for the self-serve brand-activation endpoint
  * (POST /v2/orgs/:spaceCatId/brands/:brandId/activate — LLMO-5605).
  *
- * Scope is request validation and the auth gate (org lookup → membership →
- * explicit PAID entitlement) plus the org-scoped brand lookup — all of which
- * resolve against the real PostgREST DB *before* the endpoint touches DRS. The
- * promote state machine (pending → active, the deleted/active/non-pending
- * guards, the 409 base-site conflict) and the best-effort DRS prompt-gen +
- * schedule side-effects are covered by the unit suite (test/controllers/
- * brands.test.js); DRS is unconfigured in this harness, so those external
- * interactions don't run here.
+ * Covers, against the real PostgREST DB:
+ *  - request validation + the auth gate (org lookup → membership → explicit PAID
+ *    entitlement) + the org-scoped brand lookup;
+ *  - the real promotion path (pending → active with baseSiteId written), its
+ *    idempotent re-activation no-op, and the brands_base_site_unique → 409 — all
+ *    pure Postgres, so testable here.
+ *
+ * The best-effort DRS prompt-gen + schedule side-effects are covered by the unit
+ * suite (test/controllers/brands.test.js); DRS is unconfigured in this harness,
+ * so those external interactions don't run here (generatePrompts:false is used).
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
@@ -85,6 +90,50 @@ export default function activateBrandForOrgTests(getHttpClient, resetData) {
       const http = getHttpClient();
       const res = await http.admin.post(activatePath(ORG_3_ID, MISSING_BRAND_ID), validBody);
       expect(res.status).to.equal(404);
+    });
+
+    // --- Real promotion path (pure Postgres; DRS unconfigured, generatePrompts:false) ---
+    // These run in order: the promote below activates ACTIVATE_PENDING_BRAND_ID and
+    // claims its base site, which the idempotency and 409 cases then rely on.
+
+    it('promotes a pending brand to active and anchors its base site', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.post(
+        activatePath(ORG_3_ID, ACTIVATE_PENDING_BRAND_ID),
+        { generatePrompts: false },
+      );
+
+      expect(res.status).to.equal(200);
+      expect(res.body.status).to.equal('active');
+      expect(res.body.baseSiteId).to.equal(ACTIVATE_SITE_ID);
+
+      // The persisted brand is now active and anchored to its base site.
+      const brandPath = `/v2/orgs/${ORG_3_ID}/brands/${ACTIVATE_PENDING_BRAND_ID}`;
+      const getRes = await http.admin.get(brandPath);
+      expect(getRes.status).to.equal(200);
+      expect(getRes.body.status).to.equal('active');
+      expect(getRes.body.baseSiteId).to.equal(ACTIVATE_SITE_ID);
+    });
+
+    it('is idempotent — re-activating the now-active brand is a 200 no-op', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.post(
+        activatePath(ORG_3_ID, ACTIVATE_PENDING_BRAND_ID),
+        { generatePrompts: false },
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body.status).to.equal('active');
+    });
+
+    it('returns 409 when a second brand activates onto an already-claimed base site', async () => {
+      // ACTIVATE_CONFLICT_BRAND_ID resolves (via its stashed Semrush primaryUrl) to the
+      // same site the brand above now owns → brands_base_site_unique.
+      const http = getHttpClient();
+      const res = await http.admin.post(
+        activatePath(ORG_3_ID, ACTIVATE_CONFLICT_BRAND_ID),
+        { generatePrompts: false },
+      );
+      expect(res.status).to.equal(409);
     });
   });
 }

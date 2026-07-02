@@ -40,4 +40,30 @@ export const brands = [
     regions: ['us'],
     updated_by: 'seed',
   },
+  {
+    // Activate-brand IT: a pending brand already anchored to the Activate IT site.
+    // POST .../activate promotes it to active in a single write (no URL resolution).
+    id: 'ac000000-b000-4000-8000-000000000001',
+    organization_id: '33330000-3333-4333-b333-000000000333',
+    name: 'Activate IT Pending Brand',
+    site_id: 'ac000000-5170-4000-8000-000000000001',
+    status: 'pending',
+    origin: 'human',
+    regions: ['us'],
+    updated_by: 'seed',
+  },
+  {
+    // Activate-brand IT: an unanchored pending brand whose stashed Semrush primaryUrl
+    // resolves to the SAME site as the brand above. Activating it after that brand is
+    // active hits brands_base_site_unique → 409.
+    id: 'ac000000-b000-4000-8000-000000000002',
+    organization_id: '33330000-3333-4333-b333-000000000333',
+    name: 'Activate IT Conflict Brand',
+    site_id: null,
+    status: 'pending',
+    origin: 'human',
+    regions: ['us'],
+    pending_semrush_provisioning: { primaryUrl: 'https://it-activate.example.com' },
+    updated_by: 'seed',
+  },
 ];
