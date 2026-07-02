@@ -1060,7 +1060,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
         .to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
     });
 
-    it('uses ipsToWhitelist fallback for bot blocker', async () => {
+    it('normalizes a legacy ipsToWhitelist to ipsToAllowlist for bot blocker', async () => {
       detectBotBlockerStub.resolves({
         crawlable: false,
         type: 'generic',

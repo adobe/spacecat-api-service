@@ -30,11 +30,16 @@ const BODY_READ_TIMEOUT_MS = 3000;
 // emulate Chrome's TLS/JA3 and runs no JS, so it cannot predict headless-scraper success
 // on TLS-fingerprint or JS-challenge sites — it is diagnostic only (see the aggregate
 // note in detectBotBlockerMultiClient).
+//
+// Chrome major version presented by the probe — bump this single constant as Chrome
+// advances so the UA and Client Hints stay current (a stale version increasingly draws
+// false "blocked" verdicts from rules that reject outdated Client Hints).
+const CHROME_MAJOR = 125;
 const BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_MAJOR}.0.0.0 Safari/537.36`,
   'Accept-Language': 'en-US,en;q=0.9',
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-  'sec-ch-ua': '"Chromium";v="125", "Not.A/Brand";v="24", "Google Chrome";v="125"',
+  'sec-ch-ua': `"Chromium";v="${CHROME_MAJOR}", "Not.A/Brand";v="24", "Google Chrome";v="${CHROME_MAJOR}"`,
   'sec-ch-ua-mobile': '?0',
   'sec-ch-ua-platform': '"Windows"',
 };

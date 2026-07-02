@@ -608,10 +608,10 @@ export async function performAsoPlgOnboarding({
         await site.save();
       }
 
-      // eslint-disable-next-line id-match
       const botBlockerInfo = {
         type: botBlockerResult.type,
-        ipsToAllowlist: botBlockerResult.ipsToAllowlist || botBlockerResult.ipsToWhitelist,
+        // detectBotBlockerMultiClient already normalizes to ipsToAllowlist.
+        ipsToAllowlist: botBlockerResult.ipsToAllowlist,
         userAgent: botBlockerResult.userAgent,
       };
 

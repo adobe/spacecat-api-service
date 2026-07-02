@@ -68,10 +68,11 @@ export async function createPlgEsmock(stubs, {
         detectBotBlockerMultiClient: async ({ baseUrl, headers }, opts = {}) => {
           const fn = opts.detectBotBlockerFn || detectBotBlockerStub;
           const r = await fn({ baseUrl, headers });
-          // Mirror the production shape (incl. perClient) so the mock can't mask a
-          // future shape regression in onboarding.
+          // Mirror the production shape (incl. the ipsToAllowlist normalization and
+          // perClient) so the mock can't mask a future shape regression in onboarding.
           return {
             ...r,
+            ipsToAllowlist: r.ipsToAllowlist || r.ipsToWhitelist,
             perClient: {
               'adobe-fetch': { crawlable: r.crawlable, type: r.type, confidence: r.confidence },
               undici: { crawlable: r.crawlable, type: r.type, confidence: r.confidence },
