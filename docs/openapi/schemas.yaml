@@ -10946,6 +10946,24 @@ SerenityPrompt:
         Tag names are assumed unique per Semrush project; if duplicates exist,
         only the last entry is retained.
       example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
+    tags:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the tag NAMES this prompt was created/updated with via the
+        legacy name-based write path (`SerenityPromptInput.tags` /
+        `SerenityUpdatePromptRequest.tags`). Only present on a create/update
+        response (`SerenityCreatePromptsResponse.created`, the
+        `updateSerenityPrompt` 200); absent on `GET /serenity/prompts` list
+        items, which carry `tagMap` instead.
+    tagIds:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the upstream tag ids this prompt was created/updated with via
+        the id-based write path (serenity-docs#24). Only present when the
+        request used `tagIds` rather than `tags` — mutually exclusive with a
+        non-empty `tags` on the same response.
 
 SerenityPromptListResponse:
   type: object
@@ -10960,7 +10978,12 @@ SerenityPromptListResponse:
 
 SerenityPromptInput:
   type: object
-  description: One row in a bulk-create prompts request.
+  description: |
+    One row in a bulk-create prompts request. `tags` (names, via the legacy
+    name-based upstream write path) and `tagIds` (upstream tag ids from a
+    prior tags list/create, via the id-based write path — serenity-docs#24)
+    are mutually exclusive: supply at most one. `tagIds`, when present, must
+    be non-empty.
   required: [text, geoTargetId, languageCode]
   properties:
     text: { type: string }
@@ -10968,6 +10991,12 @@ SerenityPromptInput:
       type: array
       items: { type: string }
       default: []
+      description: Tag NAMES. Mutually exclusive with tagIds.
+    tagIds:
+      type: array
+      items: { type: string }
+      minItems: 1
+      description: Upstream tag ids. Mutually exclusive with tags.
     geoTargetId:
       type: integer
       minimum: 1
@@ -11017,11 +11046,13 @@ SerenityUpdatePromptRequest:
   description: |
     Replace the prompt's text and tags. Carries the owning slice in
     `geoTargetId` + `languageCode` so the server can resolve the upstream
-    project without scanning. All four fields are required — the upstream
-    provider's API has no in-place update or GET-by-id, so the server runs
-    DELETE-old + POST-new and treats the body as the full next state.
-    Pass `tags: []` to clear tags.
-  required: [geoTargetId, languageCode, text, tags]
+    project without scanning. `geoTargetId`, `languageCode`, and `text` are
+    always required — the upstream provider's API has no in-place update or
+    GET-by-id, so the server runs DELETE-old + POST-new and treats the body
+    as the full next state. Exactly one of `tags` (pass `[]` to clear) or
+    `tagIds` (non-empty, id-based write path — serenity-docs#24) must also be
+    present; they are mutually exclusive.
+  required: [geoTargetId, languageCode, text]
   properties:
     geoTargetId:
       type: integer
@@ -11033,6 +11064,12 @@ SerenityUpdatePromptRequest:
     tags:
       type: array
       items: { type: string }
+      description: Tag NAMES. Mutually exclusive with tagIds.
+    tagIds:
+      type: array
+      items: { type: string }
+      minItems: 1
+      description: Upstream tag ids. Mutually exclusive with tags.
 
 SerenityBulkDeletePromptsRequest:
   type: object

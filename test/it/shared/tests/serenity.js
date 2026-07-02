@@ -236,9 +236,9 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(res.body.error).to.equal('invalidRequest');
     });
 
-    it('POST /serenity/tags 400s when type is not a creatable dimension', async () => {
+    it('POST /serenity/tags 400s when type is not a recognized open or closed dimension', async () => {
       const res = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'intent', name: 'Whatever', geoTargetId: 2840, languageCode: 'en',
+        type: 'bogus', name: 'Whatever', geoTargetId: 2840, languageCode: 'en',
       });
       expect(res.status).to.equal(400);
       expect(res.body.message).to.match(/type must be one of/i);
@@ -307,14 +307,11 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
     // 1-level nested category tags (needs PE mock >= 1.6.0 — adobe/spacecat-shared#1758,
     // which models parent_id on create, the tree-aware GET, and PATCH re-parent).
     //
-    // MOCK-FIDELITY NOTE: the mock derives a tag id from its name
-    // (`tag-<encodeURIComponent(name)>`), so a `category:*` tag's id embeds a literal `%3A`. That
-    // id round-trips faithfully through a JSON body (so nested CREATE and the derived childrenCount
-    // below ARE exercised end-to-end against the mock), but NOT through a URL query/path (the `%3A`
-    // decodes back to `:` and no longer matches the stored id). So drilling a parent's children by
-    // id, and a successful PATCH-by-id, cannot be asserted against this mock. Those id-in-URL paths
-    // are validated against LIVE Semrush instead — opaque UUID ids, probed 2026-07-01 (see the
-    // rest-transport / tags handler JSDoc). Real callers use UUID ids, so this gap is mock-only.
+    // The mock derives a tag id as an opaque `tag-<sha256(name) prefix>` (spacecat-shared#1760 /
+    // adobe/spacecat-shared#1764) — URL-safe, so it round-trips through both a JSON body AND a URL
+    // query/path segment. Drilling a parent's children by id and a full PATCH-by-id round trip are
+    // therefore exercised end-to-end against the mock below (previously only testable against live
+    // Semrush, per the WP0 probe — see rest-transport / tags handler JSDoc).
     const createTag = (name, parentId) => getHttpClient().admin.post(`${base}/tags`, {
       type: 'category',
       name,
@@ -348,20 +345,113 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(parentRow, 'the parent should list among the roots').to.exist;
       expect(parentRow.parentId).to.equal(null);
       expect(parentRow.childrenCount).to.be.greaterThan(0);
+
+      // Drill the parent's CHILDREN by id (parentId=<parent's upstream id>) — round-trips through
+      // the URL query value now that tag ids are URL-safe (spacecat-shared#1760).
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parentId}`,
+      );
+      expect(children.status).to.equal(200);
+      expect(children.body.items.map((t) => t.id)).to.include(child.body.id);
+      expect(children.body.items.find((t) => t.id === child.body.id).parentId).to.equal(parentId);
+    });
+
+    it('PATCH /serenity/tags/:tagId renames a child by id (URL-safe id round-trips through the path)', async () => {
+      await createUsMarket();
+      const parent = await createTag('Footwear');
+      const child = await createTag('Sneakers', parent.body.id);
+      const childId = child.body.id;
+
+      // Rename-only: parentId omitted — the proxy must re-send the child's current parent itself
+      // (gate 5) so the child stays nested, not promoted to root.
+      const renamed = await getHttpClient().admin.patch(`${base}/tags/${childId}`, {
+        name: 'Boots', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(renamed.status).to.equal(200);
+      expect(renamed.body.tag).to.equal('Boots');
+      expect(renamed.body.parentId).to.equal(parent.body.id);
+
+      // Promote to root: explicit parentId: null (gate 1).
+      const promoted = await getHttpClient().admin.patch(`${base}/tags/${childId}`, {
+        name: 'Boots', parentId: null, geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(promoted.status).to.equal(200);
+      expect(promoted.body.parentId).to.equal(null);
     });
 
     it('PATCH /serenity/tags/:tagId route reaches upstream (unknown id → 502)', async () => {
       await createUsMarket();
       // A UUID tag id the mock has never stored → upstream 404, which the serenity proxy
       // deliberately collapses to 502 (mapError does not echo upstream detail — same convention as
-      // every other serenity write). Proves the new PATCH route → controller → handler → transport
-      // → upstream wiring; the 200 re-parent/rename + the live 404 shape are covered by the unit
-      // tests and the live probe (the mock's name-derived id can't round-trip a PATCH-by-id URL).
+      // every other serenity write). Proves the PATCH route → controller → handler → transport →
+      // upstream wiring for a genuinely unknown id (the known-id round trip is covered above).
       const res = await getHttpClient().admin.patch(
         `${base}/tags/00000000-0000-4000-8000-000000000000`,
         { name: 'category:Ghost', geoTargetId: US_GEO, languageCode: 'en' },
       );
       expect(res.status).to.equal(502);
+    });
+
+    it('POST /serenity/tags resolves a closed-dimension tag idempotently (source/intent/type)', async () => {
+      await createUsMarket();
+      const first = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(first.status).to.equal(200);
+      expect(first.body).to.include({ tag: 'source:ai', created: true });
+      expect(first.body.id).to.be.a('string').that.is.not.empty;
+
+      // Same closed-dimension value again — resolved, not re-created (no upstream collision).
+      const second = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(second.status).to.equal(200);
+      expect(second.body).to.include({ tag: 'source:ai', id: first.body.id, created: false });
+    });
+
+    it('POST /serenity/tags 400s a closed-dimension value outside the fixed enum', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'intent', name: 'not-a-real-intent', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(400);
+    });
+
+    it('POST /serenity/prompts creates a prompt by id-based tagIds (serenity-docs#24)', async () => {
+      await createUsMarket();
+      const category = await createTag('Photography');
+      const child = await createTag('Cameras', category.body.id);
+
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{
+          text: 'What is the best mirrorless camera?',
+          tagIds: [category.body.id, child.body.id],
+          geoTargetId: US_GEO,
+          languageCode: 'en',
+        }],
+      });
+      expect(created.status).to.equal(200);
+      expect(created.body.created).to.have.lengthOf(1);
+      expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
+      expect(created.body.created[0].tagIds).to.deep.equal([category.body.id, child.body.id]);
+      expect(created.body.failed).to.deep.equal([]);
+
+      // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
+      // by the child's id surfaces the new prompt.
+      const list = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en&tagIds=${child.body.id}`,
+      );
+      expect(list.status).to.equal(200);
+      const promptIds = list.body.items.map((p) => p.semrushPromptId);
+      expect(promptIds).to.include(created.body.created[0].semrushPromptId);
+    });
+
+    it('PATCH /serenity/prompts/:id 400s when both tags and tagIds are supplied', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.patch(`${base}/prompts/00000000-0000-4000-8000-000000000000`, {
+        text: 'x', tags: ['a'], tagIds: ['b'], geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(400);
     });
 
     it('POST /serenity/activate provisions + publishes, then deactivate decommissions', async () => {
