@@ -1758,7 +1758,8 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
-    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+    const siteBaseURL = site.getBaseURL();
+    const apexBaseUrl = getHostName(siteBaseURL) || siteBaseURL;
 
     if (!isValidUUID(opportunityId)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
@@ -1818,7 +1819,6 @@ function SuggestionsController(ctx, sqs, env) {
 
     // siteBasePath is constant for the whole batch — resolve it once instead of
     // re-parsing site.getBaseURL() inside isSuggestionInScope for every suggestion.
-    const siteBaseURL = site.getBaseURL();
     let siteBasePath;
     try {
       siteBasePath = new URL(siteBaseURL).pathname;
