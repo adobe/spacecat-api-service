@@ -21,7 +21,6 @@ import esmock from 'esmock';
 import { ValidationError, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import DrsClient from '@adobe/spacecat-shared-drs-client';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -6717,7 +6716,6 @@ describe('Suggestions Controller', () => {
 
   describe('deploySuggestionToEdge (Experiment Async Flow)', () => {
     let edgeSuggestions;
-    let mockDrsClient;
     const JOB_ID = 'c3a7b5e2-1234-4abc-9def-567890abcdef';
     const asyncExperimentEnv = {
       AWS_ENV: 'dev',
@@ -6853,15 +6851,6 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resetBehavior();
       mockSuggestion.allByOpportunityId.resolves(edgeSuggestions);
 
-      mockDrsClient = {
-        createExperimentSchedule: sandbox.stub().resolves({
-          schedule: {
-            schedule_id: 'sched-pre-001',
-          },
-        }),
-      };
-      sandbox.stub(DrsClient, 'createFrom').returns(mockDrsClient);
-
       mockSuggestionDataAccess.AsyncJob.create.resolves({
         getId: () => JOB_ID,
         getStatus: () => 'IN_PROGRESS',
@@ -6885,29 +6874,6 @@ describe('Suggestions Controller', () => {
           remove: sandbox.stub().resolves(),
         };
       });
-    });
-
-    it('returns 207 with failure when suggestions have no prompts', async () => {
-      const noPromptsSugg = {
-        ...edgeSuggestions[0],
-        getData: () => ({
-          url: 'https://example.com/page1',
-          recommendedAction: 'New Heading Title',
-        }),
-      };
-      mockSuggestion.allByOpportunityId.resolves([noPromptsSugg]);
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.metadata.failed).to.equal(1);
-      expect(body.suggestions[0].message).to.include('No prompts found');
     });
 
     it('returns 207 with failure when pre phase has no cronExpression or expiryMs in env', async () => {
@@ -7309,25 +7275,6 @@ describe('Suggestions Controller', () => {
         domainWideSugg, lowScoreSugg, highScoreSugg, approvedSugg,
       ]);
 
-      let uploadedPrompts;
-      context.s3.s3Client.send.callsFake((command) => {
-        const key = command?.Key || command?.input?.Key || '';
-        const cmdName = command?.constructor?.name || '';
-        const isStrategyKey = key.startsWith('workspace/llmo/') && key.endsWith('/strategy.json');
-        if (isStrategyKey && (cmdName.includes('Get'))) {
-          const err = new Error('NoSuchKey');
-          err.name = 'NoSuchKey';
-          return Promise.reject(err);
-        }
-        if (isStrategyKey && cmdName.includes('Put')) {
-          return Promise.resolve({ VersionId: 'v1' });
-        }
-        if (cmdName.includes('Put') && key.endsWith('-prompts.json')) {
-          uploadedPrompts = JSON.parse(command.Body);
-        }
-        return Promise.resolve();
-      });
-
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -7336,9 +7283,11 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      // high-score suggestion's prompt should appear before low-score suggestion's
-      expect(uploadedPrompts[0]).to.deep.equal({ prompt: 'high-score prompt', regions: ['US'] });
-      expect(uploadedPrompts[1]).to.deep.equal({ prompt: 'low-score prompt', regions: ['US'] });
+      // high-score suggestion's url should appear before low-score suggestion's in metadata
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.metadata.urls).to.deep.equal([
+        'https://example.com/high', 'https://example.com/low',
+      ]);
     });
 
     it('excludes domain-wide prompt source candidates that are already deployed, missing aiSummary, or not valuable', async () => {
@@ -7406,25 +7355,6 @@ describe('Suggestions Controller', () => {
         domainWideSugg, eligibleSugg, deployedSugg, noSummarySugg, notValuableSugg,
       ]);
 
-      let uploadedPrompts;
-      context.s3.s3Client.send.callsFake((command) => {
-        const key = command?.Key || command?.input?.Key || '';
-        const cmdName = command?.constructor?.name || '';
-        const isStrategyKey = key.startsWith('workspace/llmo/') && key.endsWith('/strategy.json');
-        if (isStrategyKey && cmdName.includes('Get')) {
-          const err = new Error('NoSuchKey');
-          err.name = 'NoSuchKey';
-          return Promise.reject(err);
-        }
-        if (isStrategyKey && cmdName.includes('Put')) {
-          return Promise.resolve({ VersionId: 'v1' });
-        }
-        if (cmdName.includes('Put') && key.endsWith('-prompts.json')) {
-          uploadedPrompts = JSON.parse(command.Body);
-        }
-        return Promise.resolve();
-      });
-
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -7433,8 +7363,9 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(uploadedPrompts).to.have.lengthOf(1);
-      expect(uploadedPrompts[0]).to.deep.equal({ prompt: 'eligible prompt', regions: ['US'] });
+      // Only the eligible suggestion's url should survive the prompt-source filter into metadata
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.metadata.urls).to.deep.equal(['https://example.com/eligible']);
     });
 
     it('logs warning and continues when domain-wide regex is invalid', async () => {
@@ -7630,26 +7561,12 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.geoExperimentStatus).to.equal('GENERATING_BASELINE');
-      expect(body.geoExperimentPhase).to.equal('pre_analysis_started');
-      expect(body.prePhaseScheduleId).to.equal('sched-pre-001');
+      expect(body.geoExperimentPhase).to.equal('initiated');
+      expect(body.prePhaseScheduleId).to.equal(null);
       expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       expect(body.metadata.success).to.equal(2);
       expect(body.suggestions).to.have.lengthOf(2);
       expect(body.suggestions[0].statusCode).to.equal(202);
-    });
-
-    it('calls DrsClient.createExperimentSchedule with correct params', async () => {
-      await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(mockDrsClient.createExperimentSchedule).to.have.been.calledOnce;
-      const callArgs = mockDrsClient.createExperimentSchedule.firstCall.args[0];
-      expect(callArgs.siteId).to.equal(SITE_ID);
-      expect(callArgs.experimentPhase).to.equal('pre');
     });
 
     it('creates GeoExperiment with correct metadata', async () => {
@@ -7667,10 +7584,11 @@ describe('Suggestions Controller', () => {
       expect(depExpCreateArg.siteId).to.equal(SITE_ID);
       expect(depExpCreateArg.opportunityId).to.equal(OPPORTUNITY_ID);
       expect(depExpCreateArg.status).to.equal('GENERATING_BASELINE');
-      expect(depExpCreateArg.phase).to.equal('pre_analysis_started');
+      expect(depExpCreateArg.phase).to.equal('initiated');
       expect(depExpCreateArg.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
-      const geoEntity = await mockSuggestionDataAccess.GeoExperiment.create.firstCall.returnValue;
-      expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
+      // Prompt fields are no longer set by the API service — owned by the engine.
+      expect(depExpCreateArg.promptsLocation).to.be.undefined;
+      expect(depExpCreateArg.promptsCount).to.be.undefined;
     });
 
     it('deduplicates urls in GeoExperiment metadata when multiple suggestions share the same URL', async () => {
@@ -7714,34 +7632,6 @@ describe('Suggestions Controller', () => {
       expect(createArg.metadata.urls).to.deep.equal([sharedUrl]);
     });
 
-    it('returns 500 when GeoExperiment save fails after DRS schedule is created', async () => {
-      const removeStubFn = sandbox.stub().resolves();
-      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
-        const id = payload.geoExperimentId;
-        return {
-          getId: () => id,
-          setPreScheduleId: sandbox.stub(),
-          setStatus: sandbox.stub(),
-          setUpdatedBy: sandbox.stub(),
-          save: sandbox.stub().rejects(new Error('geo save failed')),
-          remove: removeStubFn,
-        };
-      });
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.suggestions[0].message).to.include('geo save failed');
-      expect(removeStubFn).to.have.been.calledOnce;
-      expect(context.log.error.calledWithMatch('Failed to update GeoExperiment pre schedule ID')).to.equal(true);
-    });
-
     it('returns 207 success and logs warning when marking suggestion as EXPERIMENT_IN_PROGRESS fails', async () => {
       edgeSuggestions[0].save.rejects(new Error('suggestion persist failed'));
 
@@ -7756,21 +7646,6 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.geoExperimentId).to.be.a('string');
       expect(context.log.warn.calledWithMatch(/suggestion.*failed to mark as EXPERIMENT_IN_PROGRESS/i)).to.equal(true);
-    });
-
-    it('returns 207 with failure when S3 prompts upload fails before GeoExperiment is created', async () => {
-      context.s3.s3Client.send.rejects(new Error('s3 denied'));
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.suggestions[0].message).to.include('s3 denied');
     });
 
     it('honors Prefer: respond-async from pathInfo.headers.prefer (current implementation)', async () => {
@@ -7813,24 +7688,6 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.geoExperimentId).to.be.a('string');
-    });
-
-    it('supports createExperimentSchedule response with top-level schedule_id', async () => {
-      mockDrsClient.createExperimentSchedule.resolves({
-        schedule_id: 'sched-pre-flat-001',
-      });
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.prePhaseScheduleId).to.equal('sched-pre-flat-001');
-      expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
     });
 
     it('updates valid suggestions with deploy metadata', async () => {
@@ -7895,49 +7752,6 @@ describe('Suggestions Controller', () => {
       expect(failed[0].uuid).to.equal(notFoundId);
     });
 
-    it('returns 207 with failure when DRS call fails', async () => {
-      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS unavailable'));
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.suggestions[0].message).to.include('DRS unavailable');
-    });
-
-    it('returns 207 with failure when DRS returns no schedule ID', async () => {
-      const removeStubFn = sandbox.stub().resolves();
-      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
-        const id = payload.geoExperimentId;
-        return {
-          getId: () => id,
-          setPreScheduleId: sandbox.stub(),
-          setStatus: sandbox.stub(),
-          setUpdatedBy: sandbox.stub(),
-          save: sandbox.stub().resolves(),
-          remove: removeStubFn,
-        };
-      });
-      mockDrsClient.createExperimentSchedule.resolves({});
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.suggestions[0].message).to.include('DRS schedule created but returned no schedule ID');
-      expect(removeStubFn).to.have.been.called;
-    });
-
     it('uses direct deploy flow when Prefer: respond-async is missing', async () => {
       const mockTokowakaClient = {
         deployToEdge: sandbox.stub().resolves({
@@ -7958,7 +7772,6 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(tokowakaCreateFromStub).to.have.been.calledOnce;
       expect(mockTokowakaClient.deployToEdge).to.have.been.calledOnce;
-      expect(mockDrsClient.createExperimentSchedule).to.not.have.been.called;
       expect(mockSuggestionDataAccess.AsyncJob.create).to.not.have.been.called;
     });
 
@@ -8974,15 +8787,12 @@ describe('Suggestions Controller', () => {
       expect(context.log.error).to.have.been.calledWithMatch(/edge-geo-exp-failed.*Error initiating experiment: strategy boom/);
     });
 
-    it('rolls back the GeoExperiment AND deletes the strategy when DRS fails after strategy is created', async () => {
-      // Symmetric coverage: strategy-create succeeded, then a downstream
-      // step (DRS schedule) failed. The outer catch must run BOTH
-      // compensating actions: geoExperiment.remove() and deleteAtomicStrategy.
-      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1, strategyId: 'will-be-overridden' });
+    it('rolls back the GeoExperiment AND deletes the strategy when a post-creation step throws', async () => {
+      // The atomic strategy is a real S3 side-effect created before the response is
+      // built. If a later step throws (e.g. SuggestionDto.toJSON on malformed data),
+      // the outer catch must compensate: delete the strategy AND remove the experiment.
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1 });
       const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: true, attempts: 1 });
-
-      // Force the DRS schedule call to fail.
-      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS down for cleanup test'));
 
       let geoExperimentRemoveStub;
       mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
@@ -8998,19 +8808,28 @@ describe('Suggestions Controller', () => {
         };
       });
 
-      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+      // Force a throw AFTER strategy creation by making DTO serialization fail.
+      const dtoMod = await import('../../src/dto/suggestion.js');
+      const ControllerWithThrowingDto = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/atomic-strategy-helper.js': {
           createAtomicStrategy: createAtomicStrategyStub,
           deleteAtomicStrategy: deleteAtomicStrategyStub,
         },
+        '../../src/dto/suggestion.js': {
+          ...dtoMod,
+          SuggestionDto: {
+            ...dtoMod.SuggestionDto,
+            toJSON: () => { throw new Error('dto boom'); },
+          },
+        },
       });
-      const controllerWithAtomicStub = ControllerWithAtomicStub({
+      const controllerWithThrowingDto = ControllerWithThrowingDto({
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
       }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
 
-      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+      const response = await controllerWithThrowingDto.deploySuggestionToEdge({
         ...context,
         pathInfo: { headers: { prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -9021,64 +8840,14 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.metadata).to.deep.include({ success: 0, failed: 1 });
-      expect(body.suggestions[0].message).to.include('DRS down for cleanup test');
+      expect(body.suggestions[0].message).to.include('dto boom');
 
-      // Both compensating actions must run: strategy was created, so it
-      // must be deleted; GeoExperiment row must be removed.
+      // Strategy was created, then a later step threw → both compensating actions run.
       expect(createAtomicStrategyStub).to.have.been.calledOnce;
       expect(deleteAtomicStrategyStub).to.have.been.calledOnce;
       expect(geoExperimentRemoveStub).to.have.been.calledOnce;
-
-      // The strategyId passed to deleteAtomicStrategy must equal the
-      // geoExperimentId (per the pinned design: strategy.id === geoExperimentId).
       const deleteArgs = deleteAtomicStrategyStub.firstCall.args[0];
       expect(deleteArgs).to.include.keys('siteId', 'strategyId', 's3', 'log');
-    });
-
-    it('logs but does not fail when deleteAtomicStrategy itself throws during cleanup', async () => {
-      // Defense-in-depth: if cleanup fails, the original failure response
-      // is still returned. The cleanup error is logged with the
-      // [atomic-strategy-cleanup-failed] tag.
-      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1 });
-      const deleteAtomicStrategyStub = sandbox.stub().rejects(new Error('cleanup boom'));
-
-      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS down'));
-
-      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => ({
-        getId: () => payload.geoExperimentId,
-        getName: () => payload.name,
-        setPreScheduleId: sandbox.stub(),
-        setStatus: sandbox.stub(),
-        setUpdatedBy: sandbox.stub(),
-        save: sandbox.stub().resolves(),
-        remove: sandbox.stub().resolves(),
-      }));
-
-      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
-        '../../src/support/atomic-strategy-helper.js': {
-          createAtomicStrategy: createAtomicStrategyStub,
-          deleteAtomicStrategy: deleteAtomicStrategyStub,
-        },
-      });
-      const controllerWithAtomicStub = ControllerWithAtomicStub({
-        dataAccess: mockSuggestionDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
-        ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
-
-      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
-        ...context,
-        pathInfo: { headers: { prefer: 'respond-async' } },
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      // Cleanup failure does not change the response — the original error
-      // still surfaces as a 500 per-suggestion result.
-      expect(response.status).to.equal(207);
-      expect(deleteAtomicStrategyStub).to.have.been.calledOnce;
-      expect(context.log.error).to.have.been.calledWithMatch(/atomic-strategy-cleanup-failed.*cleanup boom/);
     });
 
     it('falls back to <type>-<date> name when geoExperiment.getName() returns falsy', async () => {
