@@ -16,7 +16,9 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES } from '../errors.js';
-import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
+import {
+  normalizeGeoTargetId, normalizeLanguageCode, MAX_TAG_ID_LEN, isValidTagIdFormat,
+} from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
   tagFor, CREATABLE_TAG_DIMENSIONS, CLOSED_TAG_DIMENSIONS, PROJECT_STANDARD_TAGS,
@@ -42,16 +44,19 @@ import { listProjectTagTree } from './markets.js';
  */
 
 const MAX_TAG_NAME_LEN = 100;
-// Upstream tag ids are opaque (UUIDs in practice); this only bounds an absurd
-// value, not a strict format — the id must round-trip from a prior list.
-const MAX_TAG_ID_LEN = 200;
 // Bounds resolveTagTarget's per-root fan-out for an unresolvable tagId — well
 // above any real project's root-category count, just a ceiling on amplification.
 const MAX_ROOTS_TO_SEARCH = 100;
 
 /**
- * Whitespace/control-char + length validation shared by every parentId parser
+ * Length + whitespace/control-char validation shared by every parentId parser
  * below, given an already-trimmed, already-known-to-be-a-string, non-empty id.
+ * Delegates to isValidTagIdFormat (validation.js) for the character check --
+ * the same bound prompts.js's tagIds array entries are held to -- but keeps
+ * the length and character checks as separate throws so the 400 message
+ * pinpoints which one failed. The length check runs first, so by the time
+ * isValidTagIdFormat is consulted `id.length` is already known to be in
+ * bounds and a `false` result can only mean a whitespace/control character.
  */
 function validateParentIdFormat(id) {
   if (id.length > MAX_TAG_ID_LEN) {
@@ -60,11 +65,7 @@ function validateParentIdFormat(id) {
       400,
     );
   }
-  // Whitespace / control chars can never be a valid upstream id and would corrupt
-  // the request (query value on create, path segment on PATCH). Reject them; leave
-  // the id otherwise opaque (do not assume a strict UUID shape).
-  // eslint-disable-next-line no-control-regex
-  if (/[\s\u0000-\u001F\u007F]/.test(id)) {
+  if (!isValidTagIdFormat(id)) {
     throw new ErrorWithStatusCode(
       'parentId must not contain whitespace or control characters',
       400,
@@ -430,8 +431,7 @@ function requireTagId(tagId) {
   if (id.length > MAX_TAG_ID_LEN) {
     throw new ErrorWithStatusCode(`tagId must not exceed ${MAX_TAG_ID_LEN} characters`, 400);
   }
-  // eslint-disable-next-line no-control-regex
-  if (/[\s\u0000-\u001F\u007F]/.test(id)) {
+  if (!isValidTagIdFormat(id)) {
     throw new ErrorWithStatusCode('tagId must not contain whitespace or control characters', 400);
   }
   return id;

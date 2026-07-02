@@ -576,6 +576,30 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(transport.createTaggedPrompts).to.not.have.been.called;
   });
 
+  it('skips an input that supplies BOTH an empty tags array AND tagIds (presence-based exclusivity, not content-based)', async () => {
+    // Regression lock for the content-based-vs-presence-based fix: under the
+    // old check (tags.length > 0), an explicitly-present-but-empty `tags: []`
+    // did not conflict and this input succeeded via the id-based path. Now
+    // both create and update reject on the KEYS being present, matching
+    // parseUpdatePromptBody's contract (see the mirrored 400 test on the
+    // update side above).
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = { createPromptsByIds: sinon.stub(), createTaggedPrompts: sinon.stub() };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tags: [], tagIds: ['tag-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.skipped).to.have.lengthOf(1);
+    expect(transport.createPromptsByIds).to.not.have.been.called;
+    expect(transport.createTaggedPrompts).to.not.have.been.called;
+  });
+
   it('drops falsy tagIds entries and returns empty semrushPromptId when createPromptsByIds has no items', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
