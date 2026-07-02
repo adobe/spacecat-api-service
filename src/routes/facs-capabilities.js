@@ -554,6 +554,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/opportunities': 'llmo/can_configure',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'llmo/can_configure',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'llmo/can_configure',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': 'llmo/can_configure',
       'POST /sites/:siteId/reports': 'llmo/can_configure',
       'POST /sites/:siteId/sandbox/audit': 'llmo/can_configure',
       'POST /sites/:siteId/sentiment/guidelines': 'llmo/can_configure',
@@ -579,6 +580,7 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
@@ -852,6 +854,7 @@ const routeFacsCapabilities = {
       'DELETE /sites/:siteId/opportunities/:opportunityId': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'aso/can_edit',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'aso/can_edit',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_edit',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_edit',
@@ -1174,9 +1177,9 @@ const routeFacsCapabilities = {
     // an X-ASO-API-Key-authenticated internal route, not a FACS resource.
     'service',
     // Serenity proxy params — identifiers from the upstream API (geo
-    // target / language / semrush prompt id), not SpaceCat resources. The
-    // enclosing :brandId is the FACS resource for these routes.
-    'semrushPromptId', 'geoTargetId', 'languageCode',
+    // target / language / semrush prompt id / aio tag id), not SpaceCat
+    // resources. The enclosing :brandId is the FACS resource for these routes.
+    'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId',
     // Preflight job id — sub-resource of the enclosing :siteId.
     'preflightId',
     // Filter / pagination / format params (not entities):

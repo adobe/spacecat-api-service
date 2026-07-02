@@ -230,6 +230,7 @@ export default function getRouteHandlers(
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
@@ -331,6 +332,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': suggestionsController.getSuggestionFixes,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': suggestionsController.createBackofficeReview,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,

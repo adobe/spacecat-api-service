@@ -147,6 +147,7 @@ describe('getRouteHandlers', () => {
     getByStatus: sinon.stub(),
     getByID: sinon.stub(),
     createSuggestions: sinon.stub(),
+    createBackofficeReview: sinon.stub(),
     patchSuggestion: sinon.stub(),
     patchSuggestionsStatus: sinon.stub(),
   };
@@ -874,6 +875,7 @@ describe('getRouteHandlers', () => {
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',
@@ -994,6 +996,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',

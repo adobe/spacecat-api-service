@@ -1,3 +1,45 @@
+# [1.618.0](https://github.com/adobe/spacecat-api-service/compare/v1.617.0...v1.618.0) (2026-07-02)
+
+
+### Features
+
+* **serenity:** consume nested AIO tags (parentId create, tree read, PATCH re-parent) ([#2737](https://github.com/adobe/spacecat-api-service/issues/2737)) ([640cba5](https://github.com/adobe/spacecat-api-service/commit/640cba510d4bfda6fe7ee9d633dcb1f7a09b5d17)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.617.0](https://github.com/adobe/spacecat-api-service/compare/v1.616.0...v1.617.0) (2026-07-02)
+
+
+### Features
+
+* add backoffice review capture endpoint + reviews composition (SITES-43974) ([#2652](https://github.com/adobe/spacecat-api-service/issues/2652)) ([36bc8f5](https://github.com/adobe/spacecat-api-service/commit/36bc8f561454688dd818e0d3cefce2576d333641))
+
+# [1.616.0](https://github.com/adobe/spacecat-api-service/compare/v1.615.0...v1.616.0) (2026-07-01)
+
+
+### Features
+
+* **auth:** wire facsWrapper into the middleware chain ([#2726](https://github.com/adobe/spacecat-api-service/issues/2726)) ([fe51085](https://github.com/adobe/spacecat-api-service/commit/fe51085925a7e8312cc7b2bef0ced613d9b388c2))
+
+# [1.615.0](https://github.com/adobe/spacecat-api-service/compare/v1.614.0...v1.615.0) (2026-07-01)
+
+
+### Features
+
+* return per-prompt userIntent in topic-prompts endpoint | LLMO-5950 ([#2735](https://github.com/adobe/spacecat-api-service/issues/2735)) ([5043c91](https://github.com/adobe/spacecat-api-service/commit/5043c91cc3fbe4b3ffde8a5e44dc3a70ec1fb1a3))
+
+# [1.614.0](https://github.com/adobe/spacecat-api-service/compare/v1.613.4...v1.614.0) (2026-07-01)
+
+
+### Features
+
+* add ive support for summarization opportunity ([#2736](https://github.com/adobe/spacecat-api-service/issues/2736)) ([67977c0](https://github.com/adobe/spacecat-api-service/commit/67977c0ca4e76cc60db70aab46a50a3136bbbf0e))
+
+## [1.613.4](https://github.com/adobe/spacecat-api-service/compare/v1.613.3...v1.613.4) (2026-07-01)
+
+
+### Bug Fixes
+
+* remove ims user token dependency to create promise token while creating fixes ([#2732](https://github.com/adobe/spacecat-api-service/issues/2732)) ([9ac67ac](https://github.com/adobe/spacecat-api-service/commit/9ac67ac717cfba5a93d4d38793db9738a9fd1af4))
+
 ## [1.613.3](https://github.com/adobe/spacecat-api-service/compare/v1.613.2...v1.613.3) (2026-07-01)
 
 

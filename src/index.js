@@ -27,6 +27,7 @@ import {
   JwtHandler,
   s2sAuthWrapper,
   readOnlyAdminWrapper,
+  facsWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
@@ -101,6 +102,7 @@ import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
+import routeFacsCapabilities from './routes/facs-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -411,6 +413,9 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
 //    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
 //    (fail-closed), so unmapped routes are blocked for read-only admins
+// 4. facsWrapper — innermost (runs last, just before the route handler): enforces the
+//    hybrid MAC/FACS permission model (JWT facs_permissions ∪ state-layer grants) for
+//    FACS-governed external callers; internal identities and non-enrolled orgs bypass
 //
 // authHandlers order contract:
 //  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
@@ -454,6 +459,12 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
+  // Innermost: runs after auth wrappers have populated authInfo and after
+  // dataAccess/enrichPathInfo (applied on `main`), but before the route handler.
+  // Enforces the hybrid MAC/FACS model (JWT facs_permissions ∪ state-layer grants)
+  // for FACS-governed external callers; internal identities and non-enrolled orgs
+  // bypass. See routeFacsCapabilities for route → capability classification.
+  .with(facsWrapper, { routeFacsCapabilities })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,

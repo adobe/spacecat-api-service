@@ -673,6 +673,64 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.listPromptsByTags).to.have.been.calledWith(WS, 'p-tag');
     });
 
+    it('parentId drills the standalone tree (draft view) instead of the prompt merge', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listPromptsByTags: sinon.stub(),
+        listProjectTags: sinon.stub().resolves({
+          page: 1,
+          total: 1,
+          items: [{
+            id: 'child-1',
+            name: 'category:Sneakers',
+            parent_id: 'root-1',
+            children_count: 0,
+            path: [{ id: 'root-1', name: 'category:Footwear' }],
+          }],
+        }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en', parentId: 'root-1' }, log);
+      expect(result.items).to.deep.equal([{
+        id: 'child-1',
+        name: 'category:Sneakers',
+        parentId: 'root-1',
+        childrenCount: 0,
+        path: [{ id: 'root-1', name: 'category:Footwear' }],
+      }]);
+      expect(transport.listPromptsByTags).to.not.have.been.called;
+      expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(WS, 'p-tag', {
+        parentId: 'root-1', page: 1, limit: 100, draft: true,
+      });
+    });
+
+    it('400s a parentId query over the length ceiling (MysticatBot review, PR 2737)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listProjectTags: sinon.stub(),
+      });
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', parentId: 'x'.repeat(201) },
+        log,
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
+    it('400s a parentId query containing a control character (MysticatBot review, PR 2737)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listProjectTags: sinon.stub(),
+      });
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}` },
+        log,
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
     it('merges standalone tags (prompt-less categories) with prompt-derived ones, deduped by name', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
