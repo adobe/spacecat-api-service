@@ -366,30 +366,6 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * PUT /v2/.../aio/prompts/tags — batch-updates a prompt's tag
-     * REFERENCES (not its text). Body: { items: [{ id, references, replace
-     * }, ...] } (id = existing prompt id, references = tag ids). Per item:
-     * `replace: false` MERGES `references` onto the prompt's existing tag
-     * set; `replace: true` REPLACES the set with exactly `references`. An
-     * unknown prompt `id` is skipped SILENTLY — live 204s with no "not
-     * found" signal, so this call alone cannot confirm a prompt exists.
-     * Response: 204 No Content (`unwrap` resolves to `null`).
-     *
-     * @param {string} semrushWorkspaceId
-     * @param {string} projectId
-     * @param {Array<{ id: string, references: string[], replace: boolean }>} items
-     */
-    async updatePromptTags(semrushWorkspaceId, projectId, items) {
-      return unwrap('PUT', await projects.PUT(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tags',
-        {
-          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
-          body: { items },
-        },
-      ));
-    },
-
-    /**
      * DELETE /v2/.../aio/prompts — deletes prompts by their Semrush ids in
      * this project. Body shape: { ids: [...] }.
      */

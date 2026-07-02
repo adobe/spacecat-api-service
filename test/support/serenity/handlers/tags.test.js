@@ -1048,5 +1048,33 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         { name: 'SneakersRenamed', parentId: 'root-1' },
       );
     });
+
+    it('forwards an explicit null parentId as promote-to-root (twin of the flat-mode gate 1 fix)', async () => {
+      const resolveProjectStub = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const handler = await esmock('../../../../src/support/serenity/handlers/tags.js', {
+        '../../../../src/support/serenity/subworkspace-projects.js': {
+          resolveProject: resolveProjectStub,
+        },
+      });
+      const transport = makeChildTreeTransport('root-1', 'child-1', {
+        updateProjectTag: sinon.stub().resolves({ id: 'child-1', name: 'Sneakers', parent_id: null }),
+      });
+      const res = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        'child-1',
+        {
+          name: 'Sneakers', parentId: null, geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.body).to.include({ tag: 'Sneakers', parentId: null });
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-sub-1',
+        'child-1',
+        { name: 'Sneakers', parentId: null },
+      );
+    });
   });
 });

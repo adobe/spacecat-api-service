@@ -326,6 +326,22 @@ describe('prompts-subworkspace handlers', () => {
       }, log)).to.be.rejected;
       expect(transport.createTaggedPrompts).to.not.have.been.called;
     });
+
+    it('logs and re-throws when createOnePrompt fails AFTER a successful delete (data-loss window)', async () => {
+      const createErr = Object.assign(new Error('unknown tag id: bogus'), { status: 500 });
+      const transport = makeTransport({
+        createPromptsByIds: sinon.stub().rejects(createErr),
+      });
+      const errorLog = sinon.stub();
+      await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: ['bogus'], geoTargetId: 2840, languageCode: 'en',
+      }, { ...log, error: errorLog })).to.be.rejectedWith(/unknown tag id: bogus/);
+      expect(transport.deletePromptsByIds).to.have.been.calledOnce;
+      expect(errorLog).to.have.been.calledOnceWith(
+        sinon.match(/createOnePrompt failed AFTER a successful delete/),
+      );
+      expect(transport.publishProject).to.not.have.been.called;
+    });
   });
 
   describe('handleBulkDeletePromptsSubworkspace', () => {

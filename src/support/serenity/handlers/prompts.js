@@ -17,7 +17,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../../utils.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
-import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
+import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
@@ -185,33 +185,66 @@ export async function publishAffected(transport, semrushWorkspaceId, projectIds,
 }
 
 /**
+ * Trims a raw `tagIds` array to strings, drops anything empty or malformed
+ * (see {@link isValidTagIdFormat} -- the same length/control-char bound
+ * `parentId` is held to), and caps the result at {@link MAX_TAG_IDS} -- the
+ * same cap the tagIds *query* filter already enforces above, so a bulk write
+ * can't fan out further than a bulk read is allowed to. Shared by
+ * {@link normalizePromptInput} (create) and {@link parseUpdatePromptBody}
+ * (update) so the two write paths can't silently diverge on what counts as
+ * a valid tag id.
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function sanitizeTagIds(raw) {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((t) => String(t || '').trim())
+    .filter((t) => isValidTagIdFormat(t))
+    .slice(0, MAX_TAG_IDS);
+}
+
+/**
  * Normalizes one bulk-create/update prompt input. `tags` (names, the legacy
  * write path via `aio/prompts/tagged`) and `tagIds` (upstream tag ids, the
  * id-based write path via `aio/prompts`) are MUTUALLY EXCLUSIVE — at most one
- * may be present, and `tagIds` when present must be non-empty. `tagIds` stays
- * `undefined` when absent so the handler can branch on
- * `input.tagIds !== undefined` to pick the write path; `tags` always
- * defaults to `[]` (unused, not `undefined`) to keep the name-based path's
- * existing contract unchanged.
+ * of the two BODY KEYS may be present (presence-based, matching
+ * {@link parseUpdatePromptBody}'s PATCH contract so the same input shape is
+ * accepted/rejected identically on create and update), and `tagIds` when
+ * present must resolve to a non-empty array. `tagIds` stays `undefined` when
+ * absent so the handler can branch on `input.tagIds !== undefined` to pick
+ * the write path; `tags` always defaults to `[]` (unused, not `undefined`)
+ * to keep the name-based path's existing contract unchanged.
  */
 export function normalizePromptInput(input) {
   const text = String(input?.text || '').trim();
   const languageCode = normalizeLanguageCode(input?.languageCode);
   const geoTargetId = normalizeGeoTargetId(Number(input?.geoTargetId));
-  const tags = Array.isArray(input?.tags)
-    ? input.tags.map((t) => String(t || '').trim()).filter(Boolean)
-    : [];
-  const tagIds = Array.isArray(input?.tagIds)
-    ? input.tagIds.map((t) => String(t || '').trim()).filter(Boolean)
-    : undefined;
   if (!text || languageCode === null || geoTargetId === null) {
     return null;
   }
-  if (tagIds !== undefined && (tags.length > 0 || tagIds.length === 0)) {
+  const hasTagsField = input?.tags !== undefined;
+  const hasTagIdsField = input?.tagIds !== undefined;
+  if (hasTagsField && hasTagIdsField) {
     return null;
   }
+  if (hasTagIdsField) {
+    const tagIds = sanitizeTagIds(input.tagIds);
+    if (tagIds.length === 0) {
+      return null;
+    }
+    return {
+      text, languageCode, geoTargetId, tags: [], tagIds,
+    };
+  }
+  const tags = Array.isArray(input?.tags)
+    ? input.tags.map((t) => String(t || '').trim()).filter(Boolean)
+    : [];
   return {
-    text, languageCode, geoTargetId, tags, tagIds,
+    text, languageCode, geoTargetId, tags, tagIds: undefined,
   };
 }
 
@@ -282,9 +315,7 @@ export function parseUpdatePromptBody(body) {
   }
   const text = String(body.text);
   if (hasTagIdsField) {
-    const tagIds = Array.isArray(body.tagIds)
-      ? body.tagIds.map((t) => String(t || '').trim()).filter(Boolean)
-      : [];
+    const tagIds = sanitizeTagIds(body.tagIds);
     if (tagIds.length === 0) {
       return {
         ok: false,
@@ -543,9 +574,24 @@ export async function handleUpdatePrompt(
     throw e;
   }
 
-  const newSemrushPromptId = await createOnePrompt(transport, semrushWorkspaceId, projectId, {
-    text: nextText, tags: nextTags, tagIds: nextTagIds,
-  });
+  let newSemrushPromptId;
+  try {
+    newSemrushPromptId = await createOnePrompt(transport, semrushWorkspaceId, projectId, {
+      text: nextText, tags: nextTags, tagIds: nextTagIds,
+    });
+  } catch (e) {
+    // The DELETE above already succeeded, so the old prompt is gone upstream —
+    // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
+    // create) is a genuine data-loss event, not a retryable no-op. Log it
+    // distinctly from the pre-delete failure above so on-call can tell "nothing
+    // happened" apart from "the prompt is gone and must be recreated manually".
+    log?.error?.('handleUpdatePrompt: createOnePrompt failed AFTER a successful delete; the prompt is now lost upstream and must be recreated manually', {
+      projectId,
+      semrushPromptId,
+      error: e.message,
+    });
+    throw e;
+  }
 
   invalidateTagCacheForProject(semrushWorkspaceId, projectId);
 

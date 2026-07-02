@@ -10880,6 +10880,24 @@ SerenityPrompt:
         Tag names are assumed unique per Semrush project; if duplicates exist,
         only the last entry is retained.
       example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
+    tags:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the tag NAMES this prompt was created/updated with via the
+        legacy name-based write path (`SerenityPromptInput.tags` /
+        `SerenityUpdatePromptRequest.tags`). Only present on a create/update
+        response (`SerenityCreatePromptsResponse.created`, the
+        `updateSerenityPrompt` 200); absent on `GET /serenity/prompts` list
+        items, which carry `tagMap` instead.
+    tagIds:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the upstream tag ids this prompt was created/updated with via
+        the id-based write path (serenity-docs#24). Only present when the
+        request used `tagIds` rather than `tags` — mutually exclusive with a
+        non-empty `tags` on the same response.
 
 SerenityPromptListResponse:
   type: object

@@ -472,21 +472,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('updatePromptTags', () => {
-    it('PUTs to /v2/.../aio/prompts/tags with { items }', async () => {
-      fetchStub.resolves(fetchOk(null));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const items = [{ id: 'prompt-1', references: ['tag-1'], replace: false }];
-      await transport.updatePromptTags(WORKSPACE_ID, PROJECT_ID, items);
-
-      const call = await callOf(fetchStub);
-      expect(call.method).to.equal('PUT');
-      expect(call.url).to.match(/\/aio\/prompts\/tags$/);
-      expect(JSON.parse(call.body)).to.deep.equal({ items });
-    });
-  });
-
   describe('deletePromptsByIds', () => {
     it('DELETEs /v2/.../aio/prompts with body { ids }', async () => {
       fetchStub.resolves(fetchOk(null));

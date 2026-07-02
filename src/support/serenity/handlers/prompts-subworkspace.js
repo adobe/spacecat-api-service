@@ -266,9 +266,24 @@ export async function handleUpdatePromptSubworkspace(
     throw e;
   }
 
-  const newSemrushPromptId = await createOnePrompt(transport, workspaceId, projectId, {
-    text: nextText, tags: nextTags, tagIds: nextTagIds,
-  });
+  let newSemrushPromptId;
+  try {
+    newSemrushPromptId = await createOnePrompt(transport, workspaceId, projectId, {
+      text: nextText, tags: nextTags, tagIds: nextTagIds,
+    });
+  } catch (e) {
+    // The DELETE above already succeeded, so the old prompt is gone upstream —
+    // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
+    // create) is a genuine data-loss event, not a retryable no-op. Log it
+    // distinctly from the pre-delete failure above so on-call can tell "nothing
+    // happened" apart from "the prompt is gone and must be recreated manually".
+    log?.error?.('handleUpdatePromptSubworkspace: createOnePrompt failed AFTER a successful delete; the prompt is now lost upstream and must be recreated manually', {
+      projectId,
+      semrushPromptId,
+      error: e.message,
+    });
+    throw e;
+  }
 
   invalidateTagCacheForProject(workspaceId, projectId);
 
