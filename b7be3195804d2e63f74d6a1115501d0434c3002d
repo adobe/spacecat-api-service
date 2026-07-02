@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "full",
+  "commit_sha": "b7be3195804d2e63f74d6a1115501d0434c3002d",
+  "author": "cboldis@yahoo.com",
+  "timestamp": "2026-07-02T19:44:46+03:00",
+  "detection": {
+    "ai_assisted": true,
+    "method": "heuristic",
+    "tool": "claude-code",
+    "model": "",
+    "confidence": 0.9
+  },
+  "stats": {
+    "total_additions": 21,
+    "total_deletions": 2,
+    "ai_additions": 21,
+    "ai_deletions": 2,
+    "human_additions": 0,
+    "human_deletions": 0
+  },
+  "files": {
+    "src/support/serenity/rest-transport.js": {
+      "ai_additions": 21,
+      "human_additions": 0,
+      "ai_deletions": 2,
+      "human_deletions": 0
+    }
+  }
+}
