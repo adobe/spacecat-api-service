@@ -10,10 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl, detectBotBlocker } from '@adobe/spacecat-shared-utils';
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
+import { detectBotBlockerMultiClient } from '../../bot-blocker-multi-client.js';
 
 const COMMAND_ID = 'detect-bot-blocker';
 const PHRASES = ['detect bot-blocker', 'detect bot blocker', 'check bot blocker'];
@@ -103,10 +104,23 @@ function DetectBotBlockerCommand(context) {
     await say(`:mag: Checking bot blocker for \`${baseURL}\`...`);
 
     try {
-      const result = await detectBotBlocker({ baseUrl: baseURL });
+      const result = await detectBotBlockerMultiClient({ baseUrl: baseURL }, { log });
       const formattedResult = formatResult(result);
 
-      await say(`:robot_face: *Bot Blocker Detection Results for* \`${baseURL}\`\n\n${formattedResult}`);
+      // Per-client breakdown: a site can allow one HTTP client while blocking another
+      // (Cloudflare fingerprints the client), so the aggregate alone hides which audits
+      // will fail. headless Chrome is not probed here (no browser in this service).
+      const perClientLines = Object.entries(result.perClient || {})
+        .map(([client, r]) => {
+          const emoji = r.crawlable ? ':white_check_mark:' : ':no_entry:';
+          return `   • \`${client}\`: ${emoji} ${r.crawlable ? 'allowed' : `blocked (${r.type})`}`;
+        })
+        .join('\n');
+      const perClientBlock = perClientLines
+        ? `\n:gear: *Per client:*\n${perClientLines}`
+        : '';
+
+      await say(`:robot_face: *Bot Blocker Detection Results for* \`${baseURL}\`\n\n${formattedResult}${perClientBlock}`);
     } catch (error) {
       log.error(`detect-bot-blocker command: failed for URL ${baseURL}`, error);
       await postErrorMessage(say, error);

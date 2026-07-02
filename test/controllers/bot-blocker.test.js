@@ -75,7 +75,9 @@ describe('Bot Blocker Controller', () => {
       '@adobe/spacecat-shared-utils': {
         isNonEmptyObject: (obj) => obj !== null && typeof obj === 'object' && Object.keys(obj).length > 0,
         isValidUUID: isValidUUIDStub,
-        detectBotBlocker: detectBotBlockerStub,
+      },
+      '../../src/support/bot-blocker-multi-client.js': {
+        detectBotBlockerMultiClient: detectBotBlockerStub,
       },
       '../../src/support/access-control-util.js': {
         default: {

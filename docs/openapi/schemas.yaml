@@ -83,6 +83,51 @@ BotBlockerResult:
       type: string
       description: Optional reason or additional context for the detection result
       example: 'HTTP 403 Forbidden - access denied'
+    userAgent:
+      type: string
+      description: Optional User-Agent used for the probe (surfaced when a block is detected, to aid allowlisting)
+      example: 'Spacecat/1.0'
+    ipsToAllowlist:
+      type: array
+      description: Optional list of SpaceCat egress IPs the customer should allowlist to unblock crawling
+      items:
+        type: string
+      example: ['18.232.5.47', '3.94.219.54']
+    perClient:
+      type: object
+      description: >-
+        Per-HTTP-client crawlability breakdown. Cloudflare Bot Management keys on the
+        client's TLS/HTTP fingerprint, so a site can allow one client (e.g. @adobe/fetch)
+        while blocking another (e.g. undici). The top-level `crawlable` is the aggregate
+        over the real audit clients (`adobe-fetch`, `undici`) — false if either is blocked.
+        `undici-browser` is a DIAGNOSTIC probe (undici transport + browser-realistic
+        headers) and is NOT part of the aggregate: contrast it with `undici` to tell a
+        header/UA-based block (undici blocked, undici-browser allowed) from a deeper
+        fingerprint/JS block (both blocked). It does not emulate Chrome's TLS/JA3 or run
+        JS, so it does not predict headless-scraper success.
+      additionalProperties:
+        type: object
+        properties:
+          crawlable:
+            type: boolean
+          type:
+            type: string
+          confidence:
+            type: number
+            format: float
+      example:
+        adobe-fetch:
+          crawlable: true
+          type: 'cloudflare-allowed'
+          confidence: 1
+        undici:
+          crawlable: false
+          type: 'cloudflare'
+          confidence: 0.99
+        undici-browser:
+          crawlable: true
+          type: 'none'
+          confidence: 1
   required:
     - crawlable
     - type
