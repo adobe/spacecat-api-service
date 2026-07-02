@@ -43,6 +43,9 @@ const MAX_TAG_NAME_LEN = 100;
 // Upstream tag ids are opaque (UUIDs in practice); this only bounds an absurd
 // value, not a strict format — the id must round-trip from a prior list.
 const MAX_TAG_ID_LEN = 200;
+// Bounds resolveTagTarget's per-root fan-out for an unresolvable tagId — well
+// above any real project's root-category count, just a ceiling on amplification.
+const MAX_ROOTS_TO_SEARCH = 100;
 
 /**
  * Validates an optional upstream parent tag id (an `id` from a prior tags list).
@@ -272,12 +275,25 @@ export async function handleCreateTagSubworkspace(
   };
 }
 
-/** Throws a 400 for a missing/blank tagId path param. Returns the trimmed id. */
+/**
+ * Throws a 400 for a missing/blank tagId path param, or one too long or
+ * carrying whitespace/control characters -- mirrors {@link parseParentId}'s
+ * validation for consistency; openapi-fetch already encodes path params, so
+ * this is defense-in-depth rather than a live exploit. Returns the trimmed id.
+ */
 function requireTagId(tagId) {
   if (!hasText(tagId)) {
     throw new ErrorWithStatusCode('tagId is required', 400);
   }
-  return String(tagId).trim();
+  const id = String(tagId).trim();
+  if (id.length > MAX_TAG_ID_LEN) {
+    throw new ErrorWithStatusCode(`tagId must not exceed ${MAX_TAG_ID_LEN} characters`, 400);
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001F\u007F]/.test(id)) {
+    throw new ErrorWithStatusCode('tagId must not contain whitespace or control characters', 400);
+  }
+  return id;
 }
 
 /**
@@ -345,7 +361,10 @@ function parseUpdateTagBody(body) {
  * roots first, then (if not found there) each root's children in turn until
  * `tagId` is found. Bounded by the project's root-category count (O(1 +
  * numRoots) upstream calls) -- acceptable for an admin-frequency rename/
- * re-parent action, not a hot path.
+ * re-parent action, not a hot path. Roots with no children are skipped (their
+ * `childrenCount` is 0, so a child lookup can never match), and the walk is
+ * capped at {@link MAX_ROOTS_TO_SEARCH} roots so a bogus `tagId` against a
+ * project with many root categories can't fan out unboundedly.
  *
  * Exists to close a live-verified gap (serenity-docs#24 section 3.1 gate 5,
  * probed 2026-07-02): PATCHing a child with `parent_id` omitted from the
@@ -366,7 +385,9 @@ async function resolveTagTarget(transport, semrushWorkspaceId, projectId, tagId,
   if (roots.items.some((t) => t.id === tagId)) {
     return { kind: 'root', parentId: null };
   }
-  for (const root of roots.items) {
+  const candidates = roots.items.filter((root) => root.childrenCount > 0);
+  const searched = candidates.slice(0, MAX_ROOTS_TO_SEARCH);
+  for (const root of searched) {
     // Sequential by design: stop at the first root whose children contain the
     // target, rather than fanning out every root's children concurrently for
     // what is expected to resolve within the first few roots in practice.

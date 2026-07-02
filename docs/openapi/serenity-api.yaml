@@ -581,7 +581,8 @@ v2-serenity-tag-by-id:
       CURRENT `parentId` itself (never omits it for a child — omission silently
       promotes a child to root upstream), so the parent is safely left
       unchanged either way. Note that promoting a child back to a root is not
-      supported upstream. An unknown `tagId` returns 404.
+      supported upstream. An unknown `tagId` is NOT a 404 — it surfaces as 502,
+      like every serenity proxy write against an upstream error.
     operationId: updateSerenityTag
     security:
       - ims_key: []

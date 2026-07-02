@@ -959,6 +959,34 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
   });
 
+  it('listTags 400s a parentId query over the length ceiling (MysticatBot review, PR 2737)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = { listPromptsByTags: sinon.stub(), listProjectTags: sinon.stub() };
+
+    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'x'.repeat(201),
+    }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('listTags 400s a parentId query containing a control character (MysticatBot review, PR 2737)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = { listPromptsByTags: sinon.stub(), listProjectTags: sinon.stub() };
+
+    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}`,
+    }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
   it('listModels (catalog mode) calls listGlobalAiModels and returns items', async () => {
     const dataAccess = makeDataAccess([]);
     const transport = {

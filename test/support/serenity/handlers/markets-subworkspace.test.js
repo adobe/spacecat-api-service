@@ -703,6 +703,34 @@ describe('markets-subworkspace handlers', () => {
       });
     });
 
+    it('400s a parentId query over the length ceiling (MysticatBot review, PR 2737)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listProjectTags: sinon.stub(),
+      });
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', parentId: 'x'.repeat(201) },
+        log,
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
+    it('400s a parentId query containing a control character (MysticatBot review, PR 2737)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listProjectTags: sinon.stub(),
+      });
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}` },
+        log,
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
     it('merges standalone tags (prompt-less categories) with prompt-derived ones, deduped by name', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),

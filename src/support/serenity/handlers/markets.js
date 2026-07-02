@@ -23,6 +23,31 @@ import { resolveLocation } from '../locations.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
+const MAX_PARENT_ID_QUERY_LEN = 200;
+
+/**
+ * Validates the `parentId` query param for the nested-tree tag read (`''` = roots,
+ * an upstream tag id = that tag's children). Mirrors handlers/tags.js's
+ * `parseParentId` create/PATCH-body validation for a consistent posture across
+ * every path that accepts a parentId, but keeps `''` as a meaningful value here
+ * (it is not omitted/absent — see {@link listProjectTagTree}).
+ *
+ * @param {string} raw - `String(query.parentId)`.
+ * @returns {string} the value, unchanged, once validated.
+ */
+export function validateParentIdQuery(raw) {
+  if (raw.length > MAX_PARENT_ID_QUERY_LEN) {
+    throw new ErrorWithStatusCode(
+      `parentId must not exceed ${MAX_PARENT_ID_QUERY_LEN} characters`,
+      400,
+    );
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001F\u007F]/.test(raw)) {
+    throw new ErrorWithStatusCode('parentId must not contain whitespace or control characters', 400);
+  }
+  return raw;
+}
 
 // Re-exported so existing importers (handlers/markets-subworkspace.js, tests)
 // keep resolving it from here; the implementation now lives in ../locations.js
@@ -762,7 +787,7 @@ export async function handleListTags(
       transport,
       semrushWorkspaceId,
       projectId,
-      String(query.parentId),
+      validateParentIdQuery(String(query.parentId)),
       log,
     );
   }

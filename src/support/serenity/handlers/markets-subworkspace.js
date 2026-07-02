@@ -28,6 +28,7 @@ import {
   listSliceModels,
   syncModelsForProject,
   MAX_MODEL_IDS,
+  validateParentIdQuery,
 } from './markets.js';
 import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
@@ -601,7 +602,13 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // NESTED-TREE MODE (parity with flat handleListTags): a `parentId` query param
   // drills the standalone AIO tag tree instead of the prompt-derived merge below.
   if (query?.parentId !== undefined) {
-    return listProjectTagTree(transport, workspaceId, projectId, String(query.parentId), log);
+    return listProjectTagTree(
+      transport,
+      workspaceId,
+      projectId,
+      validateParentIdQuery(String(query.parentId)),
+      log,
+    );
   }
   // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
   // prompt vocabulary) OR standalone (registered via createProjectTags but not yet

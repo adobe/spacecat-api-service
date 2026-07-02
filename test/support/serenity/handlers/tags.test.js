@@ -615,6 +615,127 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     });
   });
 
+  describe('handleUpdateTag — tagId validation (MysticatBot review, PR 2737)', () => {
+    let handler;
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    it('400s a tagId over the length ceiling', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'x'.repeat(201),
+        { name: 'category:Footwear', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
+    it('400s a tagId containing whitespace', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'tag one',
+        { name: 'category:Footwear', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
+    it('400s a tagId containing a control character', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        `tag-${String.fromCharCode(7)}`,
+        { name: 'category:Footwear', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+  });
+
+  describe('resolveTagTarget — root fan-out bounds (MysticatBot review, PR 2737)', () => {
+    let handler;
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    it('skips a childless root (childrenCount 0) without fetching its children', async () => {
+      const listProjectTags = sinon.stub();
+      listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: '' }))
+        .resolves({
+          page: 1,
+          total: 1,
+          items: [{ id: 'root-empty', name: 'category:Empty', children_count: 0 }],
+        });
+      const transport = makeTransport({ listProjectTags });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      // tagId resolves to 'unknown' (not found among roots or their children) —
+      // same legacy dimension-prefix path as a root, so this succeeds (200); the
+      // assertion under test is the call count, not the outcome.
+      const res = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'no-such-tag',
+        { name: 'category:Whatever', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      // Only the roots-level call — the childless root is never drilled.
+      expect(listProjectTags).to.have.been.calledOnce;
+    });
+
+    it('caps the number of roots searched for an unresolvable tagId', async () => {
+      const ROOT_COUNT = 150;
+      const roots = Array.from({ length: ROOT_COUNT }, (_, i) => ({
+        id: `root-${i}`, name: `category:R${i}`, children_count: 1,
+      }));
+      const listProjectTags = sinon.stub().callsFake((ws, pid, opts) => {
+        if (opts.parentId === '') {
+          // Real pagination: 100 items/page (matches listProjectTagTree's LIMIT),
+          // so this correctly spans 2 pages for 150 roots.
+          const start = (opts.page - 1) * opts.limit;
+          return Promise.resolve({
+            page: opts.page, total: ROOT_COUNT, items: roots.slice(start, start + opts.limit),
+          });
+        }
+        // Any root's children: empty (tagId is never found).
+        return Promise.resolve({ page: 1, total: 0, items: [] });
+      });
+      const transport = makeTransport({ listProjectTags });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'no-such-tag',
+        { name: 'category:Whatever', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      // 2 roots-level pages (150 roots / 100 per page) + at most 100 per-root
+      // drills (the cap), not all 150 — bounds the total at 102, not 152.
+      expect(listProjectTags.callCount).to.be.at.most(102);
+      expect(listProjectTags.callCount).to.be.greaterThan(2);
+    });
+  });
+
   describe('handleUpdateTagSubworkspace', () => {
     const updateBody = {
       name: 'category:Footwear', parentId: 'tag-parent', geoTargetId: 2840, languageCode: 'en',
