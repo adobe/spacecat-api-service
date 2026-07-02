@@ -6841,6 +6841,7 @@ describe('Suggestions Controller', () => {
         getId: sandbox.stub().returns(OPPORTUNITY_ID),
         getSiteId: sandbox.stub().returns(SITE_ID),
         getType: sandbox.stub().returns('headings'),
+        getData: sandbox.stub().returns({}),
       };
 
       site.getBaseURL = sandbox.stub().returns('https://example.com');
@@ -7312,7 +7313,7 @@ describe('Suggestions Controller', () => {
         expect(body.suggestions[0].message).to.include('outside the scope');
       });
 
-      it('logs a warning and passes suggestions through when the site base URL is unparseable', async () => {
+      it('rejects suggestions when the site base URL is unparseable (fail closed)', async () => {
         site.getBaseURL = sandbox.stub().returns('not a valid base url');
         const sugg = {
           ...edgeSuggestions[0],
@@ -7330,9 +7331,10 @@ describe('Suggestions Controller', () => {
           data: { suggestionIds: [SUGGESTION_IDS[0]] },
           env: {},
         });
+        expect(response.status).to.equal(207);
         const body = await response.json();
-        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
-        expect(context.log.warn.calledWithMatch(/unparseable baseURL/)).to.equal(true);
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
       });
 
       it('passes all suggestions through for a root-level site', async () => {
@@ -7403,7 +7405,7 @@ describe('Suggestions Controller', () => {
         expect(body.suggestions[0]?.message).to.not.include('outside the scope');
       });
 
-      it('passes regular suggestion with unparseable URL through the scope guard', async () => {
+      it('rejects a regular suggestion with an unparseable URL on a subpath site (fail closed)', async () => {
         site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
         const badUrlSugg = {
           ...edgeSuggestions[0],
@@ -7421,8 +7423,10 @@ describe('Suggestions Controller', () => {
           data: { suggestionIds: [SUGGESTION_IDS[0]] },
           env: {},
         });
+        expect(response.status).to.equal(207);
         const body = await response.json();
-        expect(body.suggestions[0]?.message).to.not.include('outside the scope');
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].message).to.include('outside the scope');
       });
     });
 

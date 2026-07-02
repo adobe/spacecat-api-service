@@ -1817,23 +1817,7 @@ function SuggestionsController(ctx, sqs, env) {
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
 
-    // siteBasePath is constant for the whole batch — resolve it once instead of
-    // re-parsing site.getBaseURL() inside isSuggestionInScope for every suggestion.
-    let siteBasePath;
-    try {
-      siteBasePath = new URL(siteBaseURL).pathname;
-    } catch {
-      context.log.warn(`[edge-deploy] site ${apexBaseUrl} has unparseable baseURL '${siteBaseURL}', skipping scope guard`);
-    }
-
-    // Returns false when a suggestion's URL or allowedRegexPatterns fall outside the
-    // site's registered base path (e.g. a suggestion for /wolves on a /kings subpath site).
-    // Root-level sites (pathname === '/') pass all suggestions through.
     const isSuggestionInScope = (suggestion) => {
-      if (!siteBasePath || siteBasePath === '/') {
-        return true;
-      }
-
       const data = suggestion.getData();
       if (isDomainWideSuggestion(suggestion) || isPathSuggestion(suggestion)) {
         const patterns = data?.allowedRegexPatterns;
@@ -1844,14 +1828,6 @@ function SuggestionsController(ctx, sqs, env) {
       }
       const url = getSuggestionUrl(data, opportunity);
       if (!url) {
-        return true;
-      }
-      try {
-        // eslint-disable-next-line no-new
-        new URL(url);
-      } catch {
-        // Not an absolute URL — isWithinSiteScope would otherwise treat it as a relative
-        // pathname and reject it; there's nothing reliable to scope-check, so let it through.
         return true;
       }
       return isWithinSiteScope(url, siteBaseURL);
