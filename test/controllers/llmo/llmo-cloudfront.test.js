@@ -14,6 +14,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 use(sinonChai);
 
@@ -87,6 +88,7 @@ describe('LlmoCloudFrontController', () => {
   let verifyRoutingStub;
   let runDeployStepStub;
   let planDeployStub;
+  let probeSiteAndResolveDomainStub;
 
   // The control-plane functions are imported from '@adobe/spacecat-shared-tokowaka-client';
   // the wrappers read the mutable outer stubs so each test can reassign them in beforeEach.
@@ -211,6 +213,10 @@ describe('LlmoCloudFrontController', () => {
       calculateForwardedHost: calculateForwardedHostMock,
       ...getEdgeOptimizeStubs(),
     },
+    // Mock only the network probe; getHostnameWithoutWww stays real (esmock merges the rest).
+    '../../../src/support/edge-routing-utils.js': {
+      probeSiteAndResolveDomain: (...args) => probeSiteAndResolveDomainStub(...args),
+    },
     '../../../src/support/access-control-util.js': accessControlMock,
   });
 
@@ -228,6 +234,7 @@ describe('LlmoCloudFrontController', () => {
     verifyRoutingStub = sinon.stub();
     runDeployStepStub = sinon.stub();
     planDeployStub = sinon.stub();
+    probeSiteAndResolveDomainStub = sinon.stub();
     mockTokowakaClient = { fetchMetaconfig: sinon.stub() };
 
     LlmoCloudFrontController = await esmock(
@@ -336,6 +343,62 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('12-digit');
+    });
+
+    it('reuses the org-persisted external ID when one already exists (no mint/save)', async () => {
+      const EXISTING = '11111111-1111-1111-1111-111111111111';
+      mockSite.getOrganizationId = sinon.stub().returns('org-1');
+      const orgConfig = Config({ edgeOptimizeConfig: { externalId: EXISTING } });
+      const mockOrg = {
+        getConfig: () => orgConfig, setConfig: sinon.stub(), save: sinon.stub().resolves(),
+      };
+      const Organization = { findById: sinon.stub().resolves(mockOrg) };
+
+      const result = await controller.createBootstrapUrl({
+        ...bootstrapContext,
+        dataAccess: { ...mockDataAccess, Organization },
+      });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.externalId).to.equal(EXISTING);
+      expect(mockOrg.save.called).to.equal(false); // reused, not minted
+    });
+
+    it('mints + persists an org external ID on first bootstrap, then reuses it', async () => {
+      mockSite.getOrganizationId = sinon.stub().returns('org-1');
+      const orgConfig = Config({}); // no externalId yet
+      const mockOrg = {
+        getConfig: () => orgConfig, setConfig: sinon.stub(), save: sinon.stub().resolves(),
+      };
+      const Organization = { findById: sinon.stub().resolves(mockOrg) };
+
+      const result = await controller.createBootstrapUrl({
+        ...bootstrapContext,
+        dataAccess: { ...mockDataAccess, Organization },
+      });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.externalId).to.match(/^[0-9a-f-]{36}$/); // minted UUID
+      expect(mockOrg.setConfig).to.have.been.called;
+      expect(mockOrg.save).to.have.been.called;
+      // persisted on the org config → the quick-create link carries the same id
+      expect(orgConfig.getEdgeOptimizeConfig().externalId).to.equal(body.externalId);
+    });
+
+    it('falls back to a fresh external ID when the org cannot be resolved', async () => {
+      mockSite.getOrganizationId = sinon.stub().returns('org-missing');
+      const Organization = { findById: sinon.stub().resolves(null) };
+
+      const result = await controller.createBootstrapUrl({
+        ...bootstrapContext,
+        dataAccess: { ...mockDataAccess, Organization },
+      });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.externalId).to.match(/^[0-9a-f-]{36}$/);
     });
 
     it('returns 400 when template hosting is not configured (no S3 client)', async () => {
@@ -1570,6 +1633,7 @@ describe('LlmoCloudFrontController', () => {
         requestId: 'req-123',
         details: { bot: { status: 200, headers: {} }, human: { status: 200, headers: {} } },
       });
+      probeSiteAndResolveDomainStub = sinon.stub().resolves('www.example.com');
       verifyContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
@@ -1582,38 +1646,44 @@ describe('LlmoCloudFrontController', () => {
       };
     });
 
-    it('resolves the domain from the site and verifies routing (no distribution lookup)', async () => {
+    it('resolves the domain by probing the site, then verifies routing', async () => {
       const result = await controller.verifyRouting(verifyContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.passed).to.equal(true);
       expect(body.requestId).to.equal('req-123');
+      expect(probeSiteAndResolveDomainStub.calledOnce).to.equal(true);
       expect(verifyRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
-      expect(listDistributionsStub.called).to.equal(false);
     });
 
-    it('uses an explicit domain when provided (no distribution lookup)', async () => {
+    it('uses an explicit domain when provided (no probe)', async () => {
       await controller.verifyRouting({ ...verifyContext, data: { ...verifyContext.data, domain: 'www.example.com' } });
-      expect(listDistributionsStub.called).to.equal(false);
+      expect(probeSiteAndResolveDomainStub.called).to.equal(false);
       expect(verifyRoutingStub.calledOnceWith('https://www.example.com/')).to.equal(true);
     });
 
-    it('falls back to the distribution domain when the site host is unavailable', async () => {
-      mockSite.getBaseURL.returns('');
-      const result = await controller.verifyRouting(verifyContext);
-      expect(result.status).to.equal(200);
-      expect(verifyRoutingStub.calledOnceWith('https://d111111abcdef8.cloudfront.net/')).to.equal(true);
-      expect(listDistributionsStub.calledOnce).to.equal(true);
+    it('probes the overrideBaseURL (not baseURL) when one is configured', async () => {
+      mockConfig.getFetchConfig = sinon.stub().returns({ overrideBaseURL: 'https://canonical.example.com' });
+      await controller.verifyRouting(verifyContext);
+      expect(probeSiteAndResolveDomainStub.calledOnceWith('https://canonical.example.com')).to.equal(true);
     });
 
-    it('returns 400 when no domain can be resolved (no site host, no distribution)', async () => {
-      mockSite.getBaseURL.returns('');
-      listDistributionsStub = sinon.stub().resolves([]);
+    it('returns 400 when the probe resolves an empty domain', async () => {
+      probeSiteAndResolveDomainStub = sinon.stub().resolves('');
       const result = await controller.verifyRouting(verifyContext);
       expect(result.status).to.equal(400);
+      expect(verifyRoutingStub.called).to.equal(false);
+    });
+
+    it('returns passed:false (keeps polling) when the probe reports routing not active', async () => {
+      probeSiteAndResolveDomainStub = sinon.stub().rejects(new Error('default UA routing is not yet active'));
+      const result = await controller.verifyRouting(verifyContext);
+      expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.message).to.include('domain');
+      expect(body.passed).to.equal(false);
+      expect(body.reason).to.include('not yet active');
+      expect(verifyRoutingStub.called).to.equal(false);
     });
 
     it('returns 400 for an invalid account id', async () => {
@@ -1844,6 +1914,16 @@ describe('LlmoCloudFrontController', () => {
       const result = await controller.deploy(deployContext);
       expect(result.status).to.equal(400);
       expect(runDeployStepStub.called).to.equal(false);
+    });
+
+    it('allows an apex CNAME for a www site (www-insensitive match)', async () => {
+      // site baseURL is https://www.example.com; the distribution serves the apex example.com.
+      listDistributionsStub.resolves([{
+        id: 'E2EXAMPLE123', domainName: 'd1.cloudfront.net', aliases: ['example.com'], status: 'Deployed', enabled: true,
+      }]);
+      const result = await controller.deploy(deployContext);
+      expect(result.status).to.equal(200);
+      expect(runDeployStepStub.calledOnce).to.equal(true);
     });
 
     it('proceeds despite a domain mismatch when allowDomainMismatch is set (logged override)', async () => {
