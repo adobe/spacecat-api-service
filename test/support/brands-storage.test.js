@@ -359,6 +359,25 @@ describe('brands-storage', () => {
       expect(flatResult.semrushWorkspaceId).to.equal(null);
     });
 
+    it('maps semrush_sub_workspace_id to semrushSubWorkspaceId (transitional mirror), null when absent', async () => {
+      const mirroredRow = makeBrandRow({ semrush_sub_workspace_id: 'ws-sub-123' });
+      const mirroredQuery = createChainableQuery({ data: mirroredRow, error: null });
+      const mirroredResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(mirroredQuery) },
+      );
+      expect(mirroredResult.semrushSubWorkspaceId).to.equal('ws-sub-123');
+
+      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
+      const flatResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(flatQuery) },
+      );
+      expect(flatResult.semrushSubWorkspaceId).to.equal(null);
+    });
+
     it('maps pending_semrush_provisioning to pendingSemrushProvisioning (draft), null when absent', async () => {
       const draft = { primaryUrl: 'https://acme.com', markets: [{ market: 'US', languageCode: 'en' }] };
       const draftRow = makeBrandRow({ status: 'pending', pending_semrush_provisioning: draft });

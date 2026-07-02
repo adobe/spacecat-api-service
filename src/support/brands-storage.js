@@ -245,6 +245,13 @@ function mapDbBrandToV2(row) {
     // brands still in flat mode (no sub-workspace minted yet). Consumers use it
     // to scope per-brand Semrush views to the sub-workspace.
     semrushWorkspaceId: row.semrush_workspace_id || null,
+    // TRANSITIONAL (serenity-docs brand-semrush-mapping-maintenance.md §10
+    // rename, expand phase): read-only mirror of semrushWorkspaceId above,
+    // maintained by the mysticat-data-service brands_sync_semrush_sub_workspace_id
+    // trigger. Additive — semrushWorkspaceId remains the field every consumer
+    // (internal and external) reads until they cut over; this is exposed early
+    // so new/updated consumers can start reading the correctly-named field.
+    semrushSubWorkspaceId: row.semrush_sub_workspace_id || null,
     // Read-only: deferred Semrush provisioning data for a pending (draft) brand
     // (serenity dual-mode). Object { primaryUrl, markets: [{ market,
     // languageCode }] } the wizard collected before provisioning; null once
