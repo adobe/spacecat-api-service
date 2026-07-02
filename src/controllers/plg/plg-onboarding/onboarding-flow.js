@@ -13,6 +13,7 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupPlgSiteSuggestionsAndFixes } from '../plg-onboarding-cleanup.js';
+import { detectBotBlockerMultiClient } from '../../../support/bot-blocker-multi-client.js';
 import { updateRumConfig } from '../../../support/rum-config-service.js';
 import { hasActiveSuggestions } from './displacement.js';
 import {
@@ -593,8 +594,15 @@ export async function performAsoPlgOnboarding({
       }
     }
 
-    // Step 4: Bot blocker check
-    const botBlockerResult = await detectBotBlocker({ baseUrl: baseURL });
+    // Step 4: Bot blocker check. Probe with multiple HTTP clients (@adobe/fetch +
+    // undici) because Cloudflare blocks on client fingerprint — a single-client probe
+    // can report "crawlable" while the clients our audits actually use are blocked
+    // (SITES-47217). `detectBotBlocker` is injected via context for testability and is
+    // forwarded as the @adobe/fetch probe.
+    const botBlockerResult = await detectBotBlockerMultiClient(
+      { baseUrl: baseURL },
+      { log, detectBotBlockerFn: detectBotBlocker },
+    );
     if (!botBlockerResult.crawlable) {
       if (site) {
         await site.save();

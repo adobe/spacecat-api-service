@@ -35,7 +35,9 @@ describe('DetectBotBlockerCommand', () => {
       {
         '@adobe/spacecat-shared-utils': {
           isValidUrl: (url) => url.startsWith('http'),
-          detectBotBlocker: checkBotProtectionStub,
+        },
+        '../../../../src/support/bot-blocker-multi-client.js': {
+          detectBotBlockerMultiClient: checkBotProtectionStub,
         },
         '../../../../src/utils/slack/base.js': {
           extractURLFromSlackInput: extractURLFromSlackInputStub,
@@ -79,6 +81,26 @@ describe('DetectBotBlockerCommand', () => {
     expect(slackContext.say).to.have.been.calledWithMatch('valid URL');
     expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
     expect(checkBotProtectionStub).to.not.have.been.called;
+  });
+
+  it('renders a per-client breakdown when present', async () => {
+    checkBotProtectionStub.resolves({
+      crawlable: false,
+      type: 'cloudflare',
+      confidence: 0.99,
+      perClient: {
+        'adobe-fetch': { crawlable: true, type: 'cloudflare-allowed', confidence: 1 },
+        undici: { crawlable: false, type: 'cloudflare', confidence: 0.99 },
+      },
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://datacom.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Per client');
+    expect(slackContext.say).to.have.been.calledWithMatch('adobe-fetch');
+    expect(slackContext.say).to.have.been.calledWithMatch('undici');
+    expect(slackContext.say).to.have.been.calledWithMatch('blocked (cloudflare)');
   });
 
   it('detects Cloudflare bot blocker', async () => {
