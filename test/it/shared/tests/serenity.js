@@ -236,9 +236,9 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(res.body.error).to.equal('invalidRequest');
     });
 
-    it('POST /serenity/tags 400s when type is not a creatable dimension', async () => {
+    it('POST /serenity/tags 400s when type is not a recognized open or closed dimension', async () => {
       const res = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'intent', name: 'Whatever', geoTargetId: 2840, languageCode: 'en',
+        type: 'bogus', name: 'Whatever', geoTargetId: 2840, languageCode: 'en',
       });
       expect(res.status).to.equal(400);
       expect(res.body.message).to.match(/type must be one of/i);
