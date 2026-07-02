@@ -13,7 +13,7 @@ on:
 
 jobs:
   ci:
-    uses: adobe/mysticat-ci/.github/workflows/service-ci.yaml@v2
+    uses: adobe/mysticat-ci/.github/workflows/service-ci.yaml@v3
     with:
       service-name: api-service
       validate-pr-title: true
@@ -34,12 +34,12 @@ jobs:
       contents: read
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node & NPM
-        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v3
         env:
           MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
