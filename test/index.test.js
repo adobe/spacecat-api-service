@@ -177,7 +177,10 @@ describe('Index Tests', () => {
           findByHashedApiKey: sinon.stub().resolves(null),
         },
         Opportunity: {},
-        Suggestion: {},
+        Suggestion: { findById: sinon.stub() },
+        TaskManagementConnection: { allByOrganizationId: sinon.stub() },
+        Ticket: { findById: sinon.stub() },
+        TicketSuggestion: { findBySuggestionId: sinon.stub() },
       },
       s3Client: {
         send: sinon.stub(),
