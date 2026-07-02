@@ -886,6 +886,79 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     );
   });
 
+  // Nested-tree read: when the request carries a `parentId` query param, the
+  // handler drills the standalone /aio/tags tree via listProjectTags(draft:true)
+  // instead of the prompt-derived aggregation, surfacing childrenCount/path.
+  it('listTags (parentId=\'\') returns roots with childrenCount from the standalone tree', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'root-1', name: 'category:Footwear', parent_id: null, children_count: 2, path: null,
+        }],
+      }),
+    };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: '',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null,
+    }]);
+    // Tree read, not the prompt-derived path.
+    expect(transport.listPromptsByTags).to.not.have.been.called;
+    expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-tree',
+      {
+        parentId: '', page: 1, limit: 100, draft: true,
+      },
+    );
+  });
+
+  it('listTags (parentId=<id>) returns that parent\'s children with a path breadcrumb', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'child-1',
+          name: 'category:Sneakers',
+          parent_id: 'root-1',
+          children_count: 0,
+          path: [{ id: 'root-1', name: 'category:Footwear' }],
+        }],
+      }),
+    };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'root-1',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'child-1',
+      name: 'category:Sneakers',
+      parentId: 'root-1',
+      childrenCount: 0,
+      path: [{ id: 'root-1', name: 'category:Footwear' }],
+    }]);
+    expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
+  });
+
   it('listModels (catalog mode) calls listGlobalAiModels and returns items', async () => {
     const dataAccess = makeDataAccess([]);
     const transport = {

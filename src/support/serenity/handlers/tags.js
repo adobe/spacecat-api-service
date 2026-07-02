@@ -37,14 +37,60 @@ import { tagFor, CREATABLE_TAG_DIMENSIONS } from '../prompt-tags.js';
  */
 
 const MAX_TAG_NAME_LEN = 100;
+// Upstream tag ids are opaque (UUIDs in practice); this only bounds an absurd
+// value, not a strict format — the id must round-trip from a prior list.
+const MAX_TAG_ID_LEN = 200;
+
+/**
+ * Validates an optional upstream parent tag id (an `id` from a prior tags list).
+ * Returns the trimmed id, or `undefined` when absent/empty — an empty parent is a
+ * no-op upstream (a flat/root create), so it is normalized away rather than sent.
+ * Throws a 400 {@link ErrorWithStatusCode} on a malformed value.
+ *
+ * @param {unknown} raw - the request's `parentId`.
+ * @returns {string | undefined}
+ */
+function parseParentId(raw) {
+  if (raw === undefined || raw === null || raw === '') {
+    return undefined;
+  }
+  if (typeof raw !== 'string') {
+    throw new ErrorWithStatusCode('parentId must be a string', 400);
+  }
+  const id = raw.trim();
+  if (!id) {
+    return undefined;
+  }
+  if (id.length > MAX_TAG_ID_LEN) {
+    throw new ErrorWithStatusCode(
+      `parentId must not exceed ${MAX_TAG_ID_LEN} characters`,
+      400,
+    );
+  }
+  // Whitespace / control chars can never be a valid upstream id and would corrupt
+  // the request (query value on create, path segment on PATCH). Reject them; leave
+  // the id otherwise opaque (do not assume a strict UUID shape).
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001F\u007F]/.test(id)) {
+    throw new ErrorWithStatusCode(
+      'parentId must not contain whitespace or control characters',
+      400,
+    );
+  }
+  return id;
+}
 
 /**
  * Validates + normalizes the create-tag body, throwing a 400
  * {@link ErrorWithStatusCode} on the first problem. Returns the parsed
- * `{ type, name, geoTargetId, languageCode }`.
+ * `{ type, name, geoTargetId, languageCode, parentId }`. `parentId` (optional) is
+ * an upstream tag id under which the new tag is nested (1-level category tree).
  *
  * @param {object} body - request body.
- * @returns {{ type: string, name: string, geoTargetId: number, languageCode: string }}
+ * @returns {{
+ *   type: string, name: string, geoTargetId: number,
+ *   languageCode: string, parentId: string | undefined,
+ * }}
  */
 function parseCreateTagBody(body) {
   const type = hasText(body?.type) ? String(body.type).trim().toLowerCase() : '';
@@ -91,9 +137,30 @@ function parseCreateTagBody(body) {
       400,
     );
   }
+  const parentId = parseParentId(body?.parentId);
   return {
-    type, name: rawName, geoTargetId, languageCode,
+    type, name: rawName, geoTargetId, languageCode, parentId,
   };
+}
+
+/**
+ * Picks the created/updated tag's upstream id + parent id out of the transport
+ * result. `createProjectTags` resolves to a LIST (model.TreeNodeResponse[]);
+ * `updateProjectTag` to a single object. Returns `{ id, parentId }` with
+ * `parentId` falling back to the requested `parentId` (so the echo is stable even
+ * if the upstream omits it), or null.
+ *
+ * @param {any} result - transport result (array for create, object for update).
+ * @param {string | undefined} requestedParentId
+ * @returns {{ id: string | undefined, parentId: string | null }}
+ */
+function pickTagIds(result, requestedParentId) {
+  const node = Array.isArray(result) ? result[0] : result;
+  const id = node && typeof node.id === 'string' ? node.id : undefined;
+  const parentId = node && typeof node.parent_id === 'string' && node.parent_id
+    ? node.parent_id
+    : (requestedParentId ?? null);
+  return { id, parentId };
 }
 
 /** Throws a 404 `marketNotFound` for a slice with no backing project. */
@@ -114,7 +181,7 @@ function marketNotFound() {
  * @param {object} dataAccess - data-access layer (BrandSemrushProject).
  * @param {string} brandId - brand UUID.
  * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
- * @param {object} body - request body ({ type, name, geoTargetId, languageCode }).
+ * @param {object} body - request body ({ type, name, geoTargetId, languageCode, parentId? }).
  * @param {object} log - logger.
  * @returns {Promise<{status: number, body: object}>}
  */
@@ -127,7 +194,7 @@ export async function handleCreateTag(
   log,
 ) {
   const {
-    type, name, geoTargetId, languageCode,
+    type, name, geoTargetId, languageCode, parentId,
   } = parseCreateTagBody(body);
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
@@ -138,14 +205,20 @@ export async function handleCreateTag(
     throw marketNotFound();
   }
   const tag = tagFor(type, name);
-  await transport.createProjectTags(semrushWorkspaceId, row.getSemrushProjectId(), [tag]);
+  const created = await transport.createProjectTags(
+    semrushWorkspaceId,
+    row.getSemrushProjectId(),
+    [tag],
+    { parentId },
+  );
+  const { id, parentId: createdParentId } = pickTagIds(created, parentId);
   log?.info?.('handleCreateTag: registered tag', {
-    brandId, geoTargetId, languageCode, tag,
+    brandId, geoTargetId, languageCode, tag, parentId,
   });
   return {
     status: 201,
     body: {
-      brandId, geoTargetId, languageCode, type, name, tag,
+      brandId, geoTargetId, languageCode, type, name, tag, id, parentId: createdParentId,
     },
   };
 }
@@ -156,7 +229,7 @@ export async function handleCreateTag(
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} workspaceId - the brand's subworkspace id.
- * @param {object} body - request body ({ type, name, geoTargetId, languageCode }).
+ * @param {object} body - request body ({ type, name, geoTargetId, languageCode, parentId? }).
  * @param {object} log - logger.
  * @returns {Promise<{status: number, body: object}>}
  */
@@ -167,21 +240,197 @@ export async function handleCreateTagSubworkspace(
   log,
 ) {
   const {
-    type, name, geoTargetId, languageCode,
+    type, name, geoTargetId, languageCode, parentId,
   } = parseCreateTagBody(body);
   const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
     throw marketNotFound();
   }
   const tag = tagFor(type, name);
-  await transport.createProjectTags(workspaceId, String(project.id), [tag]);
+  const created = await transport.createProjectTags(
+    workspaceId,
+    String(project.id),
+    [tag],
+    { parentId },
+  );
+  const { id, parentId: createdParentId } = pickTagIds(created, parentId);
   log?.info?.('handleCreateTagSubworkspace: registered tag', {
-    geoTargetId, languageCode, tag,
+    geoTargetId, languageCode, tag, parentId,
   });
   return {
     status: 201,
     body: {
-      geoTargetId, languageCode, type, name, tag,
+      geoTargetId, languageCode, type, name, tag, id, parentId: createdParentId,
+    },
+  };
+}
+
+/** Throws a 400 for a missing/blank tagId path param. Returns the trimmed id. */
+function requireTagId(tagId) {
+  if (!hasText(tagId)) {
+    throw new ErrorWithStatusCode('tagId is required', 400);
+  }
+  return String(tagId).trim();
+}
+
+/**
+ * Validates + normalizes the update-tag body, throwing a 400 on the first
+ * problem. Unlike create, `name` here is the FULL `<dimension>:<value>` tag
+ * string (upstream requires `name` on every PATCH, so a pure re-parent still
+ * carries the tag's current full name — the caller has it from a prior list). The
+ * dimension must be one of {@link CREATABLE_TAG_DIMENSIONS}, so a PATCH can never
+ * smuggle a tag into a closed taxonomy (`intent`/`source`/`type`). `parentId`
+ * (optional) re-parents when non-empty.
+ *
+ * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).
+ * @returns {{
+ *   tag: string, parentId: string | undefined,
+ *   geoTargetId: number, languageCode: string,
+ * }}
+ */
+function parseUpdateTagBody(body) {
+  const rawName = hasText(body?.name) ? String(body.name).trim() : '';
+  if (!rawName) {
+    throw new ErrorWithStatusCode('name is required', 400);
+  }
+  const colon = rawName.indexOf(':');
+  const dimension = colon > 0 ? rawName.slice(0, colon).toLowerCase() : '';
+  const value = colon > 0 ? rawName.slice(colon + 1) : '';
+  // Widen the frozen tuple to string[] for the runtime membership test (see the
+  // same idiom in parseCreateTagBody).
+  const creatable = /** @type {readonly string[]} */ (CREATABLE_TAG_DIMENSIONS);
+  if (!creatable.includes(dimension) || !value) {
+    throw new ErrorWithStatusCode(
+      `name must be a "<dimension>:<value>" tag where dimension is one of: ${CREATABLE_TAG_DIMENSIONS.join(', ')}`,
+      400,
+    );
+  }
+  if (value.length > MAX_TAG_NAME_LEN) {
+    throw new ErrorWithStatusCode(
+      `name value must not exceed ${MAX_TAG_NAME_LEN} characters`,
+      400,
+    );
+  }
+  // Exactly one ':' — a second colon would smuggle a nested dimension.
+  if (value.includes(':')) {
+    throw new ErrorWithStatusCode('name must contain exactly one ":"', 400);
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F]/.test(value)) {
+    throw new ErrorWithStatusCode('name must not contain control characters', 400);
+  }
+  const parentId = parseParentId(body?.parentId);
+  const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
+  if (geoTargetId === null) {
+    throw new ErrorWithStatusCode('geoTargetId must be a positive integer', 400);
+  }
+  const languageCode = normalizeLanguageCode(body?.languageCode);
+  if (languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$',
+      400,
+    );
+  }
+  return {
+    tag: `${dimension}:${value}`, parentId, geoTargetId, languageCode,
+  };
+}
+
+/**
+ * PATCH /serenity/tags/:tagId (flat mode) — rename and/or re-parent a single tag
+ * in place. The market's project id comes from the persisted `BrandSemrushProject`
+ * mapping (same resolution as handleCreateTag). An unknown `tagId` surfaces as the
+ * upstream 404 (SerenityTransportError) via the controller's mapError.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {object} dataAccess - data-access layer (BrandSemrushProject).
+ * @param {string} brandId - brand UUID.
+ * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
+ * @param {string} tagId - upstream tag id to update.
+ * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{status: number, body: object}>}
+ */
+export async function handleUpdateTag(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  tagId,
+  body,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const {
+    tag, parentId, geoTargetId, languageCode,
+  } = parseUpdateTagBody(body);
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    throw marketNotFound();
+  }
+  const updated = await transport.updateProjectTag(
+    semrushWorkspaceId,
+    row.getSemrushProjectId(),
+    id,
+    { name: tag, parentId },
+  );
+  const { parentId: updatedParentId } = pickTagIds(updated, parentId);
+  log?.info?.('handleUpdateTag: updated tag', {
+    brandId, geoTargetId, languageCode, tagId: id, tag, parentId,
+  });
+  return {
+    status: 200,
+    body: {
+      brandId, geoTargetId, languageCode, tagId: id, tag, parentId: updatedParentId,
+    },
+  };
+}
+
+/**
+ * PATCH /serenity/tags/:tagId (subworkspace mode) — the market's project is
+ * resolved live from the brand's own subworkspace listing (same resolution as
+ * handleCreateTagSubworkspace).
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} workspaceId - the brand's subworkspace id.
+ * @param {string} tagId - upstream tag id to update.
+ * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{status: number, body: object}>}
+ */
+export async function handleUpdateTagSubworkspace(
+  transport,
+  workspaceId,
+  tagId,
+  body,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const {
+    tag, parentId, geoTargetId, languageCode,
+  } = parseUpdateTagBody(body);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    throw marketNotFound();
+  }
+  const updated = await transport.updateProjectTag(
+    workspaceId,
+    String(project.id),
+    id,
+    { name: tag, parentId },
+  );
+  const { parentId: updatedParentId } = pickTagIds(updated, parentId);
+  log?.info?.('handleUpdateTagSubworkspace: updated tag', {
+    geoTargetId, languageCode, tagId: id, tag, parentId,
+  });
+  return {
+    status: 200,
+    body: {
+      geoTargetId, languageCode, tagId: id, tag, parentId: updatedParentId,
     },
   };
 }

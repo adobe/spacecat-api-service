@@ -218,6 +218,26 @@ const FIXTURES = {
       type: 'category', name: 'Running Shoes', geoTargetId: 2840, languageCode: 'en',
     },
   },
+  updateSerenityTag: {
+    expectedStatus: 200,
+    controllerMethod: 'updateTag',
+    handlerName: 'handleUpdateTag',
+    handlerResult: {
+      status: 200,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagId: 'tag-1',
+        tag: 'category:Running Shoes',
+        parentId: 'tag-parent',
+      },
+    },
+    params: { tagId: 'tag-1' },
+    data: {
+      name: 'category:Running Shoes', parentId: 'tag-parent', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
   listSerenityModels: {
     expectedStatus: 200,
     controllerMethod: 'listModels',
@@ -335,6 +355,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
         handleCreateTag: sinon.stub(),
+        handleUpdateTag: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
@@ -384,6 +405,8 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/handlers/tags.js': {
             handleCreateTag: handlerStubs.handleCreateTag,
             handleCreateTagSubworkspace: sinon.stub(),
+            handleUpdateTag: handlerStubs.handleUpdateTag,
+            handleUpdateTagSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: sinon.stub(),
