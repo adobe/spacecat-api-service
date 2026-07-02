@@ -11827,6 +11827,64 @@ ReferralTrafficWeeks:
   required:
     - weeks
 
+SuggestionReview:
+  type: object
+  description: |
+    A human-review feedback event for a suggestion (Learning Agent feedback loop,
+    SITES-43974). Composed at read time from the feedback_event store. Raw patch
+    fields are omitted unless explicitly requested via ?include=reviews,patches.
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-supplied idempotency key for the review.
+    eventTime:
+      type: string
+      format: date-time
+      description: When the review action happened (server-stamped).
+    source:
+      type: string
+      enum: [backoffice, aso_ui, aemy_pr]
+      description: Capture surface (derived server-side from the route).
+    verdict:
+      type: string
+      enum: [up, down]
+      description: The reviewer's verdict.
+    signal:
+      type: string
+      enum: [positive, negative]
+      description: Persisted training label, derived from the verdict.
+    reviewerId:
+      type: string
+      description: >-
+        Server-derived, opaque IMS user identifier (e.g. <id>@<authSrc>) — NOT a
+        mailbox. Stable per user (reviewer-continuity signal). Null when not set.
+    detailMarkdown:
+      type: string
+      description: Sanitised ESE rationale. Null when not provided.
+    rejectionCategory:
+      type: string
+      enum: [product_bug, bad_recommendation, other]
+      description: Optional reject category. Null when not set.
+    stateTransition:
+      type: string
+      description: The accompanying suggestion state transition. Null when not set.
+    tier:
+      type: string
+      enum: [paid, free]
+    previousFix:
+      type: object
+      description: Patch snapshot at review time (only when ?include=...,patches).
+    editedFix:
+      type: object
+      description: ESE-edited patch (only when ?include=...,patches).
+  required:
+    - eventId
+    - eventTime
+    - source
+    - verdict
+    - signal
+    - tier
 StateAccessMapping:
   type: object
   description: |
@@ -11975,6 +12033,92 @@ UserCapabilitiesResponse:
         items:
           type: string
           enum: [jwt, 'state:user', 'state:org']
+
+FacsAuditEvent:
+  type: object
+  description: |
+    One row from the `facs_access_mapping_audit_events` log — a single
+    state-mapping operation (create / patch / delete / revoke) with its
+    outcome. Shape is intentionally flat so the admin UI can render whichever
+    fields it needs. Fields describing the affected binding (`mappingId`,
+    `binding*`, `resource*`, `grantedCapabilities`, `revokeReason`) are null
+    for operations that did not touch a specific row.
+  required:
+    - id
+    - createdAt
+    - imsOrgId
+    - actorId
+    - operation
+    - outcome
+  properties:
+    id: { $ref: '#/Id' }
+    createdAt: { $ref: '#/DateTime' }
+    requestId:
+      type: [string, 'null']
+      description: Correlates the audit event with the originating request.
+    imsOrgId:
+      type: string
+      example: ABC123@AdobeOrg
+    actorId:
+      type: string
+      description: IMS ident of the caller who performed the operation.
+      example: admin@AdobeID
+    operation:
+      type: string
+      description: The attempted state-mapping operation.
+      example: create
+    outcome:
+      type: string
+      description: Whether the operation was allowed and applied, or denied.
+      example: allowed
+    denialReason:
+      type: [string, 'null']
+      description: Populated when `outcome` is a denial.
+    statusCode:
+      type: [integer, 'null']
+      description: HTTP status the operation returned.
+      example: 201
+    errorMessage:
+      type: [string, 'null']
+    mappingId:
+      type: [string, 'null']
+      description: ID of the affected `facs_access_mappings` row, when applicable.
+    bindingSubjectType:
+      oneOf:
+        - { $ref: '#/StateAccessMappingSubjectType' }
+        - type: 'null'
+    bindingSubjectId:
+      type: [string, 'null']
+      example: someone@AdobeID
+    resourceType:
+      oneOf:
+        - { $ref: '#/StateAccessMappingResourceType' }
+        - type: 'null'
+    resourceId:
+      type: [string, 'null']
+      example: '11111111-2222-4333-9444-555555555555'
+    product:
+      type: [string, 'null']
+      enum: [LLMO, ASO, ACO, null]
+      example: LLMO
+    grantedCapabilities:
+      oneOf:
+        - type: array
+          items: { $ref: '#/StateGrantedCapability' }
+        - type: 'null'
+    revokeReason:
+      type: [string, 'null']
+
+FacsAuditLogsResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/FacsAuditEvent' }
+    cursor:
+      type: [string, 'null']
+      description: Opaque cursor for fetching the next page, or null when the result is the final page.
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
 
