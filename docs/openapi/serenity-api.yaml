@@ -519,11 +519,14 @@ v2-serenity-tags:
                 pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
                 description: BCP-47 primary subtag of the market slice.
               parentId:
-                type: string
+                type: [string, 'null']
                 description: |
                   Optional upstream tag id (from a prior tags list) to nest the
-                  new OPEN-dimension tag under as a 1-level child. Omit for a
-                  root/flat tag. Not allowed for a closed dimension.
+                  new OPEN-dimension tag under as a 1-level child. Omit, or
+                  pass explicit JSON `null`, for a root/flat tag — unlike the
+                  PATCH endpoint's `parentId`, create has no "leave unchanged"
+                  state to distinguish `null` from, so both are treated
+                  identically. Not allowed for a closed dimension.
     responses:
       '200':
         description: Closed-dimension tag resolved (already existed or was just created — see `created`).

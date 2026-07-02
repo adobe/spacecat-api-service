@@ -271,7 +271,9 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
       [input.text],
       input.tagIds,
     );
-    return Array.isArray(resp?.items) && resp.items.length > 0 ? String(resp.items[0].id) : '';
+    return Array.isArray(resp?.items) && resp.items.length > 0
+      ? String(resp.items[0].id ?? '')
+      : '';
   }
   const resp = await transport.createTaggedPrompts(
     semrushWorkspaceId,

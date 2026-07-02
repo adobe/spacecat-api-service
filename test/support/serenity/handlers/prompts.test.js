@@ -624,6 +624,28 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep']);
   });
 
+  it('returns empty semrushPromptId (not the string "undefined") when createPromptsByIds returns an item with no id', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ name: 'hello' }],
+      }),
+      createTaggedPrompts: sinon.stub(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].semrushPromptId).to.equal('');
+  });
+
   it('drops malformed tagIds entries (too long / whitespace / control char) like validateParentIdFormat does for parentId', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
@@ -1234,6 +1256,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const transport = {
       deletePromptsByIds: sinon.stub().resolves(),
       createPromptsByIds: sinon.stub().rejects(createErr),
+      publishProject: sinon.stub().resolves(),
     };
     const log = fakeLog();
 
@@ -1252,6 +1275,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(log.error).to.have.been.calledOnceWith(
       sinon.match(/createOnePrompt failed AFTER a successful delete/),
     );
+    expect(transport.publishProject).to.not.have.been.called;
   });
 });
 

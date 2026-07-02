@@ -267,7 +267,17 @@ function marketNotFound() {
  * @returns {Promise<{ id: string | undefined, created: boolean }>}
  */
 async function resolveOrCreateClosedTag(transport, semrushWorkspaceId, projectId, tag, log) {
-  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  // Closed tags are seeded at project creation and will almost always be on
+  // page 1; stop paginating as soon as a match is found instead of always
+  // walking the full root tag list.
+  const roots = await listProjectTagTree(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    '',
+    log,
+    (t) => t.name === tag,
+  );
   const existing = roots.items.find((t) => t.name === tag);
   if (existing) {
     return { id: existing.id, created: false };
