@@ -1,3 +1,10 @@
+# [1.617.0](https://github.com/adobe/spacecat-api-service/compare/v1.616.0...v1.617.0) (2026-07-02)
+
+
+### Features
+
+* add backoffice review capture endpoint + reviews composition (SITES-43974) ([#2652](https://github.com/adobe/spacecat-api-service/issues/2652)) ([36bc8f5](https://github.com/adobe/spacecat-api-service/commit/36bc8f561454688dd818e0d3cefce2576d333641))
+
 # [1.616.0](https://github.com/adobe/spacecat-api-service/compare/v1.615.0...v1.616.0) (2026-07-01)
 
 
