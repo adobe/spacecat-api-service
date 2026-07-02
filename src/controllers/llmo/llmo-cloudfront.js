@@ -23,6 +23,7 @@ import TokowakaClient, {
   verifyRouting as verifyAwsRouting,
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { getHostnameWithoutWww, probeSiteAndResolveDomain } from '../../support/edge-routing-utils.js';
 
@@ -64,6 +65,36 @@ const TARGETED_PATHS_MAX_ENTRY_LENGTH = 256;
  */
 function LlmoCloudFrontController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  // The connector external ID is owned by the org (not the client): persisted once so every
+  // domain/account under the org reuses one connector role. Reads the persisted value; with
+  // { mint: true } (bootstrap) lazily creates + persists it, then re-reads so concurrent
+  // first-bootstraps for the org converge on one value.
+  const resolveOrgConnectorExternalId = async (site, context, { mint = false } = {}) => {
+    const { Organization } = context.dataAccess;
+    const orgId = site.getOrganizationId?.();
+    if (!hasText(orgId)) {
+      return null;
+    }
+    const org = await Organization.findById(orgId);
+    if (!org) {
+      return null;
+    }
+    const existing = org.getConfig()?.getEdgeOptimizeConfig?.()?.externalId;
+    if (hasText(existing) || !mint) {
+      return existing || null;
+    }
+    const config = org.getConfig();
+    config.updateEdgeOptimizeConfig({
+      ...(config.getEdgeOptimizeConfig?.() || {}),
+      externalId: crypto.randomUUID(),
+    });
+    org.setConfig(Config.toDynamoItem(config));
+    await org.save();
+    // Re-read so concurrent first-bootstraps for the same org converge on the persisted value.
+    const fresh = await Organization.findById(orgId);
+    return fresh?.getConfig()?.getEdgeOptimizeConfig?.()?.externalId || null;
+  };
 
   /**
    * POST /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url
@@ -115,7 +146,10 @@ function LlmoCloudFrontController(ctx) {
       // shrinks the exposure window if the URL leaks (it only grants GetObject on this
       // one template object until expiry — see security notes). Override via env.
       const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 900);
-      const externalId = crypto.randomUUID();
+      // Reuse the org's persisted connector external ID (mint on first use) so the org's domains
+      // share one connector role; fall back to a fresh id if the site has no org (defensive).
+      const externalId = await resolveOrgConnectorExternalId(site, context, { mint: true })
+        || crypto.randomUUID();
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
       // The Adobe principal allowed to assume the customer's connector role — per-environment,
       // from Vault (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN).
@@ -204,16 +238,21 @@ function LlmoCloudFrontController(ctx) {
     return { accountId, externalId, distributionId };
   };
 
-  const assumeCloudFrontClient = async ({ accountId, externalId, roleName }) => {
-    const assumed = await assumeConnectorRole({ accountId, externalId, roleName });
+  // Caller identity for audit lines + the assumed-role session name (mirrors Cloudflare). Passed
+  // as `operator` so the customer's CloudTrail attributes each mutation to who ran it.
+  const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
+
+  const assumeCloudFrontClient = async ({
+    accountId, externalId, roleName, operator,
+  }) => {
+    const assumed = await assumeConnectorRole({
+      accountId, externalId, roleName, operator,
+    });
     return {
       ...assumed,
       cloudFrontClient: new CloudFrontEdgeClient({ credentials: assumed.credentials }),
     };
   };
-
-  // Caller identity for audit lines; defaults so the field is always present (mirrors Cloudflare).
-  const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
 
   // Greppable key=value audit line per mutation (started/done/error), correlated by requestId —
   // same shape as the Cloudflare onboarding controller. Null/empty fields are dropped.
@@ -332,7 +371,9 @@ function LlmoCloudFrontController(ctx) {
       }
 
       try {
-        const { roleArn } = await assumeConnectorRole({ accountId, externalId, roleName });
+        const { roleArn } = await assumeConnectorRole({
+          accountId, externalId, roleName, operator: getCallerId(context),
+        });
         log.info(`[cdn-onboard-cloudfront] Connected site ${siteId} to account ${accountId}`);
         return ok({ connected: true, accountId, roleArn });
       } catch (assumeError) {
@@ -367,7 +408,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const distributions = await cloudFrontClient.listDistributions();
       return ok({ distributions });
@@ -402,7 +443,7 @@ function LlmoCloudFrontController(ctx) {
 
       try {
         const { cloudFrontClient } = await assumeCloudFrontClient({
-          accountId, externalId, roleName,
+          accountId, externalId, roleName, operator: getCallerId(context),
         });
         try {
           await cloudFrontClient.listDistributions();
@@ -448,7 +489,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const { origins } = await cloudFrontClient.getDistributionConfig(distributionId);
       const hasEdgeOptimizeOrigin = origins.some((origin) => /edgeoptimize/i.test(origin.id)
@@ -482,7 +523,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const { defaultCacheBehavior, cacheBehaviors } = await cloudFrontClient
         .getDistributionConfig(distributionId);
@@ -554,7 +595,7 @@ function LlmoCloudFrontController(ctx) {
       const { apiKey, forwardedHost } = target;
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const guard = await assertDistributionServesSite(
         cloudFrontClient,
@@ -630,7 +671,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const guard = await assertDistributionServesSite(
         cloudFrontClient,
@@ -690,7 +731,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const guard = await assertDistributionServesSite(
         cloudFrontClient,
@@ -742,7 +783,9 @@ function LlmoCloudFrontController(ctx) {
       const {
         cloudFrontClient,
         accountId: resolvedAccountId,
-      } = await assumeCloudFrontClient({ accountId, externalId, roleName });
+      } = await assumeCloudFrontClient({
+        accountId, externalId, roleName, operator: getCallerId(context),
+      });
       const guard = await assertDistributionServesSite(
         cloudFrontClient,
         distributionId,
@@ -792,7 +835,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const status = await cloudFrontClient.getLambdaAtEdgeStatus(distributionId);
       return ok(status);
@@ -836,7 +879,7 @@ function LlmoCloudFrontController(ctx) {
       }
 
       const { cloudFrontClient } = await assumeCloudFrontClient({
-        accountId, externalId, roleName,
+        accountId, externalId, roleName, operator: getCallerId(context),
       });
       const guard = await assertDistributionServesSite(
         cloudFrontClient,
@@ -964,7 +1007,9 @@ function LlmoCloudFrontController(ctx) {
       const {
         cloudFrontClient,
         accountId: resolvedAccountId,
-      } = await assumeCloudFrontClient({ accountId, externalId, roleName });
+      } = await assumeCloudFrontClient({
+        accountId, externalId, roleName, operator: getCallerId(context),
+      });
 
       const guard = await assertDistributionServesSite(
         cloudFrontClient,
@@ -987,6 +1032,7 @@ function LlmoCloudFrontController(ctx) {
         originDomain,
         originHeaders: { apiKey, forwardedHost },
         accountId: resolvedAccountId,
+        operator: getCallerId(context), // stamps created-by on the resources the deploy creates
       });
 
       log.info(auditLine(context, 'deploy', 'done', {
@@ -1050,7 +1096,9 @@ function LlmoCloudFrontController(ctx) {
       const {
         cloudFrontClient,
         accountId: resolvedAccountId,
-      } = await assumeCloudFrontClient({ accountId, externalId, roleName });
+      } = await assumeCloudFrontClient({
+        accountId, externalId, roleName, operator: getCallerId(context),
+      });
 
       // Dry-run: a distribution that doesn't serve this site surfaces as a blocker (not a hard
       // error) so the review screen explains it and keeps Deploy disabled.
