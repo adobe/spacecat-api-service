@@ -11827,6 +11827,64 @@ ReferralTrafficWeeks:
   required:
     - weeks
 
+SuggestionReview:
+  type: object
+  description: |
+    A human-review feedback event for a suggestion (Learning Agent feedback loop,
+    SITES-43974). Composed at read time from the feedback_event store. Raw patch
+    fields are omitted unless explicitly requested via ?include=reviews,patches.
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-supplied idempotency key for the review.
+    eventTime:
+      type: string
+      format: date-time
+      description: When the review action happened (server-stamped).
+    source:
+      type: string
+      enum: [backoffice, aso_ui, aemy_pr]
+      description: Capture surface (derived server-side from the route).
+    verdict:
+      type: string
+      enum: [up, down]
+      description: The reviewer's verdict.
+    signal:
+      type: string
+      enum: [positive, negative]
+      description: Persisted training label, derived from the verdict.
+    reviewerId:
+      type: string
+      description: >-
+        Server-derived, opaque IMS user identifier (e.g. <id>@<authSrc>) — NOT a
+        mailbox. Stable per user (reviewer-continuity signal). Null when not set.
+    detailMarkdown:
+      type: string
+      description: Sanitised ESE rationale. Null when not provided.
+    rejectionCategory:
+      type: string
+      enum: [product_bug, bad_recommendation, other]
+      description: Optional reject category. Null when not set.
+    stateTransition:
+      type: string
+      description: The accompanying suggestion state transition. Null when not set.
+    tier:
+      type: string
+      enum: [paid, free]
+    previousFix:
+      type: object
+      description: Patch snapshot at review time (only when ?include=...,patches).
+    editedFix:
+      type: object
+      description: ESE-edited patch (only when ?include=...,patches).
+  required:
+    - eventId
+    - eventTime
+    - source
+    - verdict
+    - signal
+    - tier
 StateAccessMapping:
   type: object
   description: |
