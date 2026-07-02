@@ -36,6 +36,7 @@ import { TYPE_TAG, topicTag } from '../prompt-tags.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
+import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -242,9 +243,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
 /**
  * POST /serenity/markets (subworkspace, design flow 3) — ensure the subworkspace
  * (lazy-create / re-grant), then create-or-adopt the slice's draft, publish
- * once, and confirm. No mapping write, no rollback: a leftover draft is a
- * resumable state, not an orphan (design §7). The duplicate-create race is
- * accepted (oldest-wins reads + alert).
+ * once, and confirm. No rollback: a leftover draft is a resumable state, not
+ * an orphan (design §7). The duplicate-create race is accepted (oldest-wins
+ * reads + alert). When `options.dataAccess` is supplied, upserts the
+ * `brand_to_semrush_projects` mapping row best-effort after the project is
+ * created/adopted (serenity-docs brand-semrush-mapping-maintenance.md §4.1) —
+ * omit it for callers whose `brand` is not yet a persisted row (see
+ * `mapping-rows.js` `upsertMappingRow` doc).
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {object} brand - brand record/stub being provisioned.
@@ -291,6 +296,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   to publish: `require` throws on failure (the default markets endpoint);
  *   `best-effort` swallows a quota 405 (empty-units publish, workspace doc §5)
  *   and leaves the project a draft; `skip` does not publish at all.
+ * @param {any} [options.dataAccess] - when supplied, upserts the
+ *   `brand_to_semrush_projects` mapping row for this project (best-effort,
+ *   never fails the create). Omit for a `brand` that is not yet a persisted
+ *   row — see `mapping-rows.js` `upsertMappingRow` doc.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -310,6 +319,7 @@ export async function handleCreateMarketSubworkspace(
     brandUrlSources = null,
     competitors = [],
     publishMode = 'require',
+    dataAccess = null,
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -493,6 +503,15 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
+  if (dataAccess) {
+    await upsertMappingRow(dataAccess, {
+      brandId: brand.getId(),
+      semrushProjectId: projectId,
+      geoTargetId: location.geoTargetId,
+      languageCode,
+    }, log);
+  }
+
   return {
     status: 201,
     body: {
@@ -513,6 +532,18 @@ export async function handleCreateMarketSubworkspace(
  * DELETE /serenity/markets/:geo/:lang (subworkspace, design flow 4) — resolve from the
  * listing, delete the project (404-as-success). NO floor check: removing the
  * last market is allowed; the empty subworkspace is kept.
+ *
+ * When `dataAccess` is supplied, best-effort tombstones the mapping row
+ * (`deletedAt` set — spec §4.2) once the project is confirmed gone. Only
+ * covers the two paths where a project id is actually resolved (deleted here,
+ * or already gone upstream via 404-as-success): when the project is not found
+ * in the listing at all (early return below), there is no project id or brand
+ * id in scope to tombstone with, so a live mapping row for an
+ * already-vanished project is left un-tombstoned — accepted,
+ * reconcile-recoverable drift (implementation plan §3.2/§11).
+ *
+ * @param {object} [options]
+ * @param {any} [options.dataAccess]
  */
 export async function handleDeleteMarketSubworkspace(
   transport,
@@ -520,6 +551,7 @@ export async function handleDeleteMarketSubworkspace(
   geoTargetId,
   languageCode,
   log,
+  { dataAccess = null } = {},
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
@@ -533,6 +565,9 @@ export async function handleDeleteMarketSubworkspace(
     if (!isUpstreamGone(e)) {
       throw e;
     }
+  }
+  if (dataAccess) {
+    await tombstoneMappingRow(dataAccess, project.id, log);
   }
   return { status: 204 };
 }

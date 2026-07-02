@@ -4714,6 +4714,7 @@ describe('Brands Controller', () => {
 
       async function buildController({
         provisionBrandSubworkspace, upsertBrand, ensureMarketSite,
+        upsertMappingRow, linkSiteToLiveRows,
         // Serenity active by default (org-wide LLMO/serenity flag ON) so the
         // Semrush-mode create reaches provisioning. The inactive case overrides this.
         isSerenityActiveForOrg = sinon.stub().resolves(true),
@@ -4727,6 +4728,12 @@ describe('Brands Controller', () => {
           },
           '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
           ...(upsertBrand ? { '../../src/support/brands-storage.js': { upsertBrand } } : {}),
+          ...((upsertMappingRow || linkSiteToLiveRows) ? {
+            '../../src/support/serenity/mapping-rows.js': {
+              upsertMappingRow: upsertMappingRow || sinon.stub().resolves(),
+              linkSiteToLiveRows: linkSiteToLiveRows || sinon.stub().resolves(),
+            },
+          } : {}),
         });
         return Mocked.default(context, loggerStub, mockEnv);
       }
@@ -4761,6 +4768,63 @@ describe('Brands Controller', () => {
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
         expect(upsertArgs.semrushWorkspaceId).to.equal('ws-1');
+      });
+
+      it('writes the mapping row for the initial market after the brand row is persisted', async () => {
+        const provisionStub = sinon.stub().resolves({
+          semrushWorkspaceId: 'ws-1', projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
+        });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const upsertMappingRowStub = sinon.stub().resolves();
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          upsertMappingRow: upsertMappingRowStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(upsertMappingRowStub).to.have.been.calledOnce;
+        // Runs AFTER the brand row is persisted — provisionBrandSubworkspace runs
+        // against a throwaway id before the row exists, so it cannot write this
+        // itself (the FK requires a persisted brand).
+        expect(upsertMappingRowStub.calledAfter(upsertStub)).to.equal(true);
+        const [, slice] = upsertMappingRowStub.firstCall.args;
+        expect(slice).to.deep.equal({
+          brandId: provisionStub.firstCall.args[1].brandId,
+          semrushProjectId: 'proj-initial',
+          geoTargetId: 2840,
+          languageCode: 'en',
+        });
+      });
+
+      it('does NOT write a mapping row when provisioning returns no initial project id', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const upsertMappingRowStub = sinon.stub().resolves();
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          upsertMappingRow: upsertMappingRowStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(upsertMappingRowStub).to.not.have.been.called;
       });
 
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
@@ -4820,6 +4884,35 @@ describe('Brands Controller', () => {
         expect(opts.organizationId).to.equal(ORGANIZATION_ID);
         expect(opts.domain).to.equal('acme.com');
         expect(opts.brandId).to.equal(provisionStub.firstCall.args[1].brandId);
+      });
+
+      it('links the mirrored site onto the mapping row after ensureMarketSite resolves', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const ensureSiteStub = sinon.stub().resolves('site-x');
+        const linkSiteToLiveRowsStub = sinon.stub().resolves();
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          ensureMarketSite: ensureSiteStub,
+          linkSiteToLiveRows: linkSiteToLiveRowsStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(linkSiteToLiveRowsStub).to.have.been.calledOnceWith(
+          mockDataAccess,
+          provisionStub.firstCall.args[1].brandId,
+          'site-x',
+        );
+        expect(linkSiteToLiveRowsStub.calledAfter(ensureSiteStub)).to.equal(true);
       });
 
       it('does NOT mirror a Site for a pending (draft) brand — nothing is provisioned yet', async () => {

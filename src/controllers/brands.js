@@ -61,6 +61,7 @@ import {
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
+import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
@@ -1481,6 +1482,10 @@ function BrandsController(ctx, log, env) {
       // The initial market's domain, resolved once during provisioning and reused
       // by the site-mirror hook below (avoids re-deriving from the payload).
       let provisionedBrandDomain = null;
+      // The initial market's identity, captured for the mapping-row write below
+      // (must happen AFTER the brand row exists — provisionBrandSubworkspace
+      // runs before it does, see brand-provisioning.js's return doc).
+      let provisionedInitialMarket = null;
       // A pending (draft) brand defers ALL Semrush provisioning: no
       // sub-workspace, no project, and crucially no primary URL required. The
       // wizard's "Save as pending" path lands here so a user can stash a brand
@@ -1631,6 +1636,11 @@ function BrandsController(ctx, log, env) {
             competitors: brandData.competitors,
           }, log);
           provisionedWorkspaceId = provisioned.semrushWorkspaceId;
+          provisionedInitialMarket = {
+            projectId: provisioned.projectId,
+            geoTargetId: provisioned.geoTargetId,
+            languageCode: provisioned.languageCode,
+          };
         }
       }
 
@@ -1663,6 +1673,20 @@ function BrandsController(ctx, log, env) {
         semrushWorkspaceId: provisionedWorkspaceId,
       });
 
+      // When a Semrush sub-workspace + initial market were provisioned, write the
+      // brand_to_semrush_projects mapping row for it NOW that the brand row exists
+      // (its brand_id FK requires a persisted row — provisionBrandSubworkspace ran
+      // before this, against a throwaway id, so it could not write it itself; see
+      // brand-provisioning.js's return doc). Best-effort, like every mapping write.
+      if (provisionedInitialMarket && hasText(provisionedInitialMarket.projectId)) {
+        await upsertMappingRow(context.dataAccess, {
+          brandId: provisionedBrandId,
+          semrushProjectId: provisionedInitialMarket.projectId,
+          geoTargetId: provisionedInitialMarket.geoTargetId,
+          languageCode: provisionedInitialMarket.languageCode,
+        }, log);
+      }
+
       // When a Semrush sub-workspace + initial market were provisioned, mirror that
       // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
       // market's domain, so the Semrush project has a resolvable site entity.
@@ -1671,7 +1695,7 @@ function BrandsController(ctx, log, env) {
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
       // contract (its own catch-all swallows + logs), so this holds.
       if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
-        await ensureMarketSite(context, {
+        const linkedSiteId = await ensureMarketSite(context, {
           organizationId: spaceCatId,
           brandId: provisionedBrandId ?? undefined,
           // The initial market's domain, resolved during provisioning above.
@@ -1679,6 +1703,7 @@ function BrandsController(ctx, log, env) {
           updatedBy,
           log,
         });
+        await linkSiteToLiveRows(context.dataAccess, provisionedBrandId, linkedSiteId, log);
       }
 
       return createResponse(created, 201);

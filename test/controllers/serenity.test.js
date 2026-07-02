@@ -136,6 +136,8 @@ describe('SerenityController', () => {
   let getBrandCompetitorsStub;
   let accessControlHasAccessStub;
   let ensureMarketSiteStub;
+  let linkSiteToLiveRowsStub;
+  let tombstoneAllForBrandStub;
   let MockTransportError;
   let SerenityController;
 
@@ -162,6 +164,8 @@ describe('SerenityController', () => {
     getBrandCompetitorsStub = sinon.stub().resolves([]);
     accessControlHasAccessStub = sinon.stub().resolves(true);
     ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
+    linkSiteToLiveRowsStub = sinon.stub().resolves();
+    tombstoneAllForBrandStub = sinon.stub().resolves();
     MockTransportError = class extends Error {
       constructor(status, message, body) {
         super(message);
@@ -241,6 +245,10 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/site-linkage.js': {
         ensureMarketSite: ensureMarketSiteStub,
+      },
+      '../../src/support/serenity/mapping-rows.js': {
+        linkSiteToLiveRows: linkSiteToLiveRowsStub,
+        tombstoneAllForBrand: tombstoneAllForBrandStub,
       },
     })).default;
   });
@@ -1043,6 +1051,20 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
+    it('createMarket links the mirrored site onto the mapping row on 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      ensureMarketSiteStub.resolves('site-uuid-1');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      expect(linkSiteToLiveRowsStub).to.have.been.calledOnceWith(ctx.dataAccess, BRAND, 'site-uuid-1');
+    });
+
     it('createMarket does NOT mirror a Site when the upstream create did not return 201', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1059,15 +1081,18 @@ describe('SerenityController', () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
       getBrandAliasesStub.resolves(['Acme Inc', 'ACME']);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.createMarket(fakeContext({
+      const ctx = fakeContext({
         data: {
           market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
         },
-      }));
+      });
+      const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(201);
       expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // options object is the 8th arg (index 7). generatePrompts was not supplied,
-      // so topic generation defaults off (today's behavior is unchanged).
+      // so topic generation defaults off (today's behavior is unchanged). brandUuid
+      // is already a persisted row (loadBrand), so dataAccess is threaded through
+      // for the mapping-row upsert (mapping-rows.js).
       expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7])
         .to.deep.equal({
           generateTopics: false,
@@ -1077,6 +1102,7 @@ describe('SerenityController', () => {
           brandAliases: ['Acme Inc', 'ACME'],
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
+          dataAccess: ctx.dataAccess,
         });
     });
 
@@ -1637,15 +1663,18 @@ describe('SerenityController', () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       getBrandAliasesStub.resolves(['Acme Inc']);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({
+      const ctx = fakeContext({
         brand: makeBrandModel(),
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
-      }));
+      });
+      const response = await controller.activate(ctx);
       expect(response.status).to.equal(200);
       // Read once for the whole batch, not per market.
       expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // Both market creates receive the same aliases in their options arg (index 7).
-      // No modelIds + no generatePrompts → empty units → best-effort publish.
+      // No modelIds + no generatePrompts → empty units → best-effort publish. The
+      // loaded brand is already persisted, so dataAccess is threaded through for
+      // the mapping-row upsert (mapping-rows.js).
       const expectedOpts = {
         modelIds: [],
         generateTopics: false,
@@ -1656,6 +1685,7 @@ describe('SerenityController', () => {
         brandAliases: ['Acme Inc'],
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
+        dataAccess: ctx.dataAccess,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       expect(firstCall.args[7]).to.deep.equal(expectedOpts);
@@ -1973,6 +2003,23 @@ describe('SerenityController', () => {
       expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
       expect(brand.save).to.have.been.called;
+    });
+
+    it('deactivate tombstones the brand\'s mapping rows after decommission', async () => {
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ brand });
+      const response = await controller.deactivate(ctx);
+      expect(response.status).to.equal(200);
+      expect(tombstoneAllForBrandStub).to.have.been.calledOnceWith(ctx.dataAccess, BRAND);
+    });
+
+    it('deactivate does NOT tombstone when the brand has no subworkspace (no-op decommission)', async () => {
+      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(200);
+      expect(tombstoneAllForBrandStub).to.not.have.been.called;
     });
 
     it('deactivate enables the linked-sub-workspace guard when the env flag is set', async () => {

@@ -71,6 +71,7 @@ import {
 import { ErrorWithStatusCode } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
+import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -599,13 +600,17 @@ function SerenityController(context, log, env) {
             brandAliases,
             brandUrlSources,
             competitors,
+            // auth.brandUuid is an already-persisted brand row here (loadBrand
+            // above), so the mapping-row upsert's FK to brands is satisfied —
+            // see mapping-rows.js upsertMappingRow doc.
+            dataAccess: ctx.dataAccess,
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
         // market's own domain, once its Semrush project is created. Best-effort:
         // never fails a live market.
         if (result?.status === 201) {
-          await ensureMarketSite(ctx, {
+          const linkedSiteId = await ensureMarketSite(ctx, {
             // Optional-chained so a missing/throwing accessor can't 500 a market
             // that is already live upstream — the mirror is best-effort.
             organizationId: brand.getOrganizationId?.(),
@@ -614,6 +619,9 @@ function SerenityController(context, log, env) {
             updatedBy: 'serenity-create-market',
             log,
           });
+          // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
+          // never overwrites an existing link.
+          await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
         }
       } else {
         result = await handleCreateMarket(
@@ -656,6 +664,7 @@ function SerenityController(context, log, env) {
           geoTargetId,
           languageCode,
           log,
+          { dataAccess: ctx.dataAccess },
         )
         : handleDeleteMarket(
           transport,
@@ -1070,6 +1079,9 @@ function SerenityController(context, log, env) {
               brandAliases,
               brandUrlSources,
               competitors,
+              // `brand` was loaded via loadBrand above — an already-persisted
+              // row, so the mapping-row upsert's FK to brands is satisfied.
+              dataAccess: ctx.dataAccess,
             },
           );
         } catch (e) {
@@ -1134,6 +1146,11 @@ function SerenityController(context, log, env) {
           log,
         });
         siteLinked = !!linkedSiteId && hasText(linkedSiteId);
+        // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
+        // never overwrites an existing link. All markets in this batch share
+        // one resolved brandDomain and thus one mirror Site, so by-brand picks
+        // up every row this batch wrote (including 409/already-live ones).
+        await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
       }
 
       let fullySucceeded = allMarketsLive && siteLinked;
@@ -1272,6 +1289,12 @@ function SerenityController(context, log, env) {
         // returns).
         brand.setSemrushWorkspaceId?.(null);
         clearBrandWorkspaceCache();
+        // Every project the brand owned is gone now that decommission emptied
+        // the sub-workspace — tombstone the brand's live mapping rows
+        // (best-effort, spec §4.2). By-brand because decommission only knows
+        // the workspace id; also sweeps rows whose upstream project had
+        // already vanished before decommission ran.
+        await tombstoneAllForBrand(ctx.dataAccess, auth.brandUuid, log);
       }
       brand.setStatus?.('pending');
       if (typeof brand.save === 'function') {

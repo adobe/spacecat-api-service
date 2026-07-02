@@ -84,7 +84,9 @@ describe('provisionBrandSubworkspace', () => {
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: false });
+    expect(result).to.deep.equal({
+      semrushWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: 0, languageCode: 'en',
+    });
   });
 
   it('exposes a brand stub whose getters/save are usable by the handler', async () => {
@@ -113,7 +115,9 @@ describe('provisionBrandSubworkspace', () => {
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: true });
+    expect(result).to.deep.equal({
+      semrushWorkspaceId: NEW_WS, published: true, projectId: '', geoTargetId: 0, languageCode: 'en',
+    });
   });
 
   it('returns published:false when a successful result carries no body (result.body || {})', async () => {
@@ -127,7 +131,35 @@ describe('provisionBrandSubworkspace', () => {
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: false });
+    expect(result).to.deep.equal({
+      semrushWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: 0, languageCode: 'en',
+    });
+  });
+
+  it('surfaces the initial market identity from the handler body, deliberately without writing the mapping row', async () => {
+    // provisionBrandSubworkspace runs before the brand row is written (a
+    // throwaway id), so it can't satisfy the mapping row's FK to brands —
+    // the caller (brands.js) writes it once the real row is persisted.
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushWorkspaceId(NEW_WS);
+      return {
+        status: 201,
+        body: {
+          brandId: brand.getId(), projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
+        },
+      };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result).to.deep.equal({
+      semrushWorkspaceId: NEW_WS,
+      published: false,
+      projectId: 'proj-initial',
+      geoTargetId: 2840,
+      languageCode: 'en',
+    });
   });
 
   it('passes the "REGION - LANG" project name and brand identity to the handler', async () => {
