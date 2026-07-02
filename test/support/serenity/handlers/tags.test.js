@@ -112,6 +112,22 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['category:Footwear'], { parentId: undefined });
     });
 
+    it('falls back to an undefined id when the upstream create response has no usable node (defensive)', async () => {
+      const transport = makeTransport({ createProjectTags: sinon.stub().resolves([{}]) });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        validBody,
+        fakeLog(),
+      );
+      expect(res.status).to.equal(201);
+      expect(res.body.id).to.equal(undefined);
+      expect(res.body.parentId).to.equal(null);
+    });
+
     it('supports the topic dimension (also free-form)', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
@@ -369,6 +385,34 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.createProjectTags.firstCall.args[3])
         .to.deep.equal({ parentId: '6f383e4e-d8e1-47bb-888e-1f93e8575567' });
     });
+
+    it('normalizes a whitespace-only parentId to undefined (trims to empty)', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        { ...validBody, parentId: '   ' },
+        fakeLog(),
+      );
+      expect(transport.createProjectTags.firstCall.args[3]).to.deep.equal({ parentId: undefined });
+    });
+
+    it('400s on a parentId over the length ceiling', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        { ...validBody, parentId: 'x'.repeat(201) },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
   });
 
   describe('handleUpdateTag (flat mode) — PATCH /serenity/tags/:tagId', () => {
@@ -530,6 +574,35 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       // The fix: parent_id is explicitly re-sent (never omitted for a child),
       // even though the request itself carried no parentId — omitting it here
       // is exactly what silently promotes a child to root on live Semrush.
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        'child-1',
+        { name: 'SneakersRenamed', parentId: 'root-1' },
+      );
+    });
+
+    it('falls back to the root id when the upstream child listing omits parent_id (defensive)', async () => {
+      const listProjectTags = sinon.stub();
+      listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: '' }))
+        .resolves({ page: 1, total: 1, items: [{ id: 'root-1', name: 'category:Footwear', children_count: 1 }] });
+      listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: 'root-1' }))
+        .resolves({ page: 1, total: 1, items: [{ id: 'child-1', name: 'Sneakers' }] }); // no parent_id
+      const transport = makeTransport({
+        listProjectTags,
+        updateProjectTag: sinon.stub().resolves({ id: 'child-1', name: 'SneakersRenamed', parent_id: 'root-1' }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'child-1',
+        { name: 'SneakersRenamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
       expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
         WORKSPACE,
         'proj-1',

@@ -991,6 +991,15 @@ describe('SerenityController', () => {
       expect(handlers.handleUpdateTag.firstCall.args[4]).to.equal('tag-1');
       expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
     });
+
+    it('updateTag returns the authorize error without throwing (auth.error short-circuit)', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+      expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
   });
 
   describe('controller surface', () => {

@@ -436,9 +436,12 @@ function buildUpdatePayload(parsed, target) {
     if (hasDimensionPrefix) {
       throw new ErrorWithStatusCode('a child tag name must not contain ":"', 400);
     }
+    // target.parentId is never null here: resolveTagTarget's child branch always
+    // resolves it (falling back to the child's own root id), so no `?? undefined`
+    // is needed the way the root/unknown branch below needs one.
     return {
       tag: value,
-      parentIdToSend: parentId !== undefined ? parentId : (target.parentId ?? undefined),
+      parentIdToSend: parentId !== undefined ? parentId : /** @type {string} */ (target.parentId),
     };
   }
   // Root, or an id we could not resolve in the tree walk -- legacy behavior:

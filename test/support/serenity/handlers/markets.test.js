@@ -27,6 +27,7 @@ import {
   resolveLocation,
   clearLanguageCache,
   clearTagCache,
+  listProjectTagTree,
 } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
@@ -985,6 +986,32 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}`,
     }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
     expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('listProjectTagTree warns and stops at the page ceiling when the last page is still full', async () => {
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({
+      id: `tag-${i}`, name: `Tag ${i}`, parent_id: null, children_count: 0,
+    }));
+    const listProjectTags = sinon.stub().resolves({ page: 1, total: 5000, items: fullPage });
+    const log = fakeLog();
+
+    const result = await listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      log,
+    );
+
+    // 50 pages x 100 items, stopped by the ceiling rather than running forever.
+    expect(result.items).to.have.lengthOf(5000);
+    expect(listProjectTags.callCount).to.equal(50);
+    expect(log.warn).to.have.been.calledOnceWith(
+      'listProjectTagTree: page ceiling hit; tag level may be truncated',
+      sinon.match({
+        semrushWorkspaceId: WORKSPACE, projectId: 'proj-tree', parentId: '', pages: 50, limit: 100,
+      }),
+    );
   });
 
   it('listModels (catalog mode) calls listGlobalAiModels and returns items', async () => {
