@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "full",
+  "commit_sha": "d4299ef732d3a1be14c0419f0c451a4e1f245d8b",
+  "author": "cboldis@yahoo.com",
+  "timestamp": "2026-06-11T06:27:00+03:00",
+  "detection": {
+    "ai_assisted": false,
+    "method": "none",
+    "tool": "unknown",
+    "model": "",
+    "confidence": 0.0
+  },
+  "stats": {
+    "total_additions": 550,
+    "total_deletions": 0,
+    "ai_additions": 0,
+    "ai_deletions": 0,
+    "human_additions": 550,
+    "human_deletions": 0
+  },
+  "files": {
+    "test/support/serenity/handlers/brand-presence.test.js": {
+      "ai_additions": 0,
+      "human_additions": 525,
+      "ai_deletions": 0,
+      "human_deletions": 0
+    },
+    "test/support/serenity/rest-transport.test.js": {
+      "ai_additions": 0,
+      "human_additions": 25,
+      "ai_deletions": 0,
+      "human_deletions": 0
+    }
+  }
+}
