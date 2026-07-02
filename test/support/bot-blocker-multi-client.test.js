@@ -127,7 +127,7 @@ describe('detectBotBlockerMultiClient', () => {
       });
       const result = await mocked.detectBotBlockerMultiClient({ baseUrl: 'https://ok.com' });
       expect(result.crawlable).to.be.true;
-      expect(result.perClient).to.have.keys(['adobe-fetch', 'undici']);
+      expect(result.perClient).to.have.keys(['adobe-fetch', 'undici', 'undici-browser']);
     } finally {
       fetchStub.restore();
     }
@@ -232,5 +232,51 @@ describe('detectBotBlockerMultiClient', () => {
     expect(result.crawlable).to.be.false;
     expect(result.type).to.equal('cloudflare');
     expect(result.reason).to.equal(undefined); // not 'infra present' from the allowed adobe probe
+  });
+
+  it('adds a diagnostic undici-browser probe to perClient (not part of the aggregate)', async () => {
+    const detectBotBlockerFn = sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 1 });
+    const fetchFn = sinon.stub().resolves(resp(200));
+
+    const result = await detectBotBlockerMultiClient(
+      { baseUrl: 'https://ok.com' },
+      { log, detectBotBlockerFn, fetchFn },
+    );
+
+    expect(result.perClient).to.have.keys(['adobe-fetch', 'undici', 'undici-browser']);
+    expect(result.perClient['undici-browser'].crawlable).to.be.true;
+    // one undici call for the plain probe, one for the browser probe
+    expect(fetchFn.callCount).to.equal(2);
+    // the browser probe is the only one carrying Client Hints / Accept-Language
+    const browserCall = fetchFn.getCalls().find((c) => c.args[1].headers['sec-ch-ua']);
+    expect(browserCall, 'expected a browser-header probe call').to.exist;
+    expect(browserCall.args[1].headers['Accept-Language']).to.equal('en-US,en;q=0.9');
+    expect(browserCall.args[1].headers['User-Agent']).to.contain('Windows NT'); // desktop Chrome, not the SPACECAT UA
+    // the plain undici probe must NOT carry browser headers (real-client fidelity)
+    const plainCall = fetchFn.getCalls().find((c) => !c.args[1].headers['sec-ch-ua']);
+    expect(plainCall.args[1].headers['Accept-Language']).to.be.undefined;
+  });
+
+  it('distinguishes a header/UA-based block: undici blocked but undici-browser passes (aggregate still reflects real undici)', async () => {
+    const detectBotBlockerFn = sinon.stub().resolves({ crawlable: true, type: 'cloudflare-allowed', confidence: 1 });
+    // Browser-header request (carries Accept-Language) is allowed; the plain bot-UA
+    // request (no Accept-Language) is 403'd — i.e. a header/UA-based rule.
+    const fetchFn = sinon.stub().callsFake((url, opts) => Promise.resolve(
+      opts.headers['Accept-Language']
+        ? resp(200)
+        : resp(403, [['server', 'cloudflare'], ['cf-ray', 'h']]),
+    ));
+
+    const result = await detectBotBlockerMultiClient(
+      { baseUrl: 'https://headers-matter.com' },
+      { log, detectBotBlockerFn, fetchFn },
+    );
+
+    // Aggregate reflects the REAL undici client (bot UA) → blocked.
+    expect(result.crawlable).to.be.false;
+    expect(result.type).to.equal('cloudflare');
+    expect(result.perClient.undici.crawlable).to.be.false;
+    // Diagnostic signal: browser headers get through → block is header/UA-based.
+    expect(result.perClient['undici-browser'].crawlable).to.be.true;
   });
 });

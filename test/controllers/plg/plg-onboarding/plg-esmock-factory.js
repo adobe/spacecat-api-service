@@ -75,6 +75,7 @@ export async function createPlgEsmock(stubs, {
             perClient: {
               'adobe-fetch': { crawlable: r.crawlable, type: r.type, confidence: r.confidence },
               undici: { crawlable: r.crawlable, type: r.type, confidence: r.confidence },
+              'undici-browser': { crawlable: r.crawlable, type: r.type, confidence: r.confidence },
             },
           };
         },
