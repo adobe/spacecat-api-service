@@ -41,12 +41,13 @@ export const brands = [
     updated_by: 'seed',
   },
   {
-    // Activate-brand IT: a pending brand already anchored to the Activate IT site.
+    // Activate-brand IT: a pending brand already anchored to the existing ORG_3 site
+    // SITE_4 (reused to avoid inflating the global site counts other ITs assert on).
     // POST .../activate promotes it to active in a single write (no URL resolution).
     id: 'ac000000-b000-4000-8000-000000000001',
     organization_id: '33330000-3333-4333-b333-000000000333',
     name: 'Activate IT Pending Brand',
-    site_id: 'ac000000-5170-4000-8000-000000000001',
+    site_id: '44400000-4444-4444-b444-000000000444',
     status: 'pending',
     origin: 'human',
     regions: ['us'],
@@ -54,8 +55,8 @@ export const brands = [
   },
   {
     // Activate-brand IT: an unanchored pending brand whose stashed Semrush primaryUrl
-    // resolves to the SAME site as the brand above. Activating it after that brand is
-    // active hits brands_base_site_unique → 409.
+    // resolves to the SAME site (SITE_4) as the brand above. Activating it after that
+    // brand is active hits brands_base_site_unique → 409.
     id: 'ac000000-b000-4000-8000-000000000002',
     organization_id: '33330000-3333-4333-b333-000000000333',
     name: 'Activate IT Conflict Brand',
@@ -63,7 +64,7 @@ export const brands = [
     status: 'pending',
     origin: 'human',
     regions: ['us'],
-    pending_semrush_provisioning: { primaryUrl: 'https://it-activate.example.com' },
+    pending_semrush_provisioning: { primaryUrl: 'https://site4-delegate.example.com' },
     updated_by: 'seed',
   },
 ];

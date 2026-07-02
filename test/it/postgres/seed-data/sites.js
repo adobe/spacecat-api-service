@@ -112,14 +112,4 @@ export const sites = [
     name: 'New LLMO Site',
     created_at: '2026-05-01T00:00:00.000Z', // after Brandalf GA cutoff (2026-04-01)
   },
-  {
-    // Activate-brand IT fixture: the onboarded primary site (ORG_3, PAID) that a
-    // pending brand promotes onto. See test/it/shared/tests/activate-brand-for-org.js.
-    id: 'ac000000-5170-4000-8000-000000000001',
-    base_url: 'https://it-activate.example.com',
-    organization_id: '33330000-3333-4333-b333-000000000333',
-    delivery_type: 'aem_edge',
-    is_live: true,
-    name: 'Activate IT Site',
-  },
 ];

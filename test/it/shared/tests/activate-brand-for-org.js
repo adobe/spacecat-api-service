@@ -17,9 +17,9 @@ import {
   ORG_2_ID, // has no entitlements
   ORG_3_ID, // has a PAID LLMO entitlement
   NON_EXISTENT_ORG_ID,
-  ACTIVATE_SITE_ID, // onboarded ORG_3 site the pending brand promotes onto
-  ACTIVATE_PENDING_BRAND_ID, // pending brand anchored to ACTIVATE_SITE_ID
-  ACTIVATE_CONFLICT_BRAND_ID, // pending brand that resolves to the same site → 409
+  SITE_4_ID, // existing ORG_3 site the pending brand is anchored to / promotes onto
+  ACTIVATE_PENDING_BRAND_ID, // pending brand anchored to SITE_4
+  ACTIVATE_CONFLICT_BRAND_ID, // pending brand that resolves to SITE_4 → 409
 } from '../seed-ids.js';
 
 /**
@@ -105,14 +105,14 @@ export default function activateBrandForOrgTests(getHttpClient, resetData) {
 
       expect(res.status).to.equal(200);
       expect(res.body.status).to.equal('active');
-      expect(res.body.baseSiteId).to.equal(ACTIVATE_SITE_ID);
+      expect(res.body.baseSiteId).to.equal(SITE_4_ID);
 
       // The persisted brand is now active and anchored to its base site.
       const brandPath = `/v2/orgs/${ORG_3_ID}/brands/${ACTIVATE_PENDING_BRAND_ID}`;
       const getRes = await http.admin.get(brandPath);
       expect(getRes.status).to.equal(200);
       expect(getRes.body.status).to.equal('active');
-      expect(getRes.body.baseSiteId).to.equal(ACTIVATE_SITE_ID);
+      expect(getRes.body.baseSiteId).to.equal(SITE_4_ID);
     });
 
     it('is idempotent — re-activating the now-active brand is a 200 no-op', async () => {
