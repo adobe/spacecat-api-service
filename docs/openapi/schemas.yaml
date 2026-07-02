@@ -9069,6 +9069,14 @@ UrlInspectorStats:
 UrlInspectorOwnedUrlRow:
   type: object
   properties:
+    urlId:
+      type: string
+      description: >-
+        Real source_urls.id for this URL, used by the URL Details "Prompt
+        Analysis" drilldown to key rpc_url_inspector_url_prompts on a genuine
+        uuid (LLMO-5992). Empty string when an older RPC build has not yet
+        shipped the column.
+      example: '44444444-4444-4444-4444-444444444444'
     url:
       type: string
       format: uri
