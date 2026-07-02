@@ -523,7 +523,10 @@ v2-serenity-tags:
                 name: { type: string }
                 tag:
                   type: string
-                  description: The full `<type>:<name>` tag string registered upstream.
+                  description: |
+                    The registered tag string: the full `<type>:<name>` for a
+                    root/flat tag (no `parentId`), or the BARE `<name>` (no
+                    dimension prefix) for a 1-level nested child.
                 id:
                   type: string
                   description: The created tag's upstream id.
@@ -570,10 +573,14 @@ v2-serenity-tag-by-id:
     description: |
       Updates a single AIO tag in place on the market addressed by the
       `(geoTargetId, languageCode)` slice — renames it and/or re-parents it under
-      another category (1-level nesting). `name` is the tag's full
-      `<dimension>:<value>` string and is always required by the upstream
-      contract, so a pure re-parent still carries the (unchanged) name. `parentId`
-      re-parents when present; note that promoting a child back to a root is not
+      another category (1-level nesting). `name` is required on every call; its
+      shape depends on the CURRENT tag: a root takes the full
+      `<dimension>:<value>` string, a child takes a BARE value (no dimension
+      prefix — mirrors tag creation). `parentId` re-parents when present; when
+      omitted on a child rename, the proxy resolves and re-sends the child's
+      CURRENT `parentId` itself (never omits it for a child — omission silently
+      promotes a child to root upstream), so the parent is safely left
+      unchanged either way. Note that promoting a child back to a root is not
       supported upstream. An unknown `tagId` returns 404.
     operationId: updateSerenityTag
     security:
@@ -591,13 +598,18 @@ v2-serenity-tag-by-id:
                 type: string
                 minLength: 1
                 description: |
-                  The tag's full `<dimension>:<value>` string (dimension one of
-                  `category` / `topic`). Rename by changing the value.
+                  The tag's new name. For a ROOT tag, the full
+                  `<dimension>:<value>` string (dimension one of `category` /
+                  `topic`) — rename by changing the value. For a CHILD tag
+                  (currently nested under a parent), a BARE value with no
+                  dimension prefix, mirroring how children are created.
               parentId:
                 type: string
                 description: |
                   Optional upstream tag id to re-parent this tag under. Omit to
-                  leave the parent unchanged.
+                  leave the parent unchanged (safe for both a root and a child
+                  — the proxy resolves and preserves a child's current parent
+                  server-side rather than omitting it from the upstream call).
               geoTargetId:
                 type: integer
                 minimum: 1
@@ -620,7 +632,9 @@ v2-serenity-tag-by-id:
                 tagId: { type: string }
                 tag:
                   type: string
-                  description: The tag's full `<dimension>:<value>` string after update.
+                  description: |
+                    The tag's name after update: the full `<dimension>:<value>`
+                    string for a root, or the BARE value for a child.
                 parentId:
                   type: [string, 'null']
                   description: The parent tag id when nested, otherwise null.

@@ -28,12 +28,43 @@ function fakeLog() {
   };
 }
 
+// Default: an empty tree, so resolveTagTarget() resolves any tagId to
+// 'unknown' unless a test overrides listProjectTags to place it as a root or
+// a child. This preserves the legacy full-"<dimension>:<value>"-name
+// behavior for every test that isn't specifically about child-target
+// resolution.
 function makeTransport(overrides = {}) {
   return {
     createProjectTags: sinon.stub().resolves([{ id: 'tag-1', name: 'category:Footwear' }]),
     updateProjectTag: sinon.stub().resolves({ id: 'tag-1', name: 'category:Footwear', parent_id: 'tag-parent' }),
+    listProjectTags: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
     ...overrides,
   };
+}
+
+// Stubs listProjectTags so resolveTagTarget() resolves `childId` as a CHILD
+// of `rootId` (mirrors the live shape: children carry `parent_id`).
+function makeChildTreeTransport(rootId, childId, overrides = {}) {
+  const listProjectTags = sinon.stub();
+  listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: '' }))
+    .resolves({ page: 1, total: 1, items: [{ id: rootId, name: 'category:Footwear', children_count: 1 }] });
+  listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: rootId }))
+    .resolves({
+      page: 1,
+      total: 1,
+      items: [{
+        id: childId, name: 'Sneakers', parent_id: rootId, path: [{ id: rootId, name: 'category:Footwear' }],
+      }],
+    });
+  return makeTransport({ listProjectTags, ...overrides });
+}
+
+// Stubs listProjectTags so resolveTagTarget() resolves `rootId` as a ROOT.
+function makeRootTreeTransport(rootId, overrides = {}) {
+  const listProjectTags = sinon.stub();
+  listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: '' }))
+    .resolves({ page: 1, total: 1, items: [{ id: rootId, name: 'category:Footwear', children_count: 0 }] });
+  return makeTransport({ listProjectTags, ...overrides });
 }
 
 function makeDataAccess(findBySliceResult) {
@@ -225,6 +256,30 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
       expect(resolveProjectStub).to.not.have.been.called;
     });
+
+    it('creates a BARE-named child when parentId is present (twin of the flat-mode fix)', async () => {
+      const resolveProjectStub = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const handler = await esmock('../../../../src/support/serenity/handlers/tags.js', {
+        '../../../../src/support/serenity/subworkspace-projects.js': {
+          resolveProject: resolveProjectStub,
+        },
+      });
+      const transport = makeTransport({
+        createProjectTags: sinon.stub().resolves([{ id: 'child-1', name: 'Sneakers', parent_id: 'parent-1' }]),
+      });
+      const res = await handler.handleCreateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        {
+          type: 'category', name: 'Sneakers', geoTargetId: 2840, languageCode: 'en', parentId: 'parent-1',
+        },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(201);
+      expect(res.body).to.include({ tag: 'Sneakers', id: 'child-1', parentId: 'parent-1' });
+      expect(transport.createProjectTags)
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-sub-1', ['Sneakers'], { parentId: 'parent-1' });
+    });
   });
 
   describe('handleCreateTag — nested (parentId)', () => {
@@ -233,10 +288,10 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       handler = await import('../../../../src/support/serenity/handlers/tags.js');
     });
 
-    it('threads parentId to the transport and echoes the created id + parentId', async () => {
+    it('threads parentId to the transport and creates a BARE-named child, echoing the id + parentId', async () => {
       const transport = makeTransport({
         createProjectTags: sinon.stub().resolves([
-          { id: 'child-1', name: 'category:Sneakers', parent_id: 'parent-1' },
+          { id: 'child-1', name: 'Sneakers', parent_id: 'parent-1' },
         ]),
       });
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
@@ -251,9 +306,11 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         fakeLog(),
       );
       expect(res.status).to.equal(201);
-      expect(res.body).to.include({ tag: 'category:Sneakers', id: 'child-1', parentId: 'parent-1' });
+      // A child is BARE — no `category:` prefix — unlike a root (see the plain
+      // 'registers a category:<NAME> tag' test above). serenity-docs#24 §2.
+      expect(res.body).to.include({ tag: 'Sneakers', id: 'child-1', parentId: 'parent-1' });
       expect(transport.createProjectTags)
-        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['category:Sneakers'], { parentId: 'parent-1' });
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['Sneakers'], { parentId: 'parent-1' });
     });
 
     it('normalizes an empty parentId to undefined (flat create)', async () => {
@@ -358,6 +415,16 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
+    it('400s on a missing/blank name', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      for (const name of [undefined, '   ']) {
+        // eslint-disable-next-line no-await-in-loop
+        await expect(handler.handleUpdateTag(transport, dataAccess, BRAND, WORKSPACE, 'tag-1', { ...updateBody, name }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      }
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
     it('400s on a name that is not a creatable <dimension>:<value>', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
@@ -387,6 +454,39 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
     });
 
+    it('400s on a name whose value is empty, too long, has a second colon, or has control characters', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const bad = [
+        { ...updateBody, name: 'category:' },
+        { ...updateBody, name: `category:${'x'.repeat(101)}` },
+        { ...updateBody, name: 'category:topic:smuggled' },
+        { ...updateBody, name: 'category:bad\u0000name' },
+      ];
+      for (const body of bad) {
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          handler.handleUpdateTag(transport, dataAccess, BRAND, WORKSPACE, 'tag-1', body, fakeLog()),
+        ).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      }
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('400s on a non-positive geoTargetId or malformed languageCode', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const bad = [
+        { ...updateBody, geoTargetId: 0 },
+        { ...updateBody, languageCode: 'EN_US!' },
+      ];
+      for (const body of bad) {
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          handler.handleUpdateTag(transport, dataAccess, BRAND, WORKSPACE, 'tag-1', body, fakeLog()),
+        ).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      }
+    });
+
     it('404s (marketNotFound) when no project backs the slice', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess(null);
@@ -402,6 +502,116 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       const transport = makeTransport({ updateProjectTag: sinon.stub().rejects(notFound) });
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       await expect(handler.handleUpdateTag(transport, dataAccess, BRAND, WORKSPACE, 'ghost', updateBody, fakeLog())).to.be.rejectedWith('not found');
+    });
+  });
+
+  describe('handleUpdateTag — child target (serenity-docs#24 §3.1 gate 5)', () => {
+    let handler;
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    it('accepts a BARE name on a child and echoes its CURRENT parent_id even when only renaming (no parentId sent)', async () => {
+      const transport = makeChildTreeTransport('root-1', 'child-1', {
+        updateProjectTag: sinon.stub().resolves({ id: 'child-1', name: 'SneakersRenamed', parent_id: 'root-1' }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'child-1',
+        { name: 'SneakersRenamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({ tag: 'SneakersRenamed', parentId: 'root-1' });
+      // The fix: parent_id is explicitly re-sent (never omitted for a child),
+      // even though the request itself carried no parentId — omitting it here
+      // is exactly what silently promotes a child to root on live Semrush.
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        'child-1',
+        { name: 'SneakersRenamed', parentId: 'root-1' },
+      );
+    });
+
+    it('400s a child rename that carries a dimension prefix (children are bare, like create)', async () => {
+      const transport = makeChildTreeTransport('root-1', 'child-1');
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'child-1',
+        { name: 'category:Sneakers', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('uses the CALLER-supplied parentId (not the current one) when explicitly re-parenting a child', async () => {
+      const transport = makeChildTreeTransport('root-1', 'child-1', {
+        updateProjectTag: sinon.stub().resolves({ id: 'child-1', name: 'Sneakers', parent_id: 'root-2' }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'child-1',
+        {
+          name: 'Sneakers', parentId: 'root-2', geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        'child-1',
+        { name: 'Sneakers', parentId: 'root-2' },
+      );
+    });
+
+    it('400s a BARE name on a ROOT — unaffected by the child fix, roots still require the dimension prefix', async () => {
+      const transport = makeRootTreeTransport('root-1');
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'root-1',
+        { name: 'Footwear', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('omits parentId (unaffected, safe) when renaming a ROOT with no parentId sent', async () => {
+      const transport = makeRootTreeTransport('root-1', {
+        updateProjectTag: sinon.stub().resolves({ id: 'root-1', name: 'category:FootwearRenamed' }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'root-1',
+        { name: 'category:FootwearRenamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      );
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        'root-1',
+        { name: 'category:FootwearRenamed', parentId: undefined },
+      );
     });
   });
 
@@ -440,6 +650,33 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
           expect(err.code).to.equal('marketNotFound');
         });
       expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('accepts a BARE child rename and echoes its CURRENT parent_id (twin of the flat-mode fix)', async () => {
+      const resolveProjectStub = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const handler = await esmock('../../../../src/support/serenity/handlers/tags.js', {
+        '../../../../src/support/serenity/subworkspace-projects.js': {
+          resolveProject: resolveProjectStub,
+        },
+      });
+      const transport = makeChildTreeTransport('root-1', 'child-1', {
+        updateProjectTag: sinon.stub().resolves({ id: 'child-1', name: 'SneakersRenamed', parent_id: 'root-1' }),
+      });
+      const res = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        'child-1',
+        { name: 'SneakersRenamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({ tag: 'SneakersRenamed', parentId: 'root-1' });
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-sub-1',
+        'child-1',
+        { name: 'SneakersRenamed', parentId: 'root-1' },
+      );
     });
   });
 });

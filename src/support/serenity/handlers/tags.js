@@ -19,18 +19,21 @@ import { ERROR_CODES } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import { tagFor, CREATABLE_TAG_DIMENSIONS } from '../prompt-tags.js';
+import { listProjectTagTree } from './markets.js';
 
 /**
  * POST /serenity/tags — create a prompt TAG on a single market.
  *
- * Tags are `dimension:<NAME>` strings registered on a market's project (the
- * `aio/tags` surface, via {@link createProjectTags}). This endpoint creates a
- * tag under one of the OPEN dimensions ({@link CREATABLE_TAG_DIMENSIONS} —
- * `category` / `topic`); the closed taxonomies (`source` / `intent` / `type`)
- * have a fixed value enum and are not freely creatable, so the `type` is
- * validated against the allow-list (this is what bounds the allowed prefixes).
- * The UI's "Categories" view, for instance, is the `category:` slice of these
- * tags across the brand's markets.
+ * A ROOT tag is a `dimension:<NAME>` string registered on a market's project
+ * (the `aio/tags` surface, via {@link createProjectTags}) under one of the
+ * OPEN dimensions ({@link CREATABLE_TAG_DIMENSIONS} — `category` / `topic`);
+ * the closed taxonomies (`source` / `intent` / `type`) have a fixed value enum
+ * and are not freely creatable, so the `type` is validated against the
+ * allow-list (this is what bounds the allowed prefixes). A CHILD tag (created
+ * with `parentId`, 1-level nesting) is BARE — no dimension prefix — matching
+ * the migration CLI's write shape (serenity-docs#24 §2). The UI's
+ * "Categories" view is the `category:` slice of these root tags, plus their
+ * bare children, across the brand's markets.
  *
  * Both the flat-mode and subworkspace-mode handlers resolve the market's project
  * id from the `(geoTargetId, languageCode)` slice and register one tag.
@@ -204,7 +207,9 @@ export async function handleCreateTag(
   if (!row) {
     throw marketNotFound();
   }
-  const tag = tagFor(type, name);
+  // A nested child is created BARE (no dimension prefix) — only a root gets the
+  // `<dimension>:<value>` name. See issue 21 §1 / serenity-docs#24 §2.
+  const tag = parentId ? name : tagFor(type, name);
   const created = await transport.createProjectTags(
     semrushWorkspaceId,
     row.getSemrushProjectId(),
@@ -246,7 +251,9 @@ export async function handleCreateTagSubworkspace(
   if (!project) {
     throw marketNotFound();
   }
-  const tag = tagFor(type, name);
+  // A nested child is created BARE (no dimension prefix) — only a root gets the
+  // `<dimension>:<value>` name. See issue 21 §1 / serenity-docs#24 §2.
+  const tag = parentId ? name : tagFor(type, name);
   const created = await transport.createProjectTags(
     workspaceId,
     String(project.id),
@@ -274,18 +281,17 @@ function requireTagId(tagId) {
 }
 
 /**
- * Validates + normalizes the update-tag body, throwing a 400 on the first
- * problem. Unlike create, `name` here is the FULL `<dimension>:<value>` tag
- * string (upstream requires `name` on every PATCH, so a pure re-parent still
- * carries the tag's current full name — the caller has it from a prior list). The
- * dimension must be one of {@link CREATABLE_TAG_DIMENSIONS}, so a PATCH can never
- * smuggle a tag into a closed taxonomy (`intent`/`source`/`type`). `parentId`
- * (optional) re-parents when non-empty.
+ * Validates + normalizes the update-tag body's SYNTAX only, throwing a 400 on
+ * the first problem. Deliberately does NOT judge whether a bare (no dimension
+ * prefix) name is legal -- that depends on whether the PATCH target is
+ * currently a root or a child, which only {@link resolveTagTarget} can answer
+ * (it needs transport access this pure parser doesn't have). See
+ * {@link buildUpdatePayload} for that cross-check.
  *
  * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).
  * @returns {{
- *   tag: string, parentId: string | undefined,
- *   geoTargetId: number, languageCode: string,
+ *   dimension: string, value: string, hasDimensionPrefix: boolean,
+ *   parentId: string | undefined, geoTargetId: number, languageCode: string,
  * }}
  */
 function parseUpdateTagBody(body) {
@@ -294,16 +300,11 @@ function parseUpdateTagBody(body) {
     throw new ErrorWithStatusCode('name is required', 400);
   }
   const colon = rawName.indexOf(':');
-  const dimension = colon > 0 ? rawName.slice(0, colon).toLowerCase() : '';
-  const value = colon > 0 ? rawName.slice(colon + 1) : '';
-  // Widen the frozen tuple to string[] for the runtime membership test (see the
-  // same idiom in parseCreateTagBody).
-  const creatable = /** @type {readonly string[]} */ (CREATABLE_TAG_DIMENSIONS);
-  if (!creatable.includes(dimension) || !value) {
-    throw new ErrorWithStatusCode(
-      `name must be a "<dimension>:<value>" tag where dimension is one of: ${CREATABLE_TAG_DIMENSIONS.join(', ')}`,
-      400,
-    );
+  const hasDimensionPrefix = colon > 0;
+  const dimension = hasDimensionPrefix ? rawName.slice(0, colon).toLowerCase() : '';
+  const value = hasDimensionPrefix ? rawName.slice(colon + 1) : rawName;
+  if (!value) {
+    throw new ErrorWithStatusCode('name must not be empty', 400);
   }
   if (value.length > MAX_TAG_NAME_LEN) {
     throw new ErrorWithStatusCode(
@@ -311,9 +312,10 @@ function parseUpdateTagBody(body) {
       400,
     );
   }
-  // Exactly one ':' — a second colon would smuggle a nested dimension.
+  // At most one ':' -- a second colon would smuggle a nested dimension, whether
+  // the target turns out to be a root (one ':' expected) or a child (none).
   if (value.includes(':')) {
-    throw new ErrorWithStatusCode('name must contain exactly one ":"', 400);
+    throw new ErrorWithStatusCode('name must contain at most one ":"', 400);
   }
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001F\u007F]/.test(value)) {
@@ -332,15 +334,117 @@ function parseUpdateTagBody(body) {
     );
   }
   return {
-    tag: `${dimension}:${value}`, parentId, geoTargetId, languageCode,
+    dimension, value, hasDimensionPrefix, parentId, geoTargetId, languageCode,
   };
 }
 
 /**
- * PATCH /serenity/tags/:tagId (flat mode) — rename and/or re-parent a single tag
- * in place. The market's project id comes from the persisted `BrandSemrushProject`
- * mapping (same resolution as handleCreateTag). An unknown `tagId` surfaces as the
- * upstream 404 (SerenityTransportError) via the controller's mapError.
+ * Resolves whether `tagId` is currently a ROOT or a CHILD in the project's
+ * standalone AIO tag tree, and -- when a child -- its current parent id. There
+ * is no upstream "get tag by id" endpoint, so this walks the draft tree: the
+ * roots first, then (if not found there) each root's children in turn until
+ * `tagId` is found. Bounded by the project's root-category count (O(1 +
+ * numRoots) upstream calls) -- acceptable for an admin-frequency rename/
+ * re-parent action, not a hot path.
+ *
+ * Exists to close a live-verified gap (serenity-docs#24 section 3.1 gate 5,
+ * probed 2026-07-02): PATCHing a child with `parent_id` omitted from the
+ * upstream body silently PROMOTES it to root -- omission is only safe when the
+ * target is already a root. Every PATCH to a child must therefore explicitly
+ * re-send its current `parent_id`, even when only the name is changing (see
+ * {@link buildUpdatePayload}).
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the PATCH target's upstream id.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ kind: 'root' | 'child' | 'unknown', parentId: string | null }>}
+ */
+async function resolveTagTarget(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  if (roots.items.some((t) => t.id === tagId)) {
+    return { kind: 'root', parentId: null };
+  }
+  for (const root of roots.items) {
+    // Sequential by design: stop at the first root whose children contain the
+    // target, rather than fanning out every root's children concurrently for
+    // what is expected to resolve within the first few roots in practice.
+    // eslint-disable-next-line no-await-in-loop
+    const children = await listProjectTagTree(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      root.id,
+      log,
+    );
+    const found = children.items.find((t) => t.id === tagId);
+    if (found) {
+      return { kind: 'child', parentId: found.parentId ?? root.id };
+    }
+  }
+  return { kind: 'unknown', parentId: null };
+}
+
+/**
+ * Cross-checks the parsed update body's name shape against the PATCH target's
+ * resolved tree position (see {@link resolveTagTarget}), and decides what
+ * `parentId` to forward upstream. A root keeps the legacy
+ * `<dimension>:<value>` requirement (dimension validated against
+ * {@link CREATABLE_TAG_DIMENSIONS}, unchanged); a child takes a bare name
+ * (no dimension prefix -- mirrors {@link handleCreateTag}'s create-side rule)
+ * and ALWAYS gets an explicit `parentId` in the outgoing PATCH: the caller's
+ * requested `parentId` when re-parenting, otherwise the child's own CURRENT
+ * parent so a rename-only PATCH never omits it (gate 5). An unresolvable
+ * (`unknown`) target falls back to the pre-existing full-name requirement and
+ * an omitted `parentId` -- the upstream 404 on the `tag_id` path segment is
+ * what actually catches a genuinely unknown id, not this validation.
+ *
+ * @param {{
+ *   hasDimensionPrefix: boolean, dimension: string, value: string,
+ *   parentId: string | undefined,
+ * }} parsed
+ * @param {{ kind: 'root' | 'child' | 'unknown', parentId: string | null }} target
+ * @returns {{ tag: string, parentIdToSend: string | undefined }}
+ */
+function buildUpdatePayload(parsed, target) {
+  const {
+    hasDimensionPrefix, dimension, value, parentId,
+  } = parsed;
+  if (target.kind === 'child') {
+    if (hasDimensionPrefix) {
+      throw new ErrorWithStatusCode('a child tag name must not contain ":"', 400);
+    }
+    return {
+      tag: value,
+      parentIdToSend: parentId !== undefined ? parentId : (target.parentId ?? undefined),
+    };
+  }
+  // Root, or an id we could not resolve in the tree walk -- legacy behavior:
+  // require the full "<dimension>:<value>" shape.
+  const creatable = /** @type {readonly string[]} */ (CREATABLE_TAG_DIMENSIONS);
+  if (!hasDimensionPrefix || !creatable.includes(dimension)) {
+    throw new ErrorWithStatusCode(
+      `name must be a "<dimension>:<value>" tag where dimension is one of: ${CREATABLE_TAG_DIMENSIONS.join(', ')}`,
+      400,
+    );
+  }
+  return { tag: `${dimension}:${value}`, parentIdToSend: parentId };
+}
+
+/**
+ * PATCH /serenity/tags/:tagId (flat mode) -- rename and/or re-parent a single
+ * tag in place. The market's project id comes from the persisted
+ * `BrandSemrushProject` mapping (same resolution as handleCreateTag).
+ *
+ * Resolves the target's current tree position first (see
+ * {@link resolveTagTarget}) so a child rename never omits `parent_id` (which
+ * would silently promote it to root, serenity-docs#24 section 3.1 gate 5) and
+ * so a bare (no dimension prefix) name is only accepted for a child, mirroring
+ * {@link handleCreateTag}'s create-side rule. An id we cannot resolve in the
+ * tree walk falls back to the pre-existing full-name requirement; the
+ * upstream 404 on the `tag_id` path segment (surfaced via the controller's
+ * mapError) is what actually catches a genuinely unknown id.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {object} dataAccess - data-access layer (BrandSemrushProject).
@@ -361,9 +465,8 @@ export async function handleUpdateTag(
   log,
 ) {
   const id = requireTagId(tagId);
-  const {
-    tag, parentId, geoTargetId, languageCode,
-  } = parseUpdateTagBody(body);
+  const parsed = parseUpdateTagBody(body);
+  const { geoTargetId, languageCode } = parsed;
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
     geoTargetId,
@@ -372,15 +475,18 @@ export async function handleUpdateTag(
   if (!row) {
     throw marketNotFound();
   }
+  const projectId = row.getSemrushProjectId();
+  const target = await resolveTagTarget(transport, semrushWorkspaceId, projectId, id, log);
+  const { tag, parentIdToSend } = buildUpdatePayload(parsed, target);
   const updated = await transport.updateProjectTag(
     semrushWorkspaceId,
-    row.getSemrushProjectId(),
+    projectId,
     id,
-    { name: tag, parentId },
+    { name: tag, parentId: parentIdToSend },
   );
-  const { parentId: updatedParentId } = pickTagIds(updated, parentId);
+  const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTag: updated tag', {
-    brandId, geoTargetId, languageCode, tagId: id, tag, parentId,
+    brandId, geoTargetId, languageCode, tagId: id, tag, parentId: parentIdToSend,
   });
   return {
     status: 200,
@@ -391,9 +497,10 @@ export async function handleUpdateTag(
 }
 
 /**
- * PATCH /serenity/tags/:tagId (subworkspace mode) — the market's project is
+ * PATCH /serenity/tags/:tagId (subworkspace mode) -- the market's project is
  * resolved live from the brand's own subworkspace listing (same resolution as
- * handleCreateTagSubworkspace).
+ * handleCreateTagSubworkspace). See {@link handleUpdateTag} for the
+ * child-target resolution / bare-name / parent_id-echo rules this shares.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} workspaceId - the brand's subworkspace id.
@@ -410,22 +517,24 @@ export async function handleUpdateTagSubworkspace(
   log,
 ) {
   const id = requireTagId(tagId);
-  const {
-    tag, parentId, geoTargetId, languageCode,
-  } = parseUpdateTagBody(body);
+  const parsed = parseUpdateTagBody(body);
+  const { geoTargetId, languageCode } = parsed;
   const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
     throw marketNotFound();
   }
+  const projectId = String(project.id);
+  const target = await resolveTagTarget(transport, workspaceId, projectId, id, log);
+  const { tag, parentIdToSend } = buildUpdatePayload(parsed, target);
   const updated = await transport.updateProjectTag(
     workspaceId,
-    String(project.id),
+    projectId,
     id,
-    { name: tag, parentId },
+    { name: tag, parentId: parentIdToSend },
   );
-  const { parentId: updatedParentId } = pickTagIds(updated, parentId);
+  const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTagSubworkspace: updated tag', {
-    geoTargetId, languageCode, tagId: id, tag, parentId,
+    geoTargetId, languageCode, tagId: id, tag, parentId: parentIdToSend,
   });
   return {
     status: 200,
