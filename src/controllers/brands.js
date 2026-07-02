@@ -9,6 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
+// @ts-check
+
 import { randomUUID } from 'crypto';
 
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
@@ -16,6 +19,7 @@ import {
   badRequest,
   notFound,
   ok,
+  noContent,
   createResponse,
   forbidden,
   internalServerError,
@@ -54,12 +58,14 @@ import {
   getBrandBySite,
   getBrandCompetitors,
 } from '../support/brands-storage.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
+import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import {
   buildReservedDomains,
   dropReservedCompetitors,
@@ -268,7 +274,7 @@ function BrandsController(ctx, log, env) {
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
       const brands = await brandClient.getBrandsForOrganization(imsOrgId, `Bearer ${imsUserToken}`);
-      return ok(brands);
+      return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
       return createErrorResponse(error);
@@ -356,7 +362,7 @@ function BrandsController(ctx, log, env) {
             govConfig,
           );
           if (brandGovGuidelines) {
-            return ok(brandGovGuidelines);
+            return createResponse(brandGovGuidelines, 200);
           }
         } catch (govError) {
           log.warn(`Brand Governance Agent failed for site ${siteId}, falling back to Brand Publish: ${govError.message}`);
@@ -376,7 +382,7 @@ function BrandsController(ctx, log, env) {
         imsOrgId,
         imsConfig,
       );
-      return ok(brandGuidelines);
+      return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
       return createErrorResponse(error);
@@ -444,7 +450,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -553,7 +559,7 @@ function BrandsController(ctx, log, env) {
         prompts,
         postgrestClient,
         updatedBy,
-        classifyIntent,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
@@ -613,7 +619,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
-        classifyIntent,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       if (!prompt) {
@@ -675,7 +681,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Prompt not found: ${promptId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
       return createErrorResponse(error);
@@ -734,7 +740,7 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -790,7 +796,7 @@ function BrandsController(ctx, log, env) {
       }
 
       const results = await checkPromptsExist({ brandUuid, prompts, postgrestClient });
-      return ok({ results });
+      return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
       return createErrorResponse(error);
@@ -837,7 +843,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(stats);
+      return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
       return createErrorResponse(error);
@@ -990,7 +996,25 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const brands = await listBrands(spaceCatId, postgrestClient, { status });
-      return ok({ brands });
+
+      // ReBAC collection filter. When facsWrapper marks this session as
+      // FACS-enrolled and resource-scoped (no org-wide can_view — see
+      // context.attributes.facs), narrow the listed brands to those the caller
+      // may view via a state-layer grant. Absent flag (admin / internal org /
+      // non-ReBAC org / org-wide viewer) => full list.
+      const facs = context.attributes?.facs;
+      const hasFACSCapability = facs?.enabled
+        && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+      if (facs?.enabled && !hasFACSCapability) {
+        const viewable = await listViewableResourceIds(postgrestClient, {
+          imsOrgId: organization.getImsOrgId(),
+          product: facs.product,
+          resourceType: 'brand',
+          subjectId: facs.subjectId,
+        });
+        return createResponse({ brands: brands.filter((brand) => viewable.has(brand.id)) }, 200);
+      }
+      return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1025,7 +1049,7 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       // eslint-disable-next-line max-len
       const categories = await listCategories({ organizationId: spaceCatId, postgrestClient, status });
-      return ok({ categories });
+      return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1206,7 +1230,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Category not found: ${categoryId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1244,7 +1268,7 @@ function BrandsController(ctx, log, env) {
       const topics = await listTopics({
         organizationId: spaceCatId, postgrestClient, status, brandId,
       });
-      return ok({ topics });
+      return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1396,7 +1420,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Topic not found: ${topicId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1487,6 +1511,16 @@ function BrandsController(ctx, log, env) {
       // would 400 for a missing primary URL, or worse, provision a sub-workspace
       // for a brand never meant to have one). Presence is trusted ONLY for a draft.
       const isSemrushMode = hasSemrushMarket || generatePrompts || isSubworkspaceOnlyDraft;
+      // Serenity rollout gate. Provisioning a Semrush sub-workspace / project for a
+      // brand is a serenity-active operation. While serenity is inactive for the
+      // org, refuse a Semrush-mode create rather than provision upstream: the
+      // flag-gated UI won't request it, and an org still on the normal backend data
+      // must not get a sub-workspace before its rollout flag is flipped on. The
+      // helper is only consulted on the Semrush-mode path, so a plain (flat) create
+      // is unaffected. (Effective gate is flag AND workspace, same as /serenity/*.)
+      if (isSemrushMode && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+        return forbidden('Serenity is not active for this organization');
+      }
       if (isSemrushMode) {
         let market;
         let languageCode;
@@ -1542,7 +1576,7 @@ function BrandsController(ctx, log, env) {
           };
         } else {
           const brandDomain = brandDomainFromPayload(brandData);
-          if (!hasText(brandDomain)) {
+          if (!brandDomain || !hasText(brandDomain)) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
           provisionedBrandDomain = brandDomain;
@@ -1636,12 +1670,12 @@ function BrandsController(ctx, log, env) {
       // whose catch releases the just-provisioned workspace; a throw here would
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
       // contract (its own catch-all swallows + logs), so this holds.
-      if (hasText(provisionedWorkspaceId)) {
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
         await ensureMarketSite(context, {
           organizationId: spaceCatId,
-          brandId: provisionedBrandId,
+          brandId: provisionedBrandId ?? undefined,
           // The initial market's domain, resolved during provisioning above.
-          domain: provisionedBrandDomain,
+          domain: provisionedBrandDomain ?? undefined,
           updatedBy,
           log,
         });
@@ -1657,7 +1691,7 @@ function BrandsController(ctx, log, env) {
       // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
       // error). Nothing references that workspace, so release its allocation back
       // to the parent pool (best-effort) rather than leaking it.
-      if (hasText(provisionedWorkspaceId)) {
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
         log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
@@ -1743,6 +1777,27 @@ function BrandsController(ctx, log, env) {
       // Brand aliases (the extra names the brand is known by) re-sync to every
       // market's project brand_names + own-brand benchmark on edit.
       const aliasesTouched = updates.brandAliases !== undefined;
+
+      // Serenity rollout gate. An edit that changes URL sources / competitors /
+      // aliases re-syncs onto the brand's Semrush projects (the block near the end
+      // of this handler), but ONLY for a sub-workspace brand. While serenity is
+      // inactive for the org that re-sync must not run — even if a
+      // semrush_workspace_id was backfilled for rollout prep — so reject the edit
+      // (rather than silently skip the sync and let the brand drift) when it would
+      // touch Semrush. A flat-mode brand (no workspace) edits the same fields as
+      // plain backend data and is unaffected; the brand read only happens on the
+      // inactive path, so the common active path pays nothing extra.
+      const touchesSemrushSync = updates.urls !== undefined
+        || updates.socialAccounts !== undefined
+        || updates.earnedContent !== undefined
+        || competitorsTouched
+        || aliasesTouched;
+      if (touchesSemrushSync && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+        const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        if (hasText(current?.semrushWorkspaceId)) {
+          return forbidden('Serenity is not active for this organization');
+        }
+      }
 
       // LLMO-5645: a region must not be removed from a brand while prompts still
       // use it — DRS schedules off each prompt's `regions`, so dropping a brand
@@ -1996,7 +2051,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Brand not found: ${brandId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);

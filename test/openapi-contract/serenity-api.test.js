@@ -199,6 +199,25 @@ const FIXTURES = {
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  createSerenityTag: {
+    expectedStatus: 201,
+    controllerMethod: 'createTag',
+    handlerName: 'handleCreateTag',
+    handlerResult: {
+      status: 201,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        type: 'category',
+        name: 'Running Shoes',
+        tag: 'category:Running Shoes',
+      },
+    },
+    data: {
+      type: 'category', name: 'Running Shoes', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
   listSerenityModels: {
     expectedStatus: 200,
     controllerMethod: 'listModels',
@@ -315,6 +334,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleCreateTag: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
@@ -361,6 +381,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             listGlobalModelCatalog: handlerStubs.listGlobalModelCatalog,
             listLanguageCatalog: handlerStubs.listLanguageCatalog,
           },
+          '../../src/support/serenity/handlers/tags.js': {
+            handleCreateTag: handlerStubs.handleCreateTag,
+            handleCreateTagSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: sinon.stub(),
             handleGetMarketSubworkspace: sinon.stub(),
@@ -379,6 +403,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/workspace-lifecycle.js': {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
+          },
+          // Serenity is active for the org (org-wide LLMO/serenity flag ON) so
+          // the documented success shapes are exercised rather than the
+          // inactive-org 404.
+          '../../src/support/serenity/serenity-active.js': {
+            isSerenityActiveForOrg: () => Promise.resolve(true),
           },
           // activate reads brand-level aliases/URLs/competitors once per batch;
           // stub them so the contract test doesn't hit the fake postgrest client.

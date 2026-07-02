@@ -10,8 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import {
-  createResponse, forbidden, internalServerError, notFound, ok,
+  createResponse, forbidden, internalServerError, noContent, notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -53,7 +55,12 @@ import {
   handleUpdatePromptSubworkspace,
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
+import {
+  handleCreateTag,
+  handleCreateTagSubworkspace,
+} from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
+import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -110,6 +117,7 @@ function extractQuery(context) {
 
 function parsedQuery(context) {
   const raw = extractQuery(context);
+  /** @type {Record<string, string | string[] | number | null>} */
   const out = { ...raw };
   if (raw.geoTargetId !== undefined) {
     const n = parseInt(raw.geoTargetId, 10);
@@ -143,7 +151,7 @@ function mapError(e, log) {
     // Handlers can set `e.code` (e.g. 'marketNotFound') to pin a specific
     // error token in the response envelope; falls back to the status-based
     // default for plain throws.
-    const errorToken = hasText(e.code) ? e.code : errorTokenForStatus(status);
+    const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
     return createResponse(
       { error: errorToken, message: safeError(e.message) },
       status,
@@ -177,10 +185,36 @@ function mapError(e, log) {
  * missing OR if the caller authenticated by some other mechanism. The
  * upstream gateway only understands IMS user tokens; we refuse to forward
  * anything else.
+ *
+ * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
+ * we forward is validated AGAIN by the real Semrush gateway on every upstream
+ * call (it rejects an invalid/expired/forged token with 401/403, which the
+ * transport surfaces as a SerenityTransportError). This local check is only a
+ * fail-fast + shape guard so we do not forward a token Semrush will obviously
+ * reject; it never substitutes for the upstream's own validation.
+ *
+ * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` AND the
+ * runtime is not production, the IMS-type check is skipped so an authenticated
+ * NON-IMS caller (e.g. the
+ * locally-signed JWT the integration-test harness mints) can reach the
+ * handlers. This is sound because (a) production auth is unaffected — Semrush
+ * still validates the forwarded token end to end — and (b) the integration
+ * tests run against the Semrush vendor MOCKS, which intentionally do not
+ * validate the bearer, so the token's value never matters there, only that an
+ * authenticated identity is present. Mirrors `SERENITY_ALLOW_WORKSPACE_DELETE`
+ * in rest-transport.js: an explicit opt-in flag that NO deployed environment
+ * sets (it is never written to Vault `dx_mysticat/<env>/api-service`); it is
+ * for local + automated E2E only. The Authorization-header requirement still
+ * holds — a bearer must be present to forward upstream.
  */
 function requireImsBearer(ctx) {
   const authInfo = ctx?.attributes?.authInfo;
-  if (authInfo?.getType && authInfo.getType() !== 'ims') {
+  // Hard-disable the escape hatch in production, mirroring getImsUserTokenStrict:
+  // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env, a non-IMS
+  // caller must never reach the handlers there.
+  const isProd = ctx?.env?.AWS_ENV === 'prod' || ctx?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  if (!allowNonIms && authInfo?.getType && authInfo.getType() !== 'ims') {
     throw new ErrorWithStatusCode(
       'Serenity proxy requires IMS authentication',
       401,
@@ -213,12 +247,21 @@ export function brandPointerReloader(ctx, brandUuid) {
   };
 }
 
+// Logged at most once per process: makes an accidental SERENITY_ALLOW_NON_IMS_AUTH
+// enablement in a deployed environment visible in the logs (the flag bypasses the
+// IMS-type gate — it must only ever be set for local/automated E2E).
+let warnedNonImsAuth = false;
+
 function SerenityController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
   }
   if (!log) {
     throw new Error('Log required');
+  }
+  if (!warnedNonImsAuth && (context?.env || env)?.SERENITY_ALLOW_NON_IMS_AUTH === 'true') {
+    warnedNonImsAuth = true;
+    log.warn('[serenity] SERENITY_ALLOW_NON_IMS_AUTH is enabled — the IMS-type auth gate is bypassed. This is test-only and must never be set in a deployed environment.');
   }
 
   /**
@@ -272,6 +315,18 @@ function SerenityController(context, log, env) {
         ),
       };
     }
+    // Org-wide serenity rollout gate. Serenity is "active" for an org only when
+    // its `LLMO/serenity` feature flag is ON *and* a Semrush workspace resolves
+    // for the brand (the workspace half is enforced below by
+    // resolveBrandWorkspace). While the flag is OFF the org's UI keeps reading
+    // the normal backend data — even if a `semrush_workspace_id` has already
+    // been backfilled for rollout prep — so reject the serenity surface with a
+    // 404 (the same "no serenity for this org" contract the UI already handles
+    // for an org without a workspace). Checked before brand resolution so an
+    // inactive org never leaks brand existence.
+    if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
+      return { error: notFound('Serenity is not active for this organization') };
+    }
     const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
@@ -287,7 +342,7 @@ function SerenityController(context, log, env) {
       spaceCatId,
       brandUuid,
     );
-    if (mode !== 'subworkspace' && !hasText(workspaceId)) {
+    if (mode !== 'subworkspace' && (!workspaceId || !hasText(workspaceId))) {
       return { error: notFound('Organization has no semrush_workspace_id') };
     }
     // Hard invariant: a brand's sub-workspace must NEVER be the org's shared
@@ -350,7 +405,7 @@ function SerenityController(context, log, env) {
           auth.workspaceId,
           parsedQuery(ctx),
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -374,7 +429,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -438,7 +493,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -460,7 +515,7 @@ function SerenityController(context, log, env) {
           auth.brandUuid,
           auth.workspaceId,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -491,7 +546,7 @@ function SerenityController(context, log, env) {
           log,
         )
         : await handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode);
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -531,7 +586,7 @@ function SerenityController(context, log, env) {
         result = await handleCreateMarketSubworkspace(
           transport,
           brand,
-          auth.parentWorkspaceId,
+          auth.parentWorkspaceId ?? '',
           ctx.data || {},
           log,
           null,
@@ -539,8 +594,8 @@ function SerenityController(context, log, env) {
           {
             generateTopics: genMarketTopics,
             topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
-            standardTags: genMarketTopics ? STANDARD_PROMPT_TAGS : [],
-            projectTags: genMarketTopics ? PROJECT_STANDARD_TAGS : [],
+            standardTags: genMarketTopics ? [...STANDARD_PROMPT_TAGS] : [],
+            projectTags: genMarketTopics ? [...PROJECT_STANDARD_TAGS] : [],
             brandAliases,
             brandUrlSources,
             competitors,
@@ -591,15 +646,18 @@ function SerenityController(context, log, env) {
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
       const languageCode = pLang ? String(pLang).toLowerCase() : null;
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'subworkspace'
-        ? await handleDeleteMarketSubworkspace(
+      // Both delete handlers resolve to { status: 204 } on success (errors throw
+      // → mapError); the response is an empty 204 either way, so await for the
+      // upstream delete side effect and discard the result.
+      await (auth.mode === 'subworkspace'
+        ? handleDeleteMarketSubworkspace(
           transport,
           auth.workspaceId,
           geoTargetId,
           languageCode,
           log,
         )
-        : await handleDeleteMarket(
+        : handleDeleteMarket(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
@@ -607,8 +665,8 @@ function SerenityController(context, log, env) {
           geoTargetId,
           languageCode,
           log,
-        );
-      return createResponse(null, result.status);
+        ));
+      return noContent();
     } catch (e) {
       return mapError(e, log);
     }
@@ -632,7 +690,47 @@ function SerenityController(context, log, env) {
           parsedQuery(ctx),
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
+   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
+   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
+   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
+   * for one, is derived from the `category:` tags across a brand's markets.
+   * Dispatches by workspace mode, mirroring the tags/markets handlers.
+   */
+  const createTag = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      // authorize() guarantees brandUuid (404s a missing brand) and, in flat
+      // mode, a non-null workspaceId (404s 'no semrush_workspace_id'); assert
+      // the invariant for the typed handler, mirroring activate().
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        )
+        : await handleCreateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log);
     }
@@ -655,7 +753,7 @@ function SerenityController(context, log, env) {
           auth.workspaceId,
           parsedQuery(ctx),
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -692,7 +790,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const result = await listGlobalModelCatalog(transport);
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -728,7 +826,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const result = await listLanguageCatalog(transport);
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -752,7 +850,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
         );
-      return ok(result);
+      return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -773,9 +871,15 @@ function SerenityController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
+      // authorize() guarantees a resolved brand (it 404s a missing one), but the
+      // `{ error } | { brandUuid, ... }` union leaves `brandUuid` typed
+      // `string | undefined`. Assert the non-null invariant once for the typed
+      // data-access helpers below.
+      // eslint-disable-next-line prefer-destructuring
+      const brandUuid = /** @type {string} */ (auth.brandUuid);
       const body = ctx.data || {};
       const transport = buildTransport(ctx, imsToken);
-      const brand = await loadBrand(ctx, auth.brandUuid);
+      const brand = await loadBrand(ctx, brandUuid);
       // Markets + primary URL come from the request body, but a pending (draft)
       // brand activated from the wizard supplies none: fall back to what the
       // wizard stashed at "Save as pending" (brands.pending_semrush_provisioning =
@@ -822,7 +926,7 @@ function SerenityController(context, log, env) {
         const bareWorkspaceId = await ensureSubworkspace(
           transport,
           brand,
-          auth.parentWorkspaceId,
+          auth.parentWorkspaceId ?? '',
           1,
           log,
           {},
@@ -894,17 +998,17 @@ function SerenityController(context, log, env) {
       // Brand aliases are brand-level but region-scoped: read once; each market's
       // create clamps them to that market's region before writing brand_names.
       const brandAliases = await getBrandAliases(
-        auth.brandUuid,
+        brandUuid,
         ctx.dataAccess.services.postgrestClient,
       );
       // Brand URLs are brand-level: read once, push (region-filtered) per market.
       const brandUrlSources = await getBrandUrlSources(
-        auth.brandUuid,
+        brandUuid,
         ctx.dataAccess.services.postgrestClient,
       );
       // Competitors are brand-level too: read once, merge (region-filtered) per market.
       const competitors = await getBrandCompetitors(
-        auth.brandUuid,
+        brandUuid,
         ctx.dataAccess.services.postgrestClient,
       );
 
@@ -916,7 +1020,7 @@ function SerenityController(context, log, env) {
       const workspaceId = await ensureSubworkspace(
         transport,
         brand,
-        auth.parentWorkspaceId,
+        auth.parentWorkspaceId ?? '',
         markets.length,
         log,
         {},
@@ -943,7 +1047,7 @@ function SerenityController(context, log, env) {
           r = await handleCreateMarketSubworkspace(
             transport,
             brand,
-            auth.parentWorkspaceId,
+            auth.parentWorkspaceId ?? '',
             createBody,
             log,
             workspaceId,
@@ -954,8 +1058,8 @@ function SerenityController(context, log, env) {
               // the project is published empty (no prompts) — today's default.
               generateTopics: generatePrompts,
               topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
-              standardTags: generatePrompts ? STANDARD_PROMPT_TAGS : [],
-              projectTags: generatePrompts ? PROJECT_STANDARD_TAGS : [],
+              standardTags: generatePrompts ? [...STANDARD_PROMPT_TAGS] : [],
+              projectTags: generatePrompts ? [...PROJECT_STANDARD_TAGS] : [],
               // A project with neither models nor generated prompts publishes
               // "empty units" → Semrush's disguised quota 405. Tolerate it
               // (best-effort, leaves a draft) rather than failing activation; a
@@ -1029,7 +1133,7 @@ function SerenityController(context, log, env) {
           updatedBy: 'serenity-activate',
           log,
         });
-        siteLinked = hasText(linkedSiteId);
+        siteLinked = !!linkedSiteId && hasText(linkedSiteId);
       }
 
       let fullySucceeded = allMarketsLive && siteLinked;
@@ -1153,7 +1257,7 @@ function SerenityController(context, log, env) {
           transport,
           subworkspaceId,
           log,
-          auth.parentWorkspaceId,
+          auth.parentWorkspaceId ?? undefined,
           {
             enforceLinkedGuard:
               (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
@@ -1196,7 +1300,7 @@ function SerenityController(context, log, env) {
         decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
         status: 'pending',
       });
-      return ok({ brandId: auth.brandUuid, status: 'pending' });
+      return createResponse({ brandId: auth.brandUuid, status: 'pending' }, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -1212,6 +1316,7 @@ function SerenityController(context, log, env) {
     createMarket,
     deleteMarket,
     listTags,
+    createTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

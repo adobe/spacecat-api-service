@@ -23,6 +23,13 @@ import { ErrorWithStatusCode } from '../utils.js';
 //    (create child / status / family / resources transfer / delete). A DIFFERENT
 //    gateway than project ops (verified live 2026-06-15: the project prefix 404s
 //    these routes); the typed client appends the prefix internally.
+//
+// v1/v2 read-layer choice: each read method below picks its API version by which
+// project layer it must observe (v1 = draft-faithful settings; v2 prompts = live
+// layer; init_status = v2-only). When ADDING a read endpoint, see
+// docs/decisions/006-serenity-v1-v2-read-drift.md before defaulting to v2 — a
+// draft-settings read on the v2 list returns a wrong-location/null-brand live
+// view. The per-method JSDoc on each method states which layer it reads and why.
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.
@@ -60,51 +67,89 @@ export function redactUpstreamMessage(e) {
 }
 
 /**
- * Resolves and validates the upstream base URL. The URL is required and must
- * arrive via `env.SEMRUSH_PROJECTS_BASE_URL` — sourced from Vault
- * (`dx_mysticat/<env>/api-service`) and injected through AWS Secrets Manager.
- * No source default: the upstream host is operational config that must be
- * settable per-environment without a code change.
+ * Validates a raw base-URL value and returns its canonical `protocol//host`
+ * origin — never the raw value. A misconfigured value like
+ * `https://host/path-prefix` or `https://user:pass@host` would otherwise
+ * silently bleed path/userinfo into every outbound request (and the userinfo
+ * form would leak credentials in each fetch's `Authorization`-adjacent
+ * metadata). Always returning the parsed origin closes both classes of
+ * injection. The https requirement is kept for both resolvers.
  *
- * Returns the canonical `protocol//host` origin — never the raw value. A
- * misconfigured value like `https://host/path-prefix` or
- * `https://user:pass@host` would otherwise silently bleed path/userinfo into
- * every outbound request (and the userinfo form would leak credentials in
- * each fetch's `Authorization`-adjacent metadata). Always returning the
- * parsed origin closes both classes of injection.
+ * `varName` names the env var in every error message so a misconfiguration
+ * points the operator at the exact key to fix.
  *
  * Failure mapping (controller `mapError`):
  *   - Missing/invalid/non-https → throws ErrorWithStatusCode(503,
  *     'configurationError'): operational failure, not a runtime bug.
+ *
+ * @param {string | undefined} raw - The raw env value.
+ * @param {string} varName - The env var name, used in error messages.
+ * @returns {string} The canonical `protocol//host` origin.
  */
-function baseUrl(env) {
-  const raw = typeof env?.SEMRUSH_PROJECTS_BASE_URL === 'string'
-    ? env.SEMRUSH_PROJECTS_BASE_URL.trim()
-    : env?.SEMRUSH_PROJECTS_BASE_URL;
-  if (!hasText(raw)) {
+function normalizeBaseUrl(raw, varName) {
+  // Default a non-string (incl. undefined) to '' so the value is always a
+  // string for hasText/replace below — hasText is not a TS type guard, so the
+  // narrowing has to be structural (see this dir's CLAUDE.md).
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (!hasText(trimmed)) {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_PROJECTS_BASE_URL is not set. Configure it via Vault '
+      `${varName} is not set. Configure it via Vault `
       + '(dx_mysticat/<env>/api-service) or .env for local dev.',
       503,
     );
   }
-  const candidate = raw.replace(/\/$/, '');
+  const candidate = trimmed.replace(/\/$/, '');
   let parsed;
   try {
     parsed = new URL(candidate);
   } catch {
     throw new ErrorWithStatusCode(
-      `SEMRUSH_PROJECTS_BASE_URL is not a valid URL: ${candidate}`,
+      `${varName} is not a valid URL: ${candidate}`,
       503,
     );
   }
   if (parsed.protocol !== 'https:') {
     throw new ErrorWithStatusCode(
-      `SEMRUSH_PROJECTS_BASE_URL must use https (got ${parsed.protocol})`,
+      `${varName} must use https (got ${parsed.protocol})`,
       503,
     );
   }
   return `${parsed.protocol}//${parsed.host}`;
+}
+
+/**
+ * Resolves the Project Engine gateway origin. Required; arrives via
+ * `env.SEMRUSH_PROJECTS_BASE_URL` — sourced from Vault
+ * (`dx_mysticat/<env>/api-service`) and injected through AWS Secrets Manager.
+ * No source default: the upstream host is operational config that must be
+ * settable per-environment without a code change.
+ *
+ * @param {object} env
+ * @returns {string} canonical `protocol//host` origin
+ */
+function baseUrl(env) {
+  return normalizeBaseUrl(env?.SEMRUSH_PROJECTS_BASE_URL, 'SEMRUSH_PROJECTS_BASE_URL');
+}
+
+/**
+ * Resolves the User Manager gateway origin. Reads `env.SEMRUSH_USERS_BASE_URL`,
+ * **falling back to `SEMRUSH_PROJECTS_BASE_URL` when unset** — Project Engine
+ * and User Manager are distinct Semrush services that share a single host in
+ * every deployed environment today, so the fallback keeps prod/stage/dev Vault
+ * config working untouched. Decoupling lets local + E2E setups point the User
+ * Manager calls at a SEPARATE (mock) host without a path-routing reverse proxy
+ * (LLMO / api-service#2656). The error message names whichever var was the
+ * effective source so a misconfiguration is unambiguous.
+ *
+ * @param {object} env
+ * @returns {string} canonical `protocol//host` origin
+ */
+function usersBaseUrl(env) {
+  const explicit = hasText(env?.SEMRUSH_USERS_BASE_URL);
+  return normalizeBaseUrl(
+    explicit ? env.SEMRUSH_USERS_BASE_URL : env?.SEMRUSH_PROJECTS_BASE_URL,
+    explicit ? 'SEMRUSH_USERS_BASE_URL' : 'SEMRUSH_PROJECTS_BASE_URL',
+  );
 }
 
 /**
@@ -176,11 +221,17 @@ function unwrap(method, result) {
  * separate user-manager gateway.
  *
  * @param {object} args
- * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL override).
+ * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL and,
+ *   for the User Manager gateway, SEMRUSH_USERS_BASE_URL — falling back to the
+ *   projects host when the latter is unset).
  * @param {string} args.imsToken - IMS user bearer token (without 'Bearer ' prefix).
  */
 export function createSerenityTransport({ env, imsToken }) {
   const root = baseUrl(env);
+  // User Manager has its OWN origin (SEMRUSH_USERS_BASE_URL), falling back to
+  // `root` when unset — see usersBaseUrl(). Lets the sub-workspace lifecycle
+  // calls hit a separate (mock) host independently of Project Engine.
+  const usersRoot = usersBaseUrl(env);
 
   // Fail-closed guard for the destructive workspace delete. Deleting a
   // sub-workspace must be IMPOSSIBLE in every deployed environment
@@ -218,8 +269,10 @@ export function createSerenityTransport({ env, imsToken }) {
 
   // Typed User Manager client over the sub-workspace lifecycle gateway. Same
   // shape as the project client; appends its own '/enterprise/users/api' prefix.
+  // Uses `usersRoot` (SEMRUSH_USERS_BASE_URL, or `root` by fallback) so the
+  // lifecycle gateway can be a separate host from Project Engine.
   const users = createSerenityUserManagerApiClient({
-    baseUrl: root,
+    baseUrl: usersRoot,
     authToken,
     maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
@@ -231,6 +284,17 @@ export function createSerenityTransport({ env, imsToken }) {
      * project. Pass an empty `tag_ids` array to list all prompts.
      * Multiple tag IDs use OR semantics: any prompt carrying at least one of
      * the supplied IDs is included. AND filtering must be done by the caller.
+     *
+     * LIVE-LAYER READ (v1/v2 read drift — see docs/decisions/006-serenity-v1-v2-read-drift.md):
+     * prompt reads have NO v1 variant — `by_tags` exists only on /v2, and the v2
+     * prompt layer materialises the LIVE (published) view. A populated-but-
+     * unpublished draft therefore reads EMPTY here (the source of every "201 but
+     * count 0"). Counts/lists derived from this call (e.g. listTagsForProject)
+     * only reflect a slice's prompts AFTER the project is published. This differs
+     * from listProjects/getProject (above), which read draft-faithful project
+     * SETTINGS via /v1; the prompt layer cannot be read draft-faithfully at all.
+     * Migration-verification "did it land?" checks must publish first (or accept
+     * that an unpublished draft reads as 0 prompts), never treat empty as missing.
      *
      * Note: Semrush rejects `sort_field` / `sort_dir` on this endpoint (see
      * commit history on the prior `serenity` handler). Body is restricted to
@@ -345,6 +409,28 @@ export function createSerenityTransport({ env, imsToken }) {
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { names },
+        },
+      ));
+    },
+
+    /**
+     * GET /v2/workspaces/{ws}/projects/{pid}/aio/tags — lists the project's
+     * STANDALONE AIO tags (the ones `createProjectTags` registers), independent of
+     * whether any prompt carries them. This is the only read that surfaces a tag
+     * with no carrying prompt — e.g. a freshly-created, still-empty `category:<NAME>`
+     * — so the Categories surface can round-trip it. `parent_id` + `search` are
+     * required by the upstream contract; pass empty strings to list all (flat).
+     */
+    async listProjectTags(semrushWorkspaceId, projectId, { search = '', page = 1, limit = 100 } = {}) {
+      return unwrap('GET', await projects.GET(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: {
+              parent_id: '', search, page, limit,
+            },
+          },
         },
       ));
     },
@@ -596,13 +682,20 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * GET /v1/workspaces/{ws}/projects/{pid}/aio/init_status — AIO readiness
+     * GET /v2/workspaces/{ws}/projects/{pid}/aio/init_status — AIO readiness
      * for a live project (`{ initialized: bool }`). Surfaced on the single
      * market-detail read only, never per-item in the list (would be N+1).
+     *
+     * v2 (not v1): project-engine-client 1.2.0 moved init_status to /v2 and
+     * removed the /v1 route entirely (the v1 path no longer exists in the
+     * generated types). This is unrelated to the v1-draft / v2-live read split
+     * (see listProjects/getProject above) — init_status is a readiness boolean,
+     * not draft-settings, so the live-view materialisation v2 reads carries no
+     * draft-faithfulness concern here.
      */
     async getInitStatus(workspaceId, projectId) {
       return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}/aio/init_status',
+        '/v2/workspaces/{id}/projects/{project_id}/aio/init_status',
         { params: { path: { id: workspaceId, project_id: projectId } } },
       ));
     },

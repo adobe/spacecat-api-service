@@ -14,6 +14,8 @@ import { expect } from 'chai';
 import {
   ORG_1_ID,
   BRAND_1_ID,
+  SITE_2_ID,
+  SITE_2_BASE_URL,
   MARKET_SITE_1_ID,
   MARKET_SITE_1_BASE_URL,
 } from '../seed-ids.js';
@@ -175,6 +177,60 @@ export default function brandsTests(getHttpClient, resetData) {
       expect(listed.siteIds || []).to.not.include(MARKET_SITE_1_ID);
       const listedUrlValues = (listed.urls || []).map((u) => u.value);
       expect(listedUrlValues).to.not.include(MARKET_SITE_1_BASE_URL);
+    });
+  });
+
+  describe('Brands v2 pending-brand primary URL: unset + reuse (LLMO-5870)', () => {
+    before(() => resetData());
+
+    it('clears a pending brand baseSiteId so the freed site can be reused by another brand', async () => {
+      const http = getHttpClient();
+
+      // 1. A brand with no anchor (no baseSiteId / no Semrush) is created pending.
+      const createA = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Pending URL Holder', region: ['US'],
+      });
+      expect(createA.status).to.equal(201);
+      expect(createA.body.status).to.equal('pending');
+      const brandAId = createA.body.id;
+      expect(createA.body.baseSiteId == null).to.equal(true);
+
+      // 2. Setting the primary site on a pending brand (NULL -> value) is allowed
+      //    and leaves the brand pending.
+      const setA = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandAId}`, {
+        baseSiteId: SITE_2_ID,
+      });
+      expect(setA.status).to.equal(200);
+      expect(setA.body.baseSiteId).to.equal(SITE_2_ID);
+      expect(setA.body.baseUrl).to.equal(SITE_2_BASE_URL);
+      expect(setA.body.status).to.equal('pending');
+
+      // 3. A second pending brand cannot claim the same site while A holds it.
+      const createB = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Wants Same URL', region: ['US'],
+      });
+      expect(createB.status).to.equal(201);
+      const brandBId = createB.body.id;
+      const conflict = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandBId}`, {
+        baseSiteId: SITE_2_ID,
+      });
+      expect(conflict.status).to.equal(409);
+
+      // 4. Clearing brand A's primary URL (pending -> baseSiteId: null) frees the site.
+      const clearA = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandAId}`, {
+        baseSiteId: null,
+      });
+      expect(clearA.status).to.equal(200);
+      expect(clearA.body.baseSiteId == null).to.equal(true);
+      expect(clearA.body.baseUrl == null).to.equal(true);
+      expect(clearA.body.status).to.equal('pending');
+
+      // 5. Brand B can now reuse the freed site.
+      const reuse = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandBId}`, {
+        baseSiteId: SITE_2_ID,
+      });
+      expect(reuse.status).to.equal(200);
+      expect(reuse.body.baseSiteId).to.equal(SITE_2_ID);
     });
   });
 }

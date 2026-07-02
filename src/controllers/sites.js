@@ -31,6 +31,7 @@ import {
   isNonEmptyObject,
   canonicalizeUrl,
   composeBaseURL,
+  getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -57,6 +58,9 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -345,7 +349,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, Organization, Site,
+    Audit, Organization, PlgOnboarding, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -1203,15 +1207,22 @@ function SitesController(ctx, log, env) {
         ),
       ]);
 
+      // Locale-specific sites (e.g. https://example.com/de) have no RUM domain key
+      // of their own — `domain` resolves to the main domain. Narrow the RUM result
+      // to the locale subtree by its path prefix; null for whole-domain sites.
+      const pathPrefix = getBaseURLPathPrefix(site.getBaseURL());
+
       // Fetch current and previous RUM metrics in parallel
       const [current, previous] = await Promise.all([
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: thirtyDaysAgo.toISOString(),
           endTime: todayUTC.toISOString(),
         }),
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: sixtyDaysAgo.toISOString(),
           endTime: thirtyDaysAgo.toISOString(),
         }),
@@ -1631,6 +1642,20 @@ function SitesController(ctx, log, env) {
       { 'x-error': message },
     );
 
+    const isOrgWaitingForIpAllowlisting = async (org) => {
+      if (productCode !== ASO_PRODUCT_CODE) {
+        return false;
+      }
+      try {
+        const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
+        const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
+        return Array.isArray(records) && records.some((r) => r.getStatus() === waitingStatus);
+      } catch (e) {
+        log.warn('[resolveSite] PlgOnboarding lookup failed, treating as not waiting', e);
+        return false;
+      }
+    };
+
     // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
     // independent of which org's data is being requested via organizationId/imsOrg.
     // We translate it to a Spacecat UUID once, up front, so the per-path remap can
@@ -1650,12 +1675,73 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    const facs = context.attributes?.facs;
+    // FACS federal grant: if the JWT carries <product>/can_view, the caller has an
+    // org-wide federal view capability — no state-layer filter needed.
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
-    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    //           OrganizationDto, SiteDto, facs, hasFACSCapability, Site — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
       const args = [org, productCode, context, ctx, accessControlUtil];
+
+      // FACS path: state-layer filter active — find first site the caller can actually view.
+      if (facs?.enabled && !hasFACSCapability) {
+        const unavailable = requirePostgrestForFacsMappings(context);
+        if (unavailable) {
+          return unavailable;
+        }
+
+        const viewable = await listViewableResourceIds(
+          context.dataAccess.services.postgrestClient,
+          {
+            imsOrgId: org.getImsOrgId(),
+            product: facs.product,
+            resourceType: 'site',
+            subjectId: facs.subjectId,
+          },
+        );
+
+        // Check admin-configured default site first; only use it if the caller can view it.
+        const defaultData = await resolveOrgDefaultSite(...args);
+        if (defaultData && viewable.has(defaultData.site.id)) {
+          return ok({ data: defaultData });
+        }
+
+        // Scan all enrolled sites and return the first one the caller can view.
+        const tierClient = TierClient.createForOrg(context, org, productCode);
+        const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+
+        if (!entitlement) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            failureDetails,
+          );
+        }
+
+        if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+          if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+            return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+          }
+          log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+        }
+
+        const firstViewableEnrollment = enrollments?.find((e) => viewable.has(e.getSiteId()));
+        if (!firstViewableEnrollment) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        const firstViewableSite = await Site.findById(firstViewableEnrollment.getSiteId());
+        if (!firstViewableSite) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        return ok({ data: await buildResolveData(org, firstViewableSite, context) });
+      }
+
+      // Non-FACS path (admin / internal / JWT federal grant / LD-off): existing logic.
       const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });
@@ -1663,6 +1749,17 @@ function SitesController(ctx, log, env) {
 
       const tierClient = TierClient.createForOrg(context, org, productCode);
       const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+      // Internal caller viewing a customer with no customer-visible entitlement
+      // (none yet, or PRE_ONBOARD) who is mid-PLG-onboarding (WAITING_FOR_IP_ALLOWLISTING):
+      // preserve no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+      const hasCustomerVisibleEntitlement = entitlement
+        && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+      if (callerIsInternal && !hasCustomerVisibleEntitlement
+        && await isOrgWaitingForIpAllowlisting(org)) {
+        log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for org=${org.getId()}`);
+        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+      }
 
       if (!entitlement) {
         if (callerIsInternal) {
@@ -1709,11 +1806,21 @@ function SitesController(ctx, log, env) {
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
               // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
-              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
-              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              // - No customer-visible entitlement (none, or PRE_ONBOARD) + WAITING:
+              //   return no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+              // - No entitlement + not WAITING: return site_not_enrolled
+              // - Non-customer tier + not WAITING: skip tier check, let enrollment decide
               //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
               // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
               // Customer callers are completely unaffected by this block.
+              const hasCustomerVisibleEntitlement = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (callerIsInternal && !hasCustomerVisibleEntitlement
+                && await isOrgWaitingForIpAllowlisting(organization)) {
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for siteId=${siteId}`);
+                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+              }
+
               if (!entitlement) {
                 if (callerIsInternal) {
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
@@ -1731,6 +1838,25 @@ function SitesController(ctx, log, env) {
 
               if (!enrollments?.length) {
                 return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+              }
+
+              if (facs?.enabled && !hasFACSCapability) {
+                const unavailable = requirePostgrestForFacsMappings(context);
+                if (unavailable) {
+                  return unavailable;
+                }
+                const viewable = await listViewableResourceIds(
+                  context.dataAccess.services.postgrestClient,
+                  {
+                    imsOrgId: organization.getImsOrgId(),
+                    product: facs.product,
+                    resourceType: 'site',
+                    subjectId: facs.subjectId,
+                  },
+                );
+                if (!viewable.has(site.getId())) {
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                }
               }
 
               return ok({ data: await buildResolveData(organization, site, context) });
