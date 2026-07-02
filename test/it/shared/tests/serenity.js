@@ -300,6 +300,68 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(res.body.tag).to.equal('category:Footwear');
       expect(res.body.geoTargetId).to.equal(US_GEO);
       expect(res.body.languageCode).to.equal('en');
+      // The create echoes the upstream tag id (needed to nest / re-parent).
+      expect(res.body.id).to.be.a('string').that.is.not.empty;
+    });
+
+    // 1-level nested category tags (needs PE mock >= 1.6.0 — adobe/spacecat-shared#1758,
+    // which models parent_id on create, the tree-aware GET, and PATCH re-parent).
+    //
+    // MOCK-FIDELITY NOTE: the mock derives a tag id from its name
+    // (`tag-<encodeURIComponent(name)>`), so a `category:*` tag's id embeds a literal `%3A`. That
+    // id round-trips faithfully through a JSON body (so nested CREATE and the derived childrenCount
+    // below ARE exercised end-to-end against the mock), but NOT through a URL query/path (the `%3A`
+    // decodes back to `:` and no longer matches the stored id). So drilling a parent's children by
+    // id, and a successful PATCH-by-id, cannot be asserted against this mock. Those id-in-URL paths
+    // are validated against LIVE Semrush instead — opaque UUID ids, probed 2026-07-01 (see the
+    // rest-transport / tags handler JSDoc). Real callers use UUID ids, so this gap is mock-only.
+    const createTag = (name, parentId) => getHttpClient().admin.post(`${base}/tags`, {
+      type: 'category',
+      name,
+      geoTargetId: US_GEO,
+      languageCode: 'en',
+      ...(parentId ? { parentId } : {}),
+    });
+
+    it('POST /serenity/tags nests a child under a parent (parentId in, childrenCount out)', async () => {
+      await createUsMarket();
+      const parent = await createTag('Footwear');
+      expect(parent.status).to.equal(201);
+      const parentId = parent.body.id;
+      expect(parentId).to.be.a('string').that.is.not.empty;
+
+      const child = await createTag('Sneakers', parentId);
+      expect(child.status).to.equal(201);
+      // A child is created BARE (no dimension prefix) — mirrors the migration CLI's
+      // write shape (serenity-docs#24 §2); only roots keep the `category:` prefix.
+      expect(child.body.tag).to.equal('Sneakers');
+      // parent_id echoes back through the JSON body faithfully — the child is nested.
+      expect(child.body.parentId).to.equal(parentId);
+
+      // Roots view (parentId=''): the parent lists as a root (parentId null) and its
+      // childrenCount — derived server-side from the stored parentage — reflects the new child.
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      expect(roots.status).to.equal(200);
+      const parentRow = roots.body.items.find((t) => t.id === parentId);
+      expect(parentRow, 'the parent should list among the roots').to.exist;
+      expect(parentRow.parentId).to.equal(null);
+      expect(parentRow.childrenCount).to.be.greaterThan(0);
+    });
+
+    it('PATCH /serenity/tags/:tagId route reaches upstream (unknown id → 502)', async () => {
+      await createUsMarket();
+      // A UUID tag id the mock has never stored → upstream 404, which the serenity proxy
+      // deliberately collapses to 502 (mapError does not echo upstream detail — same convention as
+      // every other serenity write). Proves the new PATCH route → controller → handler → transport
+      // → upstream wiring; the 200 re-parent/rename + the live 404 shape are covered by the unit
+      // tests and the live probe (the mock's name-derived id can't round-trip a PATCH-by-id URL).
+      const res = await getHttpClient().admin.patch(
+        `${base}/tags/00000000-0000-4000-8000-000000000000`,
+        { name: 'category:Ghost', geoTargetId: US_GEO, languageCode: 'en' },
+      );
+      expect(res.status).to.equal(502);
     });
 
     it('POST /serenity/activate provisions + publishes, then deactivate decommissions', async () => {
