@@ -419,7 +419,13 @@ v2-serenity-tags:
   get:
     tags: [serenity]
     summary: List tags for one slice
-    description: Unique tag set across the slice's prompts.
+    description: |
+      Unique tag set across the slice's prompts. When the `parentId` query param
+      is present (even empty), the read instead returns one level of the nested
+      category TREE: `parentId=''` returns the root categories (each with
+      `childrenCount`), a tag id returns that category's children (each with a
+      `path[]` breadcrumb). The tree view reads the draft layer so a just-created
+      category is visible before the project is published.
     operationId: listSerenityTags
     security:
       - ims_key: []
@@ -432,6 +438,14 @@ v2-serenity-tags:
         in: query
         required: true
         schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+      - name: parentId
+        in: query
+        required: false
+        description: |
+          Present (even empty) → nested TREE read at this level: `''` lists the
+          roots, an upstream tag id lists that tag's children. Absent → the flat,
+          prompt-derived tag set.
+        schema: { type: string }
     responses:
       '200':
         description: Tags retrieved.
@@ -457,6 +471,9 @@ v2-serenity-tags:
       the closed taxonomies (`source` / `intent` / `type`) have a fixed value
       enum and are not freely creatable. The "Categories" view, for example, is
       the `category:` slice of these tags across a brand's markets.
+
+      Pass `parentId` (an upstream tag id from a prior list) to create the tag as
+      a 1-level nested child of that category; omit it for a root/flat tag.
     operationId: createSerenityTag
     security:
       - ims_key: []
@@ -486,6 +503,11 @@ v2-serenity-tags:
                 type: string
                 pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
                 description: BCP-47 primary subtag of the market slice.
+              parentId:
+                type: string
+                description: |
+                  Optional upstream tag id (from a prior tags list) to nest the
+                  new tag under as a 1-level child. Omit for a root/flat tag.
     responses:
       '201':
         description: Tag registered on the market's project.
@@ -501,12 +523,130 @@ v2-serenity-tags:
                 name: { type: string }
                 tag:
                   type: string
-                  description: The full `<type>:<name>` tag string registered upstream.
+                  description: |
+                    The registered tag string: the full `<type>:<name>` for a
+                    root/flat tag (no `parentId`), or the BARE `<name>` (no
+                    dimension prefix) for a 1-level nested child.
+                id:
+                  type: string
+                  description: The created tag's upstream id.
+                parentId:
+                  type: [string, 'null']
+                  description: The parent tag id when nested, otherwise null.
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or the (geoTargetId, languageCode) market not found.
       '502':
         description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Nested-tag edit (rename / re-parent) ─────────────────────────────
+
+v2-serenity-tag-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: tagId
+      in: path
+      required: true
+      description: Upstream AIO tag id (from a prior tags list).
+      schema:
+        type: string
+  patch:
+    tags: [serenity]
+    summary: Rename and/or re-parent a tag
+    description: |
+      Updates a single AIO tag in place on the market addressed by the
+      `(geoTargetId, languageCode)` slice — renames it and/or re-parents it under
+      another category (1-level nesting). `name` is required on every call; its
+      shape depends on the CURRENT tag: a root takes the full
+      `<dimension>:<value>` string, a child takes a BARE value (no dimension
+      prefix — mirrors tag creation). `parentId` re-parents when present; when
+      omitted on a child rename, the proxy resolves and re-sends the child's
+      CURRENT `parentId` itself (never omits it for a child — omission silently
+      promotes a child to root upstream), so the parent is safely left
+      unchanged either way. Note that promoting a child back to a root is not
+      supported upstream. An unknown `tagId` is NOT a 404 — it surfaces as 502,
+      like every serenity proxy write against an upstream error.
+    operationId: updateSerenityTag
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name, geoTargetId, languageCode]
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+                minLength: 1
+                description: |
+                  The tag's new name. For a ROOT tag, the full
+                  `<dimension>:<value>` string (dimension one of `category` /
+                  `topic`) — rename by changing the value. For a CHILD tag
+                  (currently nested under a parent), a BARE value with no
+                  dimension prefix, mirroring how children are created.
+              parentId:
+                type: string
+                description: |
+                  Optional upstream tag id to re-parent this tag under. Omit to
+                  leave the parent unchanged (safe for both a root and a child
+                  — the proxy resolves and preserves a child's current parent
+                  server-side rather than omitting it from the upstream call).
+              geoTargetId:
+                type: integer
+                minimum: 1
+                description: Google Ads Geo Target ID of the market slice.
+              languageCode:
+                type: string
+                pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+                description: BCP-47 primary subtag of the market slice.
+    responses:
+      '200':
+        description: Tag updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brandId: { type: string, format: uuid }
+                geoTargetId: { type: integer }
+                languageCode: { type: string }
+                tagId: { type: string }
+                tag:
+                  type: string
+                  description: |
+                    The tag's name after update: the full `<dimension>:<value>`
+                    string for a root, or the BARE value for a child.
+                parentId:
+                  type: [string, 'null']
+                  description: The parent tag id when nested, otherwise null.
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: |
+          Organization, brand, or the (geoTargetId, languageCode) market not found
+          (local checks). An unknown upstream tag id is NOT a 404 — like every
+          serenity proxy write, an upstream error surfaces as 502.
+      '502':
+        description: Upstream returned a non-2xx response (including an unknown tag id).
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }

@@ -1,3 +1,10 @@
+# [1.618.0](https://github.com/adobe/spacecat-api-service/compare/v1.617.0...v1.618.0) (2026-07-02)
+
+
+### Features
+
+* **serenity:** consume nested AIO tags (parentId create, tree read, PATCH re-parent) ([#2737](https://github.com/adobe/spacecat-api-service/issues/2737)) ([640cba5](https://github.com/adobe/spacecat-api-service/commit/640cba510d4bfda6fe7ee9d633dcb1f7a09b5d17)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.617.0](https://github.com/adobe/spacecat-api-service/compare/v1.616.0...v1.617.0) (2026-07-02)
 
 

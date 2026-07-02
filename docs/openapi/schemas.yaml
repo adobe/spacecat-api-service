@@ -11255,6 +11255,27 @@ SerenityTag:
   properties:
     id: { type: string }
     name: { type: string }
+    parentId:
+      type: [string, 'null']
+      description: |
+        Parent tag id when this tag is a nested child, else null. Only populated
+        by the nested TREE read (GET /serenity/tags?parentId=...); absent on the
+        flat, prompt-derived listing.
+    childrenCount:
+      type: integer
+      description: |
+        Number of direct children under this tag. Populated by the TREE read
+        (typically non-zero only on root categories).
+    path:
+      type: [array, 'null']
+      description: |
+        Ancestor breadcrumb (root → ... ) for a nested child, populated by the
+        TREE read when listing a parent's children; null for a root/flat tag.
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
 
 SerenityTagListResponse:
   type: object
