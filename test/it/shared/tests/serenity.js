@@ -332,7 +332,9 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
 
       const child = await createTag('Sneakers', parentId);
       expect(child.status).to.equal(201);
-      expect(child.body.tag).to.equal('category:Sneakers');
+      // A child is created BARE (no dimension prefix) — mirrors the migration CLI's
+      // write shape (serenity-docs#24 §2); only roots keep the `category:` prefix.
+      expect(child.body.tag).to.equal('Sneakers');
       // parent_id echoes back through the JSON body faithfully — the child is nested.
       expect(child.body.parentId).to.equal(parentId);
 
