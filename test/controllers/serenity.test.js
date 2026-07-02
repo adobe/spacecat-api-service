@@ -2530,7 +2530,7 @@ describe('SerenityController', () => {
 });
 
 describe('brandPointerReloader', () => {
-  it('returns the brand current semrush_workspace_id when present', async () => {
+  it('returns the brand current semrush_sub_workspace_id when present', async () => {
     const ctx = {
       dataAccess: {
         Brand: { findById: sinon.stub().resolves({ getSemrushSubWorkspaceId: () => 'ws-current' }) },

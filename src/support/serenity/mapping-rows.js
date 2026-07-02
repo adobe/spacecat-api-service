@@ -97,10 +97,14 @@ export async function upsertMappingRow(dataAccess, {
     return;
   }
   if (!brandId || !hasText(brandId) || !semrushProjectId || !hasText(semrushProjectId)
-      || !languageCode || !hasText(languageCode)) {
+      || !languageCode || !hasText(languageCode) || !geoTargetId || geoTargetId <= 0) {
     // Every real call site resolves these before calling in; a miss here means
     // an upstream bug, not an expected condition — worth a log, unlike the
     // silent `!BrandSemrushProject` no-op above (no data-access wired at all).
+    // geoTargetId <= 0 catches a resolved-but-invalid slice (e.g. a caller
+    // that couldn't read the upstream geoTargetId and normalized it to 0
+    // rather than leaving it undefined) — 0 is never a real Google Ads Geo
+    // Target ID (see handlers/markets.js's "must be a positive integer").
     log?.warn?.('serenity mapping row: upsert skipped — incomplete slice', {
       brandId, semrushProjectId, geoTargetId, languageCode,
     });
@@ -176,10 +180,20 @@ export async function tombstoneAllForBrand(dataAccess, brandId, log) {
     const rows = await BrandSemrushProject.allByBrandId(brandId);
     const live = (Array.isArray(rows) ? rows : []).filter((row) => !row.getDeletedAt());
     const now = new Date().toISOString();
-    await Promise.all(live.map(async (row) => {
+    // allSettled, not all: one row's save rejecting must not abandon the rest
+    // mid-flight — a bulk op processes every row it can and only reports what
+    // it couldn't, rather than leaving an unbounded number of un-tombstoned
+    // rows behind a single transient failure.
+    const results = await Promise.allSettled(live.map(async (row) => {
       row.setDeletedAt(now);
       await row.save();
     }));
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      log?.error?.(`serenity mapping row: ${WRITE_FAILED_TOKEN} — partial bulk tombstone`, {
+        brandId, op: 'tombstone-all', failed: failed.length, total: live.length,
+      });
+    }
   } catch (e) {
     log?.error?.(`serenity mapping row: ${WRITE_FAILED_TOKEN} — bulk tombstone failed`, {
       brandId, op: 'tombstone-all', error: e?.message,
@@ -210,10 +224,17 @@ export async function linkSiteToLiveRows(dataAccess, brandId, siteId, log) {
     const rows = await BrandSemrushProject.allByBrandId(brandId);
     const unlinked = (Array.isArray(rows) ? rows : [])
       .filter((row) => !row.getDeletedAt() && !row.getSiteId());
-    await Promise.all(unlinked.map(async (row) => {
+    // Same allSettled rationale as tombstoneAllForBrand above.
+    const results = await Promise.allSettled(unlinked.map(async (row) => {
       row.setSiteId(siteId);
       await row.save();
     }));
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      log?.error?.(`serenity mapping row: ${WRITE_FAILED_TOKEN} — partial site link`, {
+        brandId, siteId, op: 'link-site', failed: failed.length, total: unlinked.length,
+      });
+    }
   } catch (e) {
     log?.error?.(`serenity mapping row: ${WRITE_FAILED_TOKEN} — site link failed`, {
       brandId, siteId, op: 'link-site', error: e?.message,

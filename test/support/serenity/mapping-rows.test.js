@@ -69,6 +69,18 @@ describe('serenity mapping-rows', () => {
       expect(log.warn).to.have.been.calledThrice;
     });
 
+    it('no-ops and warns when geoTargetId is 0 or missing (resolved-but-invalid slice)', async () => {
+      const create = sinon.stub();
+      const dataAccess = { BrandSemrushProject: { create } };
+      // 0 is the normalized value a caller falls back to when it couldn't
+      // read the real geoTargetId — never a real Google Ads Geo Target ID.
+      await upsertMappingRow(dataAccess, { ...SLICE, geoTargetId: 0 }, log);
+      await upsertMappingRow(dataAccess, { ...SLICE, geoTargetId: undefined }, log);
+      await upsertMappingRow(dataAccess, { ...SLICE, geoTargetId: -1 }, log);
+      expect(create).to.not.have.been.called;
+      expect(log.warn).to.have.been.calledThrice;
+    });
+
     it('upserts keyed on semrushProjectId, clearing deletedAt (revive), never touching siteId', async () => {
       const create = sinon.stub().resolves({});
       await upsertMappingRow({ BrandSemrushProject: { create } }, SLICE, log);
@@ -203,6 +215,23 @@ describe('serenity mapping-rows', () => {
       await tombstoneAllForBrand({ BrandSemrushProject: { allByBrandId } }, BRAND, log);
       expect(log.error).to.not.have.been.called;
     });
+
+    it('processes every row even when one save rejects, and logs only the partial-failure count', async () => {
+      const live1 = fakeRow();
+      const live2 = fakeRow();
+      const live3 = fakeRow();
+      live2.save.rejects(new Error('boom'));
+      const allByBrandId = sinon.stub().resolves([live1, live2, live3]);
+      await tombstoneAllForBrand({ BrandSemrushProject: { allByBrandId } }, BRAND, log);
+
+      // Every row was attempted — a single rejection did not abandon the rest.
+      expect(live1.save).to.have.been.calledOnce;
+      expect(live2.save).to.have.been.calledOnce;
+      expect(live3.save).to.have.been.calledOnce;
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ failed: 1, total: 3 });
+    });
   });
 
   describe('linkSiteToLiveRows', () => {
@@ -240,6 +269,20 @@ describe('serenity mapping-rows', () => {
       const allByBrandId = sinon.stub().resolves(undefined);
       await linkSiteToLiveRows({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE, log);
       expect(log.error).to.not.have.been.called;
+    });
+
+    it('links every eligible row even when one save rejects, and logs only the partial-failure count', async () => {
+      const unlinked1 = fakeRow();
+      const unlinked2 = fakeRow();
+      unlinked2.save.rejects(new Error('boom'));
+      const allByBrandId = sinon.stub().resolves([unlinked1, unlinked2]);
+      await linkSiteToLiveRows({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE, log);
+
+      expect(unlinked1.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(unlinked2.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ failed: 1, total: 2 });
     });
   });
 });
