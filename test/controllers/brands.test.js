@@ -2625,6 +2625,36 @@ describe('Brands Controller', () => {
       expect(listViewableStub).to.not.have.been.called;
     });
 
+    it('skips the brand filter under ASO (brand is not a ReBAC resource for ASO)', async () => {
+      // ASO ReBAC-scopes `site`, not `brand` — listing brands must NOT be
+      // filtered even with a resource-scoped facs session active.
+      const listViewableStub = sinon.stub().resolves(new Set(['brandA']));
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/brands-storage.js': {
+          listBrands: sinon.stub().resolves([{ id: 'brandA', name: 'A' }, { id: 'brandB', name: 'B' }]),
+        },
+        '../../src/support/state-access-mapping-utils.js': {
+          listViewableResourceIds: listViewableStub,
+        },
+      });
+      const controller = Mocked(context, loggerStub, mockEnv);
+      const response = await controller.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+        attributes: {
+          ...context.attributes,
+          facs: { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' },
+        },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // Both brands returned — cross-product bypass skips the state-layer query.
+      expect(body.brands).to.be.an('array').with.lengthOf(2);
+      expect(listViewableStub).to.not.have.been.called;
+    });
+
     it('returns 404 when organization not found', async () => {
       mockDataAccess.Organization.findById = sinon.stub().resolves(null);
       brandsController = BrandsController(context, loggerStub, mockEnv);
