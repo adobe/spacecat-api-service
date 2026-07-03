@@ -334,6 +334,7 @@ const routeRequiredCapabilities = {
   // access enforced in the controller (listOrgModels / listOrgLanguages).
   'GET /v2/orgs/:spaceCatId/serenity/models': 'organization:read',
   'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
