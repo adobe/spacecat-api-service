@@ -47,6 +47,25 @@ export const MARKET_SITE_1_BASE_URL = 'https://semrush-market.example.fr';
 
 export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
 
+// ── Brand Presence (topic-prompts intent enrichment) ──
+// A prompt row carrying an `intent`, plus a brand_presence_executions row that
+// references it, so the topic-prompts endpoint can be asserted to enrich
+// `userIntent` from the prompts table. See seed-data/prompts.js +
+// seed-data/brand-presence-executions.js.
+export const BP_PROMPT_1_ID = 'b9111111-1111-4111-b111-111111111111';
+export const BP_EXECUTION_1_ID = 'be111111-1111-4111-b111-111111111111';
+export const BP_TOPIC_1_NAME = 'IntentITTopic';
+export const BP_PROMPT_1_INTENT = 'informational';
+
+// Serenity Semrush vendor-mock seed alignment. BRAND_1 is in subworkspace mode
+// (brands.semrush_workspace_id set); pointing it at the workspace the Project
+// Engine / User Manager mocks seed (`MOCK_SEED=workspace-with-data` /
+// `parent-with-child`) lets the brand-level read endpoints return live seeded
+// data instead of only 404ing. The mock seeds one project under this workspace
+// with a model (gpt-4o), a prompt, and a benchmark/market.
+export const SERENITY_MOCK_WORKSPACE_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
+
 // ── FACS state-layer managers (hybrid-model §8.3) ──
 // The brandManager persona holds state-layer `llmo/can_manage_users` on
 // MANAGED_BRAND_ID only (seeded in facs-access-mappings.js). It has an EMPTY
@@ -188,6 +207,15 @@ export const ORG_3_IMS_ORG_IDENT = 'GGGGGGGGHHHHHHHHIIIIIIII';
 
 export const SITE_4_ID = '44400000-4444-4444-b444-000000000444';
 export const SITE_4_BASE_URL = 'https://site4-delegate.example.com';
+
+// ── Activate-brand IT fixtures (ORG_3, PAID) ──
+// Two pending brands for the promote-path IT (test/it/shared/tests/
+// activate-brand-for-org.js), both tied to the existing ORG_3 site SITE_4 (reused
+// so the fixtures don't change the global site counts other ITs assert on): one
+// anchored brand that promotes to active, and one unanchored brand that resolves
+// to SITE_4 and hits the brands_base_site_unique 409.
+export const ACTIVATE_PENDING_BRAND_ID = 'ac000000-b000-4000-8000-000000000001';
+export const ACTIVATE_CONFLICT_BRAND_ID = 'ac000000-b000-4000-8000-000000000002';
 
 // ── ENTITLEMENT_3 (LLMO, PAID, ORG_3) ──
 

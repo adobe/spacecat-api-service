@@ -159,6 +159,7 @@ describe('Suggestions Controller', () => {
   const suggestionsFunctions = [
     'autofixSuggestions',
     'createSuggestions',
+    'createBackofficeReview',
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',
@@ -7672,6 +7673,46 @@ describe('Suggestions Controller', () => {
       expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
     });
 
+    it('deduplicates urls in GeoExperiment metadata when multiple suggestions share the same URL', async () => {
+      const sharedUrl = 'https://example.com/page1';
+      const dupSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'summarization',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: sharedUrl,
+          summarizationText: 'Key points text',
+          transformRules: { selector: 'h1', action: 'insertAfter' },
+          prompts: [{ prompt: 'Key points of page1?', regions: ['US'] }],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      edgeSuggestions[0].getData = () => ({
+        url: sharedUrl,
+        summarizationText: 'Page summary text',
+        transformRules: { selector: 'h1', action: 'insertBefore' },
+        prompts: [{ prompt: 'Summarize page1?', regions: ['US'] }],
+      });
+      mockSuggestion.allByOpportunityId.resolves([edgeSuggestions[0], dupSuggestion]);
+
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        env: asyncExperimentEnv,
+      });
+
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.metadata.urls).to.deep.equal([sharedUrl]);
+    });
 
     it('returns 500 when GeoExperiment save fails after DRS schedule is created', async () => {
       const removeStubFn = sandbox.stub().resolves();

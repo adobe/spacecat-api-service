@@ -130,6 +130,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/activate:
+    $ref: './brands-v2-api.yaml#/v2-brand-for-org-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/status:
     $ref: './brands-v2-api.yaml#/v2-brand-status-for-org'
   /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
@@ -160,6 +162,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
     $ref: './serenity-api.yaml#/v2-serenity-models'
   /v2/orgs/{spaceCatId}/serenity/models:
@@ -295,6 +299,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion-fixes'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/backoffice-reviews:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion-backoffice-reviews'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
@@ -634,6 +640,38 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-bootstrap-url'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/connect:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-connect'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/distributions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-distributions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/prerequisites:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-prerequisites'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/origins:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-origins'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/behaviors:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-behaviors'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-origin:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-origin'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-function:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-function'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-cache:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-cache'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-lambda:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-lambda'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/lambda-status:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-lambda-status'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-associations:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-associations'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/verify:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-verify'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/plan:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
@@ -769,6 +807,8 @@ paths:
     $ref: './state-access-mappings-api.yaml#/product-capabilities'
   /user/capabilities/{resourceId}:
     $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
+  /organizations/{organizationId}/permission/audit-logs:
+    $ref: './state-access-mappings-api.yaml#/permission-audit-logs'
 
 components:
   securitySchemes:
