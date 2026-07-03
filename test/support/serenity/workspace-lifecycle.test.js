@@ -91,6 +91,46 @@ describe('workspace-lifecycle', () => {
       expect(brand.save).to.not.have.been.called;
     });
 
+    it('dynamic-allocation ON: SKIPS the flat re-grant on an existing workspace (JIT owns sizing)', async () => {
+      const transport = makeTransport();
+      const brand = makeBrand({ workspaceId: SUB_WS });
+
+      const result = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        2,
+        log,
+        NOOP_TIMING,
+        null,
+        { dynamicAllocation: true },
+      );
+
+      expect(result).to.equal(SUB_WS);
+      // No flat re-grant transfer — the metered handlers top up just-in-time instead.
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      expect(transport.createSubworkspace).to.not.have.been.called;
+    });
+
+    it('dynamic-allocation OFF (default): re-grant is byte-for-byte unchanged', async () => {
+      const transport = makeTransport();
+      const brand = makeBrand({ workspaceId: SUB_WS });
+
+      await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        2,
+        log,
+        NOOP_TIMING,
+        null,
+        { dynamicAllocation: false },
+      );
+
+      expect(transport.transferWorkspaceResources)
+        .to.have.been.calledOnceWithExactly(SUB_WS, resourceAllocation(2));
+    });
+
     it('creates, polls until created, then persists the column', async () => {
       const transport = makeTransport();
       transport.getWorkspaceStatus
