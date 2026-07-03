@@ -2101,9 +2101,6 @@ function SuggestionsController(ctx, sqs, env) {
           .filter((s) => !domainWideSuggestionIds.has(s.getId()))
           .map((s) => s.getData()?.url)
           .filter(Boolean))];
-        // Prompt collection + upload to S3 and DRS pre-analysis schedule creation are now
-        // owned by the llmo-experimentation-engine (INITIATED / PROMPT_GENERATION_COMPLETED
-        // phases). The API service only creates the experiment and marks the suggestions.
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
           siteId,
@@ -2129,8 +2126,6 @@ function SuggestionsController(ctx, sqs, env) {
 
         context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase INITIATED`);
 
-        // Create the Atomic strategy before suggestion-marking so a
-        // failure rolls back cheaply via the outer catch.
         await createAtomicStrategy({
           siteId,
           geoExperimentId,
