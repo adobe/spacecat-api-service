@@ -30,7 +30,8 @@ import { dateToIsoWeek, getWeekDateRange } from './llmo-brand-presence.js';
  *   - anchorMonday    = Monday-UTC of the OLDEST canned week (per-site constant)
  *   - canned week i   covers [anchorMonday + i*7d, +7d), i in 0..3
  *   - phase p         = floor((thisMondayUTC - anchorMonday)/7d) mod 4
- *   - presented P0    = thisMondayUTC - 21d (window position j in 0..3 covers P0 + j*7d)
+ *   - presented P0    = thisMondayUTC - 28d — the 4 COMPLETED weeks; window
+ *                       position j in 0..3 covers P0 + j*7d (current week excluded)
  *   - canned week shown at window position j: c(j) = (j + p) mod 4
  *
  * Whole-week shifts preserve day-of-week automatically.
@@ -73,10 +74,6 @@ export const ROTATION_CONFIG = {
     referral: true,
   },
 };
-
-export function isRotationSite(siteId) {
-  return Object.prototype.hasOwnProperty.call(ROTATION_CONFIG, siteId);
-}
 
 export function getRotationConfig(siteId) {
   return ROTATION_CONFIG[siteId] ?? null;
@@ -154,15 +151,20 @@ export function computePhase(now, config, dataset) {
   return ((weeks % 4) + 4) % 4;
 }
 
-/** P0 = Monday of (this ISO week − 3): the oldest day of the presented window. */
+/**
+ * P0 = Monday of (this ISO week − 4): the oldest day of the presented window.
+ * The window is the 4 *completed* ISO weeks [thisMonday−28, thisMonday−1]; the
+ * in-progress current week is excluded (matches the dashboards' "last 4 weeks").
+ */
 function windowStart(now) {
-  return addDays(mondayOfUtc(now), -21);
+  return addDays(mondayOfUtc(now), -28);
 }
 
 /**
  * The presented rolling window as a pure function of now().
- * P0 = Monday of (this ISO week - 3). Window position j (0=oldest..3=newest)
- * covers P0 + j*7d; the newest position is the current ISO week.
+ * P0 = Monday of (this ISO week − 4). Window position j (0=oldest..3=newest)
+ * covers P0 + j*7d; the newest position is the LAST COMPLETED ISO week (the
+ * in-progress current week is excluded).
  *
  * @returns {{ P0: Date, weeks: Array<{week,startDate,endDate}> }} weeks newest-first
  */

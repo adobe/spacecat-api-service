@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  isRotationSite,
+  getRotationConfig,
   shouldRotate,
   computePhase,
   computeWindow,
@@ -33,8 +33,8 @@ describe('traffic-rotation engine', () => {
   describe('site gating', () => {
     it('recognises configured sites and datasets', () => {
       const [siteId] = Object.keys(ROTATION_CONFIG);
-      expect(isRotationSite(siteId)).to.equal(true);
-      expect(isRotationSite('not-a-demo-site')).to.equal(false);
+      expect(getRotationConfig(siteId)).to.not.equal(null);
+      expect(getRotationConfig('not-a-demo-site')).to.equal(null);
       expect(shouldRotate(siteId, 'referral')).to.equal(true);
     });
 
@@ -62,23 +62,26 @@ describe('traffic-rotation engine', () => {
   });
 
   describe('computeWindow', () => {
-    it('returns 4 Monday-started weeks, newest first, ending on the current week', () => {
+    it('returns 4 Monday-started weeks, newest first, ending on the last completed week', () => {
       const { weeks } = computeWindow(D('2026-02-02'));
       expect(weeks).to.have.length(4);
-      expect(weeks[0].startDate).to.equal('2026-02-02'); // newest = current week
-      expect(weeks[3].startDate).to.equal('2026-01-12'); // oldest = P0
+      // now=Feb 2 (Mon). Current week (Feb 2–8) is excluded; newest = last completed.
+      expect(weeks[0].startDate).to.equal('2026-01-26'); // newest = last completed week
+      expect(weeks[3].startDate).to.equal('2026-01-05'); // oldest = P0 = thisMonday−28
       weeks.forEach((w) => expect(D(w.startDate).getUTCDay()).to.equal(1)); // Monday
     });
   });
 
   describe('relabelCannedToCurrent', () => {
-    it('preserves day-of-week and maps newest canned → current week (phase 0)', () => {
-      // now on an exact 4-week multiple of the anchor → phase 0.
-      const now = D('2026-02-02');
-      // canned week 3 Wednesday (2026-01-28) → current week 3 (newest) Wednesday.
-      const out = relabelCannedToCurrent('2026-01-28', CONFIG, 'agentic', now);
-      expect(out).to.equal('2026-02-04'); // Wednesday of the current week
-      expect(D(out).getUTCDay()).to.equal(D('2026-01-28').getUTCDay());
+    it('preserves day-of-week and maps a frozen week to its rotated window slot', () => {
+      // phase 0 (now = anchor + 4wk ⇒ P0 = thisMonday−28 = anchor): identity.
+      expect(relabelCannedToCurrent('2026-01-28', CONFIG, 'agentic', D('2026-02-02')))
+        .to.equal('2026-01-28');
+      // phase 1 (now = anchor + 5wk, P0 = 2026-01-12): frozen week 0 (Wed 2026-01-07)
+      // rotates to the newest slot j3 → 2026-02-04, Wednesday preserved.
+      const out = relabelCannedToCurrent('2026-01-07', CONFIG, 'agentic', D('2026-02-09'));
+      expect(out).to.equal('2026-02-04');
+      expect(D(out).getUTCDay()).to.equal(D('2026-01-07').getUTCDay());
     });
 
     it('returns null for a date outside the 4-week canned block', () => {
@@ -89,15 +92,17 @@ describe('traffic-rotation engine', () => {
 
   describe('toCannedSegments', () => {
     it('maps the full window to a single contiguous canned block', () => {
-      const now = D('2026-01-12'); // phase 1
-      const segs = toCannedSegments('2025-12-22', '2026-01-18', CONFIG, 'agentic', now);
+      // now=2026-01-12 (phase 1) ⇒ P0=2025-12-15, window = [Dec 15, Jan 11].
+      const now = D('2026-01-12');
+      const segs = toCannedSegments('2025-12-15', '2026-01-11', CONFIG, 'agentic', now);
       expect(segs).to.deep.equal([{ start: '2026-01-05', end: '2026-02-01' }]);
     });
 
     it('splits a wrap-spanning sub-range into 2 non-contiguous segments', () => {
-      const now = D('2026-01-12'); // phase 1: window weeks map to canned [1,2,3,0]
-      // "last 2 weeks" = current weeks j2,j3 → canned {3,0} (non-contiguous).
-      const segs = toCannedSegments('2026-01-05', '2026-01-18', CONFIG, 'agentic', now);
+      // now=2026-01-12 (phase 1): window slots map to frozen weeks [1,2,3,0].
+      // The last two slots (j2,j3 = Dec 29–Jan 11) → frozen {3,0} (non-contiguous).
+      const now = D('2026-01-12');
+      const segs = toCannedSegments('2025-12-29', '2026-01-11', CONFIG, 'agentic', now);
       expect(segs).to.deep.equal([
         { start: '2026-01-05', end: '2026-01-11' },
         { start: '2026-01-26', end: '2026-02-01' },
@@ -105,8 +110,9 @@ describe('traffic-rotation engine', () => {
     });
 
     it('maps a single week to one segment', () => {
+      // newest completed slot (j3 = Jan 5–11) at now=2026-01-12.
       const now = D('2026-01-12');
-      const segs = toCannedSegments('2026-01-12', '2026-01-18', CONFIG, 'agentic', now);
+      const segs = toCannedSegments('2026-01-05', '2026-01-11', CONFIG, 'agentic', now);
       expect(segs).to.have.length(1);
     });
 
@@ -180,9 +186,9 @@ describe('traffic-rotation engine', () => {
         trend: { key: 'hits_trend', dateField: 'week_start' },
         config: CONFIG,
         dataset: 'agentic',
-        now: D('2026-02-02'),
+        now: D('2026-02-02'), // phase 0, P0 = anchor ⇒ identity relabel
       });
-      expect(row.hits_trend[0].week_start).to.equal('2026-02-04');
+      expect(row.hits_trend[0].week_start).to.equal('2026-01-28');
     });
 
     it('unions array fields and derives distinct counts from the union (not a sum)', () => {
@@ -259,7 +265,7 @@ describe('traffic-rotation engine', () => {
       expect(row.total_hits).to.equal(400);
       expect(row.success_rate).to.equal(0.6); // (0.9*100 + 0.5*300)/400
       expect(row.top_agent).to.equal('Bingbot'); // carried from the heaviest segment
-      expect(row.hits_trend.map((p) => p.week_start)).to.deep.equal(['2026-01-12', '2026-01-19']);
+      expect(row.hits_trend.map((p) => p.week_start)).to.deep.equal(['2026-01-05', '2026-01-12']);
     });
 
     it('caps merged rows to `limit`, keeping the top-weighted', () => {
@@ -290,16 +296,16 @@ describe('traffic-rotation engine', () => {
 
   describe('relabelAndFilterSeries', () => {
     it('relabels canned dates to current and filters to the requested window', () => {
-      const now = D('2026-02-02'); // phase 0
+      const now = D('2026-02-02'); // phase 0, P0 = anchor ⇒ identity relabel; window [Jan 5, Feb 1]
       const rows = [
-        { period_start: '2026-01-05', total_hits: 1 }, // canned week 0 → current week 0
-        { period_start: '2026-01-26', total_hits: 4 }, // canned week 3 → current week 3
+        { period_start: '2026-01-05', total_hits: 1 }, // frozen week 0 → Jan 5
+        { period_start: '2026-01-26', total_hits: 4 }, // frozen week 3 → Jan 26
         { period_start: '2025-12-01', total_hits: 9 }, // outside block → dropped
       ];
       const out = relabelAndFilterSeries(rows, 'period_start', {
-        config: CONFIG, dataset: 'agentic', now, startStr: '2026-01-12', endStr: '2026-02-08',
+        config: CONFIG, dataset: 'agentic', now, startStr: '2026-01-05', endStr: '2026-02-01',
       });
-      expect(out.map((r) => r.period_start)).to.deep.equal(['2026-01-12', '2026-02-02']);
+      expect(out.map((r) => r.period_start)).to.deep.equal(['2026-01-05', '2026-01-26']);
       // ascending order preserved
       expect(out[0].total_hits).to.equal(1);
     });

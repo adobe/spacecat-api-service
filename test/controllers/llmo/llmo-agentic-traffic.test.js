@@ -2334,8 +2334,8 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
   const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
   const CANNED_START = '2026-06-01'; // canned block = Jun 1–28 2026 (w23–26)
   const CANNED_END = '2026-06-28';
-  // Freeze now=2026-06-29 (Monday) → phase 0, window [2026-06-08, 2026-07-05].
-  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
+  // Freeze now=2026-06-29 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 1, Jun 28].
+  const FULL = { startDate: '2026-06-01', endDate: '2026-06-28' };
   // A rich row carrying every field the various handlers map.
   const ROW = {
     total_hits: 10,
@@ -2427,21 +2427,22 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
     const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
     const res = await createAgenticTrafficKpisTrendHandler(stubbedValidateAccess)(ctx);
     const body = await res.json();
-    // canned 2026-06-10 (week1 Wed) → current window week1 Wed = 2026-06-17
-    expect(body[0].periodStart).to.equal('2026-06-17');
+    // phase 0 (P0 = anchor) ⇒ identity: canned 2026-06-10 stays 2026-06-10.
+    expect(body[0].periodStart).to.equal('2026-06-10');
   });
 
   it('by-region: combines 2 canned segments on a wrap-spanning sub-range', async () => {
-    // now=2026-06-08 (phase 1) → last-2-weeks [Jun1,Jun14] maps to canned {wk0, wk3}.
+    // now=2026-07-06 (phase 1) ⇒ P0=Jun 8, window Jun 8–Jul 5. The last two slots
+    // (j2,j3 = Jun 22–Jul 5) map to frozen weeks {3,0} → 2 non-contiguous segments.
     clock.restore();
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 5, 8), toFake: ['Date'] });
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
     const client = createMockClient({
       rpc_agentic_traffic_by_region: { data: [{ region: 'US', total_hits: 10 }], error: null },
     });
     const ctx = makeContext({
       client,
       params: { siteId: ROTATION_SITE_ID },
-      data: { startDate: '2026-06-01', endDate: '2026-06-14' },
+      data: { startDate: '2026-06-22', endDate: '2026-07-05' },
     });
     const res = await createAgenticTrafficByRegionHandler(stubbedValidateAccess)(ctx);
     expect(client.rpc).to.have.been.calledTwice; // 2 canned segments

@@ -1265,8 +1265,8 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
   const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
   const CANNED_START = '2026-06-01';
   const CANNED_END = '2026-06-28';
-  // Freeze now=2026-06-29 (Monday) → phase 0, window [2026-06-08, 2026-07-05].
-  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
+  // Freeze now=2026-06-29 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 1, Jun 28].
+  const FULL = { startDate: '2026-06-01', endDate: '2026-06-28' };
   const REF_ROW = {
     total_pageviews: 100,
     bounce_rate: 0.3,
@@ -1337,8 +1337,8 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
     });
     const res = await createReferralTrafficUrlTrendHandler(stubbedValidateAccess)(ctx);
     const body = await res.json();
-    // canned 2026-06-10 (week1 Wed) → current window week1 Wed = 2026-06-17
-    expect(body.trend[0].weekStart).to.equal('2026-06-17');
+    // phase 0 (P0 = anchor) ⇒ identity: canned 2026-06-10 stays 2026-06-10.
+    expect(body.trend[0].weekStart).to.equal('2026-06-10');
   });
 
   it('weeks: synthesises the rolling window when the source has canned data', async () => {
