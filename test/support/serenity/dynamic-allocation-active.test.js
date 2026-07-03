@@ -55,16 +55,16 @@ describe('isDynamicAllocationActiveForOrg', () => {
 
   afterEach(() => sinon.restore());
 
-  it('exposes the org-wide LLMO/dynamic-allocation flag identity', () => {
+  it('exposes the org-wide LLMO/dynamic_allocation flag identity', () => {
     expect(PRODUCT).to.equal('LLMO');
-    expect(NAME).to.equal('dynamic-allocation');
+    expect(NAME).to.equal('dynamic_allocation');
   });
 
   it('returns true when the flag is true and reads it with the right key', async () => {
     readFeatureFlagStub.resolves(true);
     expect(await isDynamicAllocationActiveForOrg(fakeCtx(), ORG, fakeLog())).to.equal(true);
     expect(readFeatureFlagStub.firstCall.args[0]).to.include({
-      organizationId: ORG, product: 'LLMO', flagName: 'dynamic-allocation',
+      organizationId: ORG, product: 'LLMO', flagName: 'dynamic_allocation',
     });
   });
 

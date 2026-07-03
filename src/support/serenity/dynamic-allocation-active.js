@@ -30,7 +30,9 @@ import { CACHE_TTL_MS, NEG_TTL_MS, MAX_ENTRIES } from './workspace-resolver.js';
  * an unavailable PostgREST client, or a transient read error all resolve to `false`.
  */
 export const DYNAMIC_ALLOCATION_FEATURE_FLAG_PRODUCT = 'LLMO';
-export const DYNAMIC_ALLOCATION_FEATURE_FLAG_NAME = 'dynamic-allocation';
+// Lowercase snake_case per the feature-flags admin API validation (^[a-z][a-z0-9_]*$) —
+// hyphens are rejected (see feature-flags-storage.js FLAG_NAME_PATTERN).
+export const DYNAMIC_ALLOCATION_FEATURE_FLAG_NAME = 'dynamic_allocation';
 
 /**
  * Module-scoped TTL+size-bounded cache — its own Map, separate from the serenity-flag cache, so the
