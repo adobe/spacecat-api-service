@@ -16,6 +16,19 @@ import {
 import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 import { checkDateRange } from './traffic-date-range.js';
+import {
+  rotationContext,
+  runRotatedAggregate,
+  combineSingleRow,
+  combineGroupedRows,
+  cannedBlockRange,
+  relabelAndFilterSeries,
+  computeWindow,
+} from './traffic-rotation.js';
+
+// Read-time rotation of the two frozen demo sites' referral data. Non-rotation
+// sites take the `rotate: false` branch and behave exactly as before.
+const rotationCtx = (siteId) => rotationContext(siteId, 'referral');
 
 /**
  * Site-scoped referral traffic handler factories.
@@ -184,11 +197,14 @@ export function createReferralTrafficFilterDimensionsHandler(getSiteAndValidateA
       'filter-dimensions',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
+        const rot = rotationCtx(siteId);
+        // Distinct filter values are phase-independent — read the whole canned block.
+        const blockRange = rot.rotate ? cannedBlockRange(rot.config, rot.dataset) : {};
         const { data, error } = await client.rpc('rpc_referral_traffic_filter_dimensions', {
           p_site_id: siteId,
           p_source: parsed.source,
-          p_start_date: parsed.startDate,
-          p_end_date: parsed.endDate,
+          p_start_date: blockRange.p_start_date ?? parsed.startDate,
+          p_end_date: blockRange.p_end_date ?? parsed.endDate,
         });
 
         if (error) {
@@ -229,10 +245,18 @@ export function createReferralTrafficKpisHandler(getSiteAndValidateAccess) {
       'kpis',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_kpis',
-          commonRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_referral_traffic_kpis', rpcParams, {
+            ...rot,
+            combine: (segs) => [combineSingleRow(segs, {
+              additiveKeys: ['total_pageviews'],
+              rateKeys: ['bounce_rate', 'consent_rate'],
+              weightKey: 'total_pageviews',
+            })],
+          })
+          : await client.rpc('rpc_referral_traffic_kpis', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic kpis PostgREST error: ${error.message}`);
@@ -271,9 +295,14 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
       'trend',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
+        const rot = rotationCtx(siteId);
+        const rpcParams = {
+          ...commonRpcParams(siteId, parsed),
+          ...(rot.rotate ? cannedBlockRange(rot.config, rot.dataset) : {}),
+        };
         const { data, error } = await client.rpc(
           'rpc_referral_traffic_trend',
-          commonRpcParams(siteId, parsed),
+          rpcParams,
         );
 
         if (error) {
@@ -281,9 +310,14 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
           return internalServerError('Failed to fetch referral traffic trend');
         }
 
+        const trendRows = rot.rotate
+          ? relabelAndFilterSeries(data, 'traffic_date', {
+            ...rot, startStr: parsed.startDate, endStr: parsed.endDate,
+          })
+          : (data ?? []);
         /* c8 ignore next 2 — PostgREST guarantees non-null data when error is null */
         return ok({
-          trend: (data ?? []).map((row) => ({
+          trend: trendRows.map((row) => ({
             date: row.traffic_date,
             pageviews: Number(row.total_pageviews),
             entries: row.entries != null ? Number(row.entries) : null,
@@ -322,10 +356,21 @@ export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess)
       'by-platform',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_platform',
-          commonRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_referral_traffic_by_platform', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot,
+              groupKeys: ['platform'],
+              additiveKeys: ['total_pageviews', 'visits', 'visitors', 'orders', 'revenue'],
+              rateKeys: ['bounce_rate', 'avg_time_on_site'],
+              weightKey: 'total_pageviews',
+              unionKeys: ['channels'],
+            }),
+          })
+          : await client.rpc('rpc_referral_traffic_by_platform', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-platform PostgREST error: ${error.message}`);
@@ -370,10 +415,20 @@ export function createReferralTrafficByDeviceHandler(getSiteAndValidateAccess) {
       'by-device',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_device',
-          commonRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_referral_traffic_by_device', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot,
+              groupKeys: ['device'],
+              additiveKeys: ['total_pageviews'],
+              rateKeys: ['bounce_rate'],
+              weightKey: 'total_pageviews',
+            }),
+          })
+          : await client.rpc('rpc_referral_traffic_by_device', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-device PostgREST error: ${error.message}`);
@@ -410,10 +465,16 @@ export function createReferralTrafficByRegionHandler(getSiteAndValidateAccess) {
       'by-region',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_region',
-          commonRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_referral_traffic_by_region', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot, groupKeys: ['region'], additiveKeys: ['total_pageviews'], weightKey: 'total_pageviews',
+            }),
+          })
+          : await client.rpc('rpc_referral_traffic_by_region', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-region PostgREST error: ${error.message}`);
@@ -450,10 +511,16 @@ export function createReferralTrafficByPageIntentHandler(getSiteAndValidateAcces
       'by-page-intent',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_page_intent',
-          commonRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_referral_traffic_by_page_intent', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot, groupKeys: ['page_intent'], additiveKeys: ['total_pageviews'], weightKey: 'total_pageviews',
+            }),
+          })
+          : await client.rpc('rpc_referral_traffic_by_page_intent', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-page-intent PostgREST error: ${error.message}`);
@@ -511,14 +578,31 @@ export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
         const rawSortOrder = (q.sortOrder || q.sort_order || 'desc').toLowerCase();
         const sortOrder = VALID_SORT_ORDERS.has(rawSortOrder) ? rawSortOrder : 'desc';
 
-        const { data, error } = await client.rpc('rpc_referral_traffic_by_url', {
+        const rot = rotationCtx(siteId);
+        const rpcParams = {
           ...commonRpcParams(siteId, parsed),
           p_url_search: urlPathSearch,
           p_limit: limit,
           p_offset: pageOffset,
           p_sort_by: sortBy,
           p_sort_order: sortOrder,
-        });
+        };
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_referral_traffic_by_url', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot,
+              groupKeys: ['url_path', 'host'],
+              additiveKeys: ['total_pageviews', 'entries', 'exits', 'revenue'],
+              rateKeys: ['bounce_rate', 'consent_rate', 'avg_time_on_site'],
+              weightKey: 'total_pageviews',
+              // total_count is a distinct-URL window count; carried from the
+              // heaviest segment on a 2-segment wrap (best-effort pagination).
+              carryKeys: ['page_intent', 'total_count'],
+              limit, // cap merged rows to the requested page size
+            }),
+          })
+          : await client.rpc('rpc_referral_traffic_by_url', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-url PostgREST error: ${error.message}`);
@@ -609,6 +693,13 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
           return ok({ weeks: [] });
         }
 
+        const rot = rotationCtx(siteId);
+        if (rot.rotate) {
+          // Source has canned rows → present the rolling window (pure fn of now())
+          // instead of the frozen min/max, consistent with the relabeled trend.
+          return ok({ weeks: computeWindow(rot.now).weeks });
+        }
+
         const weeks = generateIsoWeekRange(minDate, maxDate).map((weekStr) => {
           const range = getWeekDateRange(weekStr);
           /* c8 ignore next 4 */
@@ -671,9 +762,11 @@ export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
         }
 
         const parsed = parseParams(ctx);
+        const rot = rotationCtx(siteId);
 
         const { data, error } = await client.rpc('rpc_referral_traffic_url_trend', {
           ...commonRpcParams(siteId, parsed),
+          ...(rot.rotate ? cannedBlockRange(rot.config, rot.dataset) : {}),
           p_url_path: urlPath,
         });
 
@@ -682,9 +775,14 @@ export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
           return internalServerError('Failed to fetch referral traffic URL trend');
         }
 
+        const trendRows = rot.rotate
+          ? relabelAndFilterSeries(data, 'week_start', {
+            ...rot, startStr: parsed.startDate, endStr: parsed.endDate,
+          })
+          : (data ?? []);
         /* c8 ignore next 2 — same null-safety pattern as sibling handlers */
         return ok({
-          trend: (data ?? []).map((row) => ({
+          trend: trendRows.map((row) => ({
             weekStart: row.week_start,
             pageviews: Number(row.total_pageviews),
           })),
@@ -712,11 +810,19 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
         }
         const source = rawSource != null ? rawSource : DEFAULT_BUSINESS_IMPACT_SOURCE;
         const parsed = { ...parseParams(ctx), source };
-
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_business_impact',
-          commonRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_referral_traffic_business_impact', rpcParams, {
+            ...rot,
+            // Session-denominated rates → weight by visits, not pageviews.
+            combine: (segs) => [combineSingleRow(segs, {
+              additiveKeys: ['total_pageviews', 'visits', 'orders', 'revenue', 'entries'],
+              rateKeys: ['bounce_rate', 'avg_session_duration', 'pages_per_visit', 'conversion_rate'],
+              weightKey: 'visits',
+            })],
+          })
+          : await client.rpc('rpc_referral_traffic_business_impact', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic business-impact PostgREST error: ${error.message}`);

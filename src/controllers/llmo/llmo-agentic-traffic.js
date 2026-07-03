@@ -20,6 +20,19 @@ import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js
 import { parseAgentTypes } from './llmo-agent-types.js';
 import { checkDateRange } from './traffic-date-range.js';
 import { cachedOk } from '../../support/cached-response.js';
+import {
+  rotationContext,
+  runRotatedAggregate,
+  combineSingleRow,
+  combineGroupedRows,
+  cannedBlockRange,
+  relabelAndFilterSeries,
+  computeWindow,
+} from './traffic-rotation.js';
+
+// Read-time rotation of the two frozen demo sites' agentic data. Non-rotation
+// sites take the `rotate: false` branch and behave exactly as before.
+const rotationCtx = (siteId) => rotationContext(siteId, 'agentic');
 
 // Site-scoped agentic traffic handlers. Queries mysticat-data-service via PostgREST.
 
@@ -436,7 +449,18 @@ export function createAgenticTrafficKpisHandler(getSiteAndValidateAccess) {
       'kpis',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc('rpc_agentic_traffic_kpis', buildRpcParams(siteId, parsed));
+        const rot = rotationCtx(siteId);
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_traffic_kpis', rpcParams, {
+            ...rot,
+            combine: (segs) => [combineSingleRow(segs, {
+              additiveKeys: ['total_hits'],
+              rateKeys: ['success_rate', 'avg_ttfb_ms', 'avg_citability_score'],
+              weightKey: 'total_hits',
+            })],
+          })
+          : await client.rpc('rpc_agentic_traffic_kpis', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic kpis PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic KPIs');
@@ -472,17 +496,25 @@ export function createAgenticTrafficKpisTrendHandler(getSiteAndValidateAccess) {
         const rawInterval = (ctx.data?.interval || 'week').toLowerCase();
         const interval = VALID_INTERVALS.has(rawInterval) ? rawInterval : 'week';
 
+        const rot = rotationCtx(siteId);
         const rpcParams = {
           ...buildRpcParams(siteId, parsed),
           ...buildAgentTypesRpcParam(parsed),
           p_interval: interval,
+          // Time-series: fetch the whole canned block once, then relabel + slice.
+          ...(rot.rotate ? cannedBlockRange(rot.config, rot.dataset) : {}),
         };
         const { data, error } = await client.rpc('rpc_agentic_traffic_kpis_trend', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic kpis-trend PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic KPIs trend');
         }
-        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
+        const trendRows = rot.rotate
+          ? relabelAndFilterSeries(data, 'period_start', {
+            ...rot, startStr: parsed.startDate, endStr: parsed.endDate,
+          })
+          : (data ?? []);
+        /* c8 ignore next */ return cachedOk(trendRows.map((row) => ({
           periodStart: row.period_start,
           totalHits: Number(row.total_hits ?? 0),
           successRate: row.success_rate !== null && row.success_rate !== undefined
@@ -510,10 +542,16 @@ export function createAgenticTrafficByRegionHandler(getSiteAndValidateAccess) {
       'by-region',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_region',
-          buildRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_traffic_by_region', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot, groupKeys: ['region'], additiveKeys: ['total_hits'], weightKey: 'total_hits',
+            }),
+          })
+          : await client.rpc('rpc_agentic_traffic_by_region', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-region PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by region');
@@ -542,10 +580,15 @@ export function createAgenticTrafficByCategoryHandler(getSiteAndValidateAccess) 
         // by_category groups by category — no p_category_name parameter.
         const rpcParams = buildRpcParams(siteId, parsed);
         delete rpcParams.p_category_name;
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_category',
-          rpcParams,
-        );
+        const rot = rotationCtx(siteId);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_traffic_by_category', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot, groupKeys: ['category_name'], additiveKeys: ['total_hits'], weightKey: 'total_hits',
+            }),
+          })
+          : await client.rpc('rpc_agentic_traffic_by_category', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-category PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by category');
@@ -571,10 +614,16 @@ export function createAgenticTrafficByPageTypeHandler(getSiteAndValidateAccess) 
       'by-page-type',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_page_type',
-          buildRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_traffic_by_page_type', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot, groupKeys: ['page_type'], additiveKeys: ['total_hits'], weightKey: 'total_hits',
+            }),
+          })
+          : await client.rpc('rpc_agentic_traffic_by_page_type', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-page-type PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by page type');
@@ -600,10 +649,16 @@ export function createAgenticTrafficByStatusHandler(getSiteAndValidateAccess) {
       'by-status',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_status',
-          buildRpcParams(siteId, parsed),
-        );
+        const rot = rotationCtx(siteId);
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_traffic_by_status', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot, groupKeys: ['http_status'], additiveKeys: ['total_hits'], weightKey: 'total_hits',
+            }),
+          })
+          : await client.rpc('rpc_agentic_traffic_by_status', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-status PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by status');
@@ -642,7 +697,21 @@ export function createAgenticTrafficByUserAgentHandler(getSiteAndValidateAccess)
         // by_user_agent does not accept p_user_agent — remove it
         delete rpcParams.p_user_agent;
 
-        const { data, error } = await client.rpc('rpc_agentic_traffic_by_user_agent', rpcParams);
+        const rot = rotationCtx(siteId);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_traffic_by_user_agent', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot,
+              groupKeys: ['page_type', 'agent_type'],
+              additiveKeys: ['total_hits'],
+              unionKeys: ['unique_agent_names'],
+              // distinct agents = union cardinality, not a per-segment sum
+              countFromUnion: { unique_agents: 'unique_agent_names' },
+              weightKey: 'total_hits',
+            }),
+          })
+          : await client.rpc('rpc_agentic_traffic_by_user_agent', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-user-agent PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by user agent');
@@ -699,7 +768,26 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
           p_sort_order: sortOrder,
         };
 
-        const { data, error } = await client.rpc('rpc_agentic_traffic_by_url', rpcParams);
+        const rot = rotationCtx(siteId);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_traffic_by_url', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot,
+              groupKeys: ['host', 'url_path'],
+              additiveKeys: ['total_hits'],
+              rateKeys: ['success_rate', 'avg_ttfb_ms', 'avg_citability_score'],
+              weightKey: 'total_hits',
+              unionKeys: ['unique_agent_names', 'response_codes'],
+              countFromUnion: { unique_agents: 'unique_agent_names' },
+              // total_count is a distinct-URL window count; on a 2-segment wrap it
+              // is carried from the heaviest segment (best-effort pagination).
+              carryKeys: ['top_agent', 'top_agent_type', 'category_name', 'deployed_at_edge', 'total_count'],
+              trend: { key: 'hits_trend', dateField: 'week_start' },
+              limit, // cap merged rows to the requested page size
+            }),
+          })
+          : await client.rpc('rpc_agentic_traffic_by_url', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-url PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by URL');
@@ -800,7 +888,19 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
           ...buildAgentTypesRpcParam(parsed),
         };
 
-        const { data, error } = await client.rpc('rpc_agentic_hits_for_urls', rpcParams);
+        const rot = rotationCtx(siteId);
+        const { data, error } = rot.rotate
+          ? await runRotatedAggregate(client, 'rpc_agentic_hits_for_urls', rpcParams, {
+            ...rot,
+            combine: (segs) => combineGroupedRows(segs, {
+              ...rot,
+              groupKeys: ['host', 'url_path'],
+              additiveKeys: ['total_hits'],
+              weightKey: 'total_hits',
+              trend: { key: 'hits_trend', dateField: 'week_start' },
+            }),
+          })
+          : await client.rpc('rpc_agentic_hits_for_urls', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic hits-by-urls PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic hits by URLs');
@@ -1027,9 +1127,16 @@ export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAc
       'filter-dimensions',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
+        const rot = rotationCtx(siteId);
+        // Distinct filter values are the same regardless of phase — read the
+        // whole canned block in one call, no relabel/combine needed.
+        const rpcParams = {
+          ...buildRpcParams(siteId, parsed),
+          ...(rot.rotate ? cannedBlockRange(rot.config, rot.dataset) : {}),
+        };
         const { data, error } = await client.rpc(
           'rpc_agentic_traffic_distinct_filters',
-          buildRpcParams(siteId, parsed),
+          rpcParams,
         );
         if (error) {
           ctx.log.error(`Agentic traffic filter-dimensions PostgREST error: ${error.message}`);
@@ -1066,8 +1173,12 @@ export function createAgenticTrafficMoversHandler(getSiteAndValidateAccess) {
           ? Math.min(Math.max(Number.parseInt(String(rawLimit), 10) || 5, 1), 50)
           : 5;
 
+        const rot = rotationCtx(siteId);
+        // Movers compares oldest vs newest date in range internally and emits no
+        // dates — rewrite the range to the full canned block for sensible deltas.
         const { data, error } = await client.rpc('rpc_agentic_traffic_movers', {
           ...buildRpcParams(siteId, parsed),
+          ...(rot.rotate ? cannedBlockRange(rot.config, rot.dataset) : {}),
           p_limit: limit,
         });
         if (error) {
@@ -1098,6 +1209,12 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
       getSiteAndValidateAccess,
       'weeks',
       async (ctx, client, siteId) => {
+        const rot = rotationCtx(siteId);
+        if (rot.rotate) {
+          // Rolling window is a pure function of now() — keeps /weeks consistent
+          // with the relabeled trend without touching the frozen min/max dates.
+          return cachedOk({ weeks: computeWindow(rot.now).weeks });
+        }
         const [minResult, maxResult] = await Promise.all([
           client
             .from('agentic_traffic')
