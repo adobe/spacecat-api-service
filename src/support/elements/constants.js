@@ -25,3 +25,38 @@ export const ELEMENT_MODELS = Object.freeze([
   'search-gpt',
   'perplexity',
 ]);
+
+/**
+ * Maps the UI's platform filter codes (project-elmo-ui `PLATFORM_CODES`) to the
+ * Semrush Elements model names in {@link ELEMENT_MODELS}. Vivek/UI confirmed the UI
+ * keeps sending its existing platform values, so the translation lives here on the
+ * SpaceCat side.
+ *
+ * Only entries whose names DIFFER are listed. Codes that are already identical to a
+ * Semrush model (`google-ai-overview`, `google-ai-mode`, `perplexity`) and any
+ * Semrush-only model with no UI counterpart (`grok-3`, `open-evidence`,
+ * `claude-sonnet-4`, `deepseek`) need no entry — {@link resolveElementModel} passes
+ * them through unchanged.
+ *
+ * TODO(LLMO-6011): confirm the two ChatGPT tier mappings with product — `openai`
+ * (ChatGPT Paid) → `gpt-5` and `chatgpt` (ChatGPT Free) → `search-gpt` are best-guess.
+ */
+export const PLATFORM_TO_ELEMENT_MODEL = Object.freeze({
+  copilot: 'microsoft-copilot',
+  gemini: 'gemini-2.5-flash',
+  openai: 'gpt-5',
+  chatgpt: 'search-gpt',
+});
+
+/**
+ * Resolves a requested platform/model value to a valid Semrush Elements model.
+ * Applies the UI→Semrush translation first, then respects any value that is already
+ * a valid Semrush model, and finally falls back to {@link DEFAULT_ELEMENT_MODEL}.
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {string} A member of {@link ELEMENT_MODELS}.
+ */
+export function resolveElementModel(value) {
+  const mapped = PLATFORM_TO_ELEMENT_MODEL[value] ?? value;
+  return ELEMENT_MODELS.includes(mapped) ? mapped : DEFAULT_ELEMENT_MODEL;
+}

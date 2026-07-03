@@ -406,6 +406,8 @@ Follow these steps in order. Steps 1–4 are contained within `src/support/eleme
 
 Source: `src/support/elements/element-ids.js`
 
+> **Surfaced endpoints:** `BRANDS`/`MARKETS`/`TOPICS` (rows 1–3) back the [URL Inspector Filter Dimensions](../llmo-semrush-apis/filter-dimensions-apis.md#1-list-url-inspector-filter-dimensions) endpoint; `WEEKS` (row 5) backs the [Weeks](../llmo-semrush-apis/filter-dimensions-apis.md#2-list-weeks) endpoint.
+
 | Constant | UUID | Section | Row(s) |
 |---|---|---|---|
 | `BRANDS` | `b178ce4e-6471-4430-9a32-8228ce72b2e6` | Filter Dimensions | 1 |

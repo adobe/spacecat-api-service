@@ -16,7 +16,7 @@ import {
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { listBrands as listSpacecatBrands } from '../support/brands-storage.js';
+import { listBrands as listSpacecatBrands, getBrandBySite } from '../support/brands-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
@@ -229,7 +229,44 @@ export default function ElementsController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks
+   * Returns the list of weeks that have Brand Presence data (week filter dropdown).
+   */
+  /* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
+  const listWeeks = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId } = ctx?.params ?? {};
+      const query = extractQuery(ctx);
+
+      // The URL Inspector filter sends a siteId, which Semrush has no concept of.
+      // Reverse-map it to the site's primary brand (brands.site_id) and scope the
+      // weeks to that brand. Omitted siteId → workspace-wide weeks.
+      const siteId = query.siteId || query.site_id;
+      let brand;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved) {
+          return notFound(`No brand found for site: ${siteId}`);
+        }
+        brand = resolved.name;
+      }
+
+      const result = await buildService(ctx).getWeeks(auth.workspaceId, { ...query, brand });
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
   return {
     listUrlInspectorFilterDimensions,
+    listWeeks,
   };
 }
