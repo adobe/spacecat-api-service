@@ -38,14 +38,12 @@ export function isUpstreamGone(e) {
 /**
  * The upstream error body as a lowercased string, for message-based classification. The gateway
  * returns either a JSON `{ message }` object or a bare text/html string (the disguised-405 case);
- * this normalises both so a predicate can match on substrings.
- * @param {unknown} e
+ * this normalises both so a predicate can match on substrings. Callers guard `instanceof
+ * SerenityTransportError` (short-circuit) before calling, so `e` is always a transport error here.
+ * @param {SerenityTransportError} e
  * @returns {string}
  */
 function bodyText(e) {
-  if (!(e instanceof SerenityTransportError)) {
-    return '';
-  }
   const { body } = e;
   if (typeof body === 'string') {
     return body.toLowerCase();
