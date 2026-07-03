@@ -13,7 +13,6 @@
 import { expect } from 'chai';
 import {
   buildMarketsPayload,
-  transformMarketsResponse,
   transformMarketsToFilterDimensions,
 } from '../../../../src/support/elements/definitions/markets.js';
 
@@ -51,59 +50,6 @@ describe('markets definitions', () => {
     it('includes simple filter object when brand is provided', () => {
       const payload = buildMarketsPayload({ brand: 'Adobe' });
       expect(payload.filters.simple).to.deep.equal({});
-    });
-  });
-
-  describe('transformMarketsResponse', () => {
-    it('returns an empty array when raw is null', () => {
-      expect(transformMarketsResponse(null)).to.deep.equal([]);
-    });
-
-    it('returns an empty array when raw has no blocks', () => {
-      expect(transformMarketsResponse({})).to.deep.equal([]);
-    });
-
-    it('returns an empty array when blocks.value is empty', () => {
-      expect(transformMarketsResponse({ blocks: { value: [] } })).to.deep.equal([]);
-    });
-
-    it('maps raw items to Market objects', () => {
-      const raw = {
-        blocks: {
-          value: [
-            {
-              value: 'proj-uuid-1',
-              label: 'US-en',
-              iconName: 'US',
-              defaultSelected: 1,
-            },
-          ],
-        },
-      };
-      const result = transformMarketsResponse(raw);
-      expect(result).to.deep.equal([
-        {
-          id: 'proj-uuid-1', label: 'US-en', iconName: 'US', defaultSelected: true,
-        },
-      ]);
-    });
-
-    it('defaults label to empty string when missing', () => {
-      const raw = { blocks: { value: [{ value: 'proj-uuid-1' }] } };
-      const [market] = transformMarketsResponse(raw);
-      expect(market.label).to.equal('');
-    });
-
-    it('defaults iconName to empty string when missing', () => {
-      const raw = { blocks: { value: [{ value: 'proj-uuid-1' }] } };
-      const [market] = transformMarketsResponse(raw);
-      expect(market.iconName).to.equal('');
-    });
-
-    it('sets defaultSelected to false when value is not 1', () => {
-      const raw = { blocks: { value: [{ value: 'proj-uuid-1', defaultSelected: 0 }] } };
-      const [market] = transformMarketsResponse(raw);
-      expect(market.defaultSelected).to.equal(false);
     });
   });
 
@@ -164,6 +110,22 @@ describe('markets definitions', () => {
         },
       ];
       const [item] = transformMarketsToFilterDimensions(raw, brandSemrushProjects);
+      expect(item.spacecat_brand_id).to.be.null;
+      expect(item.geoTargetId).to.be.null;
+      expect(item.languageCode).to.be.null;
+    });
+
+    it('does not enrich an item with missing value from a null-keyed project row', () => {
+      // A BrandSemrushProject row with a null semrushProjectId must not become a
+      // Map key that a value-less market item then matches against.
+      const raw = { blocks: { value: [{ label: 'US-en' }] } };
+      const brandSemrushProjects = [
+        {
+          semrushProjectId: null, brandId: 'brand-xyz', geoTargetId: 2840, languageCode: 'en',
+        },
+      ];
+      const [item] = transformMarketsToFilterDimensions(raw, brandSemrushProjects);
+      expect(item.semrush_project_id).to.be.null;
       expect(item.spacecat_brand_id).to.be.null;
       expect(item.geoTargetId).to.be.null;
       expect(item.languageCode).to.be.null;

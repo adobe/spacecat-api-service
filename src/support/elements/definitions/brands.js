@@ -34,29 +34,6 @@ export function buildBrandsPayload({ model } = {}) {
 }
 
 /**
- * @typedef {object} Brand
- * @property {string} name - Brand display name (e.g. "Adobe").
- * @property {number} count - Total mention count across the workspace.
- * @property {string} faviconDomain - Domain used for the brand favicon.
- * @property {boolean} defaultSelected - Whether the brand is pre-selected in the UI.
- */
-
-/**
- * Transforms the raw Semrush Brands element response into typed Brand objects.
- *
- * @param {object} raw - Raw response from the Elements API.
- * @returns {Brand[]}
- */
-export function transformBrandsResponse(raw) {
-  return (raw?.blocks?.value ?? []).map((item) => ({
-    name: item.value,
-    count: item.brand_count ?? 0,
-    faviconDomain: item.faviconDomain ?? '',
-    defaultSelected: item.defaultSelected === 1,
-  }));
-}
-
-/**
  * Transforms the raw Semrush Brands element response into URL Inspector filter-dimension brands.
  * `id` is always null (Semrush has no stable brand ID); `spacecat_brand_id` is resolved by
  * case-insensitive name matching against the caller-supplied SpaceCat brands list.

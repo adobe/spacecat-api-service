@@ -13,7 +13,6 @@
 import { expect } from 'chai';
 import {
   buildBrandsPayload,
-  transformBrandsResponse,
   transformBrandsToFilterDimensions,
 } from '../../../../src/support/elements/definitions/brands.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
@@ -53,74 +52,6 @@ describe('brands definitions', () => {
     it('uses eq operator in the filter', () => {
       const payload = buildBrandsPayload();
       expect(payload.filters.advanced.filters[0].op).to.equal('eq');
-    });
-  });
-
-  describe('transformBrandsResponse', () => {
-    it('returns an empty array when raw is null', () => {
-      expect(transformBrandsResponse(null)).to.deep.equal([]);
-    });
-
-    it('returns an empty array when raw has no blocks', () => {
-      expect(transformBrandsResponse({})).to.deep.equal([]);
-    });
-
-    it('returns an empty array when blocks.value is empty', () => {
-      expect(transformBrandsResponse({ blocks: { value: [] } })).to.deep.equal([]);
-    });
-
-    it('maps raw items to Brand objects', () => {
-      const raw = {
-        blocks: {
-          value: [
-            {
-              value: 'Adobe', brand_count: 42, faviconDomain: 'adobe.com', defaultSelected: 1,
-            },
-          ],
-        },
-      };
-      const result = transformBrandsResponse(raw);
-      expect(result).to.deep.equal([
-        {
-          name: 'Adobe', count: 42, faviconDomain: 'adobe.com', defaultSelected: true,
-        },
-      ]);
-    });
-
-    it('defaults count to 0 when brand_count is missing', () => {
-      const raw = { blocks: { value: [{ value: 'Nike' }] } };
-      const [brand] = transformBrandsResponse(raw);
-      expect(brand.count).to.equal(0);
-    });
-
-    it('defaults faviconDomain to empty string when missing', () => {
-      const raw = { blocks: { value: [{ value: 'Nike' }] } };
-      const [brand] = transformBrandsResponse(raw);
-      expect(brand.faviconDomain).to.equal('');
-    });
-
-    it('sets defaultSelected to false when value is not 1', () => {
-      const raw = { blocks: { value: [{ value: 'Nike', defaultSelected: 0 }] } };
-      const [brand] = transformBrandsResponse(raw);
-      expect(brand.defaultSelected).to.equal(false);
-    });
-
-    it('handles multiple brands', () => {
-      const raw = {
-        blocks: {
-          value: [
-            {
-              value: 'Adobe', brand_count: 10, faviconDomain: 'adobe.com', defaultSelected: 1,
-            },
-            {
-              value: 'Nike', brand_count: 5, faviconDomain: 'nike.com', defaultSelected: 0,
-            },
-          ],
-        },
-      };
-      const result = transformBrandsResponse(raw);
-      expect(result).to.have.length(2);
-      expect(result[1].name).to.equal('Nike');
     });
   });
 

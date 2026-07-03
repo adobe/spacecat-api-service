@@ -26,6 +26,60 @@ import { ErrorWithStatusCode } from '../support/utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
+// Caps concurrent DB queries / upstream POSTs when fanning out across brands or projects.
+const FANOUT_CONCURRENCY = 8;
+
+/**
+ * Runs `mapper` over `items` with at most `limit` concurrent invocations,
+ * preserving input order in the returned array. Bounds fan-out so a workspace
+ * with many brands/projects can't spawn an unbounded number of parallel calls.
+ */
+async function mapWithConcurrency(items, limit, mapper) {
+  const out = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (cursor < items.length) {
+        const idx = cursor;
+        cursor += 1;
+        // eslint-disable-next-line no-await-in-loop
+        out[idx] = await mapper(items[idx], idx);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return out;
+}
+
+/**
+ * Maps a BrandSemrushProject model instance to the plain object shape the
+ * definitions layer expects.
+ */
+function toPlainProject(p) {
+  return {
+    brandId: p.getBrandId(),
+    semrushProjectId: p.getSemrushProjectId(),
+    geoTargetId: p.getGeoTargetId(),
+    languageCode: p.getLanguageCode(),
+  };
+}
+
+/**
+ * Fetches all BrandSemrushProject rows for the given brands with bounded
+ * concurrency, flattened and mapped to plain objects.
+ */
+async function fetchBrandSemrushProjects(BrandSemrushProject, brands) {
+  if (!BrandSemrushProject) {
+    return [];
+  }
+  const perBrand = await mapWithConcurrency(
+    brands,
+    FANOUT_CONCURRENCY,
+    (b) => BrandSemrushProject.allByBrandId(b.id),
+  );
+  return perBrand.flat().map(toPlainProject);
+}
 
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
@@ -163,10 +217,9 @@ export default function ElementsController(context, log, env) {
   };
 
   /**
-   * GET /v2/orgs/:spaceCatId/serenity/:brandName/markets
-   * Returns available markets for the given brand name.
-   * The returned `id` values are Semrush project UUIDs — pass as `projectIds` in
-   * subsequent brand-scoped element calls.
+   * GET /v2/orgs/:spaceCatId/serenity/:brandId/markets
+   * Returns available markets for the given SpaceCat brand.
+   * The brand name is resolved from `brandId` and used to filter the Semrush workspace.
    */
   const listMarkets = async (ctx) => {
     try {
@@ -184,12 +237,7 @@ export default function ElementsController(context, log, env) {
       if (!brand) {
         return notFound(`Brand not found: ${brandId}`);
       }
-      const brandSemrushProjects = rawProjects.map((p) => ({
-        brandId: p.getBrandId(),
-        semrushProjectId: p.getSemrushProjectId(),
-        geoTargetId: p.getGeoTargetId(),
-        languageCode: p.getLanguageCode(),
-      }));
+      const brandSemrushProjects = rawProjects.map(toPlainProject);
       const result = await buildService(ctx).getMarkets(
         auth.workspaceId,
         { brand: brand.name },
@@ -215,16 +263,10 @@ export default function ElementsController(context, log, env) {
       const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
-      const brandSemrushProjects = BrandSemrushProject
-        ? (await Promise.all(
-          spacecatBrands.map((b) => BrandSemrushProject.allByBrandId(b.id)),
-        )).flat().map((p) => ({
-          brandId: p.getBrandId(),
-          semrushProjectId: p.getSemrushProjectId(),
-          geoTargetId: p.getGeoTargetId(),
-          languageCode: p.getLanguageCode(),
-        }))
-        : [];
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        spacecatBrands,
+      );
       const result = await buildService(ctx).getMarkets(auth.workspaceId, {}, brandSemrushProjects);
       return ok(result);
     } catch (e) {
@@ -259,11 +301,13 @@ export default function ElementsController(context, log, env) {
       if (projects.length === 0) {
         result = await service.getTopics(auth.workspaceId, queryParams);
       } else {
-        const perProject = await Promise.all(
-          projects.map((p) => service.getTopics(
+        const perProject = await mapWithConcurrency(
+          projects,
+          FANOUT_CONCURRENCY,
+          (p) => service.getTopics(
             auth.workspaceId,
             { ...queryParams, projectId: p.getSemrushProjectId() },
-          )),
+          ),
         );
         const seen = new Set();
         result = perProject.flat().filter((topic) => {
@@ -314,16 +358,10 @@ export default function ElementsController(context, log, env) {
 
       const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
 
-      const brandSemrushProjects = BrandSemrushProject
-        ? (await Promise.all(
-          spacecatBrands.map((b) => BrandSemrushProject.allByBrandId(b.id)),
-        )).flat().map((p) => ({
-          brandId: p.getBrandId(),
-          semrushProjectId: p.getSemrushProjectId(),
-          geoTargetId: p.getGeoTargetId(),
-          languageCode: p.getLanguageCode(),
-        }))
-        : [];
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        spacecatBrands,
+      );
 
       const result = await buildService(ctx).getUrlInspectorFilterDimensions(
         auth.workspaceId,

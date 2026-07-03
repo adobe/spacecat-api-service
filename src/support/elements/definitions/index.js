@@ -10,8 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-export { buildBrandsPayload, transformBrandsResponse, transformBrandsToFilterDimensions } from './brands.js';
-export { buildMarketsPayload, transformMarketsResponse, transformMarketsToFilterDimensions } from './markets.js';
+export { buildBrandsPayload, transformBrandsToFilterDimensions } from './brands.js';
+export { buildMarketsPayload, transformMarketsToFilterDimensions } from './markets.js';
 export {
   buildTopicsPayload,
   transformTopicsResponse,

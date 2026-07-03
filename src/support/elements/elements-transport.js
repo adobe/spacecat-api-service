@@ -18,7 +18,7 @@ const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
- * Validates and returns the canonical origin of SEMRUSH_ELEMENTS_BASE_URL.
+ * Validates and returns the canonical origin of SEMRUSH_PROJECTS_BASE_URL.
  * Enforces HTTPS. Returns `protocol//host` with no trailing path so URL
  * segments injected later cannot be escaped by a misconfigured base URL.
  */
@@ -115,7 +115,7 @@ async function request(url, imsToken, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
  * All element calls are POST requests authenticated with the caller's IMS bearer token.
  *
  * @param {object} args
- * @param {object} args.env - Environment (reads SEMRUSH_ELEMENTS_BASE_URL).
+ * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL).
  * @param {string} args.imsToken - IMS user bearer token (without 'Bearer ' prefix).
  */
 export function createElementsTransport({ env, imsToken }) {

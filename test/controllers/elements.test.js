@@ -277,6 +277,16 @@ describe('ElementsController', () => {
       expect(body.error).to.equal('elementsUpstreamError');
     });
 
+    it('maps a 504 timeout ElementsTransportError to 502', async () => {
+      serviceStub.getBrands.rejects(new MockElementsTransportError(504, 'timed out'));
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listBrands(ctx);
+      expect(res.status).to.equal(502);
+      const body = await readBody(res);
+      expect(body.error).to.equal('elementsUpstreamError');
+    });
+
     it('maps unknown errors to 500', async () => {
       serviceStub.getBrands.rejects(new Error('unexpected'));
       const ctx = fakeContext();
