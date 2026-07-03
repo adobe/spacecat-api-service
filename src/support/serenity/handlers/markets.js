@@ -23,6 +23,31 @@ import { resolveLocation } from '../locations.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
+const MAX_PARENT_ID_QUERY_LEN = 200;
+
+/**
+ * Validates the `parentId` query param for the nested-tree tag read (`''` = roots,
+ * an upstream tag id = that tag's children). Mirrors handlers/tags.js's
+ * `parseParentId` create/PATCH-body validation for a consistent posture across
+ * every path that accepts a parentId, but keeps `''` as a meaningful value here
+ * (it is not omitted/absent — see {@link listProjectTagTree}).
+ *
+ * @param {string} raw - `String(query.parentId)`.
+ * @returns {string} the value, unchanged, once validated.
+ */
+export function validateParentIdQuery(raw) {
+  if (raw.length > MAX_PARENT_ID_QUERY_LEN) {
+    throw new ErrorWithStatusCode(
+      `parentId must not exceed ${MAX_PARENT_ID_QUERY_LEN} characters`,
+      400,
+    );
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001F\u007F]/.test(raw)) {
+    throw new ErrorWithStatusCode('parentId must not contain whitespace or control characters', 400);
+  }
+  return raw;
+}
 
 // Re-exported so existing importers (handlers/markets-subworkspace.js, tests)
 // keep resolving it from here; the implementation now lives in ../locations.js
@@ -557,6 +582,12 @@ function evictTagCacheIfNeeded() {
  * how the slice resolves to a `projectId` (DB row vs live listing); the cache,
  * pagination, truncation guard, and sort are identical, so they live here once.
  * `logCtx` is spread into the truncation warning for diagnosability.
+ *
+ * LIVE-LAYER READ: tags are derived by paginating `transport.listPromptsByTags`,
+ * which reads the LIVE (published) prompt layer (no v1 draft variant exists — see
+ * docs/decisions/006-serenity-v1-v2-read-drift.md). A slice whose prompts are
+ * staged in an unpublished draft therefore yields an EMPTY tag set here until the
+ * project is published — that is correct, not a missing-data bug.
  */
 export async function listTagsForProject(transport, semrushWorkspaceId, projectId, logCtx, log) {
   const cacheKey = tagCacheKey(semrushWorkspaceId, projectId);
@@ -635,14 +666,112 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
 }
 
 /**
+ * Read one LEVEL of a project's STANDALONE AIO tag tree (the `/aio/tags` surface),
+ * shaped for the nested Categories view. `parentId === ''` returns the ROOTS (each
+ * carrying `childrenCount`); a non-empty `parentId` returns that tag's CHILDREN
+ * (each carrying a `path[]` breadcrumb up to its root). Reads the DRAFT view so a
+ * just-created, still-unpublished category is visible — the live view hides it
+ * until the project is published (verified live 2026-07-01). Pages through the
+ * level bounded by a ceiling, mirroring the standalone-tag walk.
+ *
+ * Unlike {@link listTagsForProject} (prompt-derived, flat, cached), this reads the
+ * registered standalone tags keyed by their upstream ids — the ids the nested
+ * create + re-parent endpoints operate on — so it is NOT cached (a just-created or
+ * re-parented tag must show immediately).
+ *
+ * @param {any} transport - Serenity transport.
+ * @param {string} semrushWorkspaceId - Semrush (sub-)workspace id.
+ * @param {string} projectId - AIO project id.
+ * @param {string} parentId - '' for roots, an upstream tag id for its children.
+ * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
+ * @param {(item: { id: string, name: string }) => boolean} [stopWhen] - optional
+ *   early-exit predicate. When a fetched page contains a matching item, that
+ *   page's items are still collected in full but no further pages are
+ *   requested. Callers that only need to test membership (e.g. resolve-or-
+ *   create) pass this to avoid paginating the whole tree; omit it to collect
+ *   every item, as every pre-existing caller does.
+ * @returns {Promise<{ items: Array<{
+ *   id: string, name: string, parentId: string | null,
+ *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ * }> }>}
+ */
+export async function listProjectTagTree(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  parentId,
+  log,
+  stopWhen,
+) {
+  const items = [];
+  const LIMIT = 100;
+  const PAGE_LIMIT = 50;
+  let page = 1;
+  while (page <= PAGE_LIMIT) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
+      parentId, page, limit: LIMIT, draft: true,
+    });
+    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    let matched = false;
+    for (const t of batch) {
+      // AIOTag.id is required upstream; guard defensively and skip a malformed row.
+      if (t && typeof t.id === 'string' && t.id) {
+        const item = {
+          id: t.id,
+          name: typeof t.name === 'string' ? t.name : '',
+          parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
+          childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+          path: Array.isArray(t.path)
+            ? t.path.map((p) => ({
+              id: typeof p?.id === 'string' ? p.id : '',
+              name: typeof p?.name === 'string' ? p.name : '',
+            }))
+            : null,
+        };
+        items.push(item);
+        if (stopWhen && stopWhen(item)) {
+          matched = true;
+        }
+      }
+    }
+    if (matched) {
+      break;
+    }
+    if (batch.length < LIMIT) {
+      break;
+    }
+    if (page === PAGE_LIMIT) {
+      // Ceiling reached with a still-full last page: at least one more page went
+      // unread, so this tag level may be truncated. A missing category in the UI
+      // is a real symptom, so log it rather than stop silently.
+      log?.warn?.('listProjectTagTree: page ceiling hit; tag level may be truncated', {
+        semrushWorkspaceId, projectId, parentId, pages: PAGE_LIMIT, limit: LIMIT,
+      });
+      break;
+    }
+    page += 1;
+  }
+  return { items };
+}
+
+/**
  * GET /serenity/tags?geoTargetId=&languageCode= — unique tag names across
  * the slice's prompts. Required filters; one slice → one upstream call set.
  * Short-TTL cache to keep dashboard polling cheap.
  *
- * TODO: the tag set is computed by paginating the project's prompts and
- * aggregating distinct tag names in JS. This is an O(N) approximation —
- * for a project with N prompts we do ceil(N/200) upstream calls. Capped
- * at 50 pages (10k prompts); beyond that the tag set is silently
+ * NESTED-TREE MODE: when the request carries a `parentId` query param (present,
+ * even empty), the read switches to the standalone AIO tag TREE instead of the
+ * prompt-derived list — `parentId=''` returns the root categories (each with
+ * `childrenCount`), a tag id returns that category's children (each with a
+ * `path[]` breadcrumb). This is the read the nested Categories view drills with,
+ * and the level the id-keyed create/re-parent endpoints operate on. Absent
+ * `parentId` preserves the legacy flat, prompt-derived behavior below.
+ *
+ * TODO: the (legacy) prompt-derived tag set is computed by paginating the
+ * project's prompts and aggregating distinct tag names in JS. This is an O(N)
+ * approximation — for a project with N prompts we do ceil(N/200) upstream calls.
+ * Capped at 50 pages (10k prompts); beyond that the tag set is silently
  * truncated and a `warn` log fires (see TAG_PAGE_LIMIT in
  * `listTagsForProject`). When/if Semrush exposes a dedicated tags endpoint
  * (`GET /v1/workspaces/{ws}/projects/{pid}/tags`), this whole loop
@@ -673,10 +802,20 @@ export async function handleListTags(
   if (!row) {
     return { items: [] };
   }
+  const projectId = row.getSemrushProjectId();
+  if (query?.parentId !== undefined) {
+    return listProjectTagTree(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      validateParentIdQuery(String(query.parentId)),
+      log,
+    );
+  }
   return listTagsForProject(
     transport,
     semrushWorkspaceId,
-    row.getSemrushProjectId(),
+    projectId,
     { brandId, geoTargetId, languageCode },
     log,
   );

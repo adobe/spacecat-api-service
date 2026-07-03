@@ -103,6 +103,77 @@ async function withMissingIntentFallback(postgrestClient, run) {
   return result;
 }
 
+// Bound the number of ids per `id=in.(...)` PostgREST GET so the query string
+// stays well under proxy/header URL-length limits: a full page (pageSize caps at
+// 1000) of ~36-char UUIDs would be ~37KB and risk a 414. 100 ids ≈ 3.7KB.
+const INTENT_LOOKUP_CHUNK_SIZE = 100;
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Loads `intent` for a set of prompts by their `prompts.id` (uuid) values.
+ * Used to enrich reads (e.g. brand-presence executions) that carry a `prompt_id`
+ * FK but not intent itself. Any error — including a missing `intent` column — is a
+ * non-fatal miss (empty Map) so callers never fail a request over this enrichment.
+ * No missing-column retry is needed here: this helper's only output is intent, so a
+ * column-absent environment simply yields an empty Map, same as the error path.
+ *
+ * The id list is chunked across parallel queries to bound the IN-clause URL length,
+ * and an optional `organizationId` predicate scopes the lookup for defense-in-depth
+ * (callers already pass tenant-scoped ids). A missing-`intent`-column error logs at
+ * debug (benign, older DB image); any other error logs at warn so blank intent is
+ * diagnosable — neither fails the caller.
+ *
+ * @param {object} params
+ * @param {Array<string>} params.promptIds - prompts.id (uuid) values; nullish/dupes are ignored
+ * @param {string} [params.organizationId] - scopes the lookup to this org (defense-in-depth)
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} [params.log] - logger; `debug` for benign missing-column, `warn` otherwise
+ * @returns {Promise<Map<string, string>>} Map of promptId -> intent (only non-empty intents)
+ */
+export async function getIntentsByPromptIds({
+  promptIds, organizationId, postgrestClient, log,
+}) {
+  const ids = [...new Set((promptIds || []).filter(Boolean))];
+  if (!ids.length || !postgrestClient?.from) {
+    return new Map();
+  }
+
+  const results = await Promise.all(
+    chunkArray(ids, INTENT_LOOKUP_CHUNK_SIZE).map((batch) => {
+      let query = postgrestClient.from('prompts').select('id, intent').in('id', batch);
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+      return query;
+    }),
+  );
+
+  const map = new Map();
+  results.forEach(({ data, error }) => {
+    if (error) {
+      if (isMissingIntentColumnError(error)) {
+        log?.debug?.(`getIntentsByPromptIds: prompts.intent unavailable (${error.message}); returning no intent`);
+      } else {
+        log?.warn?.(`getIntentsByPromptIds: intent lookup failed (${error.message}); returning no intent`);
+      }
+      return;
+    }
+    (data || []).forEach((r) => {
+      if (r.intent) {
+        map.set(String(r.id), r.intent);
+      }
+    });
+  });
+  return map;
+}
+
 /**
  * Resolves brandId (path param) to Postgres brands.id (uuid).
  * Tries: 1) valid uuid lookup, 2) case-insensitive name lookup.
@@ -307,6 +378,8 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
   }
 }
 
+const UPDATE_CONCURRENCY = 20;
+
 const SORT_COLUMN_MAP = {
   topic: 'topics(name)',
   prompt: 'text',
@@ -509,7 +582,10 @@ export async function listPrompts({
     }
 
     if (hasText(region)) {
-      baseQuery = baseQuery.contains('regions', [region]);
+      // Stored region codes can be lower- or upper-case, so match both
+      // variants — a case-sensitive `.contains` would miss the other. (LLMO-5755)
+      const regionVariants = [...new Set([region.toLowerCase(), region.toUpperCase()])];
+      baseQuery = baseQuery.overlaps('regions', regionVariants);
     }
 
     if (hasText(search)) {
@@ -619,6 +695,11 @@ export async function getPromptById({
  * categoryId, topicId, ... }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
+ *   Optional best-effort intent classifier; applied only to prompts that change
+ *   text without an explicit intent. Non-fatal: a null result leaves intent unset.
+ * @param {number} [params.classifyIntentBatchTimeoutMs] - Cap on the classifier
+ *   batch (ms); the upsert proceeds without intent once it elapses.
  * @returns {Promise<{created: number, updated: number, prompts: object[]}>}
  */
 export async function upsertPrompts({
@@ -628,7 +709,7 @@ export async function upsertPrompts({
   postgrestClient,
   updatedBy = 'system',
   classifyIntent,
-  classifyIntentBatchTimeoutMs,
+  classifyIntentBatchTimeoutMs = 8000,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -638,18 +719,21 @@ export async function upsertPrompts({
     .map((p) => p.id || p.prompt_id)
     .filter(hasText);
 
-  let existingQuery = postgrestClient
-    .from('prompts')
-    .select('id,prompt_id,text,regions,status')
-    .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid);
-
-  if (incomingIds.length > 0) {
-    existingQuery = existingQuery.in('prompt_id', incomingIds);
-  }
-
   const [{ data: existing }, lookups] = await Promise.all([
-    existingQuery,
+    withMissingIntentFallback(postgrestClient, (includeIntent) => {
+      const cols = includeIntent
+        ? 'id,prompt_id,text,regions,status,intent'
+        : 'id,prompt_id,text,regions,status';
+      let q = postgrestClient
+        .from('prompts')
+        .select(cols)
+        .eq('organization_id', organizationId)
+        .eq('brand_id', brandUuid);
+      if (incomingIds.length > 0) {
+        q = q.in('prompt_id', incomingIds);
+      }
+      return q;
+    }),
     buildLookupMaps(organizationId, postgrestClient),
   ]);
 
@@ -706,6 +790,16 @@ export async function upsertPrompts({
     };
 
     if (match && match.status !== 'active') {
+      if (match.status === 'deleted') {
+        const reactivated = {
+          ...row,
+          id: match.id,
+          status: 'active',
+          intent: row.intent ?? match.intent,
+        };
+        toUpdate.push(reactivated);
+        processed.push({ ...reactivated, prompt_id: promptId });
+      }
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -763,9 +857,7 @@ export async function upsertPrompts({
   }
 
   // Best-effort intent classification for prompts that arrived WITHOUT an
-  // intent (typically human-added). Pipeline prompts already carry a
-  // normalized intent and are skipped. Failures leave intent null; they MUST
-  // NOT block the write — the backfill/reconciliation path covers them later.
+  // intent. Failures leave intent null; the backfill path covers them later.
   if (typeof classifyIntent === 'function') {
     const rowsNeedingIntent = [...toInsert, ...toUpdate]
       .filter((r) => r.intent === null && hasText(r.text));
@@ -777,8 +869,6 @@ export async function upsertPrompts({
       );
       const apply = (r) => {
         const classified = intentByText.get(r.text);
-        // Only overwrite when we actually got a bucket back — a null/absent
-        // result (failed or timed-out classification) leaves intent as null.
         if (r.intent === null && hasText(r.text) && classified != null) {
           // eslint-disable-next-line no-param-reassign
           r.intent = classified;
@@ -786,7 +876,6 @@ export async function upsertPrompts({
       };
       toInsert.forEach(apply);
       toUpdate.forEach(apply);
-      // Keep the returned payload consistent with what was persisted.
       processed.forEach(apply);
     }
   }
@@ -814,20 +903,38 @@ export async function upsertPrompts({
     created = inserted?.length ?? toInsert.length;
   }
 
-  for (const row of toUpdate) {
-    const { id, ...patch } = row;
-    // eslint-disable-next-line no-await-in-loop
-    const { error } = await withMissingIntentFallback(
-      postgrestClient,
-      (includeIntent) => postgrestClient
-        .from('prompts')
-        .update(includeIntent ? patch : stripIntent(patch))
-        .eq('id', id),
+  if (toUpdate.length > 0) {
+    let cursor = 0;
+    const errors = [];
+    const worker = async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= toUpdate.length) {
+          return;
+        }
+        const { id, ...patch } = toUpdate[index];
+        // eslint-disable-next-line no-await-in-loop
+        const { error } = await withMissingIntentFallback(
+          postgrestClient,
+          (includeIntent) => postgrestClient
+            .from('prompts')
+            .update(includeIntent ? patch : stripIntent(patch))
+            .eq('id', id),
+        );
+        if (error) {
+          errors.push(error);
+        } else {
+          updated += 1;
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(UPDATE_CONCURRENCY, toUpdate.length) }, () => worker()),
     );
-    if (error) {
-      throw new Error(`Failed to update prompt: ${error.message}`);
+    if (errors.length > 0) {
+      throw new Error(`Failed to update ${errors.length} prompt(s): ${errors.map((e) => e.message).join('; ')}`);
     }
-    updated += 1;
   }
 
   const promptsOut = processed.map((r) => ({

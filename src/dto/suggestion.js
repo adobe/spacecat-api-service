@@ -20,6 +20,22 @@ import { Suggestion } from '@adobe/spacecat-shared-data-access';
 export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
+ * Supported localizable fields that can be overridden from data.i18n translations.
+ * Only fields in this list are promoted from the locale map to prevent unexpected overrides.
+ * @type {string[]}
+ */
+export const ALLOWED_I18N_FIELDS = [
+  'title',
+  'description',
+  'rationale',
+  'aiRationale',
+  'aiSuggestion',
+  'expectedOutcome',
+  'actionItems',
+  'persona',
+];
+
+/**
  * Valid skip reasons when a suggestion is marked as SKIPPED.
  * @type {string[]}
  */
@@ -64,14 +80,42 @@ const extractMinimalData = (data, opportunityType) => {
 export const SuggestionDto = {
   /**
    * Converts a Suggestion object into a JSON object with optional projection.
+   *
+   * Translations for AI-generated fields (title, rationale, description, etc.) are stored by
+   * audit workers in `suggestion.data.i18n` as a map of locale → { field: value, ... }.
+   * When `locale` is supplied the matching translation is merged on top of `data` and
+   * `data.i18n` is stripped so the response shape stays stable.
+   * Falls back to the original English values when the locale is absent or not found.
+   *
    * @param {Readonly<Suggestion>} suggestion - Suggestion object.
    * @param {string} [view='full'] - Projection view: 'minimal', 'summary', or 'full'.
    * @param {object} [opportunity] - Optional opportunity entity for type-specific filtering.
+   * @param {string|null} [locale] - Optional locale code (e.g. 'fr_fr', 'ja_jp').
    * @returns {object} JSON object with fields based on the selected view.
    */
-  toJSON: (suggestion, view = 'full', opportunity = null) => {
-    const data = suggestion.getData();
+  toJSON: (suggestion, view = 'full', opportunity = null, locale = null) => {
+    const rawData = suggestion.getData();
     const opportunityType = opportunity?.getType() || null;
+
+    // Strip the internal i18n key and optionally promote allowed translated fields.
+    // Preserve null rawData — converting it to {} would change downstream behavior.
+    let data = rawData;
+    if (rawData) {
+      // eslint-disable-next-line no-unused-vars
+      const { i18n, ...baseData } = rawData;
+      if (locale && i18n?.[locale]) {
+        const localized = i18n[locale];
+        const filteredLocalized = {};
+        for (const field of ALLOWED_I18N_FIELDS) {
+          if (localized[field] != null) {
+            filteredLocalized[field] = localized[field];
+          }
+        }
+        data = { ...baseData, ...filteredLocalized };
+      } else {
+        data = baseData;
+      }
+    }
 
     const skipReason = suggestion.getSkipReason?.();
     const skipDetail = suggestion.getSkipDetail?.();

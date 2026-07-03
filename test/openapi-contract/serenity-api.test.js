@@ -46,6 +46,7 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
         findById: sinon.stub().resolves({
           getId: () => BRAND,
           getName: () => 'Test Brand',
+          getOrganizationId: () => ORG,
           getSemrushWorkspaceId: () => null,
           setSemrushWorkspaceId: sinon.stub(),
           setStatus: sinon.stub(),
@@ -198,6 +199,45 @@ const FIXTURES = {
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  createSerenityTag: {
+    expectedStatus: 201,
+    controllerMethod: 'createTag',
+    handlerName: 'handleCreateTag',
+    handlerResult: {
+      status: 201,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        type: 'category',
+        name: 'Running Shoes',
+        tag: 'category:Running Shoes',
+      },
+    },
+    data: {
+      type: 'category', name: 'Running Shoes', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
+  updateSerenityTag: {
+    expectedStatus: 200,
+    controllerMethod: 'updateTag',
+    handlerName: 'handleUpdateTag',
+    handlerResult: {
+      status: 200,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagId: 'tag-1',
+        tag: 'category:Running Shoes',
+        parentId: 'tag-parent',
+      },
+    },
+    params: { tagId: 'tag-1' },
+    data: {
+      name: 'category:Running Shoes', parentId: 'tag-parent', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
   listSerenityModels: {
     expectedStatus: 200,
     controllerMethod: 'listModels',
@@ -314,6 +354,8 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleCreateTag: sinon.stub(),
+        handleUpdateTag: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
@@ -360,6 +402,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             listGlobalModelCatalog: handlerStubs.listGlobalModelCatalog,
             listLanguageCatalog: handlerStubs.listLanguageCatalog,
           },
+          '../../src/support/serenity/handlers/tags.js': {
+            handleCreateTag: handlerStubs.handleCreateTag,
+            handleCreateTagSubworkspace: sinon.stub(),
+            handleUpdateTag: handlerStubs.handleUpdateTag,
+            handleUpdateTagSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: sinon.stub(),
             handleGetMarketSubworkspace: sinon.stub(),
@@ -379,14 +427,26 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
           },
+          // Serenity is active for the org (org-wide LLMO/serenity flag ON) so
+          // the documented success shapes are exercised rather than the
+          // inactive-org 404.
+          '../../src/support/serenity/serenity-active.js': {
+            isSerenityActiveForOrg: () => Promise.resolve(true),
+          },
           // activate reads brand-level aliases/URLs/competitors once per batch;
           // stub them so the contract test doesn't hit the fake postgrest client.
           '../../src/support/brands-storage.js': {
-            getBrandAliasNames: () => Promise.resolve([]),
+            getBrandAliases: () => Promise.resolve([]),
             getBrandUrlSources: () => Promise.resolve({
               urls: [], socialAccounts: [], earnedContent: [],
             }),
             getBrandCompetitors: () => Promise.resolve([]),
+          },
+          // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
+          // succeed; stub it to a site id so the documented 200 (full success)
+          // shape is exercised rather than the 207/502 partial-failure paths.
+          '../../src/support/serenity/site-linkage.js': {
+            ensureMarketSite: () => Promise.resolve('site-x'),
           },
         },
       )).default;

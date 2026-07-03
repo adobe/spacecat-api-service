@@ -82,9 +82,24 @@ v2-brands-for-org:
       '400':
         $ref: './responses.yaml#/400'
       '403':
-        description: User does not have access to this organization
+        description: |
+          Forbidden. Either the user does not have access to this organization, OR
+          a Semrush-mode create (a picked `semrushMarket` or `generatePrompts`) was
+          requested while the org-wide serenity feature flag (`LLMO/serenity`) is
+          inactive — provisioning a sub-workspace is refused until the org's rollout
+          flag is on (body message: "Serenity is not active for this organization").
       '404':
         $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '409':
+        description: |
+          Conflict. A by-name upsert matched an existing **active** brand and the
+          supplied `status` would demote it to `pending`. Silent demotion is
+          rejected (`code: brand_status_demotion_not_allowed`). Use
+          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+          status transitions.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -155,17 +170,35 @@ v2-brand-for-org:
             $ref: './schemas.yaml#/V2BrandUpdateInput'
     responses:
       '200':
-        description: Brand updated successfully
+        description: |
+          Brand updated successfully. For a sub-workspace brand whose edit changed
+          aliases/competitors, the body may include `semrushRejectedAliases` listing
+          per-market aliases Semrush refused during the re-sync.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/V2Brand'
+              $ref: './schemas.yaml#/V2BrandUpdateResponse'
       '400':
         $ref: './responses.yaml#/400'
       '403':
-        description: User does not have access to this organization
+        description: |
+          Forbidden. Either the user does not have access to this organization, OR
+          the edit would re-sync a sub-workspace brand to Semrush (a URL, competitor,
+          or alias change on a brand carrying a `semrushWorkspaceId`) while the
+          org-wide serenity feature flag (`LLMO/serenity`) is inactive — the edit is
+          refused rather than left to drift (body message: "Serenity is not active
+          for this organization").
       '404':
         description: Organization or brand not found
+      '409':
+        description: |
+          Conflict. The PATCH would demote an **active** brand to `pending` via the
+          generic update path (`code: brand_status_demotion_not_allowed`). Use
+          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+          status transitions.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -185,6 +218,140 @@ v2-brand-for-org:
     responses:
       '204':
         description: Brand deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-for-org-activate:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags:
+      - brands
+      - customer-config
+    summary: Activate a brand (v2)
+    description: |
+      Explicit, customer-triggered "activate brand". Promotes an existing
+      `pending` brand to `active` by setting its `baseSiteId` (from the brand's
+      onboarded primary site) and flipping `status` to `active`. Optionally
+      generates AI prompts for the brand and ensures a brand-presence schedule
+      exists for the brand's primary site.
+
+      Activation requires the brand to already have an onboarded primary site —
+      a request against a brand with no onboarded primary site returns 400.
+
+      Set `generatePrompts` to `true` to trigger asynchronous AI prompt
+      generation; the response then includes a `promptGenerationJobId`. When a
+      brand-presence schedule is created or ensured, the response includes a
+      `scheduleId`.
+    operationId: activateBrandForOrg
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2BrandActivateInput'
+    responses:
+      '200':
+        description: Brand activated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2BrandActivateResponse'
+      '400':
+        description: Brand has no onboarded primary site
+      '403':
+        description: |
+          User is not a member of the organization, or the organization is not on a
+          PAID tier.
+      '404':
+        description: Organization or brand not found
+      '409':
+        description: |
+          The brand's primary URL is already the primary URL (base site) of
+          another brand in this organization.
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-status-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  patch:
+    tags:
+      - brands
+      - customer-config
+    summary: Transition a brand's status (v2)
+    description: |
+      Explicitly transitions a brand's lifecycle status (approve -> `active`,
+      move-to-pending -> `pending`). This is the sanctioned path for an
+      active -> pending demotion. Once the companion demotion guard ships
+      (LLMO-5587 PR3), the generic
+      `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}` will refuse that transition.
+    operationId: transitionBrandStatusForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - status
+            properties:
+              status:
+                type: string
+                enum:
+                  - active
+                  - pending
+                description: Target brand status.
+    responses:
+      '200':
+        description: Brand status updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
       '400':
         $ref: './responses.yaml#/400'
       '403':

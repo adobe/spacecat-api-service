@@ -132,6 +132,48 @@ describe('Fixes Controller', () => {
       });
     });
 
+    it('returns 400 for non-underscore locale format on getAllForOpportunity', async () => {
+      requestContext.data = { locale: 'en-US' };
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Invalid locale format' });
+    });
+
+    it('applies locale to embedded suggestion titles in getAllForOpportunity', async () => {
+      const mockOpportunity = {
+        getSiteId: () => siteId,
+        getType: () => 'test-opportunity-type',
+      };
+      const suggestion = await suggestionCollection.create({
+        opportunityId,
+        data: {
+          title: 'English title',
+          i18n: { fr_fr: { title: 'Titre français' } },
+        },
+      });
+      suggestion.getOpportunity = () => mockOpportunity;
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      // eslint-disable-next-line no-underscore-dangle
+      fixEntity._suggestions = [suggestion];
+
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [suggestion] }]);
+
+      requestContext.data = { locale: 'fr_fr' };
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0].suggestions[0].data.title).to.equal('Titre français');
+      expect(result[0].suggestions[0].data).to.not.have.property('i18n');
+    });
+
     it('can get all fixes for an opportunity', async () => {
       const fixEntities = await Promise.all([
         fixEntityCollection.create({
@@ -1057,7 +1099,55 @@ describe('Fixes Controller', () => {
       })));
       const response = await fixesController.getAllSuggestionsForFix(requestContext);
       expect(response).includes({ status: 200 });
-      expect(await response.json()).deep.equals(suggestions.map((s) => SuggestionDto.toJSON(s)));
+      expect(await response.json()).deep.equals(
+        suggestions.map((s) => SuggestionDto.toJSON(s, 'full', mockOpportunity, null)),
+      );
+    });
+
+    it('returns 400 for non-underscore locale format on getAllSuggestionsForFix', async () => {
+      requestContext.data = { locale: 'fr-FR' };
+      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Invalid locale format' });
+    });
+
+    it('applies locale to suggestion data in getAllSuggestionsForFix', async () => {
+      const mockOpportunity = {
+        getSiteId: () => siteId,
+        getType: () => 'test-opportunity-type',
+      };
+      const suggestion = await suggestionCollection.create({
+        opportunityId,
+        data: {
+          title: 'English title',
+          description: 'English description',
+          i18n: {
+            fr_fr: { title: 'Titre français', description: 'Description française' },
+          },
+        },
+      });
+      suggestion.getOpportunity = () => mockOpportunity;
+
+      suggestionCollection.batchGetByKeys.resolves({
+        data: [suggestion],
+        unprocessed: [],
+      });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion]);
+      fixEntitySuggestionCollection.allByFixEntityId.resolves([{
+        getSuggestionId: () => suggestion.getId(),
+        getFixEntityId: () => fixId,
+      }]);
+
+      requestContext.data = { locale: 'fr_fr' };
+      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0].data.title).to.equal('Titre français');
+      expect(result[0].data.description).to.equal('Description française');
+      expect(result[0].data).to.not.have.property('i18n');
     });
 
     it('responds 404 if the fix does not exist', async () => {
@@ -1797,6 +1887,96 @@ describe('Fixes Controller', () => {
         expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
         expect(log.warn).to.have.been.calledWith(
           sinon.match(/Could not create ContentClient for AEM Edge documentPath enrichment/),
+        );
+      });
+
+      it('uses x-promise-token header directly and skips getIMSPromiseToken', async () => {
+        getIMSPromiseTokenStub.resetHistory();
+        exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
+
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { 'x-promise-token': 'header-promise-token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(getIMSPromiseTokenStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.have.been.calledWith(
+          sinon.match.any,
+          'header-promise-token',
+        );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] using promise token from x-promise-token header',
+        );
+      });
+
+      it('falls back to getIMSPromiseToken when x-promise-token header is absent', async () => {
+        getIMSPromiseTokenStub.resetHistory();
+        exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
+
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(getIMSPromiseTokenStub).to.have.been.calledOnce;
+        expect(exchangePromiseTokenStub).to.have.been.calledWith(
+          sinon.match.any,
+          'mock-promise-token',
+        );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] no x-promise-token header, creating promise token via IMS',
         );
       });
     });

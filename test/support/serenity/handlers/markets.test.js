@@ -27,6 +27,7 @@ import {
   resolveLocation,
   clearLanguageCache,
   clearTagCache,
+  listProjectTagTree,
 } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
@@ -886,6 +887,133 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     );
   });
 
+  // Nested-tree read: when the request carries a `parentId` query param, the
+  // handler drills the standalone /aio/tags tree via listProjectTags(draft:true)
+  // instead of the prompt-derived aggregation, surfacing childrenCount/path.
+  it('listTags (parentId=\'\') returns roots with childrenCount from the standalone tree', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'root-1', name: 'category:Footwear', parent_id: null, children_count: 2, path: null,
+        }],
+      }),
+    };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: '',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null,
+    }]);
+    // Tree read, not the prompt-derived path.
+    expect(transport.listPromptsByTags).to.not.have.been.called;
+    expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-tree',
+      {
+        parentId: '', page: 1, limit: 100, draft: true,
+      },
+    );
+  });
+
+  it('listTags (parentId=<id>) returns that parent\'s children with a path breadcrumb', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'child-1',
+          name: 'category:Sneakers',
+          parent_id: 'root-1',
+          children_count: 0,
+          path: [{ id: 'root-1', name: 'category:Footwear' }],
+        }],
+      }),
+    };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'root-1',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'child-1',
+      name: 'category:Sneakers',
+      parentId: 'root-1',
+      childrenCount: 0,
+      path: [{ id: 'root-1', name: 'category:Footwear' }],
+    }]);
+    expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
+  });
+
+  it('listTags 400s a parentId query over the length ceiling (MysticatBot review, PR 2737)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = { listPromptsByTags: sinon.stub(), listProjectTags: sinon.stub() };
+
+    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'x'.repeat(201),
+    }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('listTags 400s a parentId query containing a control character (MysticatBot review, PR 2737)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = { listPromptsByTags: sinon.stub(), listProjectTags: sinon.stub() };
+
+    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}`,
+    }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('listProjectTagTree warns and stops at the page ceiling when the last page is still full', async () => {
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({
+      id: `tag-${i}`, name: `Tag ${i}`, parent_id: null, children_count: 0,
+    }));
+    const listProjectTags = sinon.stub().resolves({ page: 1, total: 5000, items: fullPage });
+    const log = fakeLog();
+
+    const result = await listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      log,
+    );
+
+    // 50 pages x 100 items, stopped by the ceiling rather than running forever.
+    expect(result.items).to.have.lengthOf(5000);
+    expect(listProjectTags.callCount).to.equal(50);
+    expect(log.warn).to.have.been.calledOnceWith(
+      'listProjectTagTree: page ceiling hit; tag level may be truncated',
+      sinon.match({
+        semrushWorkspaceId: WORKSPACE, projectId: 'proj-tree', parentId: '', pages: 50, limit: 100,
+      }),
+    );
+  });
+
   it('listModels (catalog mode) calls listGlobalAiModels and returns items', async () => {
     const dataAccess = makeDataAccess([]);
     const transport = {
@@ -1316,6 +1444,45 @@ describe('handlers/markets.js — handleUpdateModels', () => {
       BRAND,
       WORKSPACE,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
+  });
+
+  // Guard for issue #2687 item 1: the standalone PUT /serenity/models path must
+  // ALWAYS republish a real model-set change to the live layer — the only
+  // `publish: false` caller is brand-create (which batches its own publish). The
+  // handler signature exposes no publish-control option, so a caller cannot turn
+  // republish off. This test pins that contract: a `publish`/`publishMode` field
+  // smuggled into the request body is IGNORED and the project still publishes.
+  it('always republishes on a model-set change — body publish flags cannot suppress it', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        modelIds: ['cat-gpt'],
+        // Hostile extras: neither must reach syncModelsForProject's publish gate.
+        publish: false,
+        publishMode: 'skip',
+      },
       fakeLog(),
     );
 

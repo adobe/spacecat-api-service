@@ -1,6 +1,7 @@
 site-opportunities:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunities
     summary: |
@@ -71,6 +72,7 @@ site-opportunities-by-status:
       required: true
       schema:
         type: string
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitiesByStatus
     summary: |
@@ -103,6 +105,7 @@ site-opportunity:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunity
     summary: |
@@ -197,6 +200,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionView'
     - $ref: './parameters.yaml#/suggestionStatus'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestions
     summary: |
@@ -278,6 +282,7 @@ site-opportunity-suggestions-by-status:
       schema:
         type: string
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatus
     summary: |
@@ -314,6 +319,7 @@ site-opportunity-suggestions-paged:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPaged
     summary: |
@@ -353,6 +359,7 @@ site-opportunity-suggestions-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPagedWithCursor
     summary: |
@@ -396,6 +403,7 @@ site-opportunity-suggestions-by-status-paged:
         type: string
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPaged
     summary: |
@@ -439,6 +447,7 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPagedWithCursor
     summary: |
@@ -1082,6 +1091,7 @@ site-opportunity-suggestion:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionId'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestion
     summary: |
@@ -1167,6 +1177,91 @@ site-opportunity-suggestion:
         $ref: './responses.yaml#/404'
       '429':
         $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestion-backoffice-reviews:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+  post:
+    operationId: createBackofficeReview
+    summary: |
+      Capture an ESE review verdict for a suggestion (Backoffice feedback loop)
+    description: |
+      Records a single human-review feedback event for the suggestion as part of
+      the Learning Agent feedback loop (SITES-43974). `source` is bound to
+      `backoffice` by this route and must not be supplied in the body. `eventId`
+      is a mandatory client-supplied idempotency key (UUID v4) — a duplicate POST
+      with the same `eventId` collapses to a no-op and returns 200 with the
+      existing review. Customer-derived fields are secret-scrubbed and the
+      markdown is sanitised server-side before storage; raw patches are not
+      echoed in the response.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - eventId
+              - verdict
+            properties:
+              eventId:
+                type: string
+                format: uuid
+                description: Client-supplied idempotency key (UUID v4), retained across retries.
+              verdict:
+                type: string
+                enum: [up, down]
+                description: The reviewer's verdict (translated server-side to a positive/negative signal).
+              detailMarkdown:
+                type: string
+                maxLength: 8192
+                description: Optional ESE rationale (markdown). Required on reject by the UI; sanitised + 8 KB cap server-side.
+              rejectionCategory:
+                type: string
+                enum: [product_bug, bad_recommendation, other]
+                description: Optional category on a reject.
+              stateTransition:
+                type: string
+                description: The accompanying suggestion state transition, e.g. PENDING_VALIDATION->REJECTED or EDIT.
+              previousFix:
+                type: object
+                description: Patch snapshot at review time (secret-scrubbed server-side).
+              editedFix:
+                type: object
+                description: ESE-edited patch when supplied (optional; secret-scrubbed server-side).
+    responses:
+      '201':
+        description: Review recorded
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '200':
+        description: Idempotent no-op — a review with this eventId already exists
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '413':
+        description: detail_markdown exceeds the 8 KB limit
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -1286,6 +1381,7 @@ site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixes
     summary: |
@@ -1299,6 +1395,8 @@ site-opportunity-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':
@@ -1477,6 +1575,7 @@ site-opportunity-fix-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/fixId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixSuggestions
     summary: |
@@ -1490,6 +1589,8 @@ site-opportunity-fix-suggestions:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':

@@ -18,6 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cachedOk } from '../../support/cached-response.js';
+import { getIntentsByPromptIds } from '../../support/prompts-storage.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -658,9 +659,14 @@ function parseFilterDimensionsSiteQuery(context) {
 }
 
 /**
- * True if the brand is tied to the site via legacy `brands.site_id` or `brand_sites` (M2M).
- * When `preloadedBrandSiteId` is passed (including `null`), skips the initial `brands` lookup — use
- * when the caller already selected `site_id` on the same brand row.
+ * True if the brand is tied to the site via `brands.site_id` (canonical primary
+ * site mapping) or `brand_sites` (M:N for additional touched sites). Per LLMO-4837,
+ * `brands.site_id` is the authoritative primary-site reference (not deprecated);
+ * `brand_sites` covers citations / localised variants.
+ *
+ * When `preloadedBrandSiteId` is passed (including `null`), skips the initial
+ * `brands` lookup — use when the caller already selected `site_id` on the same
+ * brand row.
  * @param {string|null|undefined} [preloadedBrandSiteId] - Known brands.site_id, else query DB
  * @internal Exported for tests
  */
@@ -671,8 +677,8 @@ export async function brandLinkedToSite(
   siteId,
   preloadedBrandSiteId,
 ) {
-  let legacySiteId = preloadedBrandSiteId;
-  if (legacySiteId === undefined) {
+  let primarySiteId = preloadedBrandSiteId;
+  if (primarySiteId === undefined) {
     const { data: rows, error } = await client
       .from('brands')
       .select('site_id')
@@ -682,9 +688,9 @@ export async function brandLinkedToSite(
     if (error || !rows?.length) {
       return false;
     }
-    legacySiteId = rows[0].site_id;
+    primarySiteId = rows[0].site_id;
   }
-  if (legacySiteId === siteId) {
+  if (primarySiteId === siteId) {
     return true;
   }
   const { data: links } = await client
@@ -2191,8 +2197,23 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
+      // Enrich only the returned page with per-prompt intent from the prompts
+      // table (1:1 with prompt_id; executions carry only prompt_id). Done after
+      // pagination so the .in() lookup is bounded to the page (≤ pageSize),
+      // never the full rawRows set. Non-fatal + intent-column-absent safe.
+      const intentByPromptId = await getIntentsByPromptIds({
+        promptIds: paged.map((item) => item.promptId),
+        organizationId,
+        postgrestClient: client,
+        log: ctx.log,
+      });
+      const pagedItems = paged.map((item) => ({
+        ...item,
+        userIntent: intentByPromptId.get(item.promptId) || '',
+      }));
+
       return cachedOk({
-        items: paged,
+        items: pagedItems,
         totalCount,
         topic: topicResponseLabel,
         topicId: topicIdResponse,

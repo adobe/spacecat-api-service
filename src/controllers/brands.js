@@ -9,18 +9,24 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
+// @ts-check
+
 import { randomUUID } from 'crypto';
 
-import BrandClient from '@adobe/spacecat-shared-brand-client';
+import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import {
   badRequest,
   notFound,
   ok,
+  noContent,
   createResponse,
   forbidden,
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
+  composeBaseURL,
   hasText,
   isNonEmptyObject,
   isValidUUID,
@@ -49,14 +55,22 @@ import {
   upsertBrand,
   updateBrand,
   deleteBrand,
+  setBrandStatus,
   getBrandById,
   getBrandBySite,
   getBrandCompetitors,
 } from '../support/brands-storage.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
+import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
+import { resolveProjects } from '../support/serenity/resolve-projects.js';
+import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import {
+  buildReservedDomains,
+  dropReservedCompetitors,
   removedCompetitorDomains,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../support/serenity/competitor-benchmarks.js';
@@ -64,7 +78,10 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
-import { createIntentClassifier, resolveBatchTimeoutMs } from '../support/intent-classifier.js';
+import { postLlmoAlert } from './llmo/llmo-onboarding.js';
+import { hasPaidLlmoEntitlement } from '../support/llmo-paid-gate.js';
+import { createIntentClassifier } from '../support/intent-classifier.js';
+import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
   listCategories,
   createCategory,
@@ -119,15 +136,37 @@ function BrandsController(ctx, log, env) {
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
+  // Best-effort P1 alerting signal (LLMO-5587): a write path tried to silently demote
+  // an active brand to pending and was rejected. Alarm on the count (Mysticat/Brands ->
+  // BrandDemotionBlocked); attribute the specific caller via the WARN log that follows.
+  // Modeled on the LLMO-5150 EMF pattern. Never affects the response.
+  const BRAND_METRICS_NAMESPACE = 'Mysticat/Brands';
+  const emitBrandDemotionBlocked = (context, operation) => {
+    try {
+      emitMetric(
+        {
+          name: 'BrandDemotionBlocked',
+          dimensions: {
+            Operation: operation,
+            Product: context?.pathInfo?.headers?.['x-product'],
+          },
+        },
+        { environment: resolveEnvironment(env), namespace: BRAND_METRICS_NAMESPACE },
+      );
+      log.warn(`BrandDemotionBlocked: ${operation} attempted an active->pending demotion `
+        + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
+        + `updatedBy=${context?.attributes?.authInfo?.profile?.sub || 'system'}); rejected — `
+        + 'use PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status for intentful transitions.');
+    } catch {
+      // best-effort: metric/log emission must never affect the request path
+    }
+  };
+
   // Best-effort intent classifier for prompts that arrive without an intent
   // (human-added). Returns null when disabled by config or Azure OpenAI is not
   // configured, in which case intent is simply left null. Built once per
   // controller instance and passed into the prompt storage layer.
   const classifyIntent = createIntentClassifier({ env, log });
-  // Total wall-clock ceiling for the bulk-create classification batch, so a slow
-  // Azure can't stall the write past the Lambda timeout (per-call timeout only
-  // bounds a single call). On expiry, completed classifications are kept.
-  const classifyIntentBatchTimeoutMs = resolveBatchTimeoutMs(env);
 
   /**
    * Fetches an organization by ID and returns a 404 error if not found.
@@ -239,7 +278,7 @@ function BrandsController(ctx, log, env) {
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
       const brands = await brandClient.getBrandsForOrganization(imsOrgId, `Bearer ${imsUserToken}`);
-      return ok(brands);
+      return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
       return createErrorResponse(error);
@@ -269,6 +308,26 @@ function BrandsController(ctx, log, env) {
   }
 
   /**
+   * Gets IMS config for the Brand Governance Agent from the environment.
+   * Returns null if Brand Governance is not configured in this environment.
+   * @returns {object|null} Brand Governance IMS config or null.
+   */
+  function getImsConfigForBrandGovernance() {
+    const {
+      IMS_HOST: host,
+      BRAND_GOV_IMS_CLIENT_ID: clientId,
+      BRAND_GOV_IMS_CLIENT_CODE: clientCode,
+      BRAND_GOV_IMS_CLIENT_SECRET: clientSecret,
+    } = env;
+    if (!hasText(host) || !hasText(clientId) || !hasText(clientCode) || !hasText(clientSecret)) {
+      return null;
+    }
+    return {
+      host, clientId, clientCode, clientSecret,
+    };
+  }
+
+  /**
    * Gets Brand Guidelines for a site.
    *
    * @param {object} context - Context of the request.
@@ -289,26 +348,45 @@ function BrandsController(ctx, log, env) {
         return forbidden('Only users belonging to the organization of the site can view its brand guidelines');
       }
 
+      const organizationId = site.getOrganizationId();
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound(`Organization not found for site: ${siteId}`);
+      }
+      const imsOrgId = organization.getImsOrgId();
+
+      // Try Brand Governance Agent first (URL-based lookup, no brandId required)
+      const govConfig = getImsConfigForBrandGovernance();
+      if (govConfig) {
+        try {
+          const brandGovClient = BrandGovernanceClient.createFrom(context);
+          const brandGovGuidelines = await brandGovClient.getBrandGuidelinesForUrl(
+            site.getBaseURL(),
+            imsOrgId,
+            govConfig,
+          );
+          if (brandGovGuidelines) {
+            return createResponse(brandGovGuidelines, 200);
+          }
+        } catch (govError) {
+          log.warn(`Brand Governance Agent failed for site ${siteId}, falling back to Brand Publish: ${govError.message}`);
+        }
+      }
+
+      // Fall back to Adobe Brand Publish (requires brandId + userId in site config)
       const brandId = site.getConfig()?.getBrandConfig()?.brandId;
       const userId = site.getConfig()?.getBrandConfig()?.userId;
-      const brandConfig = {
-        brandId,
-        userId,
-      };
       if (!hasText(brandId) || !hasText(userId)) {
         return notFound(`Brand config is missing, brandId or userId for site ID: ${siteId}`);
       }
-      const organizationId = site.getOrganizationId();
-      const organization = await Organization.findById(organizationId);
-      const imsOrgId = organization?.getImsOrgId();
       const imsConfig = getImsConfig();
       const brandClient = BrandClient.createFrom(context);
       const brandGuidelines = await brandClient.getBrandGuidelines(
-        brandConfig,
+        { brandId, userId },
         imsOrgId,
         imsConfig,
       );
-      return ok(brandGuidelines);
+      return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
       return createErrorResponse(error);
@@ -376,7 +454,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -485,8 +563,7 @@ function BrandsController(ctx, log, env) {
         prompts,
         postgrestClient,
         updatedBy,
-        classifyIntent,
-        classifyIntentBatchTimeoutMs,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
@@ -546,7 +623,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
-        classifyIntent,
+        classifyIntent: classifyIntent ?? undefined,
       });
 
       if (!prompt) {
@@ -608,7 +685,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Prompt not found: ${promptId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
       return createErrorResponse(error);
@@ -667,7 +744,7 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      return ok(result);
+      return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
       return createErrorResponse(error);
@@ -723,7 +800,7 @@ function BrandsController(ctx, log, env) {
       }
 
       const results = await checkPromptsExist({ brandUuid, prompts, postgrestClient });
-      return ok({ results });
+      return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
       return createErrorResponse(error);
@@ -770,7 +847,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      return ok(stats);
+      return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
       return createErrorResponse(error);
@@ -923,7 +1000,25 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const brands = await listBrands(spaceCatId, postgrestClient, { status });
-      return ok({ brands });
+
+      // ReBAC collection filter. When facsWrapper marks this session as
+      // FACS-enrolled and resource-scoped (no org-wide can_view — see
+      // context.attributes.facs), narrow the listed brands to those the caller
+      // may view via a state-layer grant. Absent flag (admin / internal org /
+      // non-ReBAC org / org-wide viewer) => full list.
+      const facs = context.attributes?.facs;
+      const hasFACSCapability = facs?.enabled
+        && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+      if (facs?.enabled && !hasFACSCapability) {
+        const viewable = await listViewableResourceIds(postgrestClient, {
+          imsOrgId: organization.getImsOrgId(),
+          product: facs.product,
+          resourceType: 'brand',
+          subjectId: facs.subjectId,
+        });
+        return createResponse({ brands: brands.filter((brand) => viewable.has(brand.id)) }, 200);
+      }
+      return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -958,7 +1053,7 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       // eslint-disable-next-line max-len
       const categories = await listCategories({ organizationId: spaceCatId, postgrestClient, status });
-      return ok({ categories });
+      return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1139,7 +1234,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Category not found: ${categoryId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1177,7 +1272,7 @@ function BrandsController(ctx, log, env) {
       const topics = await listTopics({
         organizationId: spaceCatId, postgrestClient, status, brandId,
       });
-      return ok({ topics });
+      return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1329,7 +1424,7 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Topic not found: ${topicId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1387,16 +1482,60 @@ function BrandsController(ctx, log, env) {
       // brand never exists without a valid Semrush side. The pre-generated id is
       // the sub-workspace title key and is forced onto the row.
       let provisionedBrandId = null;
+      // The initial market's domain, resolved once during provisioning and reused
+      // by the site-mirror hook below (avoids re-deriving from the payload).
+      let provisionedBrandDomain = null;
       // A pending (draft) brand defers ALL Semrush provisioning: no
       // sub-workspace, no project, and crucially no primary URL required. The
       // wizard's "Save as pending" path lands here so a user can stash a brand
       // before picking its primary URL.
       const isPendingBrand = brandData.status === 'pending';
       const { semrushMarket } = brandData;
-      if (isNonEmptyObject(semrushMarket)) {
-        const { market, languageCode } = semrushMarket;
-        if (!hasText(market) || !hasText(languageCode)) {
-          return badRequest('semrushMarket requires market and languageCode');
+      const hasSemrushMarket = isNonEmptyObject(semrushMarket);
+      // generatePrompts (default false) gates topic/prompt generation ONLY. The
+      // wizard sends it as an explicit boolean for every Semrush-mode create, so
+      // its presence ALSO signals Semrush mode even when no market was picked —
+      // a bare "save and continue later" draft (location/language optional).
+      const generatePrompts = brandData.generatePrompts === true;
+      // The wizard always sends `generatePrompts` as an explicit boolean for a
+      // Semrush-mode create; a flat (non-Semrush) create omits it entirely. So
+      // the mere PRESENCE of the flag (true OR false) is itself a Semrush-mode
+      // signal — but see below: only trusted for a draft.
+      const hasGeneratePromptsFlag = typeof brandData.generatePrompts === 'boolean';
+      // A draft (pending) brand may legitimately be a "sub-workspace-only Semrush
+      // brand, save and continue later": no market, generatePrompts:false. The
+      // flag's presence is what marks it as Semrush mode (see
+      // normalizePendingSemrushProvisioning, which stashes a bare no-prompt draft).
+      const isSubworkspaceOnlyDraft = isPendingBrand && hasGeneratePromptsFlag;
+      // Semrush-mode detection. A LIVE create must carry a POSITIVE signal — a
+      // picked market, or generatePrompts:true (which itself requires a market,
+      // enforced below). We deliberately do NOT treat the mere presence of the
+      // flag as the signal on the live path: a flat caller that defensively sends
+      // `generatePrompts:false` must not be pulled into Semrush provisioning (it
+      // would 400 for a missing primary URL, or worse, provision a sub-workspace
+      // for a brand never meant to have one). Presence is trusted ONLY for a draft.
+      const isSemrushMode = hasSemrushMarket || generatePrompts || isSubworkspaceOnlyDraft;
+      // Serenity rollout gate. Provisioning a Semrush sub-workspace / project for a
+      // brand is a serenity-active operation. While serenity is inactive for the
+      // org, refuse a Semrush-mode create rather than provision upstream: the
+      // flag-gated UI won't request it, and an org still on the normal backend data
+      // must not get a sub-workspace before its rollout flag is flipped on. The
+      // helper is only consulted on the Semrush-mode path, so a plain (flat) create
+      // is unaffected. (Effective gate is flag AND workspace, same as /serenity/*.)
+      if (isSemrushMode && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+        return forbidden('Serenity is not active for this organization');
+      }
+      if (isSemrushMode) {
+        let market;
+        let languageCode;
+        if (hasSemrushMarket) {
+          ({ market, languageCode } = semrushMarket);
+          if (!hasText(market) || !hasText(languageCode)) {
+            return badRequest('semrushMarket requires market and languageCode');
+          }
+        } else if (generatePrompts) {
+          // Generating prompts needs a project, which needs a (market, language).
+          return badRequest('market and languageCode are required when generatePrompts is true');
         }
         if (isPendingBrand) {
           // Defer provisioning: persist the chosen (market, languageCode) AND
@@ -1406,37 +1545,67 @@ function BrandsController(ctx, log, env) {
           // URL otherwise lives only on the Semrush side, so a site-less draft
           // would have nowhere to keep it. The row lands as 'pending' because it
           // has no anchor (no site_id, no semrush_workspace_id) — see
-          // upsertBrand's anchor check. Models are collected at activation.
+          // upsertBrand's anchor check.
           const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
             .map((u) => (typeof u === 'string' ? u : u?.value))
             .find(hasText) || null;
-          // TODO: the wizard creates a draft with a single market today, so we
-          // stash exactly one (market, languageCode). The activate flow already
-          // handles N stashed markets — if multi-market draft creation is ever
-          // added, build this `markets` array from all selected markets here.
+          // AI models (LLMs) the wizard collected. Unlike the direct-provision
+          // path they are NOT required here — a draft can be saved before the
+          // user picks any, and they can be edited per-market later from the
+          // Markets tab. Seed the initial market's modelIds with them when
+          // present so activation applies them; omit the key entirely when none
+          // were chosen (mirrors normalizePendingSemrushProvisioning).
+          const seedModelIds = Array.isArray(brandData.semrushModelIds)
+            ? brandData.semrushModelIds.filter(hasText)
+            : [];
+          // A no-prompt draft may carry NO market at all (location/language are
+          // optional then) — stash only the market actually picked. The activate
+          // flow already handles 0..N stashed markets: an empty list + a primary
+          // URL provisions a single US/EN fallback project, and an empty list +
+          // no URL provisions a sub-workspace-only brand.
+          // TODO: the wizard creates at most one market today; if multi-market
+          // draft creation is added, build this array from all selected markets.
+          const markets = [];
+          if (hasSemrushMarket) {
+            const initialMarket = { market, languageCode };
+            if (seedModelIds.length > 0) {
+              initialMarket.modelIds = seedModelIds;
+            }
+            markets.push(initialMarket);
+          }
           brandData.pendingSemrushProvisioning = {
             primaryUrl,
-            markets: [{ market, languageCode }],
+            markets,
+            generatePrompts,
           };
         } else {
           const brandDomain = brandDomainFromPayload(brandData);
-          if (!hasText(brandDomain)) {
+          if (!brandDomain || !hasText(brandDomain)) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
-          // The project needs at least one AI model (LLM) to track. The wizard
-          // collects them; reject a Semrush create that omits them.
+          provisionedBrandDomain = brandDomain;
+          // A prompt-generating project needs at least one AI model (LLM) to
+          // track. The wizard collects them; reject a prompt-generating Semrush
+          // create that omits them. With generatePrompts=false the project is
+          // created empty, so models are optional (it tracks nothing until the
+          // user adds them later).
           const modelIds = Array.isArray(brandData.semrushModelIds)
             ? brandData.semrushModelIds.filter(hasText)
             : [];
-          if (modelIds.length === 0) {
+          if (generatePrompts && modelIds.length === 0) {
             return badRequest('semrushModelIds must list at least one AI model to track');
           }
-          // Brand aliases drive branded/non-branded prompt classification. Accept
-          // both shapes the create payload may carry: plain strings or {name}.
+          // Brand aliases drive branded/non-branded prompt classification and the
+          // project brand_names. Normalize to `{ name, regions }` (accepting both
+          // payload shapes: plain strings — region-less — or `{ name, regions }`),
+          // keeping `regions` so the create handler region-clamps each alias to the
+          // initial market.
           const brandAliases = Array.isArray(brandData.brandAliases)
             ? brandData.brandAliases
-              .map((a) => (typeof a === 'string' ? a : a?.name))
-              .filter(hasText)
+              .map((a) => (typeof a === 'string'
+                ? { name: a, regions: [] }
+                : { name: a?.name, regions: a?.regions || [] }))
+              .filter((a) => hasText(a.name))
             : [];
           // Brand URLs (own sites + social + earned) are pushed onto the initial
           // market's project benchmark. The row isn't written yet, so they come
@@ -1451,10 +1620,13 @@ function BrandsController(ctx, log, env) {
             spaceCatId,
             brandId: provisionedBrandId,
             brandName: brandData.name,
+            // market/languageCode may be undefined when generatePrompts=false and
+            // no market was picked — provisionBrandSubworkspace falls back to US/EN.
             market,
             languageCode,
             brandDomain,
             modelIds,
+            generateTopics: generatePrompts,
             brandAliases,
             brandUrlSources,
             // Competitors ("other brands to track") are merged into the initial
@@ -1463,6 +1635,25 @@ function BrandsController(ctx, log, env) {
             competitors: brandData.competitors,
           }, log);
           provisionedWorkspaceId = provisioned.semrushWorkspaceId;
+        }
+      }
+
+      // Never store a competitor that is one of the brand's own properties (its
+      // primary or own website URLs — at create the only market is the primary).
+      // The benchmark sync already drops these, but they must not land in the
+      // stored competitor list either. Social/earned domains are not reserved.
+      if (Array.isArray(brandData.competitors) && brandData.competitors.length > 0) {
+        const primaryDomain = brandDomainFromPayload(brandData);
+        const reservedDomains = buildReservedDomains(
+          primaryDomain ? [primaryDomain] : [],
+          brandData.urls,
+        );
+        const { kept, dropped } = dropReservedCompetitors(brandData.competitors, reservedDomains);
+        if (dropped.length > 0) {
+          log.info('brands: dropped self-referential competitor(s) on create', {
+            dropped: dropped.map((c) => c?.url).filter(Boolean),
+          });
+          brandData.competitors = kept;
         }
       }
 
@@ -1476,14 +1667,35 @@ function BrandsController(ctx, log, env) {
         semrushWorkspaceId: provisionedWorkspaceId,
       });
 
+      // When a Semrush sub-workspace + initial market were provisioned, mirror that
+      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
+      // market's domain, so the Semrush project has a resolvable site entity.
+      // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch
+      // whose catch releases the just-provisioned workspace; a throw here would
+      // tear down a live brand's workspace. ensureMarketSite is best-effort by
+      // contract (its own catch-all swallows + logs), so this holds.
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
+        await ensureMarketSite(context, {
+          organizationId: spaceCatId,
+          brandId: provisionedBrandId ?? undefined,
+          // The initial market's domain, resolved during provisioning above.
+          domain: provisionedBrandDomain ?? undefined,
+          updatedBy,
+          log,
+        });
+      }
+
       return createResponse(created, 201);
     } catch (error) {
+      if (error.code === 'brand_status_demotion_not_allowed') {
+        emitBrandDemotionBlocked(context, 'createBrand');
+      }
       log.error(`Error creating brand for organization ${spaceCatId}:`, error);
       // Compensation: a sub-workspace was provisioned upstream but the brand row
       // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
       // error). Nothing references that workspace, so release its allocation back
       // to the parent pool (best-effort) rather than leaking it.
-      if (hasText(provisionedWorkspaceId)) {
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
         log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
@@ -1536,13 +1748,28 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
-      // pendingSemrushProvisioning is system-controlled: written only when a
-      // brand is saved as 'pending' (createBrandForOrg) and consumed/cleared by
-      // the activate flow. It is marked readOnly in the OpenAPI schema, but that
-      // is a doc hint with no runtime teeth — strip it here so a PATCH caller
-      // cannot inject a primaryUrl/markets that activation would later trust for
-      // Semrush provisioning.
-      delete updates.pendingSemrushProvisioning;
+      // pendingSemrushProvisioning is the deferred-provisioning staging blob for
+      // a *pending* (draft) brand. The draft UI mutates it via PATCH — the
+      // Markets tab appends a market / edits a market's LLMs before activation.
+      // Permit that ONLY while the brand is (and stays) pending: an active brand
+      // keeps its markets on the Semrush side, so a PATCH must never inject a
+      // primaryUrl/markets onto a live brand that activation would later trust.
+      // When the target isn't pending (or the same PATCH is flipping it to
+      // active — activation is the serenity endpoint's job, not PATCH's), strip
+      // it. Only pay for the status read when the field is actually present.
+      if (updates.pendingSemrushProvisioning !== undefined) {
+        const { data: currentBrand } = await postgrestClient
+          .from('brands')
+          .select('status')
+          .eq('organization_id', spaceCatId)
+          .eq('id', brandUuid)
+          .maybeSingle();
+        const isPending = currentBrand?.status === 'pending'
+          && (updates.status === undefined || updates.status === 'pending');
+        if (!isPending) {
+          delete updates.pendingSemrushProvisioning;
+        }
+      }
 
       // Capture the competitor list BEFORE the update so the Semrush re-sync can
       // compute which competitors were removed (old − new) — the only ones it
@@ -1551,6 +1778,30 @@ function BrandsController(ctx, log, env) {
       const oldCompetitors = competitorsTouched
         ? await getBrandCompetitors(brandUuid, postgrestClient)
         : [];
+      // Brand aliases (the extra names the brand is known by) re-sync to every
+      // market's project brand_names + own-brand benchmark on edit.
+      const aliasesTouched = updates.brandAliases !== undefined;
+
+      // Serenity rollout gate. An edit that changes URL sources / competitors /
+      // aliases re-syncs onto the brand's Semrush projects (the block near the end
+      // of this handler), but ONLY for a sub-workspace brand. While serenity is
+      // inactive for the org that re-sync must not run — even if a
+      // semrush_workspace_id was backfilled for rollout prep — so reject the edit
+      // (rather than silently skip the sync and let the brand drift) when it would
+      // touch Semrush. A flat-mode brand (no workspace) edits the same fields as
+      // plain backend data and is unaffected; the brand read only happens on the
+      // inactive path, so the common active path pays nothing extra.
+      const touchesSemrushSync = updates.urls !== undefined
+        || updates.socialAccounts !== undefined
+        || updates.earnedContent !== undefined
+        || competitorsTouched
+        || aliasesTouched;
+      if (touchesSemrushSync && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+        const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        if (hasText(current?.semrushWorkspaceId)) {
+          return forbidden('Serenity is not active for this organization');
+        }
+      }
 
       // LLMO-5645: a region must not be removed from a brand while prompts still
       // use it — DRS schedules off each prompt's `regions`, so dropping a brand
@@ -1585,6 +1836,53 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // A competitor ("other brand to track") must never be one of the brand's
+      // OWN properties — its primary, any of its market/project domains, or its
+      // own website URLs. Such a self-reference can't be tracked as a competitor
+      // (it would benchmark the brand against itself), so strip it BEFORE the row
+      // is written — it must not be stored at all, not just skipped at sync time.
+      // Social/earned domains are NOT reserved (third-party platforms). Runs only
+      // when competitors are actually edited.
+      const competitorsToGuard = competitorsTouched
+        && Array.isArray(updates.competitors) && updates.competitors.length > 0;
+      // When the competitor guard below lists a Semrush brand's projects pre-write,
+      // it stashes the listing here so the post-commit re-sync can reuse it instead
+      // of listing the same workspace a second time — the project set is stable
+      // across the brand-row write (which never re-points semrush_workspace_id), so
+      // a single competitor edit lists projects ONCE across both the guard and sync.
+      let prefetchedProjects = null;
+      if (competitorsToGuard) {
+        const brandState = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        // Use the incoming URLs when this same PATCH changes them, else the stored ones.
+        const websiteUrls = updates.urls !== undefined ? updates.urls : (brandState?.urls || []);
+        const brandOwnUrls = [brandState?.baseUrl, ...websiteUrls];
+
+        let reservedDomains;
+        if (hasText(brandState?.semrushWorkspaceId)) {
+          // Semrush brand: market/project domains come from the project listing.
+          // List once and stash for the post-commit re-sync (see prefetchedProjects).
+          const imsToken = getImsUserTokenStrict(context);
+          const transport = createSerenityTransport({ env: context.env, imsToken });
+          prefetchedProjects = await resolveProjects(transport, brandState.semrushWorkspaceId);
+          reservedDomains = buildReservedDomains(
+            prefetchedProjects.map((p) => p?.domain),
+            brandOwnUrls,
+          );
+        } else {
+          // Flat-mode brand: no projects — reserve the primary + own website URLs.
+          reservedDomains = buildReservedDomains([], brandOwnUrls);
+        }
+
+        const { kept, dropped } = dropReservedCompetitors(updates.competitors, reservedDomains);
+        if (dropped.length > 0) {
+          log.info('brands: dropped self-referential competitor(s) on update', {
+            brandId,
+            dropped: dropped.map((c) => c?.url).filter(Boolean),
+          });
+          updates.competitors = kept;
+        }
+      }
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -1611,13 +1909,32 @@ function BrandsController(ctx, log, env) {
       const urlsTouched = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;
-      if ((urlsTouched || competitorsTouched) && hasText(updated.semrushWorkspaceId)) {
+      // Aliases Semrush silently refused on this re-sync (own-brand or competitor
+      // benchmarks), surfaced on the response so the UI can warn the operator.
+      const rejectedAliases = [];
+      if ((urlsTouched || competitorsTouched || aliasesTouched)
+        && hasText(updated.semrushWorkspaceId)) {
         // Forward only an IMS user token upstream (matches the create path +
         // the rest of /serenity/*): PATCH /brands is organization:write and thus
         // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
         const imsToken = getImsUserTokenStrict(context);
         const transport = createSerenityTransport({ env: context.env, imsToken });
         try {
+          // List the sub-workspace's projects ONCE and share the result across the
+          // URL/competitor/alias syncs below — the listing is stable across the
+          // brand-row write above, so this collapses up to three redundant
+          // listProjects round-trips into one on a single edit. Threading the pre-
+          // write competitor-guard listing (when it ran — same immutable workspace)
+          // through resolveProjects' prefetch param reuses it; a null prefetch lists
+          // fresh. So a competitor edit lists projects once across BOTH the guard and
+          // the sync, while a urls/aliases-only edit lists once here. Kept inside the
+          // try so a listProjects failure still emits the workspace-scoped re-sync
+          // breadcrumb below rather than escaping to the generic outer catch.
+          const sharedProjects = await resolveProjects(
+            transport,
+            updated.semrushWorkspaceId,
+            prefetchedProjects,
+          );
           if (urlsTouched) {
             await syncBrandUrlsAcrossMarkets(
               transport,
@@ -1628,17 +1945,35 @@ function BrandsController(ctx, log, env) {
               },
               updated.semrushWorkspaceId,
               log,
+              sharedProjects,
             );
           }
           if (competitorsTouched) {
             const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
-            await syncCompetitorBenchmarksAcrossMarkets(
+            const competitorResult = await syncCompetitorBenchmarksAcrossMarkets(
               transport,
               updated.competitors,
               removed,
               updated.semrushWorkspaceId,
               log,
+              // Reserve the brand's own website URLs (every market/project domain
+              // is reserved from the project listing) so a competitor can't be one
+              // of the brand's own properties.
+              updated.urls,
+              sharedProjects,
             );
+            rejectedAliases.push(...(competitorResult?.rejected ?? []));
+          }
+          if (aliasesTouched) {
+            const aliasResult = await syncBrandAliasesAcrossMarkets(
+              transport,
+              updated.brandAliases,
+              updated.name,
+              updated.semrushWorkspaceId,
+              log,
+              sharedProjects,
+            );
+            rejectedAliases.push(...(aliasResult?.rejected ?? []));
           }
         } catch (syncError) {
           // The brand row is already committed; re-sync hard-fails (the brand
@@ -1650,14 +1985,30 @@ function BrandsController(ctx, log, env) {
             semrushWorkspaceId: updated.semrushWorkspaceId,
             urlsTouched,
             competitorsTouched,
+            aliasesTouched,
             status: syncError?.status,
           });
           throw syncError;
         }
       }
 
+      if (rejectedAliases.length > 0) {
+        // Non-fatal: the aliases were written, Semrush just declined some. Warn
+        // (so it is greppable) and hand the set back so the UI can tell the user
+        // which aliases are not being tracked.
+        log.warn('serenity: Semrush rejected some brand/competitor aliases on re-sync', {
+          brandId,
+          semrushWorkspaceId: updated.semrushWorkspaceId,
+          rejected: rejectedAliases,
+        });
+        return ok({ ...updated, semrushRejectedAliases: rejectedAliases });
+      }
+
       return ok(updated);
     } catch (error) {
+      if (error.code === 'brand_status_demotion_not_allowed') {
+        emitBrandDemotionBlocked(context, 'updateBrand');
+      }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
     }
@@ -1704,9 +2055,342 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Brand not found: ${brandId}`);
       }
-      return createResponse(null, 204);
+      return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Activates a brand: sets it `active` with a resolved `baseSiteId` in the SAME
+   * write, optionally generates AI prompts (a direct `prompt_generation_base_url`
+   * DRS job with `source: 'brand-activation'` — never Brandalf, never the
+   * `llmo-customer-analysis` cascade), and ensures the recurring brand-presence
+   * schedule when prompts exist. Explicit, customer-triggered (LLMO-5605).
+   *
+   * The brand must already exist (create it first via POST .../brands). Returns
+   * `200` quickly: the brand is `active` synchronously; prompts generate
+   * asynchronously (the `200` carries `promptGenerationJobId`, not finished prompts).
+   *
+   * @param {object} context - The request context (`params`, `data.generatePrompts`).
+   * @returns {Promise<Response>} 200 `{ brandId, status, baseSiteId,
+   *   promptGenerationJobId?, scheduleId? }`; 400/403/404/409 per the contract.
+   */
+  const activateBrandForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const { generatePrompts } = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (typeof generatePrompts !== 'boolean') {
+        return badRequest('generatePrompts is required and must be a boolean');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+
+      // Auth — same gate as Piece 1: membership + explicit PAID. PAID is stricter
+      // than the platform's any-tier "LLMO-enabled" bar; entitlements have no status
+      // column (getStatus() is an unbacked stub; revocation = row delete), so a PAID
+      // row is the "paying" signal. No separate admin requirement — mirrors Piece 1,
+      // which omits it so paying non-admin members aren't 403'd.
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      if (!await hasPaidLlmoEntitlement(context, organization)) {
+        return forbidden('A paid LLMO entitlement is required to activate a brand');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // brandId is UUID-validated by the shared param guard in index.js before the
+      // controller runs, so resolveBrandUuid's name-lookup branch is unreachable here —
+      // fetch directly. getBrandById org-scopes (organization_id + id) and returns null
+      // → 404 (the safety net even if that validation were bypassed), so no resolve is
+      // needed.
+      const brand = await getBrandById(spaceCatId, brandId, postgrestClient);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      // Do not resurrect a soft-deleted brand via activation (parity with the /status
+      // sibling, which guards the same with .neq('status', 'deleted')). Treat deleted
+      // as gone.
+      if (brand.status === 'deleted') {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      const brandUuid = brand.id;
+
+      // Idempotent / one-shot: activating an already-active brand is a no-op. Return the
+      // current state without re-running updateBrand, prompt-gen, or the schedule — a
+      // genuine retry after a COMPLETED prompt-gen job would otherwise submit a dup
+      // (listJobs dedup only catches QUEUED/RUNNING). Activate is promote-only.
+      if (brand.status === 'active') {
+        return createResponse({
+          brandId: brandUuid,
+          status: 'active',
+          baseSiteId: brand.baseSiteId,
+        }, 200);
+      }
+
+      // Promote-only: only a pending brand can be activated. deleted → 404 and active →
+      // 200 no-op are handled above; reject any other state explicitly (e.g. a future
+      // suspended/draft) rather than silently activating it.
+      if (brand.status !== 'pending') {
+        return badRequest(`Cannot activate a brand in status '${brand.status}'`);
+      }
+
+      // 1) Resolve the brand's onboarded primary site — the prompt-gen base URL and
+      // the baseSiteId to anchor on. An already-sited brand carries baseSiteId (and
+      // usually baseUrl); a pending brand resolves from its stashed Semrush primary URL.
+      // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
+      // not a declared activation anchor, so guessing one would be wrong.
+      let { baseSiteId, baseUrl } = brand;
+      if (!hasText(baseSiteId)) {
+        const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
+        const site = hasText(primaryUrl)
+          ? await Site.findByBaseURL(composeBaseURL(primaryUrl))
+          : null;
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
+        baseSiteId = site.getId();
+        baseUrl = site.getBaseURL();
+      } else if (!hasText(baseUrl)) {
+        // baseSiteId is set but the base_site embed didn't carry a URL — re-look up the
+        // site by id so prompt-gen never submits with an empty base_url.
+        const site = await Site.findById(baseSiteId);
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
+        baseUrl = site.getBaseURL();
+      }
+
+      // 2) Activate — set status=active + baseSiteId in a SINGLE atomic write.
+      // updateBrand supports promote-to-active directly: its status guard refuses only
+      // active→pending demotions (#2637, LLMO-5587), never a promotion, and the
+      // active-has-site invariant is satisfied because baseSiteId is set in the same
+      // patch. A brands_base_site_unique violation throws with status 409 (mapped by
+      // createErrorResponse).
+      const updated = await updateBrand({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        updates: { status: 'active', baseSiteId },
+        postgrestClient,
+        updatedBy,
+      });
+      if (!updated) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      // The brand is now active (committed above). Prompt generation and the
+      // brand-presence schedule are best-effort async side-effects — a DRS failure must
+      // NOT fail the activation. We run EVERYTHING after the commit in a guarded block
+      // (DRS client construction included): on error we degrade to 200 with the brand
+      // active (plus whatever ids succeeded) and alert ops with the real error so it's
+      // never lost (#4). Keeping DRS errors inside this block also means they never reach
+      // createErrorResponse, so raw upstream detail can't leak to the client (#5).
+      let promptGenerationJobId;
+      let scheduleId;
+      let sideEffectError;
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        const drsConfigured = drsClient.isConfigured();
+        // 3) Optional prompt generation (async). Best-effort dedup: reuse any in-flight
+        // brand-activation prompt-gen job for this site rather than submitting a dup.
+        // This listJobs → status check is NOT atomic (TOCTOU) — two truly-concurrent
+        // activations could both submit; acceptable since a human double-click sees the
+        // first as RUNNING, and the weekly schedule has real 409 dedup. Note the
+        // source='brand-activation' filter depends on the DRS source-filter deploy;
+        // until it lands, dedup widens to all base-url prompt-gen jobs for the site.
+        if (generatePrompts) {
+          if (drsConfigured) {
+            const inFlight = await drsClient.listJobs({
+              siteId: baseSiteId,
+              providerId: 'prompt_generation_base_url',
+              source: 'brand-activation',
+            });
+            const existing = (inFlight || []).find(
+              (job) => job.status === 'QUEUED' || job.status === 'RUNNING',
+            );
+            if (existing) {
+              promptGenerationJobId = existing.job_id;
+              log.info(`Reusing in-flight prompt-gen job ${existing.job_id} (brand ${brandUuid})`);
+            } else {
+              const region = Array.isArray(brand.region) ? brand.region[0] : undefined;
+              const job = await drsClient.submitPromptGenerationJob({
+                baseUrl,
+                brandName: brand.name,
+                // DRS defaults audience to "General Consumers" when absent; pass it
+                // explicitly to satisfy the required PromptGenerationParams type without
+                // changing behaviour.
+                audience: 'General Consumers',
+                siteId: baseSiteId,
+                imsOrgId: organization.getImsOrgId(),
+                ...(hasText(region) ? { region } : {}),
+                source: 'brand-activation',
+              });
+              promptGenerationJobId = job?.job_id;
+            }
+          } else {
+            log.warn('DRS client not configured; skipping prompt generation');
+          }
+        }
+
+        // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
+        // when prompts were generated now or the brand already has prompts (a promptless
+        // schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule POSTs and
+        // tolerates a 409 dedup.
+        let hasExistingPrompts = false;
+        if (!generatePrompts && drsConfigured) {
+          // Only worth computing when we could actually schedule — skip the DB roundtrip
+          // when DRS is unavailable (no schedule would be created regardless).
+          const stats = await getPromptStats({
+            organizationId: spaceCatId,
+            brandUuid,
+            postgrestClient,
+          });
+          hasExistingPrompts = (stats.branded + stats.unbranded) > 0;
+        }
+        if ((generatePrompts || hasExistingPrompts) && drsConfigured) {
+          const schedule = await drsClient.createBrandPresenceSchedule({
+            siteId: baseSiteId,
+            brandId: brandUuid,
+            orgId: spaceCatId,
+          });
+          scheduleId = schedule?.scheduleId;
+        }
+      } catch (error) {
+        sideEffectError = error;
+        log.error(
+          `Brand ${brandUuid} activated, but prompt-gen/schedule failed for org ${spaceCatId}:`,
+          error,
+        );
+      }
+
+      const responseBody = {
+        brandId: brandUuid,
+        status: 'active',
+        baseSiteId,
+        ...(promptGenerationJobId ? { promptGenerationJobId } : {}),
+        ...(scheduleId ? { scheduleId } : {}),
+      };
+
+      // The activation alert is also best-effort. postLlmoAlert already swallows its own
+      // Slack errors, but we wrap it defensively so an alert failure can never escape to
+      // the outer catch and turn an already-committed activation into a 5xx.
+      try {
+        if (sideEffectError) {
+          // Activation succeeded; only the async side-effects failed. Surface the real
+          // error to ops (the offending party) — the client still gets 200 (#4).
+          await postLlmoAlert(
+            `:warning: Brand activated, but prompt-gen/schedule failed — ${brand.name} `
+            + `(${brandUuid}) in org ${spaceCatId} [site=${baseSiteId}, `
+            + `generatePrompts=${generatePrompts}]: ${sideEffectError.message}`,
+            context,
+          );
+        } else {
+          await postLlmoAlert(
+            `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
+            + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
+            + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
+            context,
+          );
+        }
+      } catch (alertError) {
+        log.error(`Brand ${brandUuid} activated; activation alert failed:`, alertError);
+      }
+
+      return createResponse(responseBody, 200);
+    } catch (error) {
+      log.error(`Error activating brand ${brandId} for organization ${spaceCatId}:`, error);
+      // Guard the failure alert too: postLlmoAlert already swallows its own Slack errors,
+      // but we never want an alert failure on the error path to replace the intended
+      // status (e.g. a 409/400) with an unhandled-rejection 500.
+      try {
+        await postLlmoAlert(
+          `:x: Brand activation failed — brand ${brandId} in org ${spaceCatId}: ${error.message}`,
+          context,
+        );
+      } catch (alertError) {
+        log.error(`Failed to post activation-failure alert for brand ${brandId}:`, alertError);
+      }
+      return createErrorResponse(error);
+    }
+  };
+
+  // Explicit, intentful brand status transition (approve -> active, move-to-pending ->
+  // pending). This is the sanctioned path for an active->pending demotion: the generic
+  // PATCH /brands/:brandId refuses that transition (LLMO-5587), routing intent here.
+  const transitionBrandStatusForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const { status } = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (status !== 'active' && status !== 'pending') {
+        return badRequest("status must be one of 'active' or 'pending'");
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const updated = await setBrandStatus({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        status,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!updated) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      return ok(updated);
+    } catch (error) {
+      log.error(`Error transitioning status for brand ${brandId} in organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
     }
   };
@@ -1728,6 +2412,8 @@ function BrandsController(ctx, log, env) {
     createBrandForOrg,
     updateBrandForOrg,
     deleteBrandForOrg,
+    activateBrandForOrg,
+    transitionBrandStatusForOrg,
     listPromptsByBrand,
     getPromptByBrandAndId,
     getPromptStatsByBrand,

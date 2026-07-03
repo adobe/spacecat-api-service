@@ -350,6 +350,36 @@ describe('Opportunities Controller', () => {
     expect(error).to.have.property('message', 'Opportunity ID required');
   });
 
+  it('returns 400 for malformed locale on getAllForSite', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      data: { locale: 'INVALID' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByStatus', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      data: { locale: 'fr-FR' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByID', async () => {
+    const response = await opportunitiesController.getByID({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { locale: '123' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
   it('gets opportunity by ID returns not found if opportunity is not found', async () => {
     mockOpportunity.findById.resolves(null);
     const response = await opportunitiesController.getByID({
