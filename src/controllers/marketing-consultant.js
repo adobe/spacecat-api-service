@@ -26,7 +26,7 @@
 import { ok, badRequest, internalServerError } from '@adobe/spacecat-shared-http-utils';
 import { createAmaClient } from '../support/marketing-agent/ama-client.js';
 import { adaptBriefText } from '../support/marketing-agent/brief-adapter.js';
-import { getMarketingConsultantContext, buildBriefPrompt } from '../support/marketing-agent/context-builder.js';
+import { getMarketingConsultantContext, buildBriefPrompt, buildCoworkerPrompt } from '../support/marketing-agent/context-builder.js';
 
 /** Extracts a bearer token from the incoming request, if present. */
 function extractBearer(context) {
@@ -47,7 +47,10 @@ function MarketingConsultantController(context) {
 
   /**
    * POST /sites/:siteId/marketing-consultant/brief
-   * Generates a GEO strategic brief live via the Adobe Marketing Agent / CoWorker.
+   * Generates live output via the Adobe Marketing Agent / AEP Agentic Orchestrator (CoWorker).
+   * Body `{ "mode": "brief" | "coworker" }` (default "brief"):
+   *  - brief    → GEO strategic brief (findings + recommendations)
+   *  - coworker → executive summary + prioritized 90-day action plan
    */
   const generateBrief = async (requestContext) => {
     const { siteId } = requestContext.params || {};
@@ -63,8 +66,11 @@ function MarketingConsultantController(context) {
       );
     }
 
+    const mode = requestContext.data?.mode === 'coworker' ? 'coworker' : 'brief';
     const contextData = getMarketingConsultantContext();
-    const query = buildBriefPrompt(contextData);
+    const query = mode === 'coworker'
+      ? buildCoworkerPrompt(contextData)
+      : buildBriefPrompt(contextData);
 
     try {
       const client = createAmaClient({
@@ -79,12 +85,13 @@ function MarketingConsultantController(context) {
       return ok({
         briefSlides,
         briefSections,
+        mode,
         source: 'live',
         generatedAt: new Date().toISOString(),
       });
     } catch (e) {
-      log.error?.(`Marketing brief generation failed for site ${siteId}: ${e.message}`);
-      return internalServerError(`Marketing brief generation failed: ${e.message}`);
+      log.error?.(`Marketing consultant (${mode}) generation failed for site ${siteId}: ${e.message}`);
+      return internalServerError(`Marketing consultant generation failed: ${e.message}`);
     }
   };
 

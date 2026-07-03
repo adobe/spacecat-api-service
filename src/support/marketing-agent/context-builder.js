@@ -59,3 +59,24 @@ export function buildBriefPrompt(contextData) {
     'Output only the brief.',
   ].join('\n');
 }
+
+/**
+ * CoWorker framing: same grounded data, but asks the AEP Agentic Orchestrator for a
+ * strategic execution plan (exec summary + prioritized 90-day plan) instead of a brief.
+ * @param {string} contextData - output of getMarketingConsultantContext
+ * @returns {string} the full prompt
+ */
+export function buildCoworkerPrompt(contextData) {
+  return [
+    'I am providing gathered source data below (from LLM Optimizer, Sites Optimizer and Semrush).',
+    'Do NOT fetch or analyze any external system — just synthesize THIS data.',
+    'Acting as a CX strategy coworker, produce: (1) a one-paragraph executive summary, and',
+    '(2) a prioritized 90-day action plan of exactly 4 steps (owned / social / earned),',
+    'each on one line with its expected outcome.',
+    '',
+    'DATA:',
+    contextData,
+    '',
+    'Output only the executive summary and the 4-step plan.',
+  ].join('\n');
+}
