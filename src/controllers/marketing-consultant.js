@@ -25,8 +25,8 @@
 
 import { ok, badRequest, internalServerError } from '@adobe/spacecat-shared-http-utils';
 import { createAmaClient } from '../support/marketing-agent/ama-client.js';
-import { adaptBriefText } from '../support/marketing-agent/brief-adapter.js';
-import { getMarketingConsultantContext, buildBriefPrompt, buildCoworkerPrompt } from '../support/marketing-agent/context-builder.js';
+import { adaptFullBrief } from '../support/marketing-agent/brief-adapter.js';
+import { getMarketingConsultantContext, buildCoworkerBriefPrompt, buildMarketingAgentPrompt } from '../support/marketing-agent/context-builder.js';
 
 /** Extracts a bearer token from the incoming request, if present. */
 function extractBearer(context) {
@@ -47,10 +47,9 @@ function MarketingConsultantController(context) {
 
   /**
    * POST /sites/:siteId/marketing-consultant/brief
-   * Generates live output via the Adobe Marketing Agent / AEP Agentic Orchestrator (CoWorker).
-   * Body `{ "mode": "brief" | "coworker" }` (default "brief"):
-   *  - brief    → GEO strategic brief (findings + recommendations)
-   *  - coworker → executive summary + prioritized 90-day action plan
+   * Generates live output via the AEP Agentic Orchestrator. Body `{ "mode": ... }`:
+   *  - "brief" (default) → Adobe CoWorker full GEO brief: KPIs + 6 considerations + exec summary
+   *  - "marketing-agent" → Adobe Marketing Agent operational insights (Experience Cloud grounding)
    */
   const generateBrief = async (requestContext) => {
     const { siteId } = requestContext.params || {};
@@ -66,11 +65,11 @@ function MarketingConsultantController(context) {
       );
     }
 
-    const mode = requestContext.data?.mode === 'coworker' ? 'coworker' : 'brief';
+    const mode = requestContext.data?.mode === 'marketing-agent' ? 'marketing-agent' : 'brief';
     const contextData = getMarketingConsultantContext();
-    const query = mode === 'coworker'
-      ? buildCoworkerPrompt(contextData)
-      : buildBriefPrompt(contextData);
+    const query = mode === 'marketing-agent'
+      ? buildMarketingAgentPrompt(contextData)
+      : buildCoworkerBriefPrompt(contextData);
 
     try {
       const client = createAmaClient({
@@ -80,11 +79,24 @@ function MarketingConsultantController(context) {
         log,
       });
       const text = await client.callAgent(query);
-      const { briefSlides, briefSections } = adaptBriefText(text);
+
+      let payload;
+      if (mode === 'marketing-agent') {
+        payload = {
+          briefSlides: [],
+          briefSections: [{
+            id: 'marketing-agent-insights',
+            title: 'Adobe Marketing Agent — operational insights',
+            contentMarkdown: (text || '').trim() || '_No content returned by the agent._',
+          }],
+          geoKpis: [],
+        };
+      } else {
+        payload = adaptFullBrief(text);
+      }
 
       return ok({
-        briefSlides,
-        briefSections,
+        ...payload,
         mode,
         source: 'live',
         generatedAt: new Date().toISOString(),

@@ -52,3 +52,68 @@ export function adaptBriefText(text) {
 
   return { briefSlides, briefSections };
 }
+
+/**
+ * Adapts the CoWorker FULL brief (structured JSON: { executiveSummary, kpis[], considerations[] })
+ * into the rich UI shape — briefSlides (the 6 considerations), geoKpis, and briefSections
+ * (executive summary + a KPI table). Falls back to plain-text adaptation if JSON is missing.
+ * @param {string} text - raw agent response (expected JSON)
+ * @returns {{ briefSlides: object[], briefSections: object[], geoKpis: object[] }}
+ */
+export function adaptFullBrief(text) {
+  const clean = (text || '')
+    .trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/, '')
+    .replace(/```$/, '')
+    .trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(clean);
+  } catch {
+    return { ...adaptBriefText(text), geoKpis: [] };
+  }
+
+  if (!parsed || !Array.isArray(parsed.considerations)) {
+    return { ...adaptBriefText(text), geoKpis: [] };
+  }
+
+  const briefSlides = parsed.considerations.slice(0, 6).map((c, i) => ({
+    id: `consideration-${i + 1}`,
+    title: String(c?.title || `Consideration ${i + 1}`),
+    subtitle: 'Adobe CoWorker',
+    bullets: Array.isArray(c?.bullets) ? c.bullets.map(String) : [],
+  }));
+
+  const geoKpis = Array.isArray(parsed.kpis)
+    ? parsed.kpis.slice(0, 6).map((k) => ({
+      label: String(k?.label || ''),
+      score: Number(k?.score) || 0,
+      rank: Number(k?.rank) || 0,
+      totalBrands: Number(k?.totalBrands) || 0,
+      benchmarkDelta: String(k?.benchmarkDelta || ''),
+    }))
+    : [];
+
+  const briefSections = [];
+  if (parsed.executiveSummary) {
+    briefSections.push({
+      id: 'exec-summary',
+      title: 'Executive summary',
+      contentMarkdown: String(parsed.executiveSummary),
+    });
+  }
+  if (geoKpis.length > 0) {
+    const rows = geoKpis
+      .map((k) => `| ${k.label} | ${k.score} | ${k.rank}/${k.totalBrands} | ${k.benchmarkDelta} |`)
+      .join('\n');
+    briefSections.push({
+      id: 'geo-kpis',
+      title: 'Core GEO KPIs',
+      contentMarkdown: `| KPI | Score | Rank | Insight |\n|---|---|---|---|\n${rows}`,
+    });
+  }
+
+  return { briefSlides, briefSections, geoKpis };
+}
