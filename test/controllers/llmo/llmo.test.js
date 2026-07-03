@@ -6213,9 +6213,10 @@ describe('LlmoController', () => {
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
         expect(mockLog.info).to.have.been.calledWith(
-          sinon.match(/Skipping CDN routing for subpath-scoped site/),
+          sinon.match(/subpath sites not eligible for auto routing/),
         );
         expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
       });
 
       it('skips CDN routing when baseURL has a subpath, even with a root-level overrideBaseURL', async () => {
@@ -6227,9 +6228,23 @@ describe('LlmoController', () => {
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
         expect(mockLog.info).to.have.been.calledWith(
-          sinon.match(/Skipping CDN routing for subpath-scoped site/),
+          sinon.match(/subpath sites not eligible for auto routing/),
         );
         expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
+      });
+
+      it('skips CDN routing for a subpath site even when cdnType is provided', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx({
+          data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: true },
+        }));
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/subpath sites not eligible for auto routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
       });
 
       it('does not reject when site baseURL has a trailing slash only', async () => {

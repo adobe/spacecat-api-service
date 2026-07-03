@@ -76,7 +76,7 @@ export function getHostnameWithoutWww(url, log) {
  * @param {string} baseURL - The site base URL.
  * @returns {boolean} True if the URL has pathname, false otherwise (including unparseable URLs).
  */
-export function baseUrlHasPathname(baseURL) {
+export function hasSubpath(baseURL) {
   if (!isValidUrl(baseURL)) {
     return false;
   }

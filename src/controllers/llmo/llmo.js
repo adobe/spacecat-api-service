@@ -48,7 +48,7 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectAemCsFastlyForDomain,
-  baseUrlHasPathname,
+  hasSubpath,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1604,10 +1604,12 @@ function LlmoController(ctx) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
       }
-
-      const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
-      const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
-
+      if (hasSubpath(baseURL)) {
+        log.info(`[edge-optimize-routing] ${baseURL} subpath sites not eligible for auto routing`);
+        return ok({
+          ...metaconfig,
+        });
+      }
       let cdnTypeNormalized = null;
       if (hasText(cdnType)) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
@@ -1620,6 +1622,9 @@ function LlmoController(ctx) {
         } else {
           // Verify the requested CDN type matches the domain's actual CDN via DNS
           try {
+            // overwrite base url
+            const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+            const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
             const hostname = calculateForwardedHost(effectiveBaseUrl, log);
             const detectedCdn = await detectAemCsFastlyForDomain(hostname, log);
             if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
@@ -1631,127 +1636,125 @@ function LlmoController(ctx) {
           }
         }
       }
-
-      if (!baseUrlHasPathname(baseURL)) {
-        // CDN routing — only when cdnType is provided
-        if (cdnTypeNormalized) {
+      // CDN routing — only when cdnType is provided
+      if (cdnTypeNormalized) {
         // Exchange promise token from cookie for an IMS user token
-          let imsUserToken;
-          try {
-            imsUserToken = await getImsTokenFromPromiseToken(context);
-            log.info(`[edge-optimize-routing] IMS user token obtained for site ${siteId}`);
-          } catch (tokenError) {
-            log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to get IMS user token: ${tokenError.message}`);
-            return createResponse({ message: tokenError.message }, tokenError.status ?? 401);
+        let imsUserToken;
+        try {
+          imsUserToken = await getImsTokenFromPromiseToken(context);
+          log.info(`[edge-optimize-routing] IMS user token obtained for site ${siteId}`);
+        } catch (tokenError) {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to get IMS user token: ${tokenError.message}`);
+          return createResponse({ message: tokenError.message }, tokenError.status ?? 401);
+        }
+
+        // Authorization: paid (LLMO product context) or trial (LLMO Admin IMS group)
+        const org = await site.getOrganization();
+        const imsOrgId = org.getImsOrgId();
+        try {
+          await authorizeEdgeCdnRouting(
+            context,
+            {
+              org,
+              imsOrgId,
+              imsUserToken,
+              siteId,
+            },
+            log,
+          );
+        } catch (authErr) {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to authorize CDN routing: ${authErr.message}`);
+          return createResponse({ message: authErr.message }, authErr.status ?? 403);
+        }
+
+        // Restrict to production environment
+        if (env?.ENV && env.ENV !== 'prod') {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN routing is not available in ${env.ENV} environment`);
+          return createResponse({ message: `CDN routing is not available in ${env.ENV} environment` }, 400);
+        }
+
+        let cdnConfig;
+        try {
+          cdnConfig = parseEdgeRoutingConfig(env?.EDGE_OPTIMIZE_ROUTING_CONFIG, cdnTypeNormalized);
+        } catch (parseError) {
+          if (parseError instanceof SyntaxError) {
+            log.error(`[edge-optimize-routing-failed] ${baseURL} EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
+            return internalServerError('Failed to parse routing config.');
           }
+          log.error(`[edge-optimize-routing-failed] ${baseURL} ${parseError.message}`);
+          return createResponse({ message: 'API is missing mandatory environment variable' }, 503);
+        }
 
-          // Authorization: paid (LLMO product context) or trial (LLMO Admin IMS group)
-          const org = await site.getOrganization();
-          const imsOrgId = org.getImsOrgId();
-          try {
-            await authorizeEdgeCdnRouting(
-              context,
-              {
-                org,
-                imsOrgId,
-                imsUserToken,
-                siteId,
-              },
-              log,
-            );
-          } catch (authErr) {
-            log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to authorize CDN routing: ${authErr.message}`);
-            return createResponse({ message: authErr.message }, authErr.status ?? 403);
-          }
+        const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
+        const routingEnabled = enabled ?? true;
 
-          // Restrict to production environment
-          if (env?.ENV && env.ENV !== 'prod') {
-            log.error(`[edge-optimize-routing-failed] ${baseURL} CDN routing is not available in ${env.ENV} environment`);
-            return createResponse({ message: `CDN routing is not available in ${env.ENV} environment` }, 400);
-          }
+        // Probe the live site to resolve the canonical domain for the CDN API call
+        const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+        const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
+        const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+        log.info(`[edge-optimize-routing] Probing site ${probeUrl}`);
+        let domain;
+        try {
+          domain = await probeSiteAndResolveDomain(probeUrl, log);
+        } catch (probeError) {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN routing probe failed: ${probeError.message}`);
+          return badRequest(probeError.message);
+        }
 
-          let cdnConfig;
-          try {
-            // eslint-disable-next-line max-len
-            cdnConfig = parseEdgeRoutingConfig(env?.EDGE_OPTIMIZE_ROUTING_CONFIG, cdnTypeNormalized);
-          } catch (parseError) {
-            if (parseError instanceof SyntaxError) {
-              log.error(`[edge-optimize-routing-failed] ${baseURL} EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
-              return internalServerError('Failed to parse routing config.');
-            }
-            log.error(`[edge-optimize-routing-failed] ${baseURL} ${parseError.message}`);
-            return createResponse({ message: 'API is missing mandatory environment variable' }, 503);
-          }
+        // Obtain org-scoped SP token for the CDN API call
+        let spToken;
+        try {
+          const imsEdgeClient = new ImsClient({
+            imsHost: env.IMS_HOST,
+            clientId: env.IMS_EDGE_CLIENT_ID,
+            clientSecret: env.IMS_EDGE_CLIENT_SECRET,
+            scope: env.IMS_EDGE_SCOPE,
+          }, log);
+          const spTokenData = await imsEdgeClient.getServicePrincipalAccessToken(imsOrgId);
+          spToken = spTokenData.access_token;
+          log.info(`[edge-optimize-routing] Service Principal token obtained for site ${siteId}`);
+        } catch (tokenError) {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to obtain SP token: ${tokenError.message}`);
+          return unauthorized('Authentication failed with upstream IMS service');
+        }
 
-          const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
-          const routingEnabled = enabled ?? true;
+        // Call CDN API with the SP token
+        const cdnApiStart = Date.now();
+        try {
+          await callCdnRoutingApi(strategy, cdnConfig, domain, spToken, routingEnabled, log);
+        } catch (cdnError) {
+          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN API call failed in ${Date.now() - cdnApiStart}ms: ${cdnError.message}`);
+          return internalServerError('Failed to update CDN routing');
+        }
 
-          // Probe the live site to resolve the canonical domain for the CDN API call
-          const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
-          log.info(`[edge-optimize-routing] Probing site ${probeUrl}`);
-          let domain;
-          try {
-            domain = await probeSiteAndResolveDomain(probeUrl, log);
-          } catch (probeError) {
-            log.error(`[edge-optimize-routing-failed] ${baseURL} CDN routing probe failed: ${probeError.message}`);
-            return badRequest(probeError.message);
-          }
+        log.info(`[edge-optimize-routing] CDN routing updated for site ${siteId}, domain ${domain} in ${Date.now() - cdnApiStart}ms`);
 
-          // Obtain org-scoped SP token for the CDN API call
-          let spToken;
-          try {
-            const imsEdgeClient = new ImsClient({
-              imsHost: env.IMS_HOST,
-              clientId: env.IMS_EDGE_CLIENT_ID,
-              clientSecret: env.IMS_EDGE_CLIENT_SECRET,
-              scope: env.IMS_EDGE_SCOPE,
-            }, log);
-            const spTokenData = await imsEdgeClient.getServicePrincipalAccessToken(imsOrgId);
-            spToken = spTokenData.access_token;
-            log.info(`[edge-optimize-routing] Service Principal token obtained for site ${siteId}`);
-          } catch (tokenError) {
-            log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to obtain SP token: ${tokenError.message}`);
-            return unauthorized('Authentication failed with upstream IMS service');
-          }
-
-          // Call CDN API with the SP token
-          const cdnApiStart = Date.now();
-          try {
-            await callCdnRoutingApi(strategy, cdnConfig, domain, spToken, routingEnabled, log);
-          } catch (cdnError) {
-            log.error(`[edge-optimize-routing-failed] ${baseURL} CDN API call failed in ${Date.now() - cdnApiStart}ms: ${cdnError.message}`);
-            return internalServerError('Failed to update CDN routing');
-          }
-
-          log.info(`[edge-optimize-routing] CDN routing updated for site ${siteId}, domain ${domain} in ${Date.now() - cdnApiStart}ms`);
-
-          if (routingEnabled) {
+        if (routingEnabled) {
           // Trigger the import worker job to detect when edge-optimize goes live and stamp
           // edgeOptimizeConfig.enabled. Delayed by 5 minutes to allow CDN propagation.
-            try {
-              await context.sqs.sendMessage(
-                env.IMPORT_WORKER_QUEUE_URL,
-                { type: OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE },
-                undefined,
-                { delaySeconds: EDGE_OPTIMIZE_MARKING_DELAY_SECONDS },
-              );
-              log.info('[edge-optimize-routing] Queued edge-optimize enabled marking for site'
+          try {
+            await context.sqs.sendMessage(
+              env.IMPORT_WORKER_QUEUE_URL,
+              { type: OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE },
+              undefined,
+              { delaySeconds: EDGE_OPTIMIZE_MARKING_DELAY_SECONDS },
+            );
+            log.info('[edge-optimize-routing] Queued edge-optimize enabled marking for site'
                + ` ${siteId} (delay: ${EDGE_OPTIMIZE_MARKING_DELAY_SECONDS}s)`);
-            } catch (sqsError) {
-              log.warn(`[edge-optimize-routing-failed] ${baseURL} Failed to queue edge-optimize enabled marking: ${sqsError.message}`);
-            }
-          } else {
-          // Routing disabled — record the disabled state immediately in site config.
-            const updatedEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
-            currentConfig.updateEdgeOptimizeConfig({
-              ...updatedEdgeConfig,
-              enabled: false,
-            });
-            await saveSiteConfig(site, currentConfig, log, 'marking edge optimize disabled');
-            log.info(`[edge-optimize-routing] Marked edge optimize as disabled for site ${siteId}`);
+          } catch (sqsError) {
+            log.warn(`[edge-optimize-routing-failed] ${baseURL} Failed to queue edge-optimize enabled marking: ${sqsError.message}`);
           }
-          log.info(`[edge-optimize-routing] ${baseURL} CDN routing ${routingEnabled ? 'enabled' : 'disabled'} successfully`);
+        } else {
+          // Routing disabled — record the disabled state immediately in site config.
+          const updatedEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+          currentConfig.updateEdgeOptimizeConfig({
+            ...updatedEdgeConfig,
+            enabled: false,
+          });
+          await saveSiteConfig(site, currentConfig, log, 'marking edge optimize disabled');
+          log.info(`[edge-optimize-routing] Marked edge optimize as disabled for site ${siteId}`);
         }
+        log.info(`[edge-optimize-routing] ${baseURL} CDN routing ${routingEnabled ? 'enabled' : 'disabled'} successfully`);
       }
 
       return ok({
