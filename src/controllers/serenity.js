@@ -63,6 +63,7 @@ import {
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
+import { isDynamicAllocationActiveForOrg } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -326,7 +327,15 @@ function SerenityController(context, log, env) {
     // 404 (the same "no serenity for this org" contract the UI already handles
     // for an org without a workspace). Checked before brand resolution so an
     // inactive org never leaks brand existence.
-    if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
+    // Read both org-wide flags in parallel (independent): the serenity rollout gate (hard 404 when
+    // OFF) and the dynamic-allocation switch. dynamicAllocation is NOT a gate — it's threaded onto
+    // the auth object so the metered handlers branch between JIT top-up (ON) and the flat carve
+    // (OFF). OFF is the default and stays OFF for every org until the PR-4 safeguards land.
+    const [serenityActive, dynamicAllocation] = await Promise.all([
+      isSerenityActiveForOrg(ctx, spaceCatId, log),
+      isDynamicAllocationActiveForOrg(ctx, spaceCatId, log),
+    ]);
+    if (!serenityActive) {
       return { error: notFound('Serenity is not active for this organization') };
     }
     const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
@@ -369,7 +378,7 @@ function SerenityController(context, log, env) {
       };
     }
     return {
-      brandUuid, mode, workspaceId, parentWorkspaceId,
+      brandUuid, mode, workspaceId, parentWorkspaceId, dynamicAllocation,
     };
   }
 
