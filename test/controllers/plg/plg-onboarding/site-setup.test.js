@@ -454,6 +454,58 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         stubs.autoResolveAuthorUrlStub.resolves(null);
       });
 
+      it('alerts via Slack using rumHost CS publish pattern without calling findDeliveryType', async () => {
+        // autoResolveAuthorUrl returns a CS publish host → detected as AEM_CS,
+        // findDeliveryType is not called
+        findDeliveryTypeStub.resetHistory();
+        const existingSite = createMockSite({ deliveryType: 'aem_edge', orgId: TEST_ORG_ID });
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        stubs.autoResolveAuthorUrlStub.resolves({ host: 'publish-p12345-e67890.adobeaemcloud.com' });
+
+        const alertController = AlertControllerFactory({ log: mockLog });
+        const context = buildContext({ domain: TEST_DOMAIN });
+        context.env = {
+          ...context.env,
+          SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
+          SLACK_BOT_TOKEN: 'xoxb-test',
+        };
+
+        const res = await alertController.onboard(context);
+
+        expect(res.status).to.equal(200);
+        expect(findDeliveryTypeStub).to.not.have.been.called;
+        expect(postSlackMessageStub).to.have.been.calledOnce;
+        const [, message] = postSlackMessageStub.firstCall.args;
+        expect(message).to.include('aem_cs');
+
+        stubs.autoResolveAuthorUrlStub.resolves(null);
+      });
+
+      it('falls back to findDeliveryType when rumHost is present but unrecognised', async () => {
+        // autoResolveAuthorUrl returns a host that matches neither EDS nor CS publish pattern
+        findDeliveryTypeStub.resetHistory();
+        findDeliveryTypeStub.resolves('aem_edge');
+        const existingSite = createMockSite({ deliveryType: 'aem_cs', orgId: TEST_ORG_ID });
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        stubs.autoResolveAuthorUrlStub.resolves({ host: 'custom.example.com' });
+
+        const alertController = AlertControllerFactory({ log: mockLog });
+        const context = buildContext({ domain: TEST_DOMAIN });
+        context.env = {
+          ...context.env,
+          SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
+          SLACK_BOT_TOKEN: 'xoxb-test',
+        };
+
+        const res = await alertController.onboard(context);
+
+        expect(res.status).to.equal(200);
+        expect(findDeliveryTypeStub).to.have.been.calledOnce;
+        expect(postSlackMessageStub).to.have.been.calledOnce;
+
+        stubs.autoResolveAuthorUrlStub.resolves(null);
+      });
+
       it('logs error and continues onboarding when delivery type mismatch Slack alert fails', async () => {
         postSlackMessageStub.rejects(new Error('Slack API down'));
         rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
