@@ -96,7 +96,7 @@ function subworkspaceTitle(brand) {
   return hasText(name) ? `${name} [${suffix}]` : `brand-${suffix}`;
 }
 
-async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
+export async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     const status = await transport.getWorkspaceStatus(workspaceId);
