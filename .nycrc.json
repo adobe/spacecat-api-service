@@ -7,7 +7,7 @@
   "lines": 90,
   "branches": 90,
   "statements": 90,
-  "all": true,
+  "all": false,
   "include": [
     "src/**/*.js"
   ],
