@@ -308,6 +308,7 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:read',

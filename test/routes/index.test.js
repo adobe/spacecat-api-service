@@ -866,6 +866,7 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/activate',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts',

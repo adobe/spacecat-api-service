@@ -221,6 +221,7 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': brandsController.transitionBrandStatusForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': brandsController.activateBrandForOrg,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
