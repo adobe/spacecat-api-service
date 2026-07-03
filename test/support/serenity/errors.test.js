@@ -51,6 +51,7 @@ describe('serenity error classification', () => {
     it('isPoolExhausted: only a 422 whose message says insufficient units', () => {
       expect(isPoolExhausted(err(422, { message: 'insufficient available units in subscription' }))).to.be.true;
       expect(isPoolExhausted(err(422, { message: 'workspace not ready' }))).to.be.false; // transient, not exhaustion
+      expect(isPoolExhausted(err(422, {}))).to.be.false; // object without a message → no match
       expect(isPoolExhausted(err(500, { message: 'insufficient available units' }))).to.be.false;
       expect(isPoolExhausted(new Error('x'))).to.be.false;
     });
@@ -60,10 +61,13 @@ describe('serenity error classification', () => {
       expect(isWorkspaceNotReady(err(422, { message: 'insufficient available units' }))).to.be.false;
     });
 
-    it('isMeteredQuota: a 405 with a quota message, a text/html body, or no body', () => {
+    it('isMeteredQuota: only a 405 with an explicit quota signal — never a bare Method-Not-Allowed', () => {
       expect(isMeteredQuota(err(405, { message: 'Quota exceeded' }))).to.be.true;
-      expect(isMeteredQuota(err(405, '<html>method not allowed</html>'))).to.be.true;
-      expect(isMeteredQuota(err(405, null))).to.be.true;
+      expect(isMeteredQuota(err(405, 'quota exceeded'))).to.be.true; // string body
+      expect(isMeteredQuota(err(405, '<html>prompt allocation exhausted</html>'))).to.be.true;
+      expect(isMeteredQuota(err(405, { message: 'Method Not Allowed' }))).to.be.false; // legitimate 405
+      expect(isMeteredQuota(err(405, 'method not allowed'))).to.be.false;
+      expect(isMeteredQuota(err(405, null))).to.be.false; // no body signal → not quota
       expect(isMeteredQuota(err(404, null))).to.be.false;
     });
 

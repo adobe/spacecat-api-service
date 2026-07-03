@@ -48,8 +48,10 @@ function bodyText(e) {
   if (typeof body === 'string') {
     return body.toLowerCase();
   }
+  // Only trust the upstream body's `message`; never fall back to `e.message` (the transport URL),
+  // which would let a classifier match on the request URL rather than the upstream content.
   const msg = body && typeof body === 'object' ? /** @type {{message?: unknown}} */ (body).message : undefined;
-  return (typeof msg === 'string' ? msg : `${e.message}`).toLowerCase();
+  return typeof msg === 'string' ? msg.toLowerCase() : '';
 }
 
 /**
@@ -80,16 +82,19 @@ export function isWorkspaceNotReady(e) {
 }
 
 /**
- * The disguised metered-quota rejection: a `405` from a metered write/publish (the gateway returns
- * a non-JSON/HTML body, or a "quota" message) when `used + need > total`. Under dynamic allocation
- * a 405 right after a top-up signals stale-read / racing consumption (see the 405-recovery loop).
+ * The disguised metered-quota rejection: a `405` from a metered write/publish whose body signals a
+ * quota (`used + need > total`). Matches ONLY on an explicit quota signal in the body — NOT any
+ * `405`, so a legitimate Method-Not-Allowed is not absorbed. The exact disguised-405 body is pinned
+ * by the PR-4 live-gateway canary; widen the signal here only from that pinned shape.
  * @param {unknown} e
  * @returns {boolean}
  */
 export function isMeteredQuota(e) {
-  return e instanceof SerenityTransportError
-    && e.status === 405
-    && (bodyText(e).includes('quota') || typeof e.body === 'string' || e.body == null);
+  if (!(e instanceof SerenityTransportError) || e.status !== 405) {
+    return false;
+  }
+  const text = bodyText(e);
+  return text.includes('quota') || text.includes('allocation exhausted');
 }
 
 /**
@@ -124,4 +129,7 @@ export const ERROR_CODES = Object.freeze({
   // Dynamic AI resource allocation (JIT top-up path).
   ORG_POOL_EXHAUSTED: 'orgPoolExhausted',
   BRAND_AI_LIMIT: 'brandAiLimit',
+  // Transient: a transfer never cleared the async `workspace not ready` lock — retryable, NOT
+  // pool exhaustion (distinct from ORG_POOL_EXHAUSTED so the operator/client isn't misled).
+  WORKSPACE_BUSY: 'workspaceBusy',
 });
