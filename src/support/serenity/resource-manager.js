@@ -72,7 +72,8 @@ const realSleep = (ms) => new Promise((resolve) => {
  */
 export const DEFAULT_POLL = Object.freeze({ attempts: 12, intervalMs: 1000, sleep: realSleep });
 
-/** Bounded retries for the transient `422 "workspace not ready"` on a transfer. */
+/** Bounded RETRIES for the transient `422 "workspace not ready"` — 3 retries after the initial
+ * attempt (4 transfer attempts total). */
 export const NOT_READY_RETRIES = 3;
 
 /**
@@ -155,6 +156,17 @@ function brandAiLimit(message) {
   return e;
 }
 
+/**
+ * A transient failure — the transfer never cleared the async `workspace not ready` lock within the
+ * retry bound. `503` (retryable), NOT `orgPoolExhausted`: this is lock contention, not a full pool.
+ * @param {string} message @returns {ErrorWithStatusCode}
+ */
+function workspaceBusy(message) {
+  const e = new ErrorWithStatusCode(message, 503);
+  e.code = ERROR_CODES.WORKSPACE_BUSY;
+  return e;
+}
+
 // ---- transfer + settle --------------------------------------------------------------------------
 
 /**
@@ -192,7 +204,8 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
       await poll.sleep(poll.intervalMs * (attempt + 1));
     }
   }
-  throw orgPoolExhausted(`Transfer for ${workspaceId} never cleared 'workspace not ready'`);
+  // Lock contention, not a full pool — surface a retryable 503, not orgPoolExhausted.
+  throw workspaceBusy(`Transfer for ${workspaceId} never cleared 'workspace not ready'`);
 }
 
 // ---- entry points -------------------------------------------------------------------------------

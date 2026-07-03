@@ -182,17 +182,20 @@ describe('resource-manager — ensureAiHeadroom', () => {
     expect(transfer).to.have.callCount(2);
   });
 
-  it('throws orgPoolExhausted when "workspace not ready" never clears within the retry bound', async () => {
+  it('throws a transient workspaceBusy (503) when "workspace not ready" never clears — NOT pool exhaustion', async () => {
+    const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({
       child: resources(dim(2, 0, 2), dim(0, 0, 0)),
       master: resources(dim(0, 0, 100), dim(0, 0, 800)),
-      transfer: sinon.stub().rejects(notReady()),
+      transfer,
     });
     const e = await ensureAiHeadroom(t, {
       childId: CHILD, masterId: MASTER, need: { prompts: 10 }, poll,
     }, log).catch((x) => x);
-    expect(e.code).to.equal('orgPoolExhausted');
+    expect(e.status).to.equal(503);
+    expect(e.code).to.equal('workspaceBusy');
     expect(e.message).to.match(/never cleared/);
+    expect(transfer).to.have.callCount(4); // 1 initial + NOT_READY_RETRIES(3)
   });
 
   it('propagates a non-quota transfer error (e.g. 500) unchanged', async () => {
