@@ -295,6 +295,8 @@ export async function ensureSubworkspace(
     // and a subsequent op 422s "workspace not ready" (verified live
     // 2026-06-15). So settle before AND after the transfer so the caller can
     // immediately create/publish projects against it.
+    // This pre-poll runs regardless of mode — the workspace must be `created` before we return it
+    // (dynamic allocation only skips the flat re-grant below, not the readiness settle).
     await pollUntilCreated(transport, existing, poll);
     // Dynamic allocation (flag ON): SKIP the flat re-grant. The pre-sized
     // `resourceAllocation(marketCount)` carve is exactly the up-front over/under-allocation JIT

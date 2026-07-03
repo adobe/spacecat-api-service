@@ -110,6 +110,8 @@ describe('workspace-lifecycle', () => {
       // No flat re-grant transfer — the metered handlers top up just-in-time instead.
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.createSubworkspace).to.not.have.been.called;
+      // The readiness settle still runs (workspace must be `created` before return).
+      expect(transport.getWorkspaceStatus).to.have.been.calledOnceWith(SUB_WS);
     });
 
     it('dynamic-allocation OFF (default): re-grant is byte-for-byte unchanged', async () => {
