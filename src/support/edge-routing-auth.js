@@ -123,9 +123,8 @@ export async function authorizeEdgeCdnRouting(context, {
     if (!hasPaidLlmoProductContext(imsUserProfile)) {
       log.warn(`[edge-routing-auth] Paid user lacks LLMO product context for site ${siteId}`);
       const err = new Error(
-        'User does not have the required \'Adobe LLM Optimizer Users\' Product Profile access. '
-        + 'Please ask your Org Admin to assign you the \'Adobe LLM Optimizer Users\' Product Profile '
-        + 'in Adobe Admin Console.',
+        'You don\'t have permission to configure CDN routing. Contact your Organization Admin '
+        + 'to assign you the \'Adobe LLM Optimizer Users\' Product Profile in the Adobe Admin Console.',
       );
       err.status = 403;
       throw err;
@@ -157,9 +156,8 @@ export async function authorizeEdgeCdnRouting(context, {
 
     if (!isGroupMember) {
       const err = new Error(
-        `Only '${LLMO_ADMIN_GROUP_NAME}' IMS Group members can configure CDN routing. `
-        + `Please ask your Org Admin to add you to the '${LLMO_ADMIN_GROUP_NAME}' IMS Group `
-        + 'in Adobe Admin Console. If the group does not exist, please ask your Org Admin to create it.',
+        'You don\'t have permission to configure CDN routing. Contact your Organization Admin '
+        + `to add you to the '${LLMO_ADMIN_GROUP_NAME}' IMS Group in the Adobe Admin Console.`,
       );
       err.status = 403;
       throw err;
