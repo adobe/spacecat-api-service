@@ -47,14 +47,30 @@ function parseMcpBody(contentType, raw) {
 
 /**
  * Pulls human-readable text out of the various response shapes the agent returns:
- * standard MCP tool results ({ content: [{ type:'text', text }] }) and the A2A-wrapped
- * shape observed live ({ result: { parts: [{ kind:'text', text }] } }).
+ * - the AEP AMA widget shape (verified live): result._meta['openai.com/widget'].resource.text
+ *   is a JSON string wrapping { result: { parts: [{ kind:'text', text }] } }
+ * - standard MCP tool results ({ content: [{ type:'text', text }] })
+ * - the A2A-wrapped shape ({ result: { parts: [{ kind:'text', text }] } })
  */
 function extractText(body) {
   if (!body) {
     return '';
   }
   const result = body.result ?? body;
+
+  // AEP Adobe Marketing Agent nests the A2A message JSON as a string inside the widget meta.
+  // eslint-disable-next-line no-underscore-dangle -- `_meta` is the MCP spec field name
+  const widgetText = result?._meta?.['openai.com/widget']?.resource?.text;
+  if (typeof widgetText === 'string') {
+    try {
+      const inner = extractText(JSON.parse(widgetText));
+      if (inner) {
+        return inner;
+      }
+    } catch {
+      // fall through to the other shapes
+    }
+  }
 
   if (Array.isArray(result?.content)) {
     return result.content
