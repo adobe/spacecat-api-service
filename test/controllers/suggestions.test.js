@@ -7431,6 +7431,108 @@ describe('Suggestions Controller', () => {
       });
     });
 
+    describe('mixed domain-wide + path-level suggestions on a subpath site (async experiment flow)', () => {
+      it('creates a geo-experiment covering domain-wide, path-level, and regular suggestions together', async () => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+
+        const domainWideSubpathSuggestion = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            isDomainWide: true,
+            allowedRegexPatterns: ['/kings/*'],
+            url: 'https://example.com/kings (All Domain URLs)',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+
+        const pathLevelSubpathSuggestion = {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/kings/products',
+            pathType: 'prefix',
+            pathPattern: '/kings/products',
+            allowedRegexPatterns: ['/kings/products/*'],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+
+        // Domain-wide suggestions are excluded from prompt-sourcing (they have no page of
+        // their own), so at least one non-domain-wide suggestion must carry aiSummary/valuable
+        // prompts for the batch to have anything to build the experiment from.
+        const regularSubpathSuggestion = {
+          getId: () => SUGGESTION_IDS[2],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 3,
+          getData: () => ({
+            url: 'https://example.com/kings/blog-post',
+            aiSummary: 'Summary of the blog post',
+            valuable: true,
+            prompts: [{ prompt: 'What is the kings blog post about?', regions: ['US'] }],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSubpathSuggestion, pathLevelSubpathSuggestion, regularSubpathSuggestion,
+        ]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.failed).to.equal(0);
+        expect(body.metadata.success).to.equal(3);
+        expect(body.geoExperimentId).to.be.a('string');
+        expect(body.suggestions.map((s) => s.uuid)).to.have.members([
+          SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2],
+        ]);
+        body.suggestions.forEach((s) => expect(s.statusCode).to.equal(202));
+
+        // All three were marked in-progress together, not just the suggestion that fed prompts
+        [domainWideSubpathSuggestion, pathLevelSubpathSuggestion, regularSubpathSuggestion]
+          .forEach((s) => {
+            expect(s.setData.calledWithMatch({ edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS' }))
+              .to.equal(true);
+          });
+      });
+    });
+
     it('returns 207 with failure when GeoExperiment data access is missing', async () => {
       const controllerWithoutGeoExperiment = SuggestionsController({
         dataAccess: {
@@ -9721,6 +9823,160 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].statusCode).to.equal(400);
       // deployToEdge must NOT be called — the short-circuit happens before it
       expect(tokowakaClientStub.deployToEdge.called).to.be.false;
+    });
+
+    describe('mixed domain-wide + path-level suggestions on a subpath site (regression)', () => {
+      let domainWideSubpathSuggestion;
+      let pathLevelSubpathSuggestion;
+      let regularSubpathSuggestion;
+
+      beforeEach(() => {
+        site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
+
+        domainWideSubpathSuggestion = {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            isDomainWide: true,
+            allowedRegexPatterns: ['/kings/*'],
+            url: 'https://example.com/kings (All Domain URLs)',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+
+        pathLevelSubpathSuggestion = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            url: 'https://example.com/kings/products',
+            pathType: 'prefix',
+            pathPattern: '/kings/products',
+            allowedRegexPatterns: ['/kings/products/*'],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+
+        regularSubpathSuggestion = {
+          getId: () => SUGGESTION_IDS[2],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 3,
+          getData: () => ({ url: 'https://example.com/kings/blog-post' }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+      });
+
+      it('deploys domain-wide, path-level, and regular suggestions together when all are within the subpath scope', async () => {
+        mockSuggestion.allByOpportunityId.resolves([
+          pathLevelSubpathSuggestion, domainWideSubpathSuggestion, regularSubpathSuggestion,
+        ]);
+        mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(pathLevelSubpathSuggestion);
+        mockSuggestion.findById.withArgs(SUGGESTION_IDS[1]).resolves(domainWideSubpathSuggestion);
+        mockSuggestion.findById.withArgs(SUGGESTION_IDS[2]).resolves(regularSubpathSuggestion);
+
+        tokowakaClientStub.deployToEdge.resolves({
+          succeededSuggestions: [
+            pathLevelSubpathSuggestion, domainWideSubpathSuggestion, regularSubpathSuggestion,
+          ],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: {} },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.success).to.equal(3);
+        expect(body.metadata.failed).to.equal(0);
+
+        // All three were classified as in-scope and handed to the edge client together
+        expect(tokowakaClientStub.deployToEdge.calledOnce).to.be.true;
+        const { targetSuggestions } = tokowakaClientStub.deployToEdge.firstCall.args[0];
+        expect(targetSuggestions.map((s) => s.getId())).to.have.members([
+          SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2],
+        ]);
+      });
+
+      it('rejects only the out-of-scope suggestion, leaving in-scope domain-wide and path-level suggestions unaffected', async () => {
+        // allowedRegexPatterns point at a sibling subpath ("/wolves"), outside the
+        // site's "/kings" scope — everything else stays within scope.
+        domainWideSubpathSuggestion.getData = () => ({
+          isDomainWide: true,
+          allowedRegexPatterns: ['/wolves/*'],
+          url: 'https://example.com/kings (All Domain URLs)',
+        });
+
+        mockSuggestion.allByOpportunityId.resolves([
+          pathLevelSubpathSuggestion, domainWideSubpathSuggestion, regularSubpathSuggestion,
+        ]);
+        mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(pathLevelSubpathSuggestion);
+        mockSuggestion.findById.withArgs(SUGGESTION_IDS[1]).resolves(domainWideSubpathSuggestion);
+        mockSuggestion.findById.withArgs(SUGGESTION_IDS[2]).resolves(regularSubpathSuggestion);
+
+        tokowakaClientStub.deployToEdge.resolves({
+          succeededSuggestions: [pathLevelSubpathSuggestion, regularSubpathSuggestion],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: {} },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.success).to.equal(2);
+        expect(body.metadata.failed).to.equal(1);
+
+        const failed = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
+        expect(failed.message).to.include('outside the scope');
+        expect(failed.statusCode).to.equal(400);
+
+        // The out-of-scope domain-wide suggestion never reaches the edge client, but the
+        // in-scope path-level and regular suggestions are still deployed together.
+        expect(tokowakaClientStub.deployToEdge.calledOnce).to.be.true;
+        const { targetSuggestions } = tokowakaClientStub.deployToEdge.firstCall.args[0];
+        expect(targetSuggestions.map((s) => s.getId())).to.have.members([
+          SUGGESTION_IDS[0], SUGGESTION_IDS[2],
+        ]);
+      });
     });
   });
 
