@@ -107,6 +107,66 @@ export function collectBrandUrlEntries(sources, market) {
   });
 }
 
+/**
+ * Normalizes the WEBSITE-type brand-URL entries to Semrush's canonical stored
+ * form by resolving each raw URL through Project Engine's `url/resolve` endpoint,
+ * so the value we write matches the benchmark Semrush already holds instead of
+ * creating a duplicate `www.`-vs-apex entry (serenity-docs#25). The resolve
+ * `primary_url` (scheme-less, subdomain + path preserved, e.g. `lovesac.com`) is
+ * used as the stored value.
+ *
+ * Only `type: 'website'` entries are resolved: `social`/`earned` URLs are
+ * identity handles (e.g. `https://instagram.com/brand`), not brand domains, so
+ * apex-normalizing them would be wrong — they pass through unchanged.
+ *
+ * `url/resolve` returns `is_valid: false` with empty strings (still HTTP 200) for
+ * unresolvable input; that is NOT an error, so on it we keep the raw (already
+ * https-filtered) entry rather than writing the empty value. A transport ERROR
+ * (non-2xx) is left to propagate — the caller's best-effort (CREATE) / hard-fail
+ * (EDIT) wrapper then treats it exactly like any other upstream failure.
+ *
+ * A resolve can collapse two raw URLs (e.g. `https://www.x.com` and
+ * `https://x.com`) onto one canonical value, so the result is re-de-duplicated by
+ * url (first-seen wins) — {@link collectBrandUrlEntries} de-duped by the RAW url.
+ *
+ * @param {object} transport - Semrush transport (exposes `resolveUrl`).
+ * @param {Array<{url: string, type: string}>} entries - collected brand-URL entries.
+ * @param {object} [log] - optional logger ({ warn? }).
+ * @returns {Promise<{url: string, type: string}[]>} entries with website URLs
+ *   canonicalized (a no-op passthrough for social/earned), re-de-duped by url.
+ */
+export async function resolveWebsiteEntries(transport, entries, log) {
+  const resolved = [];
+  for (const entry of entries) {
+    if (entry.type !== BRAND_URL_TYPE.WEBSITE) {
+      resolved.push(entry);
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const r = await transport.resolveUrl(entry.url);
+    if (r?.is_valid === true && hasText(r?.primary_url)) {
+      resolved.push({ ...entry, url: r.primary_url });
+    } else {
+      // is_valid:false / empty (HTTP 200) — keep the raw https value, never the
+      // empty one. Left un-normalized on purpose; the next edit re-attempts it.
+      log?.warn?.('brand-urls: url/resolve returned is_valid:false — keeping raw url', {
+        url: entry.url,
+      });
+      resolved.push(entry);
+    }
+  }
+
+  const seen = new Set();
+  return resolved.filter((e) => {
+    if (seen.has(e.url)) {
+      return false;
+    }
+    seen.add(e.url);
+    return true;
+  });
+}
+
 // Normalizes a benchmark/brand domain for identity comparison: lowercase host,
 // no scheme, no leading `www.`, no path. Null when unparseable. Used to match an
 // existing own-brand benchmark across runs (idempotent ensure) and shared by the
@@ -235,11 +295,15 @@ export async function attachBrandUrlsToProject(
     });
     return { created: 0, skipped: true };
   }
-  await transport.createBrandUrls(workspaceId, projectId, benchmarkId, entries);
+  // Canonicalize website URLs to Semrush's stored form before writing them, so a
+  // create doesn't seed a `www.`-vs-apex duplicate of the benchmark (#25). Done
+  // only once a benchmark exists to write to (no wasted resolve on a skip).
+  const resolvedEntries = await resolveWebsiteEntries(transport, entries, log);
+  await transport.createBrandUrls(workspaceId, projectId, benchmarkId, resolvedEntries);
   log?.info?.('brand-urls: attached to project benchmark', {
-    workspaceId, projectId, benchmarkId, count: entries.length,
+    workspaceId, projectId, benchmarkId, count: resolvedEntries.length,
   });
-  return { created: entries.length };
+  return { created: resolvedEntries.length };
 }
 
 // Best-effort republish after an edit-time change so the live view reflects it.
@@ -314,7 +378,7 @@ export async function syncBrandUrlsAcrossMarkets(
     markets += 1;
 
     try {
-      const desired = collectBrandUrlEntries(sources, market);
+      const collected = collectBrandUrlEntries(sources, market);
       // Own-brand identity for the benchmark comes from the project itself: its
       // domain plus the brand_names (display name first, the rest are aliases).
       const ai = project?.settings?.ai || {};
@@ -342,6 +406,11 @@ export async function syncBrandUrlsAcrossMarkets(
         // eslint-disable-next-line no-continue
         continue;
       }
+      // Canonicalize website URLs to Semrush's stored form BEFORE diffing, so the
+      // desired set is compared against `listBrandUrls` (which returns the same
+      // canonical form) — otherwise every re-sync would churn `www.`-vs-apex (#25).
+      // eslint-disable-next-line no-await-in-loop
+      const desired = await resolveWebsiteEntries(transport, collected, log);
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
       const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];
