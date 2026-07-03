@@ -60,11 +60,15 @@ function fakeContext({
   brandId = BRAND,
   brand = makeBrandModel(),
   env = {},
+  promiseToken = undefined,
 } = {}) {
   return {
     env,
     pathInfo: {
-      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+      headers: {
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+      },
     },
     attributes: {
       authInfo: { getType: () => authType },
@@ -138,6 +142,7 @@ describe('SerenityController', () => {
   let getBrandCompetitorsStub;
   let accessControlHasAccessStub;
   let ensureMarketSiteStub;
+  let exchangePromiseTokenStub;
   let MockTransportError;
   let SerenityController;
 
@@ -164,6 +169,7 @@ describe('SerenityController', () => {
     getBrandCompetitorsStub = sinon.stub().resolves([]);
     accessControlHasAccessStub = sinon.stub().resolves(true);
     ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
+    exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
     MockTransportError = class extends Error {
       constructor(status, message, body) {
         super(message);
@@ -245,6 +251,9 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/site-linkage.js': {
         ensureMarketSite: ensureMarketSiteStub,
+      },
+      '../../src/support/utils.js': {
+        exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
       },
     })).default;
   });
@@ -337,6 +346,75 @@ describe('SerenityController', () => {
       });
       const response = await controller.listPrompts(ctx);
       expect(response.status).to.equal(401);
+    });
+
+    describe('x-promise-token support', () => {
+      it('exchanges x-promise-token for an IMS token and forwards it upstream, bypassing the IMS-type gate', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        // Authorization carries a spacecat JWT (not IMS) — would 401 via
+        // requireImsBearer alone, but the promise-token path never calls it.
+        const ctx = fakeContext({
+          authType: 'jwt',
+          bearer: 'spacecat-jwt-abc',
+          promiseToken: 'promise-token-xyz',
+        });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise-token-xyz');
+        expect(createTransportStub).to.have.been.calledWithMatch({ imsToken: 'exchanged-ims-token' });
+      });
+
+      it('decodes a URI-encoded x-promise-token header before exchanging', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ promiseToken: 'promise%20token%20xyz' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise token xyz');
+      });
+
+      it('401s with a generic message (no leaked exchange detail) when the promise token exchange fails', async () => {
+        exchangePromiseTokenStub.rejects(new Error('upstream IMS exchange failed: secret detail'));
+        const log = fakeLog();
+        const controller = SerenityController({ env: {} }, log, {});
+        const ctx = fakeContext({
+          authType: 'jwt', bearer: 'spacecat-jwt-abc', promiseToken: 'promise-token-xyz',
+        });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        const body = await readBody(response);
+        expect(body.message).to.equal('Invalid or expired promise token');
+        expect(log.error).to.have.been.calledWithMatch('serenity: promise token exchange failed');
+      });
+
+      it('falls back to the Authorization bearer when x-promise-token is absent (existing behavior unchanged)', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ bearer: 'ims-token-123' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+        expect(createTransportStub).to.have.been.calledWithMatch({ imsToken: 'ims-token-123' });
+      });
+
+      it('still 401s a non-IMS caller with no x-promise-token (existing IMS-type gate unaffected)', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ authType: 'jwt' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+      });
+
+      it('hints at the x-promise-token header when a non-IMS caller sends none', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ authType: 'jwt' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        const body = await readBody(response);
+        expect(body.error).to.equal('promiseTokenRequired');
+        expect(body.message).to.match(/x-promise-token/);
+      });
     });
 
     it('400s when :brandId is not a UUID (the new guard)', async () => {
