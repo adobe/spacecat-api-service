@@ -24,6 +24,7 @@ import {
   createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
   createReferralTrafficHasDataHandler,
 } from '../../../src/controllers/llmo/llmo-referral-traffic.js';
 
@@ -1256,5 +1257,105 @@ describe('llmo-referral-traffic', () => {
       await handler(makeContext({ client, data: { source: 'invalid' } }));
       expect(client.rpc.getCall(0).args[1].p_source).to.equal('optel');
     });
+  });
+});
+
+describe('llmo-referral-traffic — rotation (demo sites)', () => {
+  // demoStrategy has referral:true in ROTATION_CONFIG. Canned block = Jun 1–28 2026.
+  const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
+  const CANNED_START = '2026-06-01';
+  const CANNED_END = '2026-06-28';
+  // Freeze now=2026-06-29 (Monday) → phase 0, window [2026-06-08, 2026-07-05].
+  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
+  const REF_ROW = {
+    total_pageviews: 100,
+    bounce_rate: 0.3,
+    consent_rate: 0.8,
+    traffic_date: '2026-06-10',
+    week_start: '2026-06-10',
+    platform: 'openai',
+    channels: ['llm'],
+    visits: 90,
+    avg_time_on_site: 45,
+    revenue: 12,
+    visitors: 80,
+    orders: 3,
+    region: 'US',
+    device: 'desktop',
+    page_intent: 'INFORMATIONAL',
+    url_path: '/coffee',
+    host: 'frescopa.coffee',
+    entries: 50,
+    exits: 40,
+    total_count: 1,
+    avg_session_duration: 30,
+    pages_per_visit: 2,
+    conversion_rate: 0.03,
+  };
+
+  let clock;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 5, 29), toFake: ['Date'] });
+  });
+  afterEach(() => clock.restore());
+
+  const assertCannedDates = (client) => {
+    expect(client.rpc).to.have.been.called;
+    client.rpc.getCalls().forEach((call) => {
+      expect(call.args[1].p_start_date >= CANNED_START).to.equal(true);
+      expect(call.args[1].p_end_date <= CANNED_END).to.equal(true);
+    });
+  };
+
+  const ROTATED = [
+    ['filter-dimensions', createReferralTrafficFilterDimensionsHandler],
+    ['kpis', createReferralTrafficKpisHandler],
+    ['trend', createReferralTrafficTrendHandler],
+    ['by-platform', createReferralTrafficByPlatformHandler],
+    ['by-region', createReferralTrafficByRegionHandler],
+    ['by-page-intent', createReferralTrafficByPageIntentHandler],
+    ['by-url', createReferralTrafficByUrlHandler],
+    ['by-device', createReferralTrafficByDeviceHandler],
+    ['business-impact', createReferralTrafficBusinessImpactHandler],
+  ];
+  ROTATED.forEach(([name, factory]) => {
+    it(`${name}: rewrites the inbound range into the canned block`, async () => {
+      const client = makeRpcClient({ data: [REF_ROW], error: null });
+      const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+      const res = await factory(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      assertCannedDates(client);
+    });
+  });
+
+  it('by-url-trend: relabels canned week_start into the current window', async () => {
+    const client = makeRpcClient({ data: [{ week_start: '2026-06-10', total_pageviews: 20 }], error: null });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { ...FULL, urlPath: '/coffee' },
+    });
+    const res = await createReferralTrafficUrlTrendHandler(stubbedValidateAccess)(ctx);
+    const body = await res.json();
+    // canned 2026-06-10 (week1 Wed) → current window week1 Wed = 2026-06-17
+    expect(body.trend[0].weekStart).to.equal('2026-06-17');
+  });
+
+  it('weeks: synthesises the rolling window when the source has canned data', async () => {
+    const client = makeWeeksChainClient(
+      { data: [{ traffic_date: '2026-06-03' }], error: null },
+      { data: [{ traffic_date: '2026-06-24' }], error: null },
+    );
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect((await res.json()).weeks).to.have.length(4);
+  });
+
+  it('non-rotation site: passes the requested range through unchanged', async () => {
+    const client = makeRpcClient({ data: [REF_ROW], error: null });
+    const ctx = makeContext({ client }); // default SITE_ID (not a demo site)
+    await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(client.rpc.getCall(0).args[1].p_start_date).to.equal('2026-01-01');
+    expect(client.rpc.getCall(0).args[1].p_end_date).to.equal('2026-01-28');
   });
 });

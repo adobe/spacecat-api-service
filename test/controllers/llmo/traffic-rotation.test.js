@@ -225,6 +225,43 @@ describe('traffic-rotation engine', () => {
       expect(out).to.have.length(2); // must NOT merge into one bogus group
     });
 
+    it('multi-segment: weighted rates, carried scalars, and relabeled+sorted trend', () => {
+      const now = D('2026-02-02'); // phase 0, P0 = 2026-01-12
+      const segs = [
+        [{
+          host: 'a',
+          url_path: '/x',
+          total_hits: 100,
+          success_rate: 0.9,
+          top_agent: 'GPTBot',
+          hits_trend: [{ week_start: '2026-01-05', value: 1 }],
+        }],
+        [{
+          host: 'a',
+          url_path: '/x',
+          total_hits: 300,
+          success_rate: 0.5,
+          top_agent: 'Bingbot',
+          hits_trend: [{ week_start: '2026-01-12', value: 2 }],
+        }],
+      ];
+      const [row] = combineGroupedRows(segs, {
+        groupKeys: ['host', 'url_path'],
+        additiveKeys: ['total_hits'],
+        rateKeys: ['success_rate'],
+        weightKey: 'total_hits',
+        carryKeys: ['top_agent'],
+        trend: { key: 'hits_trend', dateField: 'week_start' },
+        config: CONFIG,
+        dataset: 'agentic',
+        now,
+      });
+      expect(row.total_hits).to.equal(400);
+      expect(row.success_rate).to.equal(0.6); // (0.9*100 + 0.5*300)/400
+      expect(row.top_agent).to.equal('Bingbot'); // carried from the heaviest segment
+      expect(row.hits_trend.map((p) => p.week_start)).to.deep.equal(['2026-01-12', '2026-01-19']);
+    });
+
     it('caps merged rows to `limit`, keeping the top-weighted', () => {
       const segs = [
         [{ region: 'US', total_hits: 30 }, { region: 'EU', total_hits: 20 }],
