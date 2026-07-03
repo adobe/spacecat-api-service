@@ -259,6 +259,9 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  *   re-reads the brand's CURRENT semrush_workspace_id from the data layer.
  *   When supplied, the create path uses it as a last-update concurrency guard
  *   (see below) so a parallel activation cannot orphan a resourced workspace.
+ * @param {object} [options] - feature-flag toggles for the dual-mode carve.
+ * @param {boolean} [options.dynamicAllocation] - when true (LLMO/dynamic-allocation ON), skip
+ *   the flat re-grant on an existing sub-workspace; JIT top-up owns sizing. Default false.
  * @returns {Promise<string>} the subworkspace id.
  */
 export async function ensureSubworkspace(
@@ -269,7 +272,9 @@ export async function ensureSubworkspace(
   log,
   timing = {},
   reloadPointer = null,
+  options = {},
 ) {
+  const { dynamicAllocation = false } = options;
   const poll = {
     attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
     intervalMs: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
@@ -291,8 +296,15 @@ export async function ensureSubworkspace(
     // 2026-06-15). So settle before AND after the transfer so the caller can
     // immediately create/publish projects against it.
     await pollUntilCreated(transport, existing, poll);
-    await transport.transferWorkspaceResources(existing, resourceAllocation(marketCount));
-    await pollUntilCreated(transport, existing, poll);
+    // Dynamic allocation (flag ON): SKIP the flat re-grant. The pre-sized
+    // `resourceAllocation(marketCount)` carve is exactly the up-front over/under-allocation JIT
+    // replaces — the metered handlers top up just-in-time (ensureAiHeadroom) and release surplus,
+    // so re-flattening the total here would both undo a JIT top-up and, on an ON→OFF rollback of an
+    // already-grown child, risk setting `total` below `used`. Flag OFF unchanged (byte-for-byte).
+    if (!dynamicAllocation) {
+      await transport.transferWorkspaceResources(existing, resourceAllocation(marketCount));
+      await pollUntilCreated(transport, existing, poll);
+    }
     return existing;
   }
 
