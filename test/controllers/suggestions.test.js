@@ -8783,8 +8783,8 @@ describe('Suggestions Controller', () => {
       // The GeoExperiment row created earlier in the flow must be removed.
       expect(geoExperimentRemoveStub).to.have.been.calledOnce;
 
-      // The outer catch logs the failure with the [edge-geo-exp-failed] tag.
-      expect(context.log.error).to.have.been.calledWithMatch(/edge-geo-exp-failed.*Error initiating experiment: strategy boom/);
+      // The outer catch logs the failure with the [geo-experiment-failed] tag.
+      expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-failed.*Error initiating experiment: strategy boom/);
     });
 
     it('rolls back the GeoExperiment AND deletes the strategy when a post-creation step throws', async () => {

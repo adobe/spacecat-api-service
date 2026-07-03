@@ -2041,7 +2041,7 @@ function SuggestionsController(ctx, sqs, env) {
           'pre',
         );
         if (!preScheduleParams.cronExpression || !preScheduleParams.expiryMs) {
-          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
           throw new Error('Missing required environment variables');
         }
         const domainWideSuggestionIds = new Set(
@@ -2135,7 +2135,7 @@ function SuggestionsController(ctx, sqs, env) {
 
         const markFailures = markResults.filter((r) => r.status === 'rejected');
         if (markFailures.length > 0) {
-          context.log.warn(`[edge-geo-exp-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+          context.log.warn(`[geo-experiment-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
             geoExperimentId,
             errors: markFailures.map((r) => r.reason?.message),
           });
@@ -2165,13 +2165,13 @@ function SuggestionsController(ctx, sqs, env) {
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
         return createResponse(experimentResponse, 207);
       } catch (error) {
-        context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
+        context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
         if (geoExperiment?.getId?.()) {
           /* c8 ignore start */
           try {
             await geoExperiment.remove();
           } catch (removeError) {
-            context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
+            context.log.error(`[geo-experiment-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
         }
         // Delete the strategy if it was created so we don't leave an orphan.
@@ -2202,7 +2202,7 @@ function SuggestionsController(ctx, sqs, env) {
                 s.setUpdatedBy(profile?.email || 'geo-experiment');
                 await s.save();
               } catch (unblockError) {
-                context.log.error(`[edge-geo-exp-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
+                context.log.error(`[geo-experiment-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
               }
             }),
         );
