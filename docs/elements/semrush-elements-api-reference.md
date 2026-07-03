@@ -40,13 +40,13 @@ SpaceCat wraps these as standard `GET` REST endpoints, hiding the POST/payload c
 |---|---|---|
 | Org (`spaceCatId`) | Workspace (`workspaceId`) | `resolveWorkspaceId(ctx, spaceCatId)` in `workspace-resolver.js` |
 | Brand (`brandId`) | Subworkspace (`subworkspaceId`) | `resolveBrandSubworkspaceId(ctx, brandId)` in `workspace-resolver.js` |
-| Location + Language | Project (`projectId`) | Returned by `listMarkets`/`listAllMarkets` as `semrush_project_id`; pass as `?projectIds=` in Phase 2 calls |
+| Location + Language | Project (`projectId`) | Surfaced in the filter-dimensions `regions` array as `semrush_project_id`; pass as `?projectIds=` in Phase 2 calls |
 
 **Important invariants:**
 - `elementId` UUIDs are Semrush-assigned and **never change** regardless of org, brand, or environment.
 - `workspaceId` is org-scoped and read from the Organisation's `semrush_workspace_id` field.
-- `projectId` values are discovered at runtime via `listMarkets` (brand-scoped) or `listAllMarkets` (all workspace markets). Use the returned `semrush_project_id` field as `projectIds` in Phase 2 brand-scoped calls.
-- SpaceCat stores the `brandId → semrushProjectId` mapping in `brand_to_semrush_projects` (`BrandSemrushProject` entity). This table is used to enrich markets and filter-dimension regions with `spacecat_brand_id`, `geoTargetId`, and `languageCode`.
+- `projectId` values are discovered at runtime via the filter-dimensions `regions` array. Use the returned `semrush_project_id` field as `projectIds` in Phase 2 brand-scoped calls.
+- SpaceCat stores the `brandId → semrushProjectId` mapping in `brand_to_semrush_projects` (`BrandSemrushProject` entity). This table is used to enrich filter-dimension regions with `spacecat_brand_id`, `geoTargetId`, and `languageCode`.
 
 ---
 
@@ -169,13 +169,18 @@ export function buildBrandsPayload({ model = 'search-gpt' } = {}) {
   };
 }
 
-export function transformBrandsResponse(raw) {
-  return (raw?.blocks?.value ?? []).map(item => ({
-    name: item.value,
-    count: item.brand_count ?? 0,
-    faviconDomain: item.faviconDomain ?? '',
-    defaultSelected: item.defaultSelected === 1,
-  }));
+export function transformBrandsToFilterDimensions(raw, spacecatBrands = []) {
+  const brandIdByName = new Map(
+    spacecatBrands.map((b) => [String(b.name ?? '').toLowerCase(), b.id]),
+  );
+  return (raw?.blocks?.value ?? []).map((item) => {
+    const label = item.value ?? '';
+    return {
+      id: null,
+      label,
+      spacecat_brand_id: brandIdByName.get(label.toLowerCase()) ?? null,
+    };
+  });
 }
 ```
 
@@ -188,12 +193,18 @@ Composes transport + definitions. One method per logical SpaceCat endpoint. Meth
 ```js
 export function createElementsService(transport) {
   return {
-    async getBrands(workspaceId, params) {
-      const payload = buildBrandsPayload(params);
-      const raw = await transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, payload);
-      return transformBrandsResponse(raw);
+    async getUrlInspectorFilterDimensions(workspaceId, params, spacecatBrands = [], projects = []) {
+      const [rawTopics, rawBrands, rawMarkets] = await Promise.all([
+        transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, buildTopicsPayload(params)),
+        transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
+        transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, buildMarketsPayload({})),
+      ]);
+      return {
+        brands: transformBrandsToFilterDimensions(rawBrands, spacecatBrands),
+        regions: transformMarketsToFilterDimensions(rawMarkets, projects),
+        // topics, categories, page_intents, origins ...
+      };
     },
-    // ...
   };
 }
 ```
@@ -219,13 +230,14 @@ Two authorization helpers (Phase 1 implements `authorizeOrg` only):
 
 **Route handler pattern:**
 ```js
-const listBrands = async (ctx) => {
+const listUrlInspectorFilterDimensions = async (ctx) => {
   try {
     const auth = await authorizeOrg(ctx);
     if (auth.error) {
       return auth.error;
     }
-    const result = await buildService(ctx).getBrands(auth.workspaceId, extractQuery(ctx));
+    const result = await buildService(ctx)
+      .getUrlInspectorFilterDimensions(auth.workspaceId, extractQuery(ctx));
     return ok(result);
   } catch (e) {
     return mapError(e, log);
@@ -250,79 +262,21 @@ No service-to-service credentials are involved — the user's own IMS token is t
 
 ### Org-scoped (workspace-level, implemented)
 
-All endpoints below use `authorizeOrg`. Where a `:brandId` appears in the path, the brand is validated to belong to the org via `getBrandById` — no separate auth helper is needed.
+The endpoint below uses `authorizeOrg`.
 
 | Method | Path | Controller | Description |
 |---|---|---|---|
-| GET | `/v2/orgs/:spaceCatId/serenity/brands` | `listBrands` | All brands in the workspace |
-| GET | `/v2/orgs/:spaceCatId/serenity/all/markets` | `listAllMarkets` | All markets across the workspace (no brand filter) |
-| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/markets` | `listMarkets` | Markets for a specific SpaceCat brand |
-| GET | `/v2/orgs/:spaceCatId/serenity/tags` | `listTags` | All tags in the workspace |
-| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/tags` | `listBrandTags` | Tags aggregated across all of a brand's Semrush projects |
 | GET | `/v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | All filter dimensions for the URL Inspector dashboard |
 
+> **Note:** The brand-, market-, and tag-selector data (formerly served by dedicated `/serenity/brands`, `/serenity/*/markets`, and `/serenity/*/tags` endpoints) is now provided by the existing Serenity APIs. Only the aggregated URL Inspector filter-dimensions endpoint is served by this Elements wrapper.
+
 ---
 
-**Query parameters — `listTopics` / `listBrandTopics`:**
+**Query parameters — `listUrlInspectorFilterDimensions`:**
 
 | Param | Required | Description |
 |---|---|---|
 | `model` | No | AI model filter (default: `search-gpt`) |
-| `projectId` | No | Semrush project UUID — scopes tags to a specific market (`listTopics` only; auto-resolved in `listBrandTopics`) |
-
-**Query parameters — `listBrands`:**
-
-| Param | Required | Description |
-|---|---|---|
-| `model` | No | AI model filter (default: `search-gpt`) |
-
-**`listBrandTags` additional behaviour:** resolves `BrandSemrushProject.allByBrandId(brandId)`, fetches tags for every project in parallel, then deduplicates by `value`. Falls back to workspace-wide tags if no rows exist.
-
----
-
-**Response shape — `listBrands`:**
-```json
-[
-  {
-    "id": null,
-    "label": "Adobe",
-    "spacecat_brand_id": "3e3556f0-6494-4e8f-858f-01f2c358861a"
-  }
-]
-```
-
----
-
-**Response shape — `listMarkets` / `listAllMarkets`:**
-
-Both endpoints return the same shape. `listMarkets` scopes the Semrush call to the brand (via the brand's name as `CBF_ws_brand`); `listAllMarkets` omits the filter and returns all workspace markets.
-
-Each entry is enriched from `brand_to_semrush_projects` — fields are `null` when no matching row exists.
-
-```json
-[
-  {
-    "id": "US",
-    "semrush_project_id": "b558a5e8-d9cb-4ace-907d-825eb4f9c0db",
-    "label": "US-en",
-    "spacecat_brand_id": "3e3556f0-6494-4e8f-858f-01f2c358861a",
-    "geoTargetId": 2840,
-    "languageCode": "en"
-  }
-]
-```
-
-> `id` is extracted from the label — the part before the first `-` (e.g. `"US-en"` → `"US"`). `semrush_project_id` is the Semrush project UUID. Pass it as `projectId` in subsequent calls.
-
----
-
-**Response shape — `listTopics` / `listBrandTopics`:**
-```json
-[
-  { "value": "category:Firefly", "type": "category", "name": "Firefly" },
-  { "value": "intent:informational", "type": "intent", "name": "informational" }
-]
-```
 
 ---
 
@@ -373,7 +327,7 @@ Fetches Brands, Topics, and Markets elements in parallel (three upstream calls).
 
 ### Phase 2 — Brand-scoped (subworkspace-level, not yet implemented)
 
-These endpoints will use `authorizeBrand` and require `:brandId` in the path. Callers first call `listMarkets` or `listAllMarkets` to discover `semrush_project_id` values, then pass them as `?projectIds=uuid1,uuid2`.
+These endpoints will use `authorizeBrand` and require `:brandId` in the path. Callers first read the filter-dimensions `regions` array to discover `semrush_project_id` values, then pass them as `?projectIds=uuid1,uuid2`.
 
 | Method | Path | Description |
 |---|---|---|

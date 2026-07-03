@@ -13,7 +13,6 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import getRouteHandlers from '../../src/routes/index.js';
-import matchPath from '../../src/utils/route-utils.js';
 
 describe('getRouteHandlers', () => {
   const mockAuditsController = {
@@ -572,11 +571,6 @@ describe('getRouteHandlers', () => {
   };
 
   const mockElementsController = {
-    listBrands: sinon.stub(),
-    listMarkets: sinon.stub(),
-    listAllMarkets: sinon.stub(),
-    listTags: sinon.stub(),
-    listBrandTags: sinon.stub(),
     listUrlInspectorFilterDimensions: sinon.stub(),
   };
 
@@ -891,11 +885,6 @@ describe('getRouteHandlers', () => {
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/languages',
-      'GET /v2/orgs/:spaceCatId/serenity/brands',
-      'GET /v2/orgs/:spaceCatId/serenity/all/markets',
-      'GET /v2/orgs/:spaceCatId/serenity/:brandId/markets',
-      'GET /v2/orgs/:spaceCatId/serenity/tags',
-      'GET /v2/orgs/:spaceCatId/serenity/:brandId/tags',
       'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
@@ -1570,25 +1559,5 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /plg/records/:plgOnboardingId'].paramNames).to.deep.equal(['plgOnboardingId']);
     expect(dynamicRoutes['GET /admin/users/:userId'].handler).to.equal(mockUserDetailsController.resolveUser);
     expect(dynamicRoutes['GET /admin/users/:userId'].paramNames).to.deep.equal(['userId']);
-
-    // Route precedence: '/serenity/all/markets' and '/serenity/:brandId/markets' are both
-    // dynamic and equal length, so matchPath resolves by insertion order. The literal
-    // '/all/markets' route must be registered first, otherwise ':brandId' would capture
-    // 'all' and misroute. This guards against an accidental reorder in routes/index.js.
-    const routeDefs = { staticRoutes, dynamicRoutes };
-    const allMarketsMatch = matchPath(
-      'GET',
-      '/v2/orgs/org-123/serenity/all/markets',
-      routeDefs,
-    );
-    expect(allMarketsMatch.handler).to.equal(mockElementsController.listAllMarkets);
-
-    const brandMarketsMatch = matchPath(
-      'GET',
-      '/v2/orgs/org-123/serenity/brand-456/markets',
-      routeDefs,
-    );
-    expect(brandMarketsMatch.handler).to.equal(mockElementsController.listMarkets);
-    expect(brandMarketsMatch.params.brandId).to.equal('brand-456');
   });
 });

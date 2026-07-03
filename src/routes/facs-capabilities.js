@@ -788,11 +788,6 @@ const routeFacsCapabilities = {
       // Org-level Serenity catalog reads (no brandId).
       'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
-      'GET /v2/orgs/:spaceCatId/serenity/brands': 'llmo/can_view',
-      'GET /v2/orgs/:spaceCatId/serenity/all/markets': 'llmo/can_view',
-      'GET /v2/orgs/:spaceCatId/serenity/:brandId/markets': 'llmo/can_view',
-      'GET /v2/orgs/:spaceCatId/serenity/tags': 'llmo/can_view',
-      'GET /v2/orgs/:spaceCatId/serenity/:brandId/tags': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)

@@ -14,7 +14,6 @@ export { buildBrandsPayload, transformBrandsToFilterDimensions } from './brands.
 export { buildMarketsPayload, transformMarketsToFilterDimensions } from './markets.js';
 export {
   buildTopicsPayload,
-  transformTopicsResponse,
   transformTopicsForFilterDimensions,
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,

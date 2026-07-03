@@ -13,7 +13,6 @@
 import { expect } from 'chai';
 import {
   buildTopicsPayload,
-  transformTopicsResponse,
   transformTopicsForFilterDimensions,
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,
@@ -81,49 +80,6 @@ describe('topics definitions', () => {
     it('filters on CBF_model column', () => {
       const payload = buildTopicsPayload();
       expect(payload.filters.advanced.filters[0].col).to.equal('CBF_model');
-    });
-  });
-
-  describe('transformTopicsResponse', () => {
-    it('returns an empty array when raw is null', () => {
-      expect(transformTopicsResponse(null)).to.deep.equal([]);
-    });
-
-    it('returns an empty array when raw has no blocks', () => {
-      expect(transformTopicsResponse({})).to.deep.equal([]);
-    });
-
-    it('splits colon-separated values into type and name', () => {
-      const raw = { blocks: { value: [{ value: 'category:Firefly' }] } };
-      const [topic] = transformTopicsResponse(raw);
-      expect(topic).to.deep.equal({ value: 'category:Firefly', type: 'category', name: 'Firefly' });
-    });
-
-    it('handles values with no colon', () => {
-      const raw = { blocks: { value: [{ value: 'plainvalue' }] } };
-      const [topic] = transformTopicsResponse(raw);
-      expect(topic.type).to.equal('');
-      expect(topic.name).to.equal('plainvalue');
-    });
-
-    it('handles values with multiple colons — splits on first colon only', () => {
-      const raw = { blocks: { value: [{ value: 'intent:Buy:Now' }] } };
-      const [topic] = transformTopicsResponse(raw);
-      expect(topic.type).to.equal('intent');
-      expect(topic.name).to.equal('Buy:Now');
-    });
-
-    it('handles missing value field', () => {
-      const raw = { blocks: { value: [{}] } };
-      const [topic] = transformTopicsResponse(raw);
-      expect(topic.value).to.equal('');
-      expect(topic.type).to.equal('');
-      expect(topic.name).to.equal('');
-    });
-
-    it('handles multiple items', () => {
-      const result = transformTopicsResponse(RAW_MIXED);
-      expect(result).to.have.length(8);
     });
   });
 

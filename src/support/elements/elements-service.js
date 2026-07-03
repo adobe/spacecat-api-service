@@ -17,7 +17,6 @@ import {
   buildMarketsPayload,
   transformMarketsToFilterDimensions,
   buildTopicsPayload,
-  transformTopicsResponse,
   transformTopicsForFilterDimensions,
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,
@@ -28,60 +27,10 @@ import {
  * Creates the Elements service that composes transport calls with per-element
  * payload builders and response transformers.
  *
- * Each method maps to one logical SpaceCat API endpoint. When a Semrush element UUID
- * is reused for different dashboard sections, separate methods handle each case.
- *
  * @param {object} transport - Elements transport created by createElementsTransport().
  */
 export function createElementsService(transport) {
   return {
-    /**
-     * Fetches all brands available in the workspace.
-     * Powers the brand selector dropdown (filter dimensions, row 1).
-     *
-     * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} params - Query parameters from the SpaceCat API request.
-     * @param {Array<{id: string, name: string}>} [spacecatBrands=[]] - SpaceCat brands for the org,
-     *   used to resolve `spacecat_brand_id` on each brand entry by name match.
-     * @returns {Promise<Array<{id: null, label: string, spacecat_brand_id: string|null}>>}
-     */
-    async getBrands(workspaceId, params, spacecatBrands = []) {
-      const payload = buildBrandsPayload(params);
-      const raw = await transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, payload);
-      return transformBrandsToFilterDimensions(raw, spacecatBrands);
-    },
-
-    /**
-     * Fetches available markets (location+language projects) for a brand.
-     * Powers the market/region filter dropdown (filter dimensions, row 2).
-     *
-     * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} params - Query parameters; `params.brand` scopes to a brand.
-     * @param {Array<{brandId:string, semrushProjectId:string, geoTargetId:number,
-     *   languageCode:string}>} [brandSemrushProjects=[]] - BrandSemrushProject rows
-     *   used to enrich each market entry with SpaceCat metadata.
-     * @returns {Promise<import('./definitions/markets.js').FilterDimensionRegion[]>}
-     */
-    async getMarkets(workspaceId, params, brandSemrushProjects = []) {
-      const payload = buildMarketsPayload(params);
-      const raw = await transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, payload);
-      return transformMarketsToFilterDimensions(raw, brandSemrushProjects);
-    },
-
-    /**
-     * Fetches all topic and category tags available in the workspace.
-     * Powers the Topics/Tags filter dropdown (filter dimensions, row 3).
-     *
-     * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} params - Query parameters from the SpaceCat API request.
-     * @returns {Promise<import('./definitions/topics.js').Topic[]>}
-     */
-    async getTopics(workspaceId, params) {
-      const payload = buildTopicsPayload(params);
-      const raw = await transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, payload);
-      return transformTopicsResponse(raw);
-    },
-
     /**
      * Fetches filter dimensions for the URL Inspector dashboard.
      *

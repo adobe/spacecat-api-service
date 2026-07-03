@@ -36,29 +36,6 @@ export function buildTopicsPayload({ model, projectId } = {}) {
 }
 
 /**
- * @typedef {object} Topic
- * @property {string} value - Raw tag value from Semrush (e.g. "category:Firefly").
- * @property {string} type - Tag type prefix (e.g. "category", "intent", "source").
- * @property {string} name - Tag name after the colon (e.g. "Firefly").
- */
-
-/**
- * Transforms the raw Semrush Topics element response into typed Topic objects.
- * Splits the colon-separated `value` field into `type` and `name`.
- *
- * @param {object} raw - Raw response from the Elements API.
- * @returns {Topic[]}
- */
-export function transformTopicsResponse(raw) {
-  return (raw?.blocks?.value ?? []).map((item) => {
-    const colonIdx = (item.value ?? '').indexOf(':');
-    const type = colonIdx >= 0 ? item.value.substring(0, colonIdx) : '';
-    const name = colonIdx >= 0 ? item.value.substring(colonIdx + 1) : (item.value ?? '');
-    return { value: item.value ?? '', type, name };
-  });
-}
-
-/**
  * @typedef {object} FilterDimensionItem
  * @property {string|null} id - Dimension identifier (null when no stable ID exists).
  * @property {string} label - Human-readable label.

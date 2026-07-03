@@ -16,7 +16,7 @@ import {
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { listBrands as listSpacecatBrands, getBrandById } from '../support/brands-storage.js';
+import { listBrands as listSpacecatBrands } from '../support/brands-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
@@ -196,155 +196,9 @@ export default function ElementsController(context, log, env) {
   }
 
   /**
-   * GET /v2/orgs/:spaceCatId/serenity/brands
-   * Returns all brands available in the workspace (brand selector dropdown).
-   */
-  const listBrands = async (ctx) => {
-    try {
-      const auth = await authorizeOrg(ctx);
-      if (auth.error) {
-        return auth.error;
-      }
-      const { spaceCatId } = ctx?.params ?? {};
-      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-      const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
-      const result = await buildService(ctx)
-        .getBrands(auth.workspaceId, extractQuery(ctx), spacecatBrands);
-      return ok(result);
-    } catch (e) {
-      return mapError(e, log);
-    }
-  };
-
-  /**
-   * GET /v2/orgs/:spaceCatId/serenity/:brandId/markets
-   * Returns available markets for the given SpaceCat brand.
-   * The brand name is resolved from `brandId` and used to filter the Semrush workspace.
-   */
-  const listMarkets = async (ctx) => {
-    try {
-      const auth = await authorizeOrg(ctx);
-      if (auth.error) {
-        return auth.error;
-      }
-      const { spaceCatId, brandId } = ctx?.params ?? {};
-      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
-      const [brand, rawProjects] = await Promise.all([
-        getBrandById(spaceCatId, brandId, postgrestClient),
-        BrandSemrushProject ? BrandSemrushProject.allByBrandId(brandId) : Promise.resolve([]),
-      ]);
-      if (!brand) {
-        return notFound(`Brand not found: ${brandId}`);
-      }
-      const brandSemrushProjects = rawProjects.map(toPlainProject);
-      const result = await buildService(ctx).getMarkets(
-        auth.workspaceId,
-        { brand: brand.name },
-        brandSemrushProjects,
-      );
-      return ok(result);
-    } catch (e) {
-      return mapError(e, log);
-    }
-  };
-
-  /**
-   * GET /v2/orgs/:spaceCatId/serenity/all/markets
-   * Returns all markets across the workspace with no brand filter.
-   */
-  const listAllMarkets = async (ctx) => {
-    try {
-      const auth = await authorizeOrg(ctx);
-      if (auth.error) {
-        return auth.error;
-      }
-      const { spaceCatId } = ctx?.params ?? {};
-      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
-      const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
-      const brandSemrushProjects = await fetchBrandSemrushProjects(
-        BrandSemrushProject,
-        spacecatBrands,
-      );
-      const result = await buildService(ctx).getMarkets(auth.workspaceId, {}, brandSemrushProjects);
-      return ok(result);
-    } catch (e) {
-      return mapError(e, log);
-    }
-  };
-
-  /**
-   * GET /v2/orgs/:spaceCatId/serenity/:brandId/tags
-   * Returns all tags across all of the brand's Semrush projects, deduplicated by value.
-   * Resolves projectIds from brand_to_semrush_projects and fetches each in parallel.
-   */
-  const listBrandTags = async (ctx) => {
-    try {
-      const auth = await authorizeOrg(ctx);
-      if (auth.error) {
-        return auth.error;
-      }
-      const { spaceCatId, brandId } = ctx?.params ?? {};
-      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-      const brand = await getBrandById(spaceCatId, brandId, postgrestClient);
-      if (!brand) {
-        return notFound(`Brand not found: ${brandId}`);
-      }
-      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
-      const projects = BrandSemrushProject
-        ? await BrandSemrushProject.allByBrandId(brandId)
-        : [];
-      const service = buildService(ctx);
-      const queryParams = extractQuery(ctx);
-      let result;
-      if (projects.length === 0) {
-        result = await service.getTopics(auth.workspaceId, queryParams);
-      } else {
-        const perProject = await mapWithConcurrency(
-          projects,
-          FANOUT_CONCURRENCY,
-          (p) => service.getTopics(
-            auth.workspaceId,
-            { ...queryParams, projectId: p.getSemrushProjectId() },
-          ),
-        );
-        const seen = new Set();
-        result = perProject.flat().filter((topic) => {
-          if (seen.has(topic.value)) {
-            return false;
-          }
-          seen.add(topic.value);
-          return true;
-        });
-      }
-      return ok(result);
-    } catch (e) {
-      return mapError(e, log);
-    }
-  };
-
-  /**
-   * GET /v2/orgs/:spaceCatId/serenity/tags
-   * Returns all tags available in the workspace.
-   */
-  const listTags = async (ctx) => {
-    try {
-      const auth = await authorizeOrg(ctx);
-      if (auth.error) {
-        return auth.error;
-      }
-      const result = await buildService(ctx).getTopics(auth.workspaceId, extractQuery(ctx));
-      return ok(result);
-    } catch (e) {
-      return mapError(e, log);
-    }
-  };
-
-  /**
    * GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions
-   * Returns filter dimensions for the URL Inspector dashboard.
-   * Currently includes topics only; additional dimension types will be added incrementally.
+   * Returns filter dimensions for the URL Inspector dashboard
+   * (brands, regions, topics, categories, page_intents, origins).
    */
   const listUrlInspectorFilterDimensions = async (ctx) => {
     try {
@@ -376,11 +230,6 @@ export default function ElementsController(context, log, env) {
   };
 
   return {
-    listBrands,
-    listMarkets,
-    listAllMarkets,
-    listTags,
-    listBrandTags,
     listUrlInspectorFilterDimensions,
   };
 }

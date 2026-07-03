@@ -238,11 +238,6 @@ export default function getRouteHandlers(
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
     'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
     // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
-    'GET /v2/orgs/:spaceCatId/serenity/brands': elementsController.listBrands,
-    'GET /v2/orgs/:spaceCatId/serenity/all/markets': elementsController.listAllMarkets,
-    'GET /v2/orgs/:spaceCatId/serenity/:brandId/markets': elementsController.listMarkets,
-    'GET /v2/orgs/:spaceCatId/serenity/tags': elementsController.listTags,
-    'GET /v2/orgs/:spaceCatId/serenity/:brandId/tags': elementsController.listBrandTags,
     'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
