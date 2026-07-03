@@ -1342,6 +1342,7 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
   });
 
   it('weeks: synthesises the rolling window when the source has canned data', async () => {
+    // Rotation path does a single existence check (limit(1)); first call has data.
     const client = makeWeeksChainClient(
       { data: [{ traffic_date: '2026-06-03' }], error: null },
       { data: [{ traffic_date: '2026-06-24' }], error: null },
@@ -1349,6 +1350,20 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
     const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
     const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
     expect((await res.json()).weeks).to.have.length(4);
+  });
+
+  it('weeks: returns [] when the requested source has no canned rows', async () => {
+    const client = makeWeeksChainClient({ data: [], error: null });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect((await res.json()).weeks).to.deep.equal([]);
+  });
+
+  it('weeks: surfaces an existence-check error as 500', async () => {
+    const client = makeWeeksChainClient({ data: null, error: { message: 'boom' } });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(500);
   });
 
   it('non-rotation site: passes the requested range through unchanged', async () => {

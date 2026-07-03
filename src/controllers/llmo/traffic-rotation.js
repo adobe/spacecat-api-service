@@ -452,6 +452,14 @@ export function combineGroupedRows(rowsPerSegment, spec) {
  * Returns the same `{ data, error }` shape as `client.rpc` so the caller's
  * existing response mapping is unchanged. An empty (before-window) range yields
  * `{ data: [] }` without an RPC round-trip.
+ *
+ * Pagination caveat: `p_offset`/`p_limit`/sort in `baseParams` are passed
+ * unchanged to each segment, so on a 2-segment wrap only page 1 is exact — an
+ * `offset > 0` page is approximate (there is no global re-pagination across the
+ * two non-contiguous canned weeks). This is unreachable for the current demo
+ * sites, which have well under one page of URLs; `combineGroupedRows` also caps
+ * the merged rows to the requested `limit`. Revisit if a rotation site ever
+ * exceeds a single page.
  */
 export async function runRotatedAggregate(client, rpcName, baseParams, {
   config, dataset, now, combine,
@@ -466,9 +474,18 @@ export async function runRotatedAggregate(client, rpcName, baseParams, {
     p_start_date: seg.start,
     p_end_date: seg.end,
   })));
-  const failed = responses.find((r) => r.error);
-  if (failed) {
-    return { error: failed.error };
+  const failedIdx = responses.findIndex((r) => r.error);
+  if (failedIdx !== -1) {
+    const seg = segments[failedIdx];
+    const { error } = responses[failedIdx];
+    // Name the failing canned segment so the caller's error log is actionable.
+    return {
+      error: {
+        ...error,
+        message: `${rpcName} segment ${failedIdx + 1}/${segments.length} `
+          + `[${seg.start}..${seg.end}] failed: ${error.message}`,
+      },
+    };
   }
   return { data: combine(responses.map((r) => r.data || [])) };
 }

@@ -661,6 +661,27 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
         const source = VALID_SOURCES.has(rawSource) ? rawSource : DEFAULT_SOURCE;
         const tableName = SOURCE_TO_TABLE[source];
 
+        const rot = rotationCtx(siteId);
+        if (rot.rotate) {
+          // Rotation: the window is a pure function of now(); we only need to
+          // know whether THIS source has any canned rows. One existence check
+          // (not the two-query min/max), then synthesize — mirrors the agentic
+          // /weeks early-return while preserving per-source emptiness.
+          const { data, error } = await client
+            .from(tableName)
+            .select('traffic_date')
+            .eq('site_id', siteId)
+            .limit(1);
+          if (error) {
+            ctx.log.error(`Referral traffic weeks existence PostgREST error: ${error.message}`);
+            return internalServerError('Failed to fetch referral traffic date range');
+          }
+          if ((data || []).length === 0) {
+            return ok({ weeks: [] });
+          }
+          return ok({ weeks: computeWindow(rot.now).weeks });
+        }
+
         const [minResult, maxResult] = await Promise.all([
           client
             .from(tableName)
@@ -691,13 +712,6 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
 
         if (!minDate || !maxDate) {
           return ok({ weeks: [] });
-        }
-
-        const rot = rotationCtx(siteId);
-        if (rot.rotate) {
-          // Source has canned rows → present the rolling window (pure fn of now())
-          // instead of the frozen min/max, consistent with the relabeled trend.
-          return ok({ weeks: computeWindow(rot.now).weeks });
         }
 
         const weeks = generateIsoWeekRange(minDate, maxDate).map((weekStr) => {
