@@ -570,6 +570,10 @@ describe('getRouteHandlers', () => {
     listWorkspaceProjects: sinon.stub(),
   };
 
+  const mockElementsController = {
+    listUrlInspectorFilterDimensions: sinon.stub(),
+  };
+
   const mockAgenticCategoriesController = {
     list: sinon.stub(),
     create: sinon.stub(),
@@ -654,6 +658,7 @@ describe('getRouteHandlers', () => {
       mockAgenticCategoriesController,
       mockAgenticPageTypesController,
       mockSerenityController,
+      mockElementsController,
       mockProxyController,
       mockRedirectsController,
     );
@@ -880,6 +885,7 @@ describe('getRouteHandlers', () => {
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/languages',
+      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
