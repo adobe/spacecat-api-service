@@ -120,7 +120,8 @@ export function collectBrandUrlEntries(sources, market) {
  * apex-normalizing them would be wrong — they pass through unchanged.
  *
  * `url/resolve` returns `is_valid: false` with empty strings (still HTTP 200) for
- * unresolvable input; that is NOT an error, so on it we keep the raw (already
+ * unresolvable input; that (and the defensive `is_valid: true` but empty
+ * `primary_url` case) is NOT an error, so on it we keep the raw (already
  * https-filtered) entry rather than writing the empty value. A transport ERROR
  * (non-2xx) is left to propagate — the caller's best-effort (CREATE) / hard-fail
  * (EDIT) wrapper then treats it exactly like any other upstream failure.
@@ -128,14 +129,24 @@ export function collectBrandUrlEntries(sources, market) {
  * A resolve can collapse two raw URLs (e.g. `https://www.x.com` and
  * `https://x.com`) onto one canonical value, so the result is re-de-duplicated by
  * url (first-seen wins) — {@link collectBrandUrlEntries} de-duped by the RAW url.
+ * De-dup keys on `url` alone (like `collectBrandUrlEntries`): a Semrush brand URL
+ * is unique by its url, and a canonicalized website (scheme-less apex) can't
+ * collide with a social/earned handle (a full `https://` profile url).
+ *
+ * The optional `cache` (raw url → canonical string | null) is resolved-once memo
+ * shared across calls: brand website `urls` are region-less, so the per-market
+ * edit re-sync passes ONE cache to avoid re-resolving the same url for every
+ * market. Only a cache MISS calls the transport (and warns on an unusable result),
+ * so a bad url warns once, not once per market.
  *
  * @param {object} transport - Semrush transport (exposes `resolveUrl`).
  * @param {Array<{url: string, type: string}>} entries - collected brand-URL entries.
  * @param {object} [log] - optional logger ({ warn? }).
+ * @param {Map<string, (string|null)>} [cache] - raw-url → canonical memo (see above).
  * @returns {Promise<{url: string, type: string}[]>} entries with website URLs
  *   canonicalized (a no-op passthrough for social/earned), re-de-duped by url.
  */
-export async function resolveWebsiteEntries(transport, entries, log) {
+export async function resolveWebsiteEntries(transport, entries, log, cache = new Map()) {
   const resolved = [];
   for (const entry of entries) {
     if (entry.type !== BRAND_URL_TYPE.WEBSITE) {
@@ -143,18 +154,24 @@ export async function resolveWebsiteEntries(transport, entries, log) {
       // eslint-disable-next-line no-continue
       continue;
     }
-    // eslint-disable-next-line no-await-in-loop
-    const r = await transport.resolveUrl(entry.url);
-    if (r?.is_valid === true && hasText(r?.primary_url)) {
-      resolved.push({ ...entry, url: r.primary_url });
+    let canonical;
+    if (cache.has(entry.url)) {
+      canonical = cache.get(entry.url);
     } else {
-      // is_valid:false / empty (HTTP 200) — keep the raw https value, never the
+      // eslint-disable-next-line no-await-in-loop
+      const r = await transport.resolveUrl(entry.url);
+      // is_valid:false, OR (defensively) is_valid:true with an empty primary_url —
+      // both mean "no usable canonical value": keep the raw https value, never the
       // empty one. Left un-normalized on purpose; the next edit re-attempts it.
-      log?.warn?.('brand-urls: url/resolve returned is_valid:false — keeping raw url', {
-        url: entry.url,
-      });
-      resolved.push(entry);
+      canonical = (r?.is_valid === true && hasText(r?.primary_url)) ? r.primary_url : null;
+      cache.set(entry.url, canonical);
+      if (canonical === null) {
+        log?.warn?.('brand-urls: url/resolve returned no usable primary_url — keeping raw url', {
+          url: entry.url,
+        });
+      }
     }
+    resolved.push(canonical === null ? entry : { ...entry, url: canonical });
   }
 
   const seen = new Set();
@@ -368,6 +385,11 @@ export async function syncBrandUrlsAcrossMarkets(
   let deleted = 0;
   let markets = 0;
 
+  // Website `urls` are region-less (identical across every market), so resolve
+  // each distinct one a single time and reuse the result across markets — one
+  // shared memo passed into every per-market resolveWebsiteEntries call.
+  const resolveCache = new Map();
+
   for (const project of projects) {
     const projectId = hasText(project?.id) ? String(project.id) : null;
     const market = marketOf(project);
@@ -409,8 +431,9 @@ export async function syncBrandUrlsAcrossMarkets(
       // Canonicalize website URLs to Semrush's stored form BEFORE diffing, so the
       // desired set is compared against `listBrandUrls` (which returns the same
       // canonical form) — otherwise every re-sync would churn `www.`-vs-apex (#25).
+      // The shared cache resolves each region-less website url once across markets.
       // eslint-disable-next-line no-await-in-loop
-      const desired = await resolveWebsiteEntries(transport, collected, log);
+      const desired = await resolveWebsiteEntries(transport, collected, log, resolveCache);
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
       const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];

@@ -282,9 +282,32 @@ describe('brand-urls helpers', () => {
       // Never write the empty value — fall back to the raw (already https-filtered) url.
       expect(out).to.deep.equal([{ url: 'https://not-a-real-host', type: BRAND_URL_TYPE.WEBSITE }]);
       expect(warn).to.have.been.calledWithMatch(
-        'brand-urls: url/resolve returned is_valid:false — keeping raw url',
+        'brand-urls: url/resolve returned no usable primary_url — keeping raw url',
         sinon.match({ url: 'https://not-a-real-host' }),
       );
+    });
+
+    it('keeps the raw url when resolve resolves null/undefined (optional-chaining defense)', async () => {
+      const transport = { resolveUrl: sandbox.stub().resolves(null) };
+      const out = await resolveWebsiteEntries(
+        transport,
+        [{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }],
+        undefined,
+      );
+      expect(out).to.deep.equal([{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }]);
+    });
+
+    it('resolves each distinct website url once via the shared cache', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+      };
+      const cache = new Map();
+      const entry = [{ url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE }];
+      // Two calls sharing one cache (mirrors the per-market edit loop) → one HTTP call.
+      await resolveWebsiteEntries(transport, entry, undefined, cache);
+      const out = await resolveWebsiteEntries(transport, entry, undefined, cache);
+      expect(out).to.deep.equal([{ url: 'acme.com', type: BRAND_URL_TYPE.WEBSITE }]);
+      expect(transport.resolveUrl).to.have.been.calledOnce;
     });
 
     it('keeps the raw url when is_valid:true but primary_url is empty (defensive)', async () => {
@@ -509,6 +532,29 @@ describe('brand-urls helpers', () => {
       ]);
       expect(transport.deleteBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, ['legacy']);
       expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 1 });
+    });
+
+    it('resolves a region-less website url once across markets (shared cache)', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+        listProjects: sandbox.stub().resolves({
+          items: [projectWith('p-us', 'us'), projectWith('p-de', 'de')],
+        }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [{ id: 'keep', url: 'acme.com' }] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://www.acme.com'] },
+        WS,
+        undefined,
+      );
+      expect(result.markets).to.equal(2);
+      // One region-less website url shared by both markets → resolved once (cache hit).
+      expect(transport.resolveUrl).to.have.been.calledOnce;
     });
 
     it('reuses a pre-fetched project listing instead of calling listProjects', async () => {
