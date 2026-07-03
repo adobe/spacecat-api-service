@@ -1,3 +1,10 @@
+# [1.621.0](https://github.com/adobe/spacecat-api-service/compare/v1.620.0...v1.621.0) (2026-07-03)
+
+
+### Features
+
+* guard edge deploy against out-of-scope suggestions for subpath sites ([#2595](https://github.com/adobe/spacecat-api-service/issues/2595)) ([f084db1](https://github.com/adobe/spacecat-api-service/commit/f084db102d6d2167835c04670a363b24c63bf07e))
+
 # [1.620.0](https://github.com/adobe/spacecat-api-service/compare/v1.619.0...v1.620.0) (2026-07-02)
 
 
