@@ -445,6 +445,33 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('createPromptsByIds', () => {
+    it('POSTs to /v2/.../aio/prompts with { items, tag_ids } and returns the list wrapper', async () => {
+      fetchStub.resolves(fetchOk({
+        page: 1, total: 1, items: [{ id: 'new-prompt', name: 'What is Acrobat?' }], existing_count: 0,
+      }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.createPromptsByIds(WORKSPACE_ID, PROJECT_ID, ['What is Acrobat?'], ['tag-cat-1', 'tag-child-1']);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('POST');
+      expect(call.url).to.match(/\/aio\/prompts$/);
+      expect(JSON.parse(call.body)).to.deep.equal({
+        items: ['What is Acrobat?'], tag_ids: ['tag-cat-1', 'tag-child-1'],
+      });
+      expect(result.items).to.deep.equal([{ id: 'new-prompt', name: 'What is Acrobat?' }]);
+    });
+
+    it('surfaces an upstream 500 (unresolvable tag id) as a SerenityTransportError', async () => {
+      fetchStub.resolves(fetchFail(500, { message: 'unknown tag id: bogus' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.createPromptsByIds(WORKSPACE_ID, PROJECT_ID, ['x'], ['bogus']))
+        .to.be.rejected.then((err) => expect(err.status).to.equal(500));
+    });
+  });
+
   describe('deletePromptsByIds', () => {
     it('DELETEs /v2/.../aio/prompts with body { ids }', async () => {
       fetchStub.resolves(fetchOk(null));
@@ -783,6 +810,26 @@ describe('Semrush REST transport', () => {
       );
       expect(JSON.parse(call.body)).to.deep.equal({ names });
     });
+
+    it('includes parent_id in the body when nesting under a parent', async () => {
+      fetchStub.resolves(fetchOk([{ id: 'child-1', name: 'category:Sneakers', parent_id: 'parent-1' }]));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.createProjectTags(WORKSPACE_ID, PROJECT_ID, ['category:Sneakers'], { parentId: 'parent-1' });
+
+      const call = await callOf(fetchStub);
+      expect(JSON.parse(call.body)).to.deep.equal({ names: ['category:Sneakers'], parent_id: 'parent-1' });
+    });
+
+    it('omits parent_id for an empty parentId (flat create)', async () => {
+      fetchStub.resolves(fetchOk([{ id: 'tag-1', name: 'category:Flat' }]));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.createProjectTags(WORKSPACE_ID, PROJECT_ID, ['category:Flat'], { parentId: '' });
+
+      const call = await callOf(fetchStub);
+      expect(JSON.parse(call.body)).to.deep.equal({ names: ['category:Flat'] });
+    });
   });
 
   describe('listProjectTags', () => {
@@ -799,7 +846,71 @@ describe('Semrush REST transport', () => {
       );
       expect(call.url).to.contain('parent_id=');
       expect(call.url).to.contain('search=');
+      expect(call.url).to.not.contain('draft=');
       expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+    });
+
+    it('drills a parent level and reads the draft view when requested', async () => {
+      fetchStub.resolves(fetchOk({ items: [], page: 1, total: 0 }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listProjectTags(WORKSPACE_ID, PROJECT_ID, { parentId: 'parent-1', draft: true });
+
+      const call = await callOf(fetchStub);
+      expect(call.url).to.contain('parent_id=parent-1');
+      expect(call.url).to.contain('draft=true');
+    });
+  });
+
+  describe('updateProjectTag', () => {
+    it('PATCHes /aio/tags/{tag_id} with { name, parent_id } and returns the updated tag', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'category:Renamed', parent_id: 'parent-1' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', {
+        name: 'category:Renamed', parentId: 'parent-1',
+      });
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('PATCH');
+      expect(call.url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags/tag-1`,
+      );
+      expect(JSON.parse(call.body)).to.deep.equal({ name: 'category:Renamed', parent_id: 'parent-1' });
+      expect(result).to.deep.equal({ id: 'tag-1', name: 'category:Renamed', parent_id: 'parent-1' });
+    });
+
+    it('omits parent_id when only renaming', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'category:Renamed' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', { name: 'category:Renamed' });
+
+      const call = await callOf(fetchStub);
+      expect(JSON.parse(call.body)).to.deep.equal({ name: 'category:Renamed' });
+    });
+
+    it('sends a literal null parent_id to promote a child to root (gate 1)', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'Sneakers', parent_id: null }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', {
+        name: 'Sneakers', parentId: null,
+      });
+
+      const call = await callOf(fetchStub);
+      expect(JSON.parse(call.body)).to.deep.equal({ name: 'Sneakers', parent_id: null });
+    });
+
+    it('surfaces an upstream 404 as a SerenityTransportError', async () => {
+      fetchStub.resolves(fetchFail(404, { message: 'not found' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'ghost', { name: 'category:X' }))
+        .to.be.rejected.then((err) => {
+          expect(err.status).to.equal(404);
+          expect(err.body).to.deep.equal({ message: 'not found' });
+        });
     });
   });
 

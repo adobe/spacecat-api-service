@@ -208,6 +208,15 @@ export const ORG_3_IMS_ORG_IDENT = 'GGGGGGGGHHHHHHHHIIIIIIII';
 export const SITE_4_ID = '44400000-4444-4444-b444-000000000444';
 export const SITE_4_BASE_URL = 'https://site4-delegate.example.com';
 
+// ── Activate-brand IT fixtures (ORG_3, PAID) ──
+// Two pending brands for the promote-path IT (test/it/shared/tests/
+// activate-brand-for-org.js), both tied to the existing ORG_3 site SITE_4 (reused
+// so the fixtures don't change the global site counts other ITs assert on): one
+// anchored brand that promotes to active, and one unanchored brand that resolves
+// to SITE_4 and hits the brands_base_site_unique 409.
+export const ACTIVATE_PENDING_BRAND_ID = 'ac000000-b000-4000-8000-000000000001';
+export const ACTIVATE_CONFLICT_BRAND_ID = 'ac000000-b000-4000-8000-000000000002';
+
 // ── ENTITLEMENT_3 (LLMO, PAID, ORG_3) ──
 
 export const ENTITLEMENT_3_ID = 'dd333333-3333-4333-b333-333333333333';

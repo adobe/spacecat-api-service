@@ -30,7 +30,16 @@ import {
   isPathPatternWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 
-import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
+import {
+  Suggestion as SuggestionModel,
+  GeoExperiment as GeoExperimentModel,
+  REVIEW_SOURCES,
+  REVIEW_VERDICTS,
+  REJECTION_CATEGORIES,
+  FEEDBACK_TIERS,
+  verdictToSignal,
+  toReviewView,
+} from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
@@ -50,12 +59,26 @@ import {
   isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { redactFeedbackContent } from '../support/feedback-redaction.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// Allowed state_transition values on a backoffice review (SITES-43974). Validated
+// so the Learning Agent corpus never receives arbitrary free-text transitions.
+const FEEDBACK_STATE_TRANSITIONS = [
+  'PENDING_VALIDATION->NEW',
+  'PENDING_VALIDATION->REJECTED',
+  'EDIT',
+];
+
+// Defensive cap on reviews returned by ?include=reviews. Expected volume per
+// suggestion is 2-3, but this bounds payload size (esp. with ?include=patches)
+// and is backed by idx_feedback_event_suggestion (suggestion_id, event_time).
+const FEEDBACK_REVIEW_READ_LIMIT = 100;
 
 async function isSitePlgTier(site, log) {
   try {
@@ -66,6 +89,43 @@ async function isSitePlgTier(site, log) {
     log.warn(`Failed to determine PLG tier for site ${site.getId()}: ${err.message}`);
     return false;
   }
+}
+
+/**
+ * Derives the feedback tier ('paid' | 'free') for a site from its ASO
+ * entitlement. PAID -> 'paid'; FREE_TRIAL / PLG / no entitlement -> 'free'.
+ * Never throws — defaults to 'free' on any lookup failure (SITES-43974).
+ *
+ * @param {Object} site - Site entity.
+ * @param {Object} log - logger.
+ * @returns {Promise<string>} one of FEEDBACK_TIERS.
+ */
+async function deriveFeedbackTier(site, log) {
+  try {
+    const enrollments = await site.getSiteEnrollments();
+    const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
+    const isPaid = entitlements.some(
+      (e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PAID',
+    );
+    return isPaid ? FEEDBACK_TIERS.PAID : FEEDBACK_TIERS.FREE;
+  } catch (err) {
+    log?.warn?.(`Failed to determine feedback tier for site ${site.getId?.()}: ${err.message}`);
+    return FEEDBACK_TIERS.FREE;
+  }
+}
+
+/**
+ * Parses an `?include=` query value into a set of requested includes.
+ * @param {string|undefined} includeParam
+ * @returns {Set<string>}
+ */
+function parseIncludes(includeParam) {
+  return new Set(
+    String(includeParam ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 }
 
 async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context, isPlgTier) {
@@ -270,6 +330,44 @@ function SuggestionsController(ctx, sqs, env) {
   }
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Loads the human-review history for a suggestion from feedback_event,
+   * newest-first, mapped to the API review view. Returns [] (never throws) when
+   * the feedback store is unavailable or the query fails — reviews are
+   * supplementary to the suggestion payload.
+   *
+   * @param {Object} context - request context.
+   * @param {string} suggestionId
+   * @param {Object} [opts]
+   * @param {boolean} [opts.includePatches=false]
+   * @returns {Promise<Array<Object>>}
+   */
+  const fetchReviewsForSuggestion = async (
+    context,
+    suggestionId,
+    { includePatches = false } = {},
+  ) => {
+    // Reviews are supplementary to the suggestion payload, so this read fails
+    // soft (returns []) rather than failing the whole getByID — intentionally
+    // different from the capture path, which returns 503 when the store is down.
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      context.log?.warn?.('feedback store (postgrestClient) unavailable; returning no reviews');
+      return [];
+    }
+    const { data, error } = await postgrestClient
+      .from('feedback_event')
+      .select('*')
+      .eq('suggestion_id', suggestionId)
+      .order('event_time', { ascending: false })
+      .limit(FEEDBACK_REVIEW_READ_LIMIT);
+    if (error) {
+      context.log?.error?.(`Failed to load reviews for suggestion ${suggestionId}: ${error.message}`);
+      return [];
+    }
+    return (data ?? []).map((row) => toReviewView(row, { includePatches }));
+  };
 
   /**
    * Filters suggestions to only granted ones when summit-plg is enabled for the site
@@ -626,7 +724,22 @@ function SuggestionsController(ctx, sqs, env) {
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
-    return ok(SuggestionDto.toJSON(suggestion, view, opportunity, locale));
+
+    const json = SuggestionDto.toJSON(suggestion, view, opportunity, locale);
+
+    // ?include=reviews composes human-review feedback_event rows at read time
+    // (no inline mirror on the suggestion). ?include=reviews,patches additionally
+    // surfaces the raw previous/edited fix (heavy — opt-in only).
+    const includes = parseIncludes(context.data?.include);
+    if (includes.has('reviews')) {
+      json.reviews = await fetchReviewsForSuggestion(
+        context,
+        suggestionId,
+        { includePatches: includes.has('patches') },
+      );
+    }
+
+    return ok(json);
   };
 
   /**
@@ -2755,7 +2868,158 @@ function SuggestionsController(ctx, sqs, env) {
     }
   };
 
+  /**
+   * Capture an ESE review verdict from the Backoffice (SITES-43974 / SITES-39001).
+   *
+   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews
+   *
+   * `source` is bound to 'backoffice' by the route (never trusted from the body —
+   * FR-10). `event_id` is a mandatory client-supplied idempotency key (FR-09):
+   * a duplicate collapses to a no-op (HTTP 200 with the existing row). Customer-
+   * derived fields are secret-scrubbed and the markdown is sanitised before
+   * insert. The raw patches are NOT echoed in the response.
+   *
+   * @param {Object} context - request context.
+   * @returns {Promise<Response>}
+   */
+  const createBackofficeReview = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    const body = isNonEmptyObject(context.data) ? context.data : {};
+    const {
+      eventId, verdict, detailMarkdown, rejectionCategory,
+      stateTransition, previousFix, editedFix,
+    } = body;
+
+    // FR-09: event_id is MANDATORY and client-supplied (no server fallback).
+    if (!hasText(eventId) || !isValidUUID(eventId)) {
+      return badRequest('event_id is required and must be a UUID');
+    }
+    // FR-10: a client must not self-assert a higher-trust source.
+    if (hasText(body.source) && body.source !== REVIEW_SOURCES.BACKOFFICE) {
+      return badRequest('source is derived from the route and must not be set in the body');
+    }
+    if (verdict !== REVIEW_VERDICTS.UP && verdict !== REVIEW_VERDICTS.DOWN) {
+      return badRequest('verdict must be "up" or "down"');
+    }
+    if (rejectionCategory != null
+      && !Object.values(REJECTION_CATEGORIES).includes(rejectionCategory)) {
+      return badRequest('invalid rejection_category');
+    }
+    if (stateTransition != null && !FEEDBACK_STATE_TRANSITIONS.includes(stateTransition)) {
+      return badRequest('invalid state_transition');
+    }
+    if (detailMarkdown != null) {
+      if (typeof detailMarkdown !== 'string') {
+        return badRequest('detail_markdown must be a string');
+      }
+      if (Buffer.byteLength(detailMarkdown, 'utf8') > 8192) {
+        return createResponse({ message: 'detail_markdown exceeds the 8 KB limit' }, 413);
+      }
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Suggestion not found');
+    }
+
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      return createResponse({ message: 'Feedback store unavailable' }, 503);
+    }
+
+    // reviewer_id is server-derived from the authenticated principal — never the body.
+    // NOTE: for IMS callers profile.email is the IMS user identifier (an opaque
+    // GUID like <id>@<authSrc>), NOT a mailbox. It is stable per user, so it
+    // serves reviewer-continuity as a training signal; it is documented as an
+    // opaque IMS user id (not "email") in schemas.yaml + the feedback_event
+    // column comment.
+    const { profile } = context.attributes?.authInfo ?? {};
+    const reviewerId = profile?.email ?? null;
+
+    const tier = await deriveFeedbackTier(site, context.log);
+    const signal = verdictToSignal(verdict);
+
+    const {
+      detailMarkdown: cleanMarkdown,
+      previousFix: cleanPreviousFix,
+      editedFix: cleanEditedFix,
+      scrubHits,
+    } = redactFeedbackContent({ detailMarkdown, previousFix, editedFix });
+
+    const scrubbed = Object.entries(scrubHits);
+    if (scrubbed.length > 0) {
+      context.log?.info?.(`feedback_capture.scrub_hit_total ${JSON.stringify(scrubHits)} suggestion=${suggestionId}`);
+    }
+
+    const row = {
+      event_id: eventId,
+      organization_id: site.getOrganizationId(),
+      site_id: siteId,
+      suggestion_id: suggestionId,
+      opportunity_type: opportunity.getType?.() ?? null,
+      source: REVIEW_SOURCES.BACKOFFICE,
+      signal,
+      reviewer_id: reviewerId,
+      detail_markdown: cleanMarkdown ?? null,
+      previous_fix: cleanPreviousFix ?? null,
+      edited_fix: cleanEditedFix ?? null,
+      state_transition: hasText(stateTransition) ? stateTransition : null,
+      rejection_category: rejectionCategory ?? null,
+      tier,
+    };
+
+    const { data, error } = await postgrestClient
+      .from('feedback_event')
+      .insert(row)
+      .select()
+      .single();
+
+    if (error) {
+      // 23505 = unique_violation on event_id -> idempotent no-op (FR-09).
+      if (error.code === '23505') {
+        const existing = await postgrestClient
+          .from('feedback_event')
+          .select('*')
+          .eq('event_id', eventId)
+          .single();
+        if (existing?.data) {
+          return ok(toReviewView(existing.data));
+        }
+      }
+      context.log?.error?.(`Failed to record review for suggestion ${suggestionId}: ${error.message}`);
+      return createResponse({ message: 'Failed to record review' }, 500);
+    }
+
+    return createResponse(toReviewView(data), 201);
+  };
+
   return {
+    createBackofficeReview,
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
