@@ -64,6 +64,7 @@ function fakeContext({
   spacecatBrands = [{ id: 'brand-1', name: 'Adobe' }],
   brandSemrushProjects = [],
   withBrandSemrushProject = false,
+  promiseToken = undefined,
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
@@ -72,7 +73,10 @@ function fakeContext({
     params: { spaceCatId: ORG_ID, brandId: BRAND_ID, ...params },
     request: { url },
     pathInfo: {
-      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+      headers: {
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+      },
     },
     attributes: {
       authInfo: { getType: () => authType },
@@ -108,6 +112,7 @@ describe('ElementsController', () => {
   let serviceStub;
   let createElementsServiceStub;
   let createElementsTransportStub;
+  let exchangePromiseTokenStub;
   let MockElementsTransportError;
   let ElementsController;
 
@@ -122,6 +127,7 @@ describe('ElementsController', () => {
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
+    exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
 
     MockElementsTransportError = class ElementsTransportError extends Error {
       constructor(status, message, body) {
@@ -155,6 +161,9 @@ describe('ElementsController', () => {
         resolveWorkspaceId: resolveWorkspaceIdStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
+      '../../src/support/utils.js': {
+        exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
+      },
     })).default;
   });
 
@@ -228,6 +237,74 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(404);
+    });
+
+    it('hints at the x-promise-token header when a non-IMS caller sends none', async () => {
+      const ctx = fakeContext({ authType: 'jwt' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(401);
+      const body = await readBody(res);
+      expect(body.error).to.equal('promiseTokenRequired');
+      expect(body.message).to.match(/x-promise-token/);
+    });
+  });
+
+  // ─── x-promise-token support ──────────────────────────────────────────────
+
+  describe('x-promise-token support', () => {
+    it('exchanges x-promise-token for an IMS token and forwards it upstream, bypassing the IMS-type gate', async () => {
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: 'spacecat-jwt-abc', promiseToken: 'promise-token-xyz',
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise-token-xyz');
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ imsToken: 'exchanged-ims-token' }),
+      );
+    });
+
+    it('decodes a URI-encoded x-promise-token header before exchanging', async () => {
+      const ctx = fakeContext({ promiseToken: 'promise%20token%20xyz' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise token xyz');
+    });
+
+    it('401s with a generic message (no leaked exchange detail) when the promise token exchange fails', async () => {
+      exchangePromiseTokenStub.rejects(new Error('upstream IMS exchange failed: secret detail'));
+      const log = fakeLog();
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: 'spacecat-jwt-abc', promiseToken: 'promise-token-xyz',
+      });
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(401);
+      const body = await readBody(res);
+      expect(body.message).to.equal('Invalid or expired promise token');
+      expect(log.error).to.have.been.calledWithMatch('elements: promise token exchange failed');
+    });
+
+    it('falls back to the Authorization bearer when x-promise-token is absent (existing behavior unchanged)', async () => {
+      const ctx = fakeContext({ bearer: 'ims-token-123' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ imsToken: 'ims-token-123' }),
+      );
+    });
+
+    it('still 401s a non-IMS caller with no x-promise-token (existing IMS-type gate unaffected)', async () => {
+      const ctx = fakeContext({ authType: 'jwt' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(401);
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
     });
   });
 

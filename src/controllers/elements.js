@@ -22,7 +22,8 @@ import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode, exchangePromiseToken } from '../support/utils.js';
+import { X_PROMISE_TOKEN_HEADER } from '../utils/constants.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -135,11 +136,24 @@ function extractQuery(context) {
 /**
  * Extracts and validates the IMS bearer token from the inbound Authorization header.
  * Throws 401 if missing or if the caller authenticated via a non-IMS mechanism.
+ *
+ * NOTE — this is NOT the only path into the handlers below: `x-promise-token`
+ * (see `resolveElementsImsToken`) is a second, always-on way to reach them
+ * without passing this function's IMS-type check, by exchanging the promise
+ * token for an IMS token instead of forwarding `Authorization` directly.
  */
 function requireImsBearer(ctx) {
   const authInfo = ctx?.attributes?.authInfo;
   if (authInfo?.getType && authInfo.getType() !== 'ims') {
-    throw new ErrorWithStatusCode('Elements proxy requires IMS authentication', 401);
+    // Reached only when x-promise-token was absent (resolveElementsImsToken
+    // checks that header first) — a non-IMS caller has no other way to
+    // authenticate to Semrush, so point them at the promise-token flow.
+    const err = new ErrorWithStatusCode(
+      `Elements proxy requires IMS authentication; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
+      401,
+    );
+    err.code = 'promiseTokenRequired';
+    throw err;
   }
   const header = ctx?.pathInfo?.headers?.authorization;
   if (!hasText(header) || !header.startsWith(BEARER_PREFIX)) {
@@ -190,8 +204,44 @@ export default function ElementsController(context, log, env) {
     throw new Error('Log required');
   }
 
-  function buildService(ctx) {
-    const imsToken = requireImsBearer(ctx);
+  /**
+   * Resolves the IMS access token to forward to the Semrush gateway.
+   *
+   * Preferred path: the caller sends `x-promise-token` (minted by
+   * POST /auth/v2/promise). This lets a caller authenticate to spacecat itself
+   * with a NON-IMS credential (e.g. a spacecat JWT on `Authorization`) while
+   * still supplying an IMS-exchangeable token for the upstream Semrush call.
+   * The promise token is checked FIRST and, when present, `requireImsBearer`
+   * (and its `authInfo.getType() === 'ims'` gate) is never invoked, since
+   * `Authorization` is not expected to carry an IMS token in that case.
+   *
+   * Fallback path: no `x-promise-token` — behaves exactly as before, requiring
+   * IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+   *
+   * Mirrors `resolveSemrushImsToken` in src/controllers/serenity.js, which
+   * proxies to the same Semrush workspace via a different Elements API surface.
+   */
+  async function resolveElementsImsToken(ctx) {
+    const promiseTokenHeader = ctx?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
+    if (hasText(promiseTokenHeader)) {
+      let decoded = promiseTokenHeader;
+      try {
+        decoded = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use as-is.
+      }
+      try {
+        return await exchangePromiseToken(ctx, decoded);
+      } catch (e) {
+        log.error('elements: promise token exchange failed', { error: e?.message });
+        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+      }
+    }
+    return requireImsBearer(ctx);
+  }
+
+  async function buildService(ctx) {
+    const imsToken = await resolveElementsImsToken(ctx);
     return createElementsService(createElementsTransport({ env, imsToken }));
   }
 
@@ -217,7 +267,8 @@ export default function ElementsController(context, log, env) {
         spacecatBrands,
       );
 
-      const result = await buildService(ctx).getUrlInspectorFilterDimensions(
+      const service = await buildService(ctx);
+      const result = await service.getUrlInspectorFilterDimensions(
         auth.workspaceId,
         extractQuery(ctx),
         spacecatBrands,
