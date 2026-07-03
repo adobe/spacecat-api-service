@@ -7877,6 +7877,64 @@ V2BrandListResponse:
       items:
         $ref: '#/V2Brand'
 
+V2BrandActivateInput:
+  type: object
+  description: |
+    Request body for activating a brand. Promotes an existing pending brand to
+    active (sets baseSiteId from the brand's onboarded primary site and flips
+    status to active), optionally generates AI prompts, and ensures a
+    brand-presence schedule.
+  required:
+    - generatePrompts
+  properties:
+    generatePrompts:
+      type: boolean
+      description: |
+        When `true`, asynchronous AI prompt generation is triggered for the
+        brand and the response includes a `promptGenerationJobId`.
+  example:
+    generatePrompts: true
+
+V2BrandActivateResponse:
+  type: object
+  description: |
+    Result of activating a brand: the brand is now active with its base site
+    resolved. Includes a `promptGenerationJobId` when prompt generation was
+    triggered and a `scheduleId` when a brand-presence schedule was ensured.
+  required:
+    - brandId
+    - status
+    - baseSiteId
+  properties:
+    brandId:
+      type: string
+      format: uuid
+      description: Brand UUID
+    status:
+      type: string
+      enum: [active]
+      description: Brand status after activation (always `active`)
+    baseSiteId:
+      type: string
+      format: uuid
+      description: ID of the brand's onboarded primary site, now set as its base site
+    promptGenerationJobId:
+      type: string
+      description: |
+        Identifier of the asynchronous AI prompt-generation job. Present only
+        when `generatePrompts` was `true`.
+    scheduleId:
+      type: string
+      description: |
+        Identifier of the brand-presence schedule that was created or ensured.
+        Present only when a schedule was created or already existed.
+  example:
+    brandId: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    status: 'active'
+    baseSiteId: 'b2c3d4e5-6789-01ab-cdef-2345678901ab'
+    promptGenerationJobId: 'c3d4e5f6-7890-12ab-cdef-3456789012ab'
+    scheduleId: 'd4e5f6a7-8901-23ab-cdef-4567890123ab'
+
 V2Category:
   type: object
   description: A category in the normalized categories table
@@ -9011,6 +9069,14 @@ UrlInspectorStats:
 UrlInspectorOwnedUrlRow:
   type: object
   properties:
+    urlId:
+      type: string
+      description: >-
+        Real source_urls.id for this URL, used by the URL Details "Prompt
+        Analysis" drilldown to key rpc_url_inspector_url_prompts on a genuine
+        uuid (LLMO-5992). Empty string when an older RPC build has not yet
+        shipped the column.
+      example: '44444444-4444-4444-4444-444444444444'
     url:
       type: string
       format: uri
@@ -10880,6 +10946,24 @@ SerenityPrompt:
         Tag names are assumed unique per Semrush project; if duplicates exist,
         only the last entry is retained.
       example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
+    tags:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the tag NAMES this prompt was created/updated with via the
+        legacy name-based write path (`SerenityPromptInput.tags` /
+        `SerenityUpdatePromptRequest.tags`). Only present on a create/update
+        response (`SerenityCreatePromptsResponse.created`, the
+        `updateSerenityPrompt` 200); absent on `GET /serenity/prompts` list
+        items, which carry `tagMap` instead.
+    tagIds:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the upstream tag ids this prompt was created/updated with via
+        the id-based write path (serenity-docs#24). Only present when the
+        request used `tagIds` rather than `tags` — mutually exclusive with a
+        non-empty `tags` on the same response.
 
 SerenityPromptListResponse:
   type: object
@@ -10894,7 +10978,12 @@ SerenityPromptListResponse:
 
 SerenityPromptInput:
   type: object
-  description: One row in a bulk-create prompts request.
+  description: |
+    One row in a bulk-create prompts request. `tags` (names, via the legacy
+    name-based upstream write path) and `tagIds` (upstream tag ids from a
+    prior tags list/create, via the id-based write path — serenity-docs#24)
+    are mutually exclusive: supply at most one. `tagIds`, when present, must
+    be non-empty.
   required: [text, geoTargetId, languageCode]
   properties:
     text: { type: string }
@@ -10902,6 +10991,12 @@ SerenityPromptInput:
       type: array
       items: { type: string }
       default: []
+      description: Tag NAMES. Mutually exclusive with tagIds.
+    tagIds:
+      type: array
+      items: { type: string }
+      minItems: 1
+      description: Upstream tag ids. Mutually exclusive with tags.
     geoTargetId:
       type: integer
       minimum: 1
@@ -10951,11 +11046,13 @@ SerenityUpdatePromptRequest:
   description: |
     Replace the prompt's text and tags. Carries the owning slice in
     `geoTargetId` + `languageCode` so the server can resolve the upstream
-    project without scanning. All four fields are required — the upstream
-    provider's API has no in-place update or GET-by-id, so the server runs
-    DELETE-old + POST-new and treats the body as the full next state.
-    Pass `tags: []` to clear tags.
-  required: [geoTargetId, languageCode, text, tags]
+    project without scanning. `geoTargetId`, `languageCode`, and `text` are
+    always required — the upstream provider's API has no in-place update or
+    GET-by-id, so the server runs DELETE-old + POST-new and treats the body
+    as the full next state. Exactly one of `tags` (pass `[]` to clear) or
+    `tagIds` (non-empty, id-based write path — serenity-docs#24) must also be
+    present; they are mutually exclusive.
+  required: [geoTargetId, languageCode, text]
   properties:
     geoTargetId:
       type: integer
@@ -10967,6 +11064,12 @@ SerenityUpdatePromptRequest:
     tags:
       type: array
       items: { type: string }
+      description: Tag NAMES. Mutually exclusive with tagIds.
+    tagIds:
+      type: array
+      items: { type: string }
+      minItems: 1
+      description: Upstream tag ids. Mutually exclusive with tags.
 
 SerenityBulkDeletePromptsRequest:
   type: object

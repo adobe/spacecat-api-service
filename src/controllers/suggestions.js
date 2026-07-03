@@ -26,6 +26,8 @@ import {
   isInteger,
   isValidUUID,
   isValidUrl,
+  isWithinSiteScope,
+  isPathPatternWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 
 import {
@@ -1868,7 +1870,8 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
-    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+    const siteBaseURL = site.getBaseURL();
+    const apexBaseUrl = getHostName(siteBaseURL) || siteBaseURL;
 
     if (!isValidUUID(opportunityId)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
@@ -1925,6 +1928,23 @@ function SuggestionsController(ctx, sqs, env) {
     const pathSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
+
+    const isSuggestionInScope = (suggestion) => {
+      const data = suggestion.getData();
+      if (isDomainWideSuggestion(suggestion) || isPathSuggestion(suggestion)) {
+        const patterns = data?.allowedRegexPatterns;
+        if (!isNonEmptyArray(patterns)) {
+          return true;
+        }
+        return patterns.every((pattern) => isPathPatternWithinSiteScope(pattern, siteBaseURL));
+      }
+      const url = getSuggestionUrl(data, opportunity);
+      if (!url) {
+        return true;
+      }
+      return isWithinSiteScope(url, siteBaseURL);
+    };
+
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
@@ -1936,6 +1956,14 @@ function SuggestionsController(ctx, sqs, env) {
           index,
           message: 'Suggestion not found',
           statusCode: 404,
+        });
+      } else if (!isSuggestionInScope(suggestion)) {
+        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} URL is outside site scope`);
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion URL is outside the scope of the site base URL',
+          statusCode: 400,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
         context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);

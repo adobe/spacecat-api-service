@@ -684,12 +684,25 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  * @param {string} projectId - AIO project id.
  * @param {string} parentId - '' for roots, an upstream tag id for its children.
  * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
+ * @param {(item: { id: string, name: string }) => boolean} [stopWhen] - optional
+ *   early-exit predicate. When a fetched page contains a matching item, that
+ *   page's items are still collected in full but no further pages are
+ *   requested. Callers that only need to test membership (e.g. resolve-or-
+ *   create) pass this to avoid paginating the whole tree; omit it to collect
+ *   every item, as every pre-existing caller does.
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
  *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
  * }> }>}
  */
-export async function listProjectTagTree(transport, semrushWorkspaceId, projectId, parentId, log) {
+export async function listProjectTagTree(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  parentId,
+  log,
+  stopWhen,
+) {
   const items = [];
   const LIMIT = 100;
   const PAGE_LIMIT = 50;
@@ -700,10 +713,11 @@ export async function listProjectTagTree(transport, semrushWorkspaceId, projectI
       parentId, page, limit: LIMIT, draft: true,
     });
     const batch = Array.isArray(resp?.items) ? resp.items : [];
+    let matched = false;
     for (const t of batch) {
       // AIOTag.id is required upstream; guard defensively and skip a malformed row.
       if (t && typeof t.id === 'string' && t.id) {
-        items.push({
+        const item = {
           id: t.id,
           name: typeof t.name === 'string' ? t.name : '',
           parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
@@ -714,8 +728,15 @@ export async function listProjectTagTree(transport, semrushWorkspaceId, projectI
               name: typeof p?.name === 'string' ? p.name : '',
             }))
             : null,
-        });
+        };
+        items.push(item);
+        if (stopWhen && stopWhen(item)) {
+          matched = true;
+        }
       }
+    }
+    if (matched) {
+      break;
     }
     if (batch.length < LIMIT) {
       break;

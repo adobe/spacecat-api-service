@@ -1,3 +1,29 @@
+# [1.621.0](https://github.com/adobe/spacecat-api-service/compare/v1.620.0...v1.621.0) (2026-07-03)
+
+
+### Features
+
+* guard edge deploy against out-of-scope suggestions for subpath sites ([#2595](https://github.com/adobe/spacecat-api-service/issues/2595)) ([f084db1](https://github.com/adobe/spacecat-api-service/commit/f084db102d6d2167835c04670a363b24c63bf07e))
+
+# [1.620.0](https://github.com/adobe/spacecat-api-service/compare/v1.619.0...v1.620.0) (2026-07-02)
+
+
+### Features
+
+* **serenity:** id-based prompt writes, closed-dimension tag resolve, promote-to-root ([#2741](https://github.com/adobe/spacecat-api-service/issues/2741)) ([395c7a7](https://github.com/adobe/spacecat-api-service/commit/395c7a78f0b5a7bd9768716aa59adb6647e44184)), closes [serenity-docs#24](https://github.com/serenity-docs/issues/24) [#21](https://github.com/adobe/spacecat-api-service/issues/21) [serenity-docs#24](https://github.com/serenity-docs/issues/24) [Hi#level](https://github.com/Hi/issues/level) [#2737](https://github.com/adobe/spacecat-api-service/issues/2737)
+
+# [1.619.0](https://github.com/adobe/spacecat-api-service/compare/v1.618.0...v1.619.0) (2026-07-02)
+
+
+### Bug Fixes
+
+* Return cited prompts in URL Inspector details for Postgres-backed (-pg) domains | LLMO-5992 ([#2743](https://github.com/adobe/spacecat-api-service/issues/2743)) ([067969a](https://github.com/adobe/spacecat-api-service/commit/067969af2cb2c52da182a8db106ef867ec73cf48))
+
+
+### Features
+
+* self-serve activate-brand endpoint | LLMO-5605 ([#2706](https://github.com/adobe/spacecat-api-service/issues/2706)) ([5155192](https://github.com/adobe/spacecat-api-service/commit/5155192d632a29b2ea8aa3a7ec9439e0bc0f13c5))
+
 # [1.618.0](https://github.com/adobe/spacecat-api-service/compare/v1.617.0...v1.618.0) (2026-07-02)
 
 
