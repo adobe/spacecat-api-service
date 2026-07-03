@@ -26,7 +26,7 @@ import { dateToIsoWeek, getWeekDateRange } from './llmo-brand-presence.js';
  * RPCs are NOT touched; we only rewrite the inbound date range and relabel the
  * outbound dates in the SpaceCat read path.
  *
- * Model (see the approved plan for the full derivation):
+ * Model:
  *   - anchorMonday    = Monday-UTC of the OLDEST canned week (per-site constant)
  *   - canned week i   covers [anchorMonday + i*7d, +7d), i in 0..3
  *   - phase p         = floor((thisMondayUTC - anchorMonday)/7d) mod 4
