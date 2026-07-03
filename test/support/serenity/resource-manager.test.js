@@ -239,13 +239,19 @@ describe('resource-manager — releaseAiSurplus', () => {
     expect(r.target).to.deep.equal({ projects: 2, prompts: 200 });
   });
 
-  it('is best-effort — swallows a read/transfer failure and returns released:false', async () => {
+  it('is best-effort — swallows an EXPECTED transport failure and returns released:false', async () => {
     const warn = sinon.spy();
     const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
-    t.getWorkspaceResources.withArgs(CHILD).rejects(new Error('read boom'));
+    t.getWorkspaceResources.withArgs(CHILD).rejects(new SerenityTransportError(503, 'transport boom'));
     const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
     expect(r).to.deep.equal({ released: false });
     expect(warn).to.have.been.called;
+  });
+
+  it('propagates an UNEXPECTED error (e.g. a bug) rather than hiding it', async () => {
+    const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
+    t.getWorkspaceResources.withArgs(CHILD).rejects(new TypeError('undefined is not a function'));
+    await expect(releaseAiSurplus(t, { childId: CHILD, poll }, log)).to.be.rejectedWith(TypeError);
   });
 
   it('exports the default blocks', () => {
