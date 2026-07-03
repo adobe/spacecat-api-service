@@ -18,7 +18,7 @@ import { SerenityTransportError } from '../../../src/support/serenity/rest-trans
 import { ErrorWithStatusCode } from '../../../src/support/utils.js';
 import {
   roundUpToBlock, promptUnits, modelChangeUnits, marketNeed, readAiTotals,
-  ensureAiHeadroom, releaseAiSurplus, DEFAULT_BLOCKS,
+  ensureAiHeadroom, releaseAiSurplus, DEFAULT_BLOCKS, DEFAULT_POLL,
 } from '../../../src/support/serenity/resource-manager.js';
 
 use(chaiAsPromised);
@@ -247,5 +247,10 @@ describe('resource-manager — releaseAiSurplus', () => {
 
   it('exports the default blocks', () => {
     expect(DEFAULT_BLOCKS).to.deep.equal({ projects: 1, prompts: 100 });
+  });
+
+  it('DEFAULT_POLL.sleep resolves against the real timer', async () => {
+    await DEFAULT_POLL.sleep(0); // exercises the real-clock sleep default
+    expect(DEFAULT_POLL.attempts).to.be.a('number');
   });
 });
