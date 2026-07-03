@@ -1,3 +1,10 @@
+# [1.622.0](https://github.com/adobe/spacecat-api-service/compare/v1.621.0...v1.622.0) (2026-07-03)
+
+
+### Features
+
+* introduce semrush elements apis wrapper for llmo ui ([#2666](https://github.com/adobe/spacecat-api-service/issues/2666)) ([5dc6d3b](https://github.com/adobe/spacecat-api-service/commit/5dc6d3b647f9c331d5808153d0a2c25db0ba59cf))
+
 # [1.621.0](https://github.com/adobe/spacecat-api-service/compare/v1.620.0...v1.621.0) (2026-07-03)
 
 
