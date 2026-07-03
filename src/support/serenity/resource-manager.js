@@ -35,6 +35,7 @@
  */
 
 import { ErrorWithStatusCode } from '../utils.js';
+import { SerenityTransportError } from './rest-transport.js';
 import { pollUntilCreated } from './workspace-lifecycle.js';
 import {
   ERROR_CODES, isPoolExhausted, isWorkspaceNotReady,
@@ -58,7 +59,7 @@ export const PROMPT_BLOCK = 100;
 export const DEFAULT_BLOCKS = Object.freeze({ projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK });
 
 /** The AI dimensions this allocator moves. */
-const DIMS = /** @type {const} */ (['projects', 'prompts']);
+const DIMS = Object.freeze(/** @type {const} */ (['projects', 'prompts']));
 
 /** Real-clock sleep; overridable via the injected `poll.sleep` in tests. */
 const realSleep = (ms) => new Promise((resolve) => {
@@ -300,6 +301,12 @@ export async function releaseAiSurplus(transport, {
     await transferAndSettle(transport, childId, target, poll, log);
     return { released: true, target };
   } catch (e) {
+    // Best-effort for EXPECTED failures (transport / pool / busy) — a reconciler converges strays.
+    // Let unexpected bugs (TypeError, malformed-response Error) propagate so they surface in
+    // monitoring rather than disappearing into a warn log.
+    if (!(e instanceof SerenityTransportError) && !(e instanceof ErrorWithStatusCode)) {
+      throw e;
+    }
     log?.warn?.(`SERENITY_ALLOC releaseAiSurplus best-effort failure for ${childId}: ${e?.message}`);
     return { released: false };
   }
