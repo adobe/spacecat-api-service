@@ -11,16 +11,9 @@
  */
 
 import { resolveElementModel } from '../constants.js';
-// Reused for exact parity with the legacy Brand Presence `weeks` endpoint. These are
-// pure, side-effect-free ISO-week helpers exported by the legacy controller; importing
-// them guarantees identical week boundaries (incl. year-edge cases like 2026-W01 →
-// 2025-12-29) without re-deriving the math here.
-// TODO(LLMO-6011, productization): extract these to a shared date util so the elements
-// layer no longer imports from the controller layer.
-import {
-  generateIsoWeekRange,
-  getWeekDateRange,
-} from '../../../controllers/llmo/llmo-brand-presence.js';
+// Pure ISO-week helpers live in the support layer (week-utils.js) so this file does not
+// import from the controller layer — see week-utils.js for the parity note.
+import { generateIsoWeekRange, getWeekDateRange } from '../week-utils.js';
 
 /**
  * Builds the payload for the Weeks filter-dimensions element (row 5).
