@@ -16,6 +16,21 @@ This guide helps service teams request and integrate Service-to-Service (S2S) au
 
 ---
 
+## ⚠️ Host-driven product context
+
+**The Fastly edge sets the `x-product` request header based on the request `Host`. Any client-supplied `x-product` value is overwritten.** Choose the host that matches your product:
+
+| Consumer product | Production host | Dev / CI host |
+|---|---|---|
+| **LLMO** | `https://llmo.experiencecloud.live` | `https://llmo.experiencecloud.page` |
+| **ASO** (and everything else) | `https://spacecat.experiencecloud.live` | `https://spacecat.experiencecloud.live` |
+
+This affects every S2S call, including `/auth/s2s/login`. Mint your session token via the same host you intend to call APIs on. An LLMO consumer that mints a token via `spacecat.experiencecloud.live` receives an ASO-context JWT and will fail the per-product entitlement check on tenant-scoped reads even if the underlying org has a valid LLMO entitlement.
+
+The examples and URL table below use `spacecat.experiencecloud.live` for ASO consumers; LLMO consumers should substitute the LLMO host throughout.
+
+---
+
 ## Prerequisites
 
 Before requesting an S2S account, ensure you have:
@@ -67,7 +82,7 @@ Technical Contact:
 
 > ⚠️ **IMPORTANT**:
 - Add `mysticat-s2s-request` lable on ticket.
-- Share ticket on channel [#aem-sites-optimizer-engineering](https://adobe.enterprise.slack.com/archives/C05A45JBP9N) with taging group `@mysticat-s2s-admin`.
+- Share ticket on channel [#mysticat-engineering](https://adobe.enterprise.slack.com/archives/C0A91S5UKRC) with taging group `@mysticat-s2s-admin`.
 - Permission is subject to approval. The SpaceCat Security Team reserves the right to grant or deny access based on security requirements and business justification.
 
 ### Step 2: Capability Review & Approval
@@ -76,10 +91,13 @@ The S2S Admin and SpaceCat Security Team will review your JIRA request:
 
 - **Read capabilities** (`*:read`): Generally approved quickly
 - **Write capabilities** (`*:write`): Require business justification and scrutiny
-- **Restricted capabilities**: The following are typically denied:
-  - `fixEntity:write` - Never granted
+- **Restricted capabilities**: The following require executive approval:
+  - `fixEntity:write` - Rarely granted, requires executive approval
+  - `fixEntity:create` - Rarely granted, requires executive approval
   - `site:write` - Rarely granted, requires executive approval
+  - `site:create` - Rarely granted, requires executive approval
   - `organization:write` - Rarely granted, requires executive approval
+  - `configuration:write` - Rarely granted, requires executive approval
 
 The team will respond via JIRA with approval or request additional information.
 
@@ -212,10 +230,10 @@ async function getSpaceCatSessionToken(imsAccessToken, imsOrgId) {
 Use the session token for subsequent SpaceCat API calls:
 
 ```javascript
-// Example: Get all sites
-async function getSites(sessionToken) {
+// Example: Get a specific site by ID
+async function getSite(sessionToken, siteId) {
   const response = await axios.get(
-    'https://spacecat.experiencecloud.live/api/ci/sites',
+    `https://spacecat.experiencecloud.live/api/ci/sites/${siteId}`,
     {
       headers: {
         'Authorization': `Bearer ${sessionToken}`,
@@ -544,15 +562,23 @@ curl -X POST 'https://ims-na1-stg1.adobelogin.com/ims/token/v3' \
 
 **Common Capability to Endpoint Mapping Examples**:
 ```
-GET /sites                              → site:read
+GET /sites                              → site:readAll        (cross-tenant LIST)
+GET /sites/{siteId}                     → site:read           (tenant-scoped READ)
 POST /sites                             → site:write
 GET /sites/{siteId}/audits              → audit:read
 POST /audits                            → audit:write
 GET /sites/{siteId}/opportunities       → opportunity:read
 POST /sites/{siteId}/opportunities      → opportunity:write
-GET /organizations                      → organization:read
+GET /organizations                      → organization:readAll (cross-tenant LIST)
+GET /organizations/{id}                 → organization:read    (tenant-scoped READ)
 PATCH /organizations/{id}               → organization:write
 ```
+
+> **`readAll` vs `read`**: list endpoints (`GET /sites`, `GET /organizations`) are
+> gated on the `readAll` capability; per-id reads (`GET /sites/{siteId}`,
+> `GET /organizations/{id}`) are gated on `read` and require a customer-scoped
+> S2S session token (one minted with the resource's owning `imsOrgId`).
+> See `READALL_CAPABILITY_DESIGN.md` for the trust model.
 
 ### Issue: Consumer Suspended
 
@@ -577,6 +603,40 @@ PATCH /organizations/{id}               → organization:write
 4. Test upgraded capabilities in dev first
 5. Request production upgrade after dev validation
 
+### Issue: `GET /sites` or `GET /organizations` returns 413 Payload Too Large
+
+**Symptoms**:
+```
+HTTP/2 413
+x-error: Response payload size exceeded maximum allowed payload size (6000000 bytes).
+```
+
+**Cause**: AWS Lambda caps response payloads at 6 MB. The full sites
+list (~7.5 MB uncompressed, 11k+ sites as of 2026-05-08) exceeds that.
+The SpaceCat API Gateway honours `Accept-Encoding`, and any of `gzip`,
+`deflate`, or `br` brings the response well under the cap.
+
+| Encoding | Compressed `/sites` size | Notes |
+|---|---|---|
+| `br` (Brotli) | ~865 KB | Best ratio. Server prefers this when offered. |
+| `gzip` | ~933 KB | Universally supported; Python `requests` decodes natively. |
+| (none) | ~7.5 MB → **413** | Default for raw `curl`. |
+
+**Resolution**: send `Accept-Encoding: gzip, deflate, br` (or any subset
+your client supports) on every request to `/sites` and `/organizations`.
+Most HTTP clients do this transparently:
+
+| Client | Behaviour |
+|---|---|
+| `curl` | does **not** send `Accept-Encoding` by default — pass `--compressed` or `-H 'Accept-Encoding: gzip, deflate, br'` |
+| Python `requests` | sends `Accept-Encoding: gzip, deflate` automatically and decodes transparently. For Brotli install the `brotli` package — otherwise stick to gzip (the size delta is ~7%). |
+| Node `fetch` / `axios` | send `Accept-Encoding` automatically; Node 18+ decodes Brotli natively. |
+| JVM `HttpClient` | sends `Accept-Encoding` automatically since Java 11; Brotli requires the `brotli4j` library. |
+
+If your client cannot send any compression, file an S2S admin ticket —
+the long-term fix is server-side cursor pagination (see
+`READALL_CAPABILITY_DESIGN.md` "Operational Bounds").
+
 ---
 
 ## Capability Reference
@@ -593,12 +653,17 @@ PATCH /organizations/{id}               → organization:write
 | `organization:write` | Modify organizations | Update org settings (rarely granted) |
 | `opportunity:read` | Read opportunities | Access recommendations, issues |
 | `suggestion:read` | Read AI suggestions | Access AI-generated suggestions |
+| `configuration:read` | Read platform configuration | Access handlers, jobs, queue config |
+| `configuration:write` | Modify platform configuration | Update handlers, jobs, queues, audit types (rarely granted) |
 
-### Restricted Capabilities (Typically Denied)
+### Restricted Capabilities (Require Executive Approval)
 
-- `fixEntity:write` - Never granted, internal use only
+- `fixEntity:write` - Rarely granted, requires executive approval
+- `fixEntity:create` - Rarely granted, requires executive approval
 - `site:write` - Rarely granted, requires executive approval
+- `site:create` - Rarely granted, requires executive approval
 - `organization:write` - Rarely granted, requires executive approval
+- `configuration:write` - Rarely granted, requires executive approval
 
 ---
 
@@ -665,10 +730,21 @@ curl -X GET https://spacecat.experiencecloud.live/api/ci/sites/${SITE_ID}/opport
 
 ### Environment URLs
 
+The host you call determines the `x-product` value at the edge — see [Host-driven product context](#️-host-driven-product-context).
+
+**ASO consumers (and everything that is not LLMO):**
+
 | Environment | IMS Token Endpoint | SpaceCat S2S Login | SpaceCat API Base |
 |-------------|-------------------|-------------------|-------------------|
 | **Development/Stage** | `https://ims-na1-stg1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/ci/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/ci` |
 | **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/v1/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/v1` |
+
+**LLMO consumers:**
+
+| Environment | IMS Token Endpoint | SpaceCat S2S Login | SpaceCat API Base |
+|-------------|-------------------|-------------------|-------------------|
+| **Development/Stage** | `https://ims-na1-stg1.adobelogin.com/ims/token/v3` | `https://llmo.experiencecloud.page/api/ci/auth/s2s/login` | `https://llmo.experiencecloud.page/api/ci` |
+| **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://llmo.experiencecloud.live/api/v1/auth/s2s/login` | `https://llmo.experiencecloud.live/api/v1` |
 
 ### Token Lifetimes
 

@@ -13,6 +13,14 @@
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { generateKeyPair, exportSPKI, SignJWT } from 'jose';
 
+import {
+  CONSUMER_1_CLIENT_ID,
+  CONSUMER_1_IMS_ORG_ID,
+  CONSUMER_2_CLIENT_ID,
+  CONSUMER_2_IMS_ORG_ID,
+  BRAND_MANAGER_SUBJECT,
+} from './seed-ids.js';
+
 const ISSUER = 'https://spacecat.experiencecloud.live';
 const AUDIENCE = 'spacecat-users';
 const IMS_ORG_IDENT = 'AAAAAAAABBBBBBBBCCCCCCCC';
@@ -68,6 +76,47 @@ export async function createUserToken() {
     email: 'test-user@example.com',
     is_admin: false,
     is_llmo_administrator: false,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * LLMO administrator — same ORG_1 tenancy as the `user` persona (so org/site access resolves
+ * identically) but with `is_llmo_administrator: true`. Required to reach the LLMO Cloudflare
+ * onboarding endpoints, which gate every handler behind `AccessControlUtil.isLLMOAdministrator()`
+ * (a raw JWT-claim check with no admin bypass — even the `admin` persona is denied without it).
+ */
+export async function createLlmoAdminToken() {
+  return signToken({
+    sub: 'test-llmo-admin@example.com',
+    email: 'test-llmo-admin@example.com',
+    is_admin: false,
+    is_llmo_administrator: true,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * Resource-scoped state-layer manager (hybrid-model §8.3). Member of ORG_1 with
+ * an EMPTY JWT facs_permissions set — its `can_manage_users` authority comes
+ * solely from a seeded state-layer binding on MANAGED_BRAND_ID. `sub` must match
+ * the seeded binding's `subject_id` (BRAND_MANAGER_SUBJECT).
+ */
+export async function createBrandManagerToken() {
+  return signToken({
+    sub: BRAND_MANAGER_SUBJECT,
+    email: BRAND_MANAGER_SUBJECT,
+    is_admin: false,
+    is_llmo_administrator: false,
+    facs_permissions: [],
     tenants: [{
       id: IMS_ORG_IDENT,
       subServices: [],
@@ -157,18 +206,111 @@ export async function createDelegatedUserNoSourceToken() {
   });
 }
 
+/**
+ * Read-only admin — is_admin: false, is_read_only_admin: true.
+ * The readOnlyAdminWrapper evaluates a LaunchDarkly feature flag before granting
+ * access; without LD configured (e.g. in IT tests) the wrapper is fail-closed
+ * and returns 403 for all routes. Use this persona to verify fail-closed behaviour
+ * or in environments where the LD flag is enabled.
+ */
+export async function createReadOnlyAdminToken() {
+  return signToken({
+    sub: 'test-readonly-admin@adobe.com',
+    email: 'test-readonly-admin@adobe.com',
+    is_admin: false,
+    is_read_only_admin: true,
+    is_llmo_administrator: false,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * Mints an S2S consumer JWT. The wrapper looks up
+ * `Consumer.findByClientIdAndImsOrgId(client_id, org)`, so the seeded Consumer row
+ * must use these same identifiers and ACTIVE status for the request to be honored.
+ *
+ * @param {{ clientId: string, imsOrgId: string }} opts
+ * @returns {Promise<string>}
+ */
+export async function createS2SConsumerToken({ clientId, imsOrgId }) {
+  return signToken({
+    sub: `s2s:${clientId}`,
+    is_s2s_consumer: true,
+    client_id: clientId,
+    org: imsOrgId,
+  });
+}
+
+/**
+ * S2S consumer with NO readAll capabilities (only site:read + site:write - CONSUMER_1).
+ * Used to assert that the readAll route remap rejects callers that lack the new capability.
+ */
+export async function createS2SConsumerReadOnlyToken() {
+  return createS2SConsumerToken({
+    clientId: CONSUMER_1_CLIENT_ID,
+    imsOrgId: CONSUMER_1_IMS_ORG_ID,
+  });
+}
+
+/**
+ * S2S token whose (client_id, org) pair has NO Consumer row in the database.
+ * Exercises the Layer 1 trust boundary: a token signed correctly by the auth-service
+ * is still rejected by the wrapper if the Consumer record does not exist.
+ */
+export async function createS2SConsumerUnknownToken() {
+  return createS2SConsumerToken({
+    clientId: 'unknown-client-id-999999999999',
+    imsOrgId: CONSUMER_1_IMS_ORG_ID,
+  });
+}
+
+/**
+ * S2S consumer holding `site:readAll` + `organization:readAll` (CONSUMER_2).
+ * Used to assert the positive path for cross-tenant list endpoints.
+ */
+export async function createS2SConsumerReadAllToken() {
+  return createS2SConsumerToken({
+    clientId: CONSUMER_2_CLIENT_ID,
+    imsOrgId: CONSUMER_2_IMS_ORG_ID,
+  });
+}
+
 export async function createAllTokens() {
   const [
-    admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    admin, user, trialUser, llmoAdmin,
+    delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    readOnlyAdmin, brandManager,
+    s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
     createUserToken(),
     createTrialUserToken(),
+    createLlmoAdminToken(),
     createDelegatedUserToken(),
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
+    createReadOnlyAdminToken(),
+    createBrandManagerToken(),
+    createS2SConsumerReadOnlyToken(),
+    createS2SConsumerReadAllToken(),
+    createS2SConsumerUnknownToken(),
   ]);
   return {
-    admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    admin,
+    user,
+    trialUser,
+    llmoAdmin,
+    delegatedUser,
+    delegatedUserTruncated,
+    delegatedUserNoSource,
+    readOnlyAdmin,
+    brandManager,
+    s2sConsumerReadOnly,
+    s2sConsumerReadAll,
+    s2sConsumerUnknown,
   };
 }

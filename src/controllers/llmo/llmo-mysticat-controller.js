@@ -16,15 +16,26 @@ import {
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler, createCompetitorSummaryHandler, createTopicsHandler,
   createTopicPromptsHandler,
+  createPromptExecutionStatusHandler,
   createSearchHandler,
   createTopicDetailHandler,
   createPromptDetailHandler,
+  createPromptDetailByPromptIdHandler,
   createExecutionSourcesHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
   createRegionsHandler,
 } from './llmo-brand-presence.js';
+import {
+  createUrlInspectorStatsHandler,
+  createUrlInspectorOwnedUrlsHandler,
+  createUrlInspectorTrendingUrlsHandler,
+  createUrlInspectorCitedDomainsHandler,
+  createUrlInspectorDomainUrlsHandler,
+  createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
+} from './llmo-url-inspector.js';
 import {
   createAgenticTrafficGlobalGetHandler,
   createAgenticTrafficGlobalPostHandler,
@@ -38,11 +49,29 @@ import {
   createAgenticTrafficByStatusHandler,
   createAgenticTrafficByUserAgentHandler,
   createAgenticTrafficByUrlHandler,
+  createAgenticTrafficHitsByUrlsHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
+  createAgenticTrafficUrlsExportHandler,
+  createAgenticTrafficUrlsExportStatusHandler,
 } from './llmo-agentic-traffic.js';
+import {
+  createReferralTrafficFilterDimensionsHandler,
+  createReferralTrafficKpisHandler,
+  createReferralTrafficTrendHandler,
+  createReferralTrafficByPlatformHandler,
+  createReferralTrafficByRegionHandler,
+  createReferralTrafficByPageIntentHandler,
+  createReferralTrafficByUrlHandler,
+  createReferralTrafficUrlTrendHandler,
+  createReferralTrafficBusinessImpactHandler,
+  createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
+  createReferralTrafficHasDataHandler,
+} from './llmo-referral-traffic.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -104,13 +133,32 @@ function LlmoMysticatController(ctx) {
   const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
   const getTopics = createTopicsHandler(getOrgAndValidateAccess);
   const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
+  const getPromptExecutionStatus = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
   const getSearch = createSearchHandler(getOrgAndValidateAccess);
   const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
   const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetailByPromptId = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
   const getExecutionSources = createExecutionSourcesHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorStats = createUrlInspectorStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorOwnedUrls = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorTrendingUrls = createUrlInspectorTrendingUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorCitedDomains = createUrlInspectorCitedDomainsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorDomainUrls = createUrlInspectorDomainUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorUrlPrompts = createUrlInspectorUrlPromptsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorFilterDimensions = createUrlInspectorFilterDimensionsHandler(
+    getOrgAndValidateAccess,
+  );
   const getRegions = createRegionsHandler();
   const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
     validateGlobalAgenticTrafficReadAccess,
@@ -150,6 +198,9 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getAgenticTrafficByUrl = createAgenticTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficHitsByUrls = createAgenticTrafficHitsByUrlsHandler(
+    getSiteAndValidateAccess,
+  );
   const getAgenticTrafficFilterDimensions = createAgenticTrafficFilterDimensionsHandler(
     getSiteAndValidateAccess,
   );
@@ -158,6 +209,34 @@ function LlmoMysticatController(ctx) {
   const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
     getSiteAndValidateAccess,
   );
+  const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
+  const exportAgenticTrafficUrls = createAgenticTrafficUrlsExportHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlsExportStatus = createAgenticTrafficUrlsExportStatusHandler(
+    getSiteAndValidateAccess,
+  );
+
+  const getReferralTrafficFilterDimensions = createReferralTrafficFilterDimensionsHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficKpis = createReferralTrafficKpisHandler(getSiteAndValidateAccess);
+  const getReferralTrafficTrend = createReferralTrafficTrendHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByPlatform = createReferralTrafficByPlatformHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByRegion = createReferralTrafficByRegionHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByPageIntent = createReferralTrafficByPageIntentHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByUrl = createReferralTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getReferralTrafficUrlTrend = createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess);
+  const getReferralTrafficBusinessImpact = createReferralTrafficBusinessImpactHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByDevice = createReferralTrafficByDeviceHandler(getSiteAndValidateAccess);
+  const getReferralTrafficHasData = createReferralTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -167,13 +246,22 @@ function LlmoMysticatController(ctx) {
     getSentimentOverview,
     getTopics,
     getTopicPrompts,
+    getPromptExecutionStatus,
     getSearch,
     getTopicDetail,
     getPromptDetail,
+    getPromptDetailByPromptId,
     getExecutionSources,
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
+    getUrlInspectorStats,
+    getUrlInspectorOwnedUrls,
+    getUrlInspectorTrendingUrls,
+    getUrlInspectorCitedDomains,
+    getUrlInspectorDomainUrls,
+    getUrlInspectorUrlPrompts,
+    getUrlInspectorFilterDimensions,
     getRegions,
     getAgenticTrafficGlobal,
     postAgenticTrafficGlobal,
@@ -185,10 +273,26 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficByStatus,
     getAgenticTrafficByUserAgent,
     getAgenticTrafficByUrl,
+    getAgenticTrafficHitsByUrls,
     getAgenticTrafficFilterDimensions,
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
+    getAgenticTrafficHasData,
+    exportAgenticTrafficUrls,
+    getAgenticTrafficUrlsExportStatus,
+    getReferralTrafficFilterDimensions,
+    getReferralTrafficKpis,
+    getReferralTrafficTrend,
+    getReferralTrafficByPlatform,
+    getReferralTrafficByRegion,
+    getReferralTrafficByPageIntent,
+    getReferralTrafficByUrl,
+    getReferralTrafficUrlTrend,
+    getReferralTrafficBusinessImpact,
+    getReferralTrafficWeeks,
+    getReferralTrafficByDevice,
+    getReferralTrafficHasData,
   };
 }
 

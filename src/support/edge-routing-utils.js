@@ -14,6 +14,13 @@ import { promises as dns } from 'dns';
 import { isObject, isValidUrl, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { CDN_TYPES } from '../controllers/llmo/llmo-utils.js';
+import {
+  AEM_CS_FASTLY_CNAME_PATTERNS,
+  AEM_CS_FASTLY_IPS,
+  detectAemCsFastlyWafSimpleProxy,
+  EDGE_OPTIMIZE_USER_AGENT,
+  UA_ROUTING_HEADER,
+} from './cdn-detection.js';
 
 // Per-CDN strategies for edge optimize routing.
 export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
@@ -38,8 +45,6 @@ export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-m
 // Gives the CDN API time to propagate before Tokowaka detects the change.
 export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
 
-const EDGE_OPTIMIZE_USER_AGENT = 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0';
-const UA_ROUTING_HEADER = 'x-edgeoptimize-request-id';
 const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
 
@@ -181,21 +186,20 @@ export async function callCdnRoutingApi(
   }
 }
 
-const AEM_CS_FASTLY_CNAME_PATTERNS = [
-  'cdn.adobeaemcloud.com',
-  'adobe-aem.map.fastly.net',
-];
-const AEM_CS_FASTLY_IPS = new Set([
-  '151.101.195.10',
-  '151.101.67.10',
-  '151.101.3.10',
-  '151.101.131.10',
-]);
+// Suffix-anchored match: a CNAME hostname is considered AEM-CS-Fastly only
+// when it equals one of the known patterns or terminates with `.<pattern>`.
+// Plain `includes()` would mis-classify e.g. `evil.cdn.adobeaemcloud.com.attacker.com`.
+function cnameMatches(cnames, patterns) {
+  return cnames.some((raw) => {
+    const c = (raw || '').toLowerCase().replace(/\.$/, '');
+    return patterns.some((p) => c === p || c.endsWith(`.${p}`));
+  });
+}
 
 async function checkHost(host, log) {
   const cnames = await dns.resolveCname(host).catch(() => []);
   log?.info(`[edge-routing-utils] Detected CNAMES for domain ${host}: ${cnames}`);
-  if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((pattern) => c.includes(pattern)))) {
+  if (cnameMatches(cnames, AEM_CS_FASTLY_CNAME_PATTERNS)) {
     return CDN_TYPES.AEM_CS_FASTLY;
   }
   const ips = await dns.resolve4(host).catch(() => []);
@@ -207,24 +211,30 @@ async function checkHost(host, log) {
 }
 
 /**
- * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly)
- * by checking DNS CNAME and A records.
+ * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly),
+ * including sites where a WAF or reverse proxy hides the Fastly CNAME (Case 0).
  *
- * Returns 'aem-cs-fastly' if the domain resolves to the known CS Fastly
- * CNAME or IP addresses, otherwise returns null.
+ * Tries a cheap DNS check first (CNAME + A records). If DNS does not confirm
+ * AEM CS Fastly — e.g. because a WAF CNAME is visible instead — falls back to
+ * the full CDN detector which runs Phase 1.5 HTTP probes for the WAF proxy case.
  *
- * Never throws — DNS failures are treated as undetected.
+ * Returns 'aem-cs-fastly' or null. Never throws.
  *
  * @param {string} domain - Hostname to check (e.g. 'example.com')
- * @returns {Promise<string|null>} CDN identifier or null
+ * @returns {Promise<string|null>} 'aem-cs-fastly' or null
  */
-export async function detectCdnForDomain(domain, log) {
+export async function detectAemCsFastlyForDomain(domain, log) {
   try {
-    log?.info(`[edge-routing-utils] Detecting CDN for domain ${domain}`);
-    return await checkHost(domain, log);
+    log?.info(`[edge-routing-utils] Detecting AEM-CS Fastly for domain ${domain}`);
+    const dnsResult = await checkHost(domain, log);
+    if (dnsResult) {
+      return dnsResult;
+    }
+    // DNS missed — a WAF or reverse proxy may be hiding AEM CS Fastly.
+    // Run Phase 1.5 HTTP probes directly (no Phase 2 — we only care about AEM CS).
+    return await detectAemCsFastlyWafSimpleProxy(domain, log);
   } catch (err) {
-    // DNS errors are treated as undetected — never break callers
-    log?.error('detectCdnForDomain error', err);
+    log?.error('detectAemCsFastlyForDomain error', err);
   }
   return null;
 }

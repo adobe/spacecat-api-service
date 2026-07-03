@@ -46,19 +46,25 @@ function chunkPages(pages, chunkSize) {
   return chunks;
 }
 
-function normalizePageUrlForLookup(pageUrl, siteBaseURL) {
+/**
+ * Normalize a suggestion URL to a pathname suitable for AEM page resolution.
+ *
+ * AEM resolves pages by path, not by host, so the suggestion URL's host
+ * (which may differ from the site's canonical baseURL, e.g. `www.example.com`
+ * vs `example.com`, or a CDN/staging host) is irrelevant. Always reduce
+ * absolute URLs to their pathname; pass relative paths through unchanged.
+ *
+ * Prior behavior returned the full URL on host mismatch, which downstream
+ * `resolvePageIds` would concatenate with the site base URL producing
+ * malformed URLs like `https://example.com/https://www.example.com/page`.
+ */
+function normalizePageUrlForLookup(pageUrl) {
   const trimmed = pageUrl.trim();
   if (!/^https?:\/\//i.test(trimmed)) {
     return trimmed;
   }
-
   try {
-    const siteUrl = new URL(siteBaseURL);
-    const suggestionUrl = new URL(trimmed);
-    if (suggestionUrl.host !== siteUrl.host) {
-      return trimmed;
-    }
-    return suggestionUrl.pathname || '/';
+    return new URL(trimmed).pathname || '/';
   } catch (e) {
     return trimmed;
   }
@@ -187,7 +193,7 @@ function PageRelationshipsController(ctx) {
     for (const pageBatch of pageChunks) {
       const normalizedBatch = pageBatch.map((pageSpec) => ({
         ...pageSpec,
-        normalizedPageUrl: normalizePageUrlForLookup(pageSpec.pageUrl, baseURL),
+        normalizedPageUrl: normalizePageUrlForLookup(pageSpec.pageUrl),
       }));
       const pageUrls = normalizedBatch.map((pageSpec) => pageSpec.normalizedPageUrl);
       // eslint-disable-next-line no-await-in-loop

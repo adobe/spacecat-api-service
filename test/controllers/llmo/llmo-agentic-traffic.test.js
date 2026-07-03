@@ -23,14 +23,36 @@ import {
   createAgenticTrafficByStatusHandler,
   createAgenticTrafficByUserAgentHandler,
   createAgenticTrafficByUrlHandler,
+  createAgenticTrafficHitsByUrlsHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
+  createAgenticTrafficUrlsExportHandler,
+  createAgenticTrafficUrlsExportStatusHandler,
+  jcsStringify,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
 
 const SITE_ID = '11111111-1111-1111-1111-111111111111';
+const EXPORT_ID = 'a'.repeat(64);
+
+function ListObjectsV2Command(input) {
+  this.input = input;
+}
+
+function GetObjectCommand(input) {
+  this.input = input;
+}
+
+function DeleteObjectCommand(input) {
+  this.input = input;
+}
+
+function PutObjectCommand(input) {
+  this.input = input;
+}
 
 /**
  * Minimal chainable PostgREST client mock.
@@ -76,9 +98,87 @@ function makeContext(overrides = {}) {
       },
       ...overrides.dataAccess,
     },
-    log: { error: sinon.stub(), info: sinon.stub() },
+    log: { error: sinon.stub(), info: sinon.stub(), warn: sinon.stub() },
     ...overrides.context,
   };
+}
+
+// Stubs s3Client.send so ListObjectsV2 returns the supplied keys (or echoes
+// the request Prefix when `echoPrefix` is set, simulating a single cached
+// object at the deterministic key the controller computed) and GetObject
+// returns the supplied metadata (or 404 NoSuchKey when metadata is omitted).
+function stubS3({ keys = [], echoPrefix = false, metadata } = {}) {
+  return sinon.stub().callsFake((command) => {
+    if (command instanceof ListObjectsV2Command) {
+      const Contents = echoPrefix
+        ? [{ Key: command.input.Prefix }]
+        : keys.map((Key) => ({ Key }));
+      return Promise.resolve({ Contents });
+    }
+    if (command instanceof PutObjectCommand) {
+      return Promise.resolve({});
+    }
+    if (command instanceof DeleteObjectCommand) {
+      return Promise.resolve({});
+    }
+    if (metadata === undefined) {
+      const error = new Error('not found');
+      error.name = 'NoSuchKey';
+      return Promise.reject(error);
+    }
+    return Promise.resolve({
+      Body: { transformToString: () => Promise.resolve(JSON.stringify(metadata)) },
+    });
+  });
+}
+
+function makeExportContext(overrides = {}) {
+  const send = sinon.stub().callsFake((command) => {
+    if (command instanceof ListObjectsV2Command) {
+      return Promise.resolve({ Contents: [], NextContinuationToken: undefined });
+    }
+    if (command instanceof PutObjectCommand) {
+      return Promise.resolve({});
+    }
+    if (command instanceof DeleteObjectCommand) {
+      return Promise.resolve({});
+    }
+    const error = new Error('not found');
+    error.name = 'NoSuchKey';
+    return Promise.reject(error);
+  });
+  const s3 = {
+    s3Client: { send },
+    s3Bucket: 'default-bucket',
+    ListObjectsV2Command,
+    GetObjectCommand,
+    PutObjectCommand,
+    DeleteObjectCommand,
+    getSignedUrl: sinon.stub().resolves('https://signed.example.com/export.csv'),
+    ...overrides.s3,
+  };
+  const sqs = {
+    sendMessage: sinon.stub().resolves(),
+    ...overrides.sqs,
+  };
+  return makeContext({
+    ...overrides,
+    context: {
+      ...overrides.context,
+      s3,
+      sqs,
+      env: {
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/report-jobs',
+        S3_REPORT_BUCKET: 'report-bucket',
+        ...overrides.context?.env,
+      },
+      runtime: { region: 'us-east-1', ...overrides.context?.runtime },
+      attributes: {
+        authInfo: { profile: { email: 'user@example.com' } },
+        ...overrides.context?.attributes,
+      },
+    },
+  });
 }
 
 // Resolves with the same shape as the real getSiteAndValidateAccess so that
@@ -108,6 +208,41 @@ describe('llmo-agentic-traffic', () => {
     it('returns 400 when Site.postgrestService is missing', async () => {
       const ctx = makeContext();
       ctx.dataAccess.Site.postgrestService = null;
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+    });
+  });
+
+  // ── Shared: date range guardrail (SITES-46098) ─────────────────────────────
+
+  describe('date range guardrail', () => {
+    it('returns 400 when the requested range exceeds the maximum', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/Date range too large/);
+    });
+
+    it('rejects the over-wide range before touching the data access layer', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(stubbedValidateAccess).to.not.have.been.called;
+    });
+
+    it('allows a valid in-range request through to the data layer', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-01-01', endDate: '2026-01-28' } });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(stubbedValidateAccess).to.have.been.called;
+      expect(res.status).to.equal(200);
+    });
+
+    it('rejects when only one date bound is provided', async () => {
+      const ctx = makeContext({ data: { startDate: '2020-01-01', endDate: undefined } });
       const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
@@ -154,6 +289,8 @@ describe('llmo-agentic-traffic', () => {
       ['perplexity', 'Perplexity'],
       ['gemini', 'Gemini'],
       ['google', 'Google'],
+      ['google-ai-mode', 'Google AI Mode'],
+      ['copilot', 'Copilot'],
       ['amazon', 'Amazon'],
       ['all', null],
       [undefined, null],
@@ -385,6 +522,188 @@ describe('llmo-agentic-traffic', () => {
     });
   });
 
+  // ── agentTypes additive inclusion list ────────────────────────────────────
+
+  describe('agentTypes inclusion list', () => {
+    it('forwards a comma-separated list to kpis-trend as canonical TEXT[]', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('forwards an array passed directly without re-splitting', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: ['Chatbots', 'Research'] },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('drops unknown agent types silently and dedupes case-insensitively', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'chatbots, RESEARCH , unknown ,Chatbots',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('ignores non-string entries when an array is passed directly', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        // Defensive coercion: if a caller hands us an array with a
+        // non-string element (e.g. a serialiser bug or a rogue middleware),
+        // we drop it silently instead of throwing.
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: ['Chatbots', 42, 'Research'] },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('skips empty tokens (e.g. trailing or repeated commas) without dropping the rest', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          // Repeated comma + whitespace-only token must not collapse the
+          // inclusion list to null; this exercises the empty-key branch
+          // in parseAgentTypes alongside two valid values.
+          agentTypes: 'Chatbots,, ,Research,',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('omits p_agent_types entirely when the parameter is missing', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // The key must be absent (not null) so PostgREST falls back to the RPC's
+      // own DEFAULT NULL — same back-compat contract every other consumer relies on.
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('accepts the snake_case alias agent_types and trims whitespace', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agent_types: ' Chatbots , Training bots ',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Training bots'],
+      });
+    });
+
+    it('collapses an all-unknown list to omitted (null behaviour)', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'foo,bar' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('forwards p_agent_types to by-url alongside paging/sort params', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_by_url: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'Chatbots,Research',
+          pageSize: 25,
+          sortBy: 'success_rate',
+          sortOrder: 'asc',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_agent_types: ['Chatbots', 'Research'],
+        p_page_limit: 25,
+        p_sort_by: 'success_rate',
+        p_sort_order: 'asc',
+      });
+    });
+
+    it('does not leak p_agent_types into RPCs that do not accept it', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      // kpis (non-trend) hasn't been extended yet so the key must still be absent.
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+  });
+
   // ── By Region ──────────────────────────────────────────────────────────────
 
   describe('createAgenticTrafficByRegionHandler', () => {
@@ -557,7 +876,11 @@ describe('llmo-agentic-traffic', () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: {
           data: [{
-            page_type: 'article', agent_type: 'Chatbots', unique_agents: 5, total_hits: 200,
+            page_type: 'article',
+            agent_type: 'Chatbots',
+            unique_agents: 5,
+            unique_agent_names: ['ChatGPT-User', 'GPTBot'],
+            total_hits: 200,
           }],
           error: null,
         },
@@ -569,13 +892,18 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].pageType).to.equal('article');
       expect(body[0].agentType).to.equal('Chatbots');
       expect(body[0].uniqueAgents).to.equal(5);
+      expect(body[0].uniqueAgentNames).to.deep.equal(['ChatGPT-User', 'GPTBot']);
     });
 
     it('handles null row fields with safe defaults', async () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: {
           data: [{
-            page_type: null, agent_type: null, unique_agents: null, total_hits: null,
+            page_type: null,
+            agent_type: null,
+            unique_agents: null,
+            unique_agent_names: null,
+            total_hits: null,
           }],
           error: null,
         },
@@ -588,6 +916,7 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].agentType).to.equal('');
       expect(body[0].uniqueAgents).to.equal(0);
       expect(body[0].totalHits).to.equal(0);
+      expect(body[0].uniqueAgentNames).to.deep.equal([]);
     });
 
     it('does not include p_user_agent in the RPC call', async () => {
@@ -644,6 +973,7 @@ describe('llmo-agentic-traffic', () => {
             total_count: 1,
             total_hits: 150,
             unique_agents: 3,
+            unique_agent_names: ['ChatGPT-User', 'GPTBot'],
             top_agent: 'ChatGPT-User',
             top_agent_type: 'Chatbots',
             response_codes: [200, 301],
@@ -663,19 +993,53 @@ describe('llmo-agentic-traffic', () => {
       expect(body.totalCount).to.equal(1);
       expect(body.rows[0].host).to.equal('example.com');
       expect(body.rows[0].urlPath).to.equal('/page');
+      expect(body.rows[0].uniqueAgentNames).to.deep.equal(['ChatGPT-User', 'GPTBot']);
       expect(body.rows[0].topAgent).to.equal('ChatGPT-User');
       expect(body.rows[0].topAgentType).to.equal('Chatbots');
       expect(body.rows[0].responseCodes).to.deep.equal([200, 301]);
       expect(body.rows[0].deployedAtEdge).to.equal(true);
     });
 
-    it('caps limit at 500 via legacy "limit" param', async () => {
+    it('maps hits_trend points to camelCase and coerces missing values to 0', async () => {
+      // Covers the truthy branch of `Array.isArray(row.hits_trend)`: the
+      // RPC returns a [{week_start, value}] series and the controller
+      // forwards it to the UI as [{weekStart, value}] so the URL Inspector
+      // PG dashboard can derive its sparkline + WoW + dialog chart from
+      // the same per-URL series.
+      const client = createMockClient({
+        rpc_agentic_traffic_by_url: {
+          data: [{
+            host: 'example.com',
+            url_path: '/page',
+            total_count: 1,
+            total_hits: 42,
+            hits_trend: [
+              { week_start: '2026-01-05', value: 30 },
+              { week_start: '2026-01-12', value: null },
+              { week_start: '2026-01-19', value: 12 },
+            ],
+          }],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(body.rows[0].hitsTrend).to.deep.equal([
+        { weekStart: '2026-01-05', value: 30 },
+        { weekStart: '2026-01-12', value: 0 },
+        { weekStart: '2026-01-19', value: 12 },
+      ]);
+    });
+
+    it('caps limit at 200 via legacy "limit" param', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       const rpcCallArgs = client.rpc.firstCall.args[1];
-      expect(rpcCallArgs.p_page_limit).to.equal(500);
+      expect(rpcCallArgs.p_page_limit).to.equal(200);
     });
 
     it('accepts "pageSize" as the documented parameter name', async () => {
@@ -795,6 +1159,7 @@ describe('llmo-agentic-traffic', () => {
             url_path: null,
             total_hits: null,
             unique_agents: null,
+            unique_agent_names: null,
             top_agent: null,
             top_agent_type: null,
             response_codes: null,
@@ -813,6 +1178,7 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(body.rows[0].host).to.equal('');
       expect(body.rows[0].urlPath).to.equal('');
+      expect(body.rows[0].uniqueAgentNames).to.deep.equal([]);
       expect(body.rows[0].topAgent).to.equal('');
       expect(body.rows[0].responseCodes).to.deep.equal([]);
       expect(body.rows[0].successRate).to.be.null;
@@ -857,6 +1223,579 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── JCS hash invariants ────────────────────────────────────────────────────
+
+  describe('jcsStringify', () => {
+    it('canonicalises primitives + objects with sorted keys', () => {
+      expect(jcsStringify(null)).to.equal('null');
+      expect(jcsStringify('a')).to.equal('"a"');
+      expect(jcsStringify(true)).to.equal('true');
+      expect(jcsStringify(0)).to.equal('0');
+      expect(jcsStringify([1, 'a', null])).to.equal('[1,"a",null]');
+      expect(jcsStringify({ b: 2, a: 1 })).to.equal('{"a":1,"b":2}');
+    });
+
+    it('throws on non-finite numbers per JCS', () => {
+      expect(() => jcsStringify(NaN)).to.throw(TypeError);
+      expect(() => jcsStringify(Infinity)).to.throw(TypeError);
+    });
+
+    it('locks the hash for a known canonical payload (worker must produce the same)', async () => {
+      // Cross-service contract: spacecat-reporting-worker must hash the same
+      // input to the same exportId. If this golden value changes, the worker
+      // PR needs to match — coordinate before merging.
+      const crypto = await import('node:crypto');
+      const payload = {
+        kind: 'agentic-traffic-urls',
+        v: 1,
+        c: 1,
+        format: 'csv',
+        siteId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        startDate: '2026-01-01',
+        endDate: '2026-01-31',
+        platform: null,
+        categoryName: null,
+        agentType: null,
+        userAgent: null,
+        contentType: null,
+        successRate: null,
+        urlPathSearch: null,
+      };
+      const hash = crypto.createHash('sha256').update(jcsStringify(payload)).digest('hex');
+      expect(hash).to.equal('6e6f6d808e6760960dc7540c3b28d991375852b56981bc66fca91e708b812101');
+    });
+  });
+
+  // ── URL Export ─────────────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficUrlsExportHandler', () => {
+    it('returns a cached download URL when the CSV already exists (legacy: no files[])', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = stubS3({
+        echoPrefix: true,
+        metadata: { status: 'success', rowCount: 2 },
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      // ListObjectsV2 is the fallback when metadata.files is missing — verify
+      // the prefix it asked for matches the deterministic key shape.
+      const listCmd = ctx.s3.s3Client.send.getCalls()
+        .map((c) => c.args[0])
+        .find((cmd) => cmd instanceof ListObjectsV2Command);
+      expect(listCmd.input.Prefix).to.match(
+        new RegExp(`^agentic-traffic/url-exports/${SITE_ID}/v1c1/[a-f0-9]{64}/urls\\.csv$`),
+      );
+      expect(body.downloadUrls).to.deep.equal(['https://signed.example.com/export.csv']);
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('skips ListObjectsV2 when metadata.files is present (fast path)', async () => {
+      const ctx = makeExportContext();
+      // Echo the metadata's key prefix back as files[] so the fast-path
+      // prefix-validation accepts the entries (mirrors what the worker writes).
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.reject(new Error('should not be called'));
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 42,
+              files: [`${prefix}/urls.csv`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.downloadUrls).to.have.length(1);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(0);
+    });
+
+    it('falls back to ListObjectsV2 when metadata.files contains out-of-prefix keys', async () => {
+      // Defense in depth: worker bug / compromise writes wrong keys in files[];
+      // producer must not sign URLs against them — falls back to ListObjectsV2
+      // which constrains by prefix.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [{ Key: command.input.Prefix }] });
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 1,
+              files: ['agentic-traffic/url-exports/EVIL_SITE/v1c1/EVIL_EXPORT/urls.csv'],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(1);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/out-of-prefix/);
+    });
+
+    it('falls back to ListObjectsV2 when metadata.files contains in-prefix non-CSV keys', async () => {
+      // Worker bug: an in-prefix path that isn't a CSV (e.g. metadata.json
+      // itself) would otherwise get signed. Reject any entry whose filename
+      // doesn't match urls.csv or urls.csv_partN.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [{ Key: command.input.Prefix }] });
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 1,
+              // In-prefix but not a CSV — must be rejected.
+              files: [`${prefix}/metadata.json`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(1);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/out-of-prefix/);
+    });
+
+    it('signs with the regular S3 client (not accelerated) when AWS_ENDPOINT_URL_S3 is set (IT/MinIO)', async () => {
+      const ctx = makeExportContext({
+        context: { env: { AWS_ENDPOINT_URL_S3: 'http://localhost:4566' } },
+      });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 1,
+              files: [`${prefix}/urls.csv`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // Regular client used, not accelerated.
+      expect(ctx.s3.getSignedUrl.firstCall.args[0]).to.equal(ctx.s3.s3Client);
+    });
+
+    it('produces the same exportId for the same filter set across calls', async () => {
+      // The cache contract rests on stableStringify being key-order invariant.
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const ctxA = makeExportContext({ data: { platform: 'chatgpt', urlPathSearch: 'pricing' } });
+      const ctxB = makeExportContext({ data: { urlPathSearch: 'pricing', platform: 'chatgpt' } });
+      const idA = (await (await handler(ctxA)).json()).exportId;
+      const idB = (await (await handler(ctxB)).json()).exportId;
+      expect(idA).to.equal(idB);
+    });
+
+    it('re-enqueues when prior `processing` metadata is stale (worker abandoned)', async () => {
+      const ctx = makeExportContext();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: oldDate },
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('drops non-string filter values instead of forwarding them', async () => {
+      const ctx = makeExportContext({
+        data: { urlPathSearch: { $ne: null }, userAgent: ['a', 'b'] },
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const { filters } = ctx.sqs.sendMessage.firstCall.args[1].data;
+      expect(filters.urlPathSearch).to.equal(null);
+      expect(filters.userAgent).to.equal(null);
+    });
+
+    it('queues an export job with mapped filters when no cached CSV exists', async () => {
+      // Also covers UI→DB platform code mapping (chatgpt → ChatGPT) in the payload.
+      const ctx = makeExportContext({ data: { platform: 'chatgpt' } });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(body.exportId).to.match(/^[a-f0-9]{64}$/);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = ctx.sqs.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/report-jobs');
+      expect(message.type).to.equal('agentic-traffic-urls-export');
+      expect(message.data.filters.platform).to.equal('ChatGPT');
+      expect(message.data.s3Key).to.include(`/v1c1/${body.exportId}/urls.csv`);
+      expect(message.data.requestedBy).to.equal('user@example.com');
+    });
+
+    it('does not queue another job while an export is already processing', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = stubS3({ metadata: { status: 'processing' } });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('re-enqueues when a prior attempt failed (failed metadata is retriable)', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'failed', failureReason: 'db error' },
+      });
+
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(202);
+      expect(body.status).to.equal('processing');
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('does not enqueue when CAS write loses the race', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          const error = new Error('precondition failed');
+          error.name = 'PreconditionFailed';
+          return Promise.reject(error);
+        }
+        const error = new Error('not found');
+        error.name = 'NoSuchKey';
+        return Promise.reject(error);
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('writes processing metadata with IfNoneMatch:* before enqueueing on first POST', async () => {
+      const ctx = makeExportContext();
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const putCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof PutObjectCommand);
+      expect(putCalls).to.have.length(1);
+      expect(putCalls[0].args[0].input.IfNoneMatch).to.equal('*');
+      const written = JSON.parse(putCalls[0].args[0].input.Body);
+      expect(written.status).to.equal('processing');
+      expect(written.kind).to.equal('agentic-traffic-urls');
+      expect(written.createdAt).to.be.a('string');
+      // PUT must happen before SQS sendMessage — locks the claim-before-enqueue order.
+      const putOrder = ctx.s3.s3Client.send.firstCall.calledBefore(ctx.sqs.sendMessage.firstCall);
+      expect(putOrder).to.equal(true);
+    });
+
+    it('rolls back processing metadata when SQS sendMessage fails', async () => {
+      // Without rollback a transient SQS failure would block the cache key
+      // for the full stale-processing window — 30 min outage on a blip.
+      const ctx = makeExportContext({
+        sqs: { sendMessage: sinon.stub().rejects(new Error('sqs unavailable')) },
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+      const deleteCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof DeleteObjectCommand);
+      expect(deleteCalls).to.have.length(1);
+    });
+
+    it('uses CAS (IfNoneMatch:*) when retrying against success metadata so success records are not clobbered', async () => {
+      // If CSV was evicted but success metadata remained, an unconditional
+      // overwrite would destroy the success record. CAS lets us fall through
+      // to 202 processing without touching state.
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          // CAS should fail because the object exists.
+          if (command.input.IfNoneMatch === '*') {
+            const error = new Error('precondition failed');
+            error.$metadata = { httpStatusCode: 412 };
+            return Promise.reject(error);
+          }
+          return Promise.resolve({});
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success', rowCount: 5,
+              // No files[] — exercises the legacy success-without-files path.
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      const putCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof PutObjectCommand);
+      expect(putCalls).to.have.length(1);
+      expect(putCalls[0].args[0].input.IfNoneMatch).to.equal('*');
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('uses unconditional overwrite when retrying against stale processing metadata', async () => {
+      const ctx = makeExportContext();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          return Promise.resolve({});
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'processing', createdAt: oldDate,
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      const putCall = ctx.s3.s3Client.send.getCalls()
+        .find((c) => c.args[0] instanceof PutObjectCommand);
+      expect(putCall.args[0].input.IfNoneMatch).to.equal(undefined);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('treats corrupt metadata.json as absent (heals via re-enqueue rather than 500-looping)', async () => {
+      const ctx = makeExportContext();
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        if (command instanceof PutObjectCommand) {
+          return Promise.resolve({});
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve('{not-json') },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(202);
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('signs customer presigned URLs against the s3-accelerate endpoint, not the regional client', async () => {
+      const ctx = makeExportContext();
+      // The metadata-fetch stub also serves as the success path. Echo the
+      // metadata's prefix into files[] so the fast path accepts it.
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({ Contents: [] });
+        }
+        const prefix = command.input.Key.replace(/\/metadata\.json$/, '');
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success', rowCount: 1, files: [`${prefix}/urls.csv`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // The first arg to getSignedUrl must NOT be the regional ctx.s3.s3Client
+      // — it should be the accelerated client constructed inside the handler.
+      const signingClient = ctx.s3.getSignedUrl.firstCall.args[0];
+      expect(signingClient).to.not.equal(ctx.s3.s3Client);
+      // The accelerated client carries the useAccelerateEndpoint flag (boolean or provider).
+      expect(signingClient.config?.useAccelerateEndpoint).to.not.equal(undefined);
+    });
+  });
+
+  describe('createAgenticTrafficUrlsExportStatusHandler', () => {
+    it('returns 200 processing when fresh processing metadata exists', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: new Date().toISOString() },
+      });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body).to.deep.equal({ exportId: EXPORT_ID, status: 'processing' });
+    });
+
+    it('GET skips ListObjectsV2 when metadata.files is present', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.reject(new Error('should not be called'));
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              rowCount: 7,
+              files: [`agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv`],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.downloadUrls).to.have.length(1);
+    });
+
+    it('GET falls back to ListObjectsV2 when metadata.files contains out-of-prefix keys', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = sinon.stub().callsFake((command) => {
+        if (command instanceof ListObjectsV2Command) {
+          return Promise.resolve({
+            Contents: [{ Key: `agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv` }],
+          });
+        }
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify({
+              status: 'success',
+              files: ['agentic-traffic/url-exports/EVIL/v1c1/EVIL/urls.csv'],
+            })),
+          },
+        });
+      });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const listCalls = ctx.s3.s3Client.send.getCalls()
+        .filter((c) => c.args[0] instanceof ListObjectsV2Command);
+      expect(listCalls).to.have.length(1);
+    });
+
+    it('returns 404 when no CSV or metadata exists (unknown exportId)', async () => {
+      // POST writes processing metadata atomically before enqueueing, so an
+      // unknown exportId on GET means it was never POSTed (typo, forged) or
+      // metadata has been evicted — terminal, not "still processing".
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns ready with presigned URLs for split CSV parts', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = stubS3({
+        keys: [
+          `agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv_part2`,
+          `agentic-traffic/url-exports/${SITE_ID}/v1c1/${EXPORT_ID}/urls.csv`,
+        ],
+        metadata: {
+          status: 'success', rowCount: 10, filesUploaded: 2, bytesUploaded: 1000,
+        },
+      });
+      ctx.s3.getSignedUrl = sinon.stub()
+        .onFirstCall()
+        .resolves('https://signed.example.com/part1')
+        .onSecondCall()
+        .resolves('https://signed.example.com/part2');
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('ready');
+      expect(body.downloadUrls).to.deep.equal([
+        'https://signed.example.com/part1',
+        'https://signed.example.com/part2',
+      ]);
+      expect(body.rowCount).to.equal(10);
+      expect(body.filesUploaded).to.equal(2);
+      expect(body.bytesUploaded).to.equal(1000);
+    });
+
+    it('returns failed (ADR enum + message) when metadata reports a failed export', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      ctx.s3.s3Client.send = stubS3({
+        metadata: {
+          status: 'failed',
+          failureReason: 'db_error',
+          failureMessage: 'connection lost',
+        },
+      });
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body).to.deep.equal({
+        exportId: EXPORT_ID,
+        status: 'failed',
+        failureReason: 'db_error',
+        failureMessage: 'connection lost',
+      });
+    });
+
+    it('surfaces stale `processing` metadata as failed/timeout so the UI can retry', async () => {
+      const ctx = makeExportContext({ params: { exportId: EXPORT_ID } });
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      ctx.s3.s3Client.send = stubS3({
+        metadata: { status: 'processing', createdAt: oldDate },
+      });
+
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.status).to.equal('failed');
+      expect(body.failureReason).to.equal('timeout');
+      expect(body.failureMessage).to.match(/timed out/i);
+    });
+
+    it('rejects invalid export ids', async () => {
+      const ctx = makeExportContext({ params: { exportId: 'not-a-hash' } });
+      const handler = createAgenticTrafficUrlsExportStatusHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
     });
   });
 
@@ -1195,6 +2134,197 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── Has Data ───────────────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficHasDataHandler', () => {
+    it('returns hasData: true when agentic_traffic has rows for the site', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [{ traffic_date: '2026-01-05' }], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+    });
+
+    it('returns hasData: false when no rows exist for the site', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(false);
+    });
+
+    it('returns 500 when the PostgREST query errors', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: null, error: { message: 'db error' } },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('queries the agentic_traffic table with the site id and a limit of 1', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.from).to.have.been.calledWith('agentic_traffic');
+      const chain = client.from.firstCall.returnValue;
+      expect(chain.eq).to.have.been.calledWith('site_id', SITE_ID);
+      expect(chain.limit).to.have.been.calledWith(1);
+    });
+  });
+
+  describe('hits-by-urls handler', () => {
+    const urlsBody = [
+      { host: 'www.example.com', urlPath: '/a' },
+      { host: 'www.example.com', urlPath: '/b' },
+    ];
+
+    it('maps urls to p_urls and returns mapped rows', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: {
+          data: [{
+            url: 'https://www.example.com/a',
+            host: 'www.example.com',
+            url_path: '/a',
+            total_hits: 42,
+            hits_trend: [{ week_start: '2026-01-05', value: 42 }],
+          }],
+          error: null,
+        },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          urls: urlsBody,
+          agentTypes: ['Chatbots', 'Research'],
+        },
+      });
+
+      const handler = createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_hits_for_urls', {
+        p_site_id: SITE_ID,
+        p_start_date: '2026-01-01',
+        p_end_date: '2026-01-28',
+        p_urls: [
+          { host: 'www.example.com', url_path: '/a' },
+          { host: 'www.example.com', url_path: '/b' },
+        ],
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.rows).to.deep.equal([{
+        host: 'www.example.com',
+        urlPath: '/a',
+        totalHits: 42,
+        hitsTrend: [{ weekStart: '2026-01-05', value: 42 }],
+      }]);
+    });
+
+    it('drops entries missing host or path and accepts snake_case url_path', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          urls: [
+            { host: 'www.example.com', url_path: '/snake' },
+            { urlPath: '/no-host' },
+            { host: 'www.example.com' },
+          ],
+        },
+      });
+
+      await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_hits_for_urls', {
+        p_urls: [{ host: 'www.example.com', url_path: '/snake' }],
+      });
+    });
+
+    it('returns 400 when urls is not an array', async () => {
+      const ctx = makeContext({ data: { urls: 'nope' } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when more than 2000 urls are requested', async () => {
+      const urls = Array.from({ length: 2001 }, (_, i) => ({ host: 'h', urlPath: `/p/${i}` }));
+      const ctx = makeContext({ data: { urls } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('short-circuits to an empty result without calling the RPC', async () => {
+      const client = createMockClient();
+      const ctx = makeContext({ client, data: { urls: [{ urlPath: '/no-host' }] } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      expect(await res.json()).to.deep.equal({ rows: [] });
+      expect(client.rpc).to.not.have.been.called;
+    });
+
+    it('returns 500 when the RPC errors', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: null, error: { message: 'boom' } },
+      });
+      const ctx = makeContext({ client, data: { urls: urlsBody } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('accepts exactly the 2000-entry cap (inclusive boundary)', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const urls = Array.from({ length: 2000 }, (_, i) => ({ host: 'h', urlPath: `/p/${i}` }));
+      const ctx = makeContext({ client, data: { urls } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      expect(client.rpc).to.have.been.calledWith('rpc_agentic_hits_for_urls');
+    });
+
+    it('coerces null total_hits and a non-array hits_trend to safe defaults', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: {
+          data: [
+            {
+              url: 'u', host: 'h', url_path: '/p', total_hits: null, hits_trend: null,
+            },
+            {
+              url: 'u2', host: 'h', url_path: '/q', total_hits: 5, hits_trend: [{ week_start: '2026-01-05' }],
+            },
+          ],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client, data: { urls: urlsBody } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.rows[0].totalHits).to.equal(0);
+      expect(body.rows[0].hitsTrend).to.deep.equal([]);
+      // missing point.value coerces to 0
+      expect(body.rows[1].hitsTrend).to.deep.equal([{ weekStart: '2026-01-05', value: 0 }]);
     });
   });
 });

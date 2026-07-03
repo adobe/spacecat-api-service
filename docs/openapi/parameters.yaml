@@ -388,14 +388,33 @@ cursor:
 xPromiseToken:
   name: x-promise-token
   description: |
-    Optional session-based promise token. When provided, this token is used directly
-    instead of creating one via IMS. Only relevant for promise-based authoring types
-    (CS, CS_CW, AMS); ignored for other site types.
+    IMS session-based promise token for authenticated CMS operations (from `POST /auth/v2/promise`).
+    On `POST /preflight/jobs`, **required** for promise-based authoring types (CS, CS_CW, AMS).
+    If absent for those sites, the API returns **400** with invalid request error.
+    Ignored for other site types.
+    On endpoints that also accept this header (e.g. opportunity suggestion autofix), it may be
+    omitted when the service can resolve a promise token another way. Listed as optional here
+    because requirement depends on the operation and site authoring type.
   in: header
   required: false
   schema:
     type: string
   example: eyJhbGciOiJSUzI1NiIs...
+
+locale:
+  name: locale
+  description: |
+    BCP 47 locale code in underscore form (e.g. `fr_fr`, `ja_jp`, `de_de`).
+    When provided and a translation exists, localizable fields (`title`, `description` on
+    opportunities; AI-generated fields inside `data` on suggestions) are replaced by the
+    stored translation. Falls back to the original English value when the locale is absent
+    or no translation has been stored yet for that locale.
+  in: query
+  required: false
+  schema:
+    type: string
+    pattern: '^[a-z]{2}_[a-z]{2}$'
+    example: fr_fr
 
 suggestionView:
   name: view
@@ -436,3 +455,30 @@ suggestionStatus:
     multiple:
       value: NEW,APPROVED,IN_PROGRESS
       summary: Filter by multiple statuses (comma-separated)
+
+agentTypes:
+  name: agentTypes
+  description: |
+    Additive inclusion list of agent types — comma-separated string (or
+    a repeated/array query value). Accepted canonical values: `Chatbots`,
+    `Research`, `Training bots` (case-insensitive on the wire). Unknown
+    values are silently dropped (defence-in-depth; matches the existing
+    `agentType` scalar behaviour and the DB allowlist). Omit to receive
+    the unfiltered baseline. Used by the URL Inspector PG page to enforce
+    `Agent Type ∈ {Chatbots, Research}`.
+
+    NOTE: do not combine with the scalar `agentType` parameter — the
+    server AND-intersects them, which silently returns zero rows when
+    they disagree. Use exactly one.
+  in: query
+  required: false
+  schema:
+    type: string
+    description: Comma-separated canonical agent-type values
+  examples:
+    single:
+      value: Chatbots
+      summary: Filter to a single agent type
+    multiple:
+      value: Chatbots,Research
+      summary: URL Inspector PG inclusion list

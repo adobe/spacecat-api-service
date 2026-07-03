@@ -73,6 +73,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
+ * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -94,8 +96,18 @@ function isStaticRoute(routePattern) {
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} siteDetectionController - The site detection controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
+ * @param {Object} webhooksController - GitHub webhook handler controller.
+ * @param {Object} aiVisibilityController - AI Visibility (Semrush) controller.
+ * @param {Object} fanoutReportController - Query Fan-Out report controller.
+ * @param {Object} stateAccessMappingsController - State-layer access mappings + caps.
+ * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
+ * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
+ * @param {Object} serenityController - Serenity API controller (prompts + markets).
+ * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -125,6 +137,8 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  llmoCloudflareController,
+  llmoCloudFrontController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -147,13 +161,24 @@ export default function getRouteHandlers(
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  siteDetectionController,
   plgOnboardingController,
   drsBpPgAuditController,
+  webhooksController,
+  aiVisibilityController,
+  fanoutReportController,
+  stateAccessMappingsController,
+  agenticCategoriesController,
+  agenticPageTypesController,
+  serenityController,
+  proxyController,
+  redirectsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
+    'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
@@ -169,6 +194,7 @@ export default function getRouteHandlers(
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
+    'POST /webhooks/github': webhooksController.processGitHubWebhook,
     'GET /organizations': organizationsController.getAll,
     'POST /organizations': organizationsController.createOrganization,
     'GET /organizations/:organizationId': organizationsController.getByID,
@@ -191,14 +217,37 @@ export default function getRouteHandlers(
     'DELETE /v2/orgs/:spaceCatId/topics/:topicId': brandsController.deleteTopicForOrg,
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': brandsController.transitionBrandStatusForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': brandsController.activateBrandForOrg,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.listMarkets,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.createMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
+    'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
+    'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
+    // Brand-independent global model catalog (add-brand wizard, before a brand exists).
+    'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
+    // Brand-independent Semrush language catalog (add-brand wizard language picker).
+    'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.getPromptByBrandAndId,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
-    'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': brandsController.checkPromptsByBrand,
+    'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': brandsController.getBrandForOrgSite,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -212,15 +261,21 @@ export default function getRouteHandlers(
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
-    'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
-    'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
+    'POST /sites/:siteId/preflights': preflightController.createPreflight,
+    'GET /sites/:siteId/preflights': preflightController.getAllPreflights,
+    'GET /sites/:siteId/preflights/:preflightId': preflightController.getPreflightById,
+    'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
+    'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
+    'GET /sites/:siteId/identity': sitesController.getIdentity,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
+    'GET /sites/:siteId/config/scraper': sitesController.getScraperConfig,
+    'PATCH /sites/:siteId/config/scraper': sitesController.updateScraperConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
@@ -235,6 +290,16 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/url-store': urlStoreController.addUrls,
     'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
     'POST /sites/:siteId/url-store/delete': urlStoreController.deleteUrls,
+
+    // Agentic URL classification rules (precede :auditType for static-segment match)
+    'GET /sites/:siteId/agentic-categories': agenticCategoriesController.list,
+    'POST /sites/:siteId/agentic-categories': agenticCategoriesController.create,
+    'PATCH /sites/:siteId/agentic-categories/:name': agenticCategoriesController.update,
+    'DELETE /sites/:siteId/agentic-categories/:name': agenticCategoriesController.remove,
+    'GET /sites/:siteId/agentic-page-types': agenticPageTypesController.list,
+    'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
+    'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
+    'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
@@ -267,6 +332,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': suggestionsController.getSuggestionFixes,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': suggestionsController.createBackofficeReview,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
@@ -355,7 +421,26 @@ export default function getRouteHandlers(
     'POST /tools/api-keys': apiKeyController.createApiKey,
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
+    'GET /tools/proxy': proxyController.getPreview,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
+
+    // Hybrid permission model — state-layer management + capability
+    // introspection endpoints. Self-gated at the controller level
+    // (`<product>/can_manage_users` for CRUD, `<product>/can_view` for
+    // capability introspection). Until `facsWrapper` is attached in
+    // api-service, the controller additionally restricts these endpoints to
+    // the dev environment (AWS_ENV === 'dev'); they 404 elsewhere. See:
+    //   - platform/decisions/mac-state-layer.md §"State Layer Management Endpoints"
+    //   - platform/decisions/rebac-hybrid-permission-model.md
+    'GET /state/access-mappings': stateAccessMappingsController.listMappings,
+    'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
+    'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'DELETE /state/access-mappings/:id': stateAccessMappingsController.deleteMapping,
+    'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
+    'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
+    'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
+
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'DELETE /tools/import/jobs/:jobId': importController.deleteImportJob,
@@ -401,6 +486,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/data/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource': llmoController.queryFiles,
+    'PATCH /sites/:siteId/llmo/data/:dataSource/row': llmoController.patchLlmoDataRow,
+    'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row': llmoController.patchLlmoDataRow,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
@@ -420,15 +507,41 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,
+    'POST /v2/orgs/:spaceCatId/llmo/onboard-site': llmoController.onboardSiteOnly,
     'POST /llmo/onboard/update-query-index': llmoController.updateQueryIndex,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url': llmoCloudFrontController.createBootstrapUrl,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect': llmoCloudFrontController.connect,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions': llmoCloudFrontController.listDistributions,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites': llmoCloudFrontController.checkPrerequisites,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins': llmoCloudFrontController.fetchOrigins,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors': llmoCloudFrontController.fetchBehaviors,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin': llmoCloudFrontController.createOrigin,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function': llmoCloudFrontController.createRoutingFunction,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache': llmoCloudFrontController.applyCache,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda': llmoCloudFrontController.createLambda,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status': llmoCloudFrontController.fetchLambdaStatus,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations': llmoCloudFrontController.applyAssociations,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify': llmoCloudFrontController.verifyRouting,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': llmoCloudFrontController.deploy,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': llmoCloudFrontController.plan,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': llmoCloudFrontController.getPermissions,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
+    'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+
+    // LLMO Cloudflare Onboarding Routes
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': llmoCloudflareController.getCloudflareConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': llmoCloudflareController.listAccounts,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': llmoCloudflareController.addRoute,
+
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
 
@@ -441,13 +554,32 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/by-status': llmoMysticatController.getAgenticTrafficByStatus,
     'GET /sites/:siteId/agentic-traffic/by-user-agent': llmoMysticatController.getAgenticTrafficByUserAgent,
     'GET /sites/:siteId/agentic-traffic/by-url': llmoMysticatController.getAgenticTrafficByUrl,
+    'POST /sites/:siteId/agentic-traffic/hits-by-urls': llmoMysticatController.getAgenticTrafficHitsByUrls,
     'GET /sites/:siteId/agentic-traffic/filter-dimensions': llmoMysticatController.getAgenticTrafficFilterDimensions,
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
     'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
+    'GET /sites/:siteId/agentic-traffic/has-data': llmoMysticatController.getAgenticTrafficHasData,
+    'POST /sites/:siteId/agentic-traffic/urls/export': llmoMysticatController.exportAgenticTrafficUrls,
+    'GET /sites/:siteId/agentic-traffic/urls/export/:exportId': llmoMysticatController.getAgenticTrafficUrlsExportStatus,
+
+    // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/referral-traffic/has-data': llmoMysticatController.getReferralTrafficHasData,
+    'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
+    'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
+    'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
+    'GET /sites/:siteId/referral-traffic/by-platform': llmoMysticatController.getReferralTrafficByPlatform,
+    'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
+    'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
+    'GET /sites/:siteId/referral-traffic/by-url': llmoMysticatController.getReferralTrafficByUrl,
+    'GET /sites/:siteId/referral-traffic/by-url-trend': llmoMysticatController.getReferralTrafficUrlTrend,
+    'GET /sites/:siteId/referral-traffic/by-device': llmoMysticatController.getReferralTrafficByDevice,
+    'GET /sites/:siteId/referral-traffic/business-impact': llmoMysticatController.getReferralTrafficBusinessImpact,
+    'GET /sites/:siteId/referral-traffic/weeks': llmoMysticatController.getReferralTrafficWeeks,
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
+    'GET /org/:spaceCatId/brands/:brandId/fanout-report': fanoutReportController.getFanoutReport,
     'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/all/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
@@ -462,12 +594,16 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': llmoMysticatController.getTopics,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
     'GET /org/:spaceCatId/brands/all/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
     'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,
@@ -476,6 +612,22 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
+
+    // URL Inspector (org-level, site-scoped via query param)
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/stats': llmoMysticatController.getUrlInspectorStats,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/stats': llmoMysticatController.getUrlInspectorStats,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/owned-urls': llmoMysticatController.getUrlInspectorOwnedUrls,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/owned-urls': llmoMysticatController.getUrlInspectorOwnedUrls,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/trending-urls': llmoMysticatController.getUrlInspectorTrendingUrls,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/trending-urls': llmoMysticatController.getUrlInspectorTrendingUrls,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/cited-domains': llmoMysticatController.getUrlInspectorCitedDomains,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/cited-domains': llmoMysticatController.getUrlInspectorCitedDomains,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
 
     // LLMO Opportunities (org-level)
     'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
@@ -488,7 +640,8 @@ export default function getRouteHandlers(
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
     'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
     'POST /plg/records': plgOnboardingController.createOnboarding,
-    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboarding,
+    'PATCH /plg/onboard/:onboardingId/status': plgOnboardingController.transitionStatus,
     'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
@@ -497,6 +650,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'POST /sites/:siteId/site-enrollments': siteEnrollmentController.createPlgEnrollment,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'GET /admin/users/:userId': userDetailsController.resolveUser,
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
@@ -506,6 +660,7 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'POST /sites/:siteId/entitlements': entitlementController.createSiteEntitlement,
     'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
       featureFlagsController.putByOrganizationProductAndName,
@@ -555,6 +710,7 @@ export default function getRouteHandlers(
     'POST /consumers/:consumerId/revoke': consumersController.revoke,
 
     // Tokens
+    'GET /sites/:siteId/tokens': tokensController.getAll,
     'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
     'GET /sites/:siteId/tokens/:tokenId/grants': tokensController.getGrants,
 
@@ -575,6 +731,49 @@ export default function getRouteHandlers(
 
     // Autofix checks (permission/capability validation before autofix deploy)
     'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
+
+    // AI Visibility (Semrush gRPC)
+    'GET /llmo/ai-visibility/brands/stats': aiVisibilityController.getBrandsStats,
+    'GET /llmo/ai-visibility/brands/topics': aiVisibilityController.getBrandsTopics,
+    'GET /llmo/ai-visibility/brands/prompts': aiVisibilityController.getBrandsPrompts,
+    'GET /llmo/ai-visibility/brands/cited-pages': aiVisibilityController.getBrandsCitedPages,
+    'GET /llmo/ai-visibility/brands/topic-opportunities': aiVisibilityController.getBrandsTopicOpportunities,
+    'GET /llmo/ai-visibility/brands/top-brands': aiVisibilityController.getBrandsTopBrands,
+    'GET /llmo/ai-visibility/brands/cited-sources': aiVisibilityController.getBrandsCitedSources,
+    'GET /llmo/ai-visibility/brands/source-opportunities': aiVisibilityController.getBrandsSourceOpportunities,
+    'GET /llmo/ai-visibility/brands/competitors': aiVisibilityController.getBrandsCompetitors,
+    'GET /llmo/ai-visibility/competitors/metrics': aiVisibilityController.getCompetitorsMetrics,
+    'GET /llmo/ai-visibility/meta': aiVisibilityController.getMeta,
+    'GET /llmo/ai-visibility/prompts/responses/latest': aiVisibilityController.getPromptsResponsesLatest,
+    'GET /llmo/ai-visibility/prompts/responses': aiVisibilityController.getPromptsResponses,
+    'GET /llmo/ai-visibility/topics/research/stats': aiVisibilityController.getTopicsResearchStats,
+    'GET /llmo/ai-visibility/topics/research/prompts': aiVisibilityController.getTopicsResearchPrompts,
+    'GET /llmo/ai-visibility/topics/research/brands': aiVisibilityController.getTopicsResearchBrands,
+    'GET /llmo/ai-visibility/topics/research/source-domains': aiVisibilityController.getTopicsResearchSourceDomains,
+    'GET /llmo/ai-visibility/topics/research': aiVisibilityController.getTopicsResearch,
+    'GET /llmo/ai-visibility/topics/stats': aiVisibilityController.getTopicsStats,
+    'GET /llmo/ai-visibility/v1/topic/brand-topics': aiVisibilityController.getV1TopicBrandTopics,
+    'GET /llmo/ai-visibility/v1/topic/brand-topics-export': aiVisibilityController.getV1TopicBrandTopicsExport,
+    'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': aiVisibilityController.getV1TopicBrandTopicsTotals,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics-export': aiVisibilityController.getV1TopicGapTopicsExport,
+    'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': aiVisibilityController.getV1TopicGapTopicsTotals,
+    'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
+    'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': aiVisibilityController.getV1PromptGapPromptsTotals,
+    'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains': aiVisibilityController.getV1SourceGapSourceDomains,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': aiVisibilityController.getV1SourceGapSourceDomainsExport,
+    'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': aiVisibilityController.getV1SourceGapSourceDomainsTotals,
+    'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
+    'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
+    'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,
+    'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': aiVisibilityController.getV1PromptResearchPromptsExport,
+    'GET /llmo/ai-visibility/v1/prompt-research/brands-export': aiVisibilityController.getV1PromptResearchBrandsExport,
+    'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': aiVisibilityController.getV1PromptResearchSourceDomainsExport,
+    'GET /llmo/ai-visibility/v1/prompt-research/topics-export': aiVisibilityController.getV1PromptResearchTopicsExport,
   };
 
   // Initialization of static and dynamic routes

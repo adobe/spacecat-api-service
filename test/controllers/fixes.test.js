@@ -69,6 +69,7 @@ describe('Fixes Controller', () => {
 
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
+  const testExternalUserId = 'ABCD1234@AdobeOrg';
 
   const log = {
     ...console, debug: () => undefined, info: () => undefined, warn: () => undefined,
@@ -93,7 +94,7 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'allByOpportunityIdAndStatus');
     sandbox.stub(fixEntityCollection, 'findById');
     sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
-    sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
+    sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionsByOpportunityId');
     sandbox.stub(fixEntityCollection, 'updateByKeys');
     sandbox.stub(fixEntityCollection, 'getSuggestionsByFixEntityId');
     sandbox.stub(suggestionCollection, 'bulkUpdateStatus');
@@ -111,7 +112,7 @@ describe('Fixes Controller', () => {
 
     accessControlUtil = sandbox.createStubInstance(AccessControlUtil);
     accessControlUtil.hasAccess.resolves(true);
-    fixesController = new FixesController({ dataAccess }, accessControlUtil);
+    fixesController = new FixesController({ dataAccess, log }, accessControlUtil);
     requestContext = {
       params: { siteId, opportunityId },
     };
@@ -129,6 +130,48 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({
         message: 'Only users belonging to the organization may access fix entities.',
       });
+    });
+
+    it('returns 400 for non-underscore locale format on getAllForOpportunity', async () => {
+      requestContext.data = { locale: 'en-US' };
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Invalid locale format' });
+    });
+
+    it('applies locale to embedded suggestion titles in getAllForOpportunity', async () => {
+      const mockOpportunity = {
+        getSiteId: () => siteId,
+        getType: () => 'test-opportunity-type',
+      };
+      const suggestion = await suggestionCollection.create({
+        opportunityId,
+        data: {
+          title: 'English title',
+          i18n: { fr_fr: { title: 'Titre français' } },
+        },
+      });
+      suggestion.getOpportunity = () => mockOpportunity;
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      // eslint-disable-next-line no-underscore-dangle
+      fixEntity._suggestions = [suggestion];
+
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [suggestion] }]);
+
+      requestContext.data = { locale: 'fr_fr' };
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0].suggestions[0].data.title).to.equal('Titre français');
+      expect(result[0].suggestions[0].data).to.not.have.property('i18n');
     });
 
     it('can get all fixes for an opportunity', async () => {
@@ -149,7 +192,9 @@ describe('Fixes Controller', () => {
           changeDetails: { arbitrary: 'value 3' },
         }),
       ]);
-      fixEntityCollection.allByOpportunityId.resolves(fixEntities);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves(fixEntities.map((fixEntity) => ({ fixEntity, suggestions: [] })));
 
       const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -157,13 +202,272 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals(fixEntities.map(FixDto.toJSON));
     });
 
-    it('responds 404 if the fix does not belong to the given opportunity', async () => {
-      fixEntityCollection.allByOpportunityId.resolves([
-        await fixEntityCollection.create({
+    it('hydrates executedByUser by resolving executedBy via IMS admin profile', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[0].executedByUser).to.deep.equal({
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+      });
+      expect(result[0]).to.have.property('executedBy', testExternalUserId);
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(testExternalUserId);
+    });
+
+    it('omits executedByUser when IMS profile lookup fails', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().rejects(new Error('IMS unavailable')),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+    });
+
+    it('omits executedByUser when imsClient is not configured', async () => {
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+    });
+
+    it('hydrates executedByUser when executedBy is a hex org ID (HEXID@HEXORGID format)', async () => {
+      const hexOrgUserId = 'B90A1E07680B608F0A494028@9bcd5ee55f43b6f30a494212';
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'Jane',
+          last_name: 'Smith',
+          email: 'jane.smith@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: hexOrgUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[0].executedByUser).to.deep.equal({
+        firstName: 'Jane',
+        lastName: 'Smith',
+        email: 'jane.smith@example.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(hexOrgUserId);
+    });
+
+    it('skips IMS lookup when executedBy is a plain email address', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: 'rpapani@adobe.com',
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('skips IMS lookup when no fix has executedBy', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      // empty string bypasses fakeCreateFix's `??= 'test user'` default and is
+      // stripped by filter(Boolean) inside the controller, so userIds is empty.
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: '',
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('logs a warning and omits executedByUser when IMS lookup throws synchronously', async () => {
+      const warnSpy = sandbox.spy();
+      const errorMessage = 'IMS client misconfigured';
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().throws(new Error(errorMessage)),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log: { ...log, warn: warnSpy }, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.not.have.property('executedByUser');
+      expect(warnSpy).to.have.been.calledOnceWith(
+        `Could not enrich fixes with user names: ${errorMessage}`,
+      );
+    });
+
+    it('deduplicates IMS lookups when multiple fixes share the same executedBy', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const [fixEntity1, fixEntity2] = await Promise.all([
+        fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
-          opportunityId: 'wrong-opportunity-id',
+          opportunityId,
+          executedBy: testExternalUserId,
+          changeDetails: { arbitrary: 'value 1' },
+        }),
+        fixEntityCollection.create({
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+          opportunityId,
+          executedBy: testExternalUserId,
+          changeDetails: { arbitrary: 'value 2' },
         }),
       ]);
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([
+          { fixEntity: fixEntity1, suggestions: [] },
+          { fixEntity: fixEntity2, suggestions: [] },
+        ]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result).to.have.lengthOf(2);
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[1]).to.have.property('executedByUser');
+      // Both fixes share the same executedBy — the IMS API must be called only once.
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnce;
+    });
+
+    it('responds 404 if the fix does not belong to the given opportunity', async () => {
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId: 'wrong-opportunity-id',
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
 
       const response = await fixesController.getAllForOpportunity(requestContext);
       expect(response).includes({ status: 404 });
@@ -173,7 +477,38 @@ describe('Fixes Controller', () => {
     });
 
     it('responds 404 if the opportunity does not belong to the given site', async () => {
-      fixEntityCollection.allByOpportunityId.resolves([]);
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+      opportunityGetStub.callsFake((data) => ({
+        go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
+      }));
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({
+        message: 'Opportunity not found',
+      });
+    });
+
+    it('returns empty array when no fixes exist for the opportunity', async () => {
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
+
+    it('responds 404 if the opportunity belongs to another site even when no fixes exist', async () => {
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([]);
       opportunityGetStub.callsFake((data) => ({
         go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
       }));
@@ -198,13 +533,18 @@ describe('Fixes Controller', () => {
     });
 
     describe('with fixEntityCreatedDate parameter', () => {
-      const fixEntityCreatedDate = '2025-05-19T01:23:45.678Z';
+      // YYYY-MM-DD date string — matches what the UI accordion key uses
+      const fixCreatedDateStr = '2025-05-19';
+      // A timestamp on that UTC date — simulates executedAt being set after creation
+      const executedAtOnDate = '2025-05-19T14:30:00.000Z';
+      // A timestamp on a DIFFERENT date — should NOT be returned for the above key
+      const executedAtOtherDate = '2025-05-18T22:00:00.000Z';
 
       beforeEach(() => {
-        requestContext.data = { fixCreatedDate: fixEntityCreatedDate };
+        requestContext.data = { fixCreatedDate: fixCreatedDateStr };
       });
 
-      it('can get all fixes with suggestions by created date', async () => {
+      it('can get all fixes with suggestions by created date (filters by executedAt)', async () => {
         const suggestion1 = await suggestionCollection.create({
           opportunityId,
           type: Suggestion.TYPES.CONTENT_UPDATE,
@@ -218,17 +558,12 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
-          .resolves([
-            {
-              fixEntity,
-              suggestions: [suggestion1, suggestion2],
-            },
-          ]);
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [suggestion1, suggestion2] }]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -245,9 +580,72 @@ describe('Fixes Controller', () => {
         expect(result[0].suggestions[1].id).to.equal(suggestion2.getId());
       });
 
+      it('hydrates executedByUser via IMS admin profile in the date-filtered branch', async () => {
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({
+            first_name: 'John',
+            last_name: 'Doe',
+            email: 'john.doe@example.com',
+          }),
+        };
+        fixesController = new FixesController(
+          { dataAccess, log, imsClient: mockImsClient },
+          accessControlUtil,
+        );
+
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          executedBy: testExternalUserId,
+          changeDetails: { arbitrary: 'value 1' },
+          executedAt: executedAtOnDate,
+        });
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result[0]).to.have.property('executedByUser');
+        expect(result[0].executedByUser).to.deep.equal({
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john.doe@example.com',
+        });
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(testExternalUserId);
+      });
+
+      it('filters out fixes whose executedAt ?? createdAt does not match the date', async () => {
+        const fixOnDate = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          executedAt: executedAtOnDate,
+        });
+        const fixOtherDate = await fixEntityCollection.create({
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+          opportunityId,
+          executedAt: executedAtOtherDate,
+        });
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([
+            { fixEntity: fixOnDate, suggestions: [] },
+            { fixEntity: fixOtherDate, suggestions: [] },
+          ]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(1);
+        expect(result[0].id).to.equal(fixOnDate.getId());
+      });
+
       it('returns empty array when no fixes found for the given created date', async () => {
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
           .resolves([]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
@@ -261,11 +659,11 @@ describe('Fixes Controller', () => {
         const fixEntity = await fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId: 'wrong-opportunity-id',
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
           .resolves([
             {
               fixEntity,
@@ -284,17 +682,12 @@ describe('Fixes Controller', () => {
         const fixEntity = await fixEntityCollection.create({
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
-          .resolves([
-            {
-              fixEntity,
-              suggestions: [],
-            },
-          ]);
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
 
         opportunityGetStub.callsFake((data) => ({
           go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
@@ -325,27 +718,21 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
         const fixEntity2 = await fixEntityCollection.create({
           type: Suggestion.TYPES.REDIRECT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 2' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
           .resolves([
-            {
-              fixEntity: fixEntity1,
-              suggestions: [suggestion1, suggestion2],
-            },
-            {
-              fixEntity: fixEntity2,
-              suggestions: [suggestion3],
-            },
+            { fixEntity: fixEntity1, suggestions: [suggestion1, suggestion2] },
+            { fixEntity: fixEntity2, suggestions: [suggestion3] },
           ]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
@@ -374,17 +761,12 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
-          createdAt: fixEntityCreatedDate,
+          executedAt: executedAtOnDate,
         });
 
-        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
-          .withArgs(opportunityId, fixEntityCreatedDate)
-          .resolves([
-            {
-              fixEntity,
-              suggestions: [],
-            },
-          ]);
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
 
         const response = await fixesController.getAllForOpportunity(requestContext);
 
@@ -397,6 +779,69 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
         });
         expect(result[0].suggestions).to.have.lengthOf(0);
+      });
+
+      // Regression guard: the original bug manifested when executedAt is null
+      // at fix-creation time. The junction table was populated with createdAt,
+      // but once executedAt was set the key no longer matched. The filter must
+      // use executedAt ?? createdAt so newly-created fixes (executedAt=null)
+      // still match on createdAt.
+      it('returns fix when executedAt is null but createdAt matches the requested date', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        // Simulate executedAt=null (not yet deployed) with createdAt on target date
+        sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOnDate);
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(1);
+        expect(result[0].id).to.equal(fixEntity.getId());
+      });
+
+      it('filters out fix when executedAt is null and createdAt does not match the requested date', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        // Simulate executedAt=null with createdAt on a DIFFERENT date
+        sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOtherDate);
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.deep.equal([]);
+      });
+
+      it('skips fix with malformed timestamp instead of throwing', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+        });
+        sandbox.stub(fixEntity, 'getExecutedAt').returns('not-a-valid-date');
+        sandbox.stub(fixEntity, 'getCreatedAt').returns('also-garbage');
+
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        // Should return 200 and skip the malformed fix rather than 500
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.deep.equal([]);
       });
     });
   });
@@ -517,6 +962,39 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals(FixDto.toJSON(fix));
     });
 
+    it('hydrates executedByUser when imsClient is configured', async () => {
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'Jane',
+          last_name: 'Doe',
+          email: 'jane.doe@example.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fix = await fixEntityCollection.create({
+        fixEntityId: fixId,
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: testExternalUserId,
+      });
+      fixEntityCollection.findById.withArgs(fixId).resolves(fix);
+
+      const response = await fixesController.getByID(requestContext);
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result).to.have.property('executedByUser');
+      expect(result.executedByUser).to.deep.equal({
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane.doe@example.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(testExternalUserId);
+    });
+
     it('responds 404 if the fix does not exist', async () => {
       fixEntityCollection.findById
         .withArgs(fixId)
@@ -621,7 +1099,55 @@ describe('Fixes Controller', () => {
       })));
       const response = await fixesController.getAllSuggestionsForFix(requestContext);
       expect(response).includes({ status: 200 });
-      expect(await response.json()).deep.equals(suggestions.map((s) => SuggestionDto.toJSON(s)));
+      expect(await response.json()).deep.equals(
+        suggestions.map((s) => SuggestionDto.toJSON(s, 'full', mockOpportunity, null)),
+      );
+    });
+
+    it('returns 400 for non-underscore locale format on getAllSuggestionsForFix', async () => {
+      requestContext.data = { locale: 'fr-FR' };
+      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Invalid locale format' });
+    });
+
+    it('applies locale to suggestion data in getAllSuggestionsForFix', async () => {
+      const mockOpportunity = {
+        getSiteId: () => siteId,
+        getType: () => 'test-opportunity-type',
+      };
+      const suggestion = await suggestionCollection.create({
+        opportunityId,
+        data: {
+          title: 'English title',
+          description: 'English description',
+          i18n: {
+            fr_fr: { title: 'Titre français', description: 'Description française' },
+          },
+        },
+      });
+      suggestion.getOpportunity = () => mockOpportunity;
+
+      suggestionCollection.batchGetByKeys.resolves({
+        data: [suggestion],
+        unprocessed: [],
+      });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion]);
+      fixEntitySuggestionCollection.allByFixEntityId.resolves([{
+        getSuggestionId: () => suggestion.getId(),
+        getFixEntityId: () => fixId,
+      }]);
+
+      requestContext.data = { locale: 'fr_fr' };
+      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0].data.title).to.equal('Titre français');
+      expect(result[0].data.description).to.equal('Description française');
+      expect(result[0].data).to.not.have.property('i18n');
     });
 
     it('responds 404 if the fix does not exist', async () => {
@@ -702,6 +1228,69 @@ describe('Fixes Controller', () => {
       expect(fixes).have.lengthOf(1);
       expect(fixes[0]).includes({ index: 0, statusCode: 201 });
       expect(fixes[0].fix).includes(fixData);
+    });
+
+    it('auto-populates executedBy from the auth profile, ignoring any client-supplied value', async () => {
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ user_id: testExternalUserId }) },
+      };
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        executedBy: 'attacker@evil.org',
+        changeDetails: { arbitrary: 'value' },
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes } = await response.json();
+      expect(fixes[0].fix.executedBy).to.equal(testExternalUserId);
+    });
+
+    it('strips client-supplied executedBy when caller identity cannot be resolved', async () => {
+      // No authInfo on context - callerUserId is unresolvable.
+      const warnSpy = sandbox.spy();
+      fixesController = new FixesController(
+        { dataAccess, log: { ...log, warn: warnSpy } },
+        accessControlUtil,
+      );
+      requestContext.attributes = {};
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        executedBy: 'attacker@evil.org',
+        changeDetails: { arbitrary: 'value' },
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes } = await response.json();
+      // fakeCreateFix fills the gap with 'test user' since no executedBy was passed to create();
+      // the key assertion is that the attacker-supplied value was not forwarded.
+      expect(fixes[0].fix.executedBy).to.equal('test user');
+      expect(warnSpy).to.have.been.calledOnceWith(
+        'createFixes: executedBy intent signal present but caller identity is unresolvable; executedBy will not be set',
+      );
+    });
+
+    it('falls back to sub claim when user_id is absent', async () => {
+      const testSub = 'sub-value@AdobeOrg';
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ sub: testSub }) },
+      };
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        changeDetails: { arbitrary: 'value' },
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes } = await response.json();
+      expect(fixes[0].fix.executedBy).to.equal(testSub);
     });
 
     it('reflects failures of creating a single fix', async () => {
@@ -1300,6 +1889,96 @@ describe('Fixes Controller', () => {
           sinon.match(/Could not create ContentClient for AEM Edge documentPath enrichment/),
         );
       });
+
+      it('uses x-promise-token header directly and skips getIMSPromiseToken', async () => {
+        getIMSPromiseTokenStub.resetHistory();
+        exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
+
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { 'x-promise-token': 'header-promise-token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(getIMSPromiseTokenStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.have.been.calledWith(
+          sinon.match.any,
+          'header-promise-token',
+        );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] using promise token from x-promise-token header',
+        );
+      });
+
+      it('falls back to getIMSPromiseToken when x-promise-token header is absent', async () => {
+        getIMSPromiseTokenStub.resetHistory();
+        exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
+
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(getIMSPromiseTokenStub).to.have.been.calledOnce;
+        expect(exchangePromiseTokenStub).to.have.been.calledWith(
+          sinon.match.any,
+          'mock-promise-token',
+        );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] no x-promise-token header, creating promise token via IMS',
+        );
+      });
     });
   });
 
@@ -1589,6 +2268,9 @@ describe('Fixes Controller', () => {
       sandbox.stub(fix.patcher, 'save');
       fixEntityCollection.findById.withArgs(fixEntityId).resolves(fix);
       requestContext.params.fixId = fixEntityId;
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ user_id: testExternalUserId }) },
+      };
     });
 
     it('responds 403 if the request does not have authorization/access', async () => {
@@ -1642,11 +2324,42 @@ describe('Fixes Controller', () => {
       const response = await fixesController.patchFix(requestContext);
       expect(response).includes({ status: 200 });
       expect(await response.json()).deep.equals(FixDto.toJSON(fix));
-      expect(fix.getExecutedBy()).equals('me');
+      expect(fix.getExecutedBy()).equals(testExternalUserId);
       expect(fix.getExecutedAt()).equals(executedAt);
       expect(fix.getPublishedAt()).equals(publishedAt);
       expect(fix.getChangeDetails()).deep.equals(changeDetails);
       expect(new Set(await fix.getSuggestions())).deep.equals(new Set(suggestions));
+    });
+
+    it('falls back to sub claim when user_id is absent', async () => {
+      const testSub = 'sub-value@AdobeOrg';
+      requestContext.attributes = {
+        authInfo: { getProfile: () => ({ sub: testSub }) },
+      };
+      requestContext.data = { executedBy: 'me' };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(fix.getExecutedBy()).equals(testSub);
+    });
+
+    it('returns 200 even when executedBy is already set to the caller identity (idempotent intent signal)', async () => {
+      fix.setExecutedBy(testExternalUserId);
+      requestContext.data = { executedBy: 'attacker@evil.org' };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(fix.getExecutedBy()).equals(testExternalUserId);
+    });
+
+    it('returns 400 when executedBy is sent but caller identity cannot be resolved', async () => {
+      requestContext.attributes = {};
+      requestContext.data = { executedBy: 'me' };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 400 });
+      const { message } = await response.json();
+      expect(message).to.include('resolvable user identity');
     });
 
     it('can patch a fix origin field', async () => {
@@ -1846,8 +2559,8 @@ describe('Fixes Controller', () => {
       const response = await fixesController.patchFix(requestContext);
       expect(response).includes({ status: 200 });
 
-      // Verify all updates were applied
-      expect(fix.getExecutedBy()).equals('updated-user');
+      // Verify all updates were applied; executedBy is auto-populated from the auth profile
+      expect(fix.getExecutedBy()).equals(testExternalUserId);
       expect(fix.getExecutedAt()).equals(executedAt);
       expect(fix.getChangeDetails()).deep.equals(changeDetails);
 

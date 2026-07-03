@@ -19,8 +19,11 @@ import {
   OPPTY_2_ID,
   OPPTY_3_ID,
   FIX_1_ID,
+  FIX_2_ID,
+  FIX_3_ID,
   FIX_1_CREATED_DATE,
   SUGG_1_ID,
+  SUGG_2_ID,
   NON_EXISTENT_FIX_ID,
 } from '../seed-ids.js';
 
@@ -56,12 +59,25 @@ export default function fixTests(getHttpClient, resetData) {
     describe('GET .../fixes', () => {
       before(() => resetData());
 
-      it('user: returns fixes for opportunity', async () => {
+      it('user: returns fixes with suggestions for opportunity', async () => {
         const http = getHttpClient();
         const res = await http.user.get(BASE);
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((f) => expectFixDto(f));
+
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions).to.be.an('array').with.lengthOf(1);
+        expect(fix1.suggestions[0].id).to.equal(SUGG_1_ID);
+
+        const fix2 = res.body.find((f) => f.id === FIX_2_ID);
+        expect(fix2.suggestions).to.be.an('array').with.lengthOf(1);
+        expect(fix2.suggestions[0].id).to.equal(SUGG_2_ID);
+
+        // FIX_3 has no junction entry — must still be returned with empty
+        // suggestions instead of being silently dropped (the bug this PR fixes)
+        const fix3 = res.body.find((f) => f.id === FIX_3_ID);
+        expect(fix3.suggestions).to.be.an('array').with.lengthOf(0);
       });
 
       it('user: returns 403 for denied site', async () => {
@@ -77,6 +93,38 @@ export default function fixTests(getHttpClient, resetData) {
         );
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('returns 400 for non-underscore locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr-FR`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns fixes', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
+        res.body.forEach((f) => expectFixDto(f));
+      });
+
+      it('user: promotes locale-specific suggestion titles on embedded suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions).to.be.an('array').with.lengthOf(1);
+        expect(fix1.suggestions[0].data.title).to.equal('Mettre à jour l\'image hero');
+        expect(fix1.suggestions[0].data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English suggestion titles when locale is absent', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(BASE);
+        expect(res.status).to.equal(200);
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions[0].data.title).to.equal('Update hero image');
       });
     });
 
@@ -202,6 +250,35 @@ export default function fixTests(getHttpClient, resetData) {
         const res = await http.user.get(`${BASE}/${NON_EXISTENT_FIX_ID}/suggestions`);
         expect(res.status).to.equal(404);
       });
+
+      it('returns 400 for non-underscore locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=en-US`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(SUGG_1_ID);
+      });
+
+      it('user: promotes locale-specific suggestion title when locale matches', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body[0].data.title).to.equal('Mettre à jour l\'image hero');
+        expect(res.body[0].data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English suggestion title when locale is absent', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions`);
+        expect(res.status).to.equal(200);
+        expect(res.body[0].data.title).to.equal('Update hero image');
+      });
     });
 
     // ── Write endpoints ──
@@ -222,6 +299,22 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.body.fixes[0].statusCode).to.equal(201);
         expect(res.body.fixes[0].fix).to.be.an('object');
         expect(res.body.fixes[0].fix.type).to.equal('CODE_CHANGE');
+      });
+
+      it('user: server-derives executedBy from JWT, ignoring client-supplied value', async () => {
+        const http = getHttpClient();
+        const res = await http.user.post(BASE, [
+          {
+            type: 'CODE_CHANGE',
+            changeDetails: { file: '/server-derive-test.js' },
+            executedBy: 'attacker@evil.org',
+          },
+        ]);
+        expectBatch207(res, 1, 'fixes');
+        const { fix } = res.body.fixes[0];
+        // The server must use the JWT sub claim, never the client-supplied string.
+        expect(fix.executedBy).to.equal('test-user@example.com');
+        expect(fix.executedBy).to.not.equal('attacker@evil.org');
       });
 
       it('user: creates fix with suggestion association', async () => {
@@ -274,6 +367,17 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         expectFixDto(res.body);
         expect(res.body.changeDetails.file).to.equal('/updated.js');
+      });
+
+      it('user: server-derives executedBy from JWT when intent signal is present', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`${BASE}/${testFixId}`, {
+          executedBy: 'attacker@evil.org',
+        });
+        expect(res.status).to.equal(200);
+        // The server must use the JWT sub claim, never the client-supplied string.
+        expect(res.body.executedBy).to.equal('test-user@example.com');
+        expect(res.body.executedBy).to.not.equal('attacker@evil.org');
       });
 
       it('user: returns 403 for denied site', async () => {

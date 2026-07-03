@@ -20,7 +20,8 @@ export default defineConfig([
     'coverage/*',
     'dist/*',
     'node_modules/*',
-    'test/*/fixtures/*'
+    'test/*/fixtures/*',
+    'third-party/*'
   ]),
   {
     extends: [ recommended ],
@@ -43,5 +44,5 @@ export default defineConfig([
       'no-console': 'off',
       'func-names': 'off',
     },
-  }
+  },
 ]);

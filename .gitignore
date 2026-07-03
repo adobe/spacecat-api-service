@@ -16,12 +16,12 @@ admin-idp-p*.json
 .vscode/settings.json
 
 # Cursor
-.cursor/*
-!.cursor/rules/
-!.cursor/commands/
-.cursor/commands/speckit.*
+.cursor/
 
 # V1 to V2 migration scripts and test data (local only)
 scripts/
+!scripts/backfill-rum-config.mjs
 docs/index.html
 mcp-server.log
+# Scout MCP local config (per-developer, never commit)
+.scout/

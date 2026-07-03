@@ -96,6 +96,7 @@ describe('Organizations Controller', () => {
       organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
       name: 'Org 2',
       imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+      semrushWorkspaceId: 'ws_test_org2',
     },
     {
       organizationId: 'org3',
@@ -120,6 +121,7 @@ describe('Organizations Controller', () => {
                 config: { type: 'any', get: (value) => Config(value) },
                 name: { type: 'string', get: (value) => value },
                 imsOrgId: { type: 'string', get: (value) => value },
+                semrushWorkspaceId: { type: 'string', get: (value) => value },
               },
             },
           },
@@ -240,6 +242,7 @@ describe('Organizations Controller', () => {
         debug: sinon.stub(),
       },
       pathInfo: {
+        // GET .../sites requires x-product; unit mocks use product code 'abcd'.
         headers: { 'x-product': 'abcd' },
       },
       attributes: {
@@ -289,6 +292,7 @@ describe('Organizations Controller', () => {
 
   it('creates an organization', async () => {
     mockDataAccess.Organization.create.resolves(organizations[0]);
+    context.pathInfo = { headers: {} };
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
       ...context,
@@ -315,8 +319,21 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new Organizations');
   });
 
+  it('returns forbidden for read-only admin when creating an organization', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    const controller = OrganizationsController(context, env);
+    const response = await controller.createOrganization({
+      data: { name: 'Org 1' },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new Organizations');
+  });
+
   it('returns bad request when creating an organization fails', async () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
+    context.pathInfo = { headers: {} };
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
       ...context,
@@ -332,6 +349,7 @@ describe('Organizations Controller', () => {
   it('returns existing organization when organization with same imsOrgId already exists', async () => {
     const existingOrg = organizations[1];
     mockDataAccess.Organization.findByImsOrgId.resolves(existingOrg);
+    context.pathInfo = { headers: {} };
 
     const response = await organizationsController.createOrganization({
       data: {
@@ -349,6 +367,141 @@ describe('Organizations Controller', () => {
     expect(organization).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
     expect(organization).to.have.property('name', 'Org 2');
     expect(organization).to.have.property('imsOrgId', '1234567890ABCDEF12345678@AdobeOrg');
+  });
+
+  describe('createOrganization auto-entitlement via x-product header', () => {
+    let tierClientStub;
+
+    beforeEach(() => {
+      tierClientStub = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        createEntitlement: sinon.stub().resolves({
+          entitlement: { getId: () => 'entitlement-456' },
+        }),
+      };
+      sandbox.stub(TierClient, 'createForOrg').returns(tierClientStub);
+    });
+
+    it('creates entitlement for a newly created organization when x-product header is set', async () => {
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForOrg).to.have.been.calledOnce;
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        sinon.match.object,
+        sinon.match.object,
+        'ASO',
+      );
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('FREE_TRIAL');
+      expect(context.log.info).to.have.been.calledWithMatch(/Ensured ASO entitlement entitlement-456/);
+    });
+
+    it('skips auto-entitlement for an existing organization when x-product header is set', async () => {
+      const existingOrg = organizations[1];
+      mockDataAccess.Organization.findByImsOrgId.resolves(existingOrg);
+      context.pathInfo = { headers: { 'x-product': 'LLMO' } };
+
+      const response = await organizationsController.createOrganization({
+        data: {
+          name: 'New Org Name',
+          imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Organization.create).to.not.have.been.called;
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('skips auto-entitlement when x-product header is missing', async () => {
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: {} };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('skips auto-entitlement when x-product header is an empty string', async () => {
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: { 'x-product': '' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('returns 400 for an invalid x-product header', async () => {
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: { 'x-product': 'INVALID' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('does not call TierClient for non-admin callers even when x-product is set', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      expect(TierClient.createForOrg).to.have.not.been.called;
+    });
+
+    it('uses existing PRE_ONBOARD tier when provisioning a newly created organization', async () => {
+      tierClientStub.checkValidEntitlement.resolves({
+        entitlement: { getId: () => 'entitlement-pre', getTier: () => 'PRE_ONBOARD' },
+      });
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(tierClientStub.createEntitlement).to.have.been.calledOnceWith('PRE_ONBOARD');
+    });
+
+    it('returns 500 when TierClient.createEntitlement throws for a newly created organization', async () => {
+      mockDataAccess.Organization.create.resolves(organizations[0]);
+      tierClientStub.createEntitlement.rejects(new Error('Database error'));
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const response = await organizationsController.createOrganization({
+        data: { name: 'Org 1' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Failed to ensure entitlement for organization');
+      expect(context.log.error).to.have.been.calledWithMatch(/Error ensuring entitlement for organization .*Database error/);
+    });
   });
 
   it('updates an organization', async () => {
@@ -388,6 +541,39 @@ describe('Organizations Controller', () => {
 
     const error = await response.json();
     expect(error).to.have.property('message', 'Only users belonging to the organization can update it');
+  });
+
+  it('PATCH organization semrushWorkspaceId succeeds for admin', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      data: { semrushWorkspaceId: 'ws_admin_set' },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const organization = await response.json();
+    expect(organization).to.have.property('semrushWorkspaceId', 'ws_admin_set');
+  });
+
+  it('PATCH organization semrushWorkspaceId is forbidden for non-admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    // User belongs to the org (hasAccess true) but is not admin.
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(true);
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      data: { semrushWorkspaceId: 'ws_non_admin_attempt' },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can set semrushWorkspaceId');
   });
 
   it('returns bad request when updating an organization if id not provided', async () => {
@@ -439,6 +625,174 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'No updates provided');
   });
 
+  it('updates config.defaults with a valid siteId', async () => {
+    const siteId = '550e8400-e29b-41d4-a716-446655440001';
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    organizations[0].setConfig = sinon.stub();
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getTier: () => 'PAID' },
+        siteEnrollment: { getId: () => 'enrollment-1' },
+      }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId } } } },
+      ...context,
+    });
+
+    const expectedConfig = { defaults: { ASO: { siteId } } };
+    expect(organizations[0].setConfig).to.have.been.calledOnceWith(expectedConfig);
+    expect(organizations[0].save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('updates config.defaults without siteId (other fields allowed)', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    organizations[0].setConfig = sinon.stub();
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    sandbox.stub(TierClient, 'createForOrg').returns({
+      checkValidEntitlement: sinon.stub().resolves({ entitlement: { getTier: () => 'PAID' } }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { someOtherField: 'value' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('returns forbidden when non-admin tries to update config.defaults', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error.message).to.include('Only admins can update config.defaults');
+  });
+
+  it('returns bad request for an unknown product code in config.defaults', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { UNKNOWN_PRODUCT: { siteId: 'site1' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Unknown product code in config.defaults: UNKNOWN_PRODUCT');
+  });
+
+  it('returns bad request when config.defaults product has no entitlement (with siteId)', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({ entitlement: null, siteEnrollment: null }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: organization does not have an entitlement for this product');
+  });
+
+  it('returns bad request when config.defaults site is not enrolled for product', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getTier: () => 'PAID' },
+        siteEnrollment: null,
+      }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: site is not enrolled for this product');
+  });
+
+  it('returns bad request when config.defaults siteId is not a valid UUID', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: 'not-a-uuid' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid siteId for product ASO in config.defaults');
+  });
+
+  it('returns bad request when config.defaults siteId does not belong to the organization', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => 'different-org-id' });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: site not found or does not belong to this organization');
+  });
+
+  it('returns bad request when config.defaults siteId does not exist', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves(null);
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440099' } } } },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'config.defaults.ASO: site not found or does not belong to this organization');
+  });
+
   it('gets all organizations', async () => {
     mockDataAccess.Organization.all.resolves(organizations);
 
@@ -451,6 +805,17 @@ describe('Organizations Controller', () => {
     expect(resultOrganizations[1]).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
   });
 
+  it('gets all organizations for read-only admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    mockDataAccess.Organization.all.resolves(organizations);
+
+    const result = await organizationsController.getAll();
+
+    expect(result.status).to.equal(200);
+    const resultOrgs = await result.json();
+    expect(resultOrgs).to.be.an('array').with.lengthOf(4);
+  });
+
   it('gets all organizations for non admin users', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Organization.all.resolves(organizations);
@@ -459,7 +824,116 @@ describe('Organizations Controller', () => {
     const error = await response.json();
 
     expect(response.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can view all Organizations');
+    expect(error).to.have.property('message', 'Forbidden: admin access or organization:readAll capability required');
+  });
+
+  it('gets all organizations for a legacy API-key caller (non-JWT/non-IMS)', async () => {
+    // Legacy API-key auth has type !== 'jwt' && !== 'ims', which makes hasAdminAccess() true.
+    context.attributes.authInfo = new AuthInfo()
+      .withType('api_key')
+      .withScopes([])
+      .withProfile({ user_id: 'api-key-svc' })
+      .withAuthenticated(true);
+    mockDataAccess.Organization.all.resolves(organizations);
+    organizationsController = OrganizationsController(context, env);
+
+    const response = await organizationsController.getAll();
+    const body = await response.json();
+
+    expect(response.status).to.equal(200);
+    expect(body).to.be.an('array').with.lengthOf(4);
+  });
+
+  describe('GET /organizations - S2S readAll capability', () => {
+    function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
+      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
+    }
+
+    function makeFreshConsumer({
+      id = 'consumer-id-1',
+      capabilities = ['organization:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    beforeEach(() => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sinon.stub() };
+      mockDataAccess.Organization.all.resolves(organizations);
+    });
+
+    it('grants access to S2S consumer with organization:readAll', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-org-456' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['organization:readAll'] }));
+
+      const response = await organizationsController.getAll(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.be.an('array').with.lengthOf(4);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/organizations granted clientId=svc-1 consumerId=consumer-id-1 capability=organization:readAll count=4 requestId=req-org-456/,
+      );
+    });
+
+    it('denies S2S consumer with only organization:read (no readAll)', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['organization:read'] }));
+
+      const response = await organizationsController.getAll(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(body).to.have.property('message', 'Forbidden: admin access or organization:readAll capability required');
+      expect(mockDataAccess.Organization.all).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/organizations - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
+      );
+    });
+
+    it('denies S2S consumer that was revoked between L1 and L2', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+
+      const response = await organizationsController.getAll(context);
+
+      expect(response.status).to.equal(403);
+      expect(mockDataAccess.Organization.all).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(/reason=revoked/);
+    });
+
+    it('denies S2S consumer that is SUSPENDED', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ status: 'SUSPENDED' }));
+
+      const response = await organizationsController.getAll(context);
+
+      expect(response.status).to.equal(403);
+      expect(context.log.info).to.have.been.calledWithMatch(/reason=not-active/);
+    });
+
+    it('denies S2S consumer when DB row is missing on Layer 2 re-fetch', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId.resolves(null);
+
+      const response = await organizationsController.getAll(context);
+
+      expect(response.status).to.equal(403);
+      expect(context.log.info).to.have.been.calledWithMatch(/reason=not-found clientId=svc-1/);
+    });
   });
 
   it('gets all sites of an organization', async () => {
@@ -497,6 +971,84 @@ describe('Organizations Controller', () => {
     expect(resultSites[1]).to.have.property('id', 'site2');
   });
 
+  describe('getSitesForOrganization — ReBAC collection filter', () => {
+    // Minimal chained PostgREST stub; resolves every read to the given rows.
+    function fakeFacsPostgrest(rows) {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        is: () => builder,
+        order: () => builder,
+        range: () => builder,
+        then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+      };
+      return { from: () => builder };
+    }
+
+    function setupBothSitesPass() {
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0], sites[1]]);
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'abcd',
+        getTier: () => 'FREE_TRIAL',
+      });
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getId: () => 'e1', getEntitlementId: () => 'entitlement-123', getSiteId: () => 'site1' },
+        { getId: () => 'e2', getEntitlementId: () => 'entitlement-123', getSiteId: () => 'site2' },
+      ]);
+    }
+
+    it('filters own sites to the ReBAC-viewable set when facs flag is set', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([
+          { resource_id: 'site1', granted_capabilities: ['abcd/can_view'] },
+        ]),
+      };
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      const resultSites = await result.json();
+      expect(result.status).to.equal(200);
+      // site2 is dropped — the caller has no can_view grant on it.
+      expect(resultSites).to.be.an('array').with.lengthOf(1);
+      expect(resultSites[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns 503 when the facs flag is set but PostgREST is unavailable', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      // No context.dataAccess.services → postgrest guard trips.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(503);
+    });
+
+    it('skips filter when JWT carries the federal can_view grant', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      // Keep is_admin: true so hasAccess passes; add facs_permissions to trigger the bypass.
+      context.attributes.authInfo.withProfile({
+        email: 'test@example.com',
+        is_admin: true,
+        facs_permissions: ['abcd/can_view'],
+      });
+      // No postgrestClient needed — the bypass should skip the state-layer query entirely.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(200);
+      const resultSites = await result.json();
+      expect(resultSites).to.be.an('array').with.lengthOf(2);
+    });
+  });
+
   it('gets all sites of an organization for non belonging organization', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Site.allByOrganizationId.resolves(sites);
@@ -522,9 +1074,11 @@ describe('Organizations Controller', () => {
   });
 
   it('returns bad request if organization id is not provided when getting sites for organization', async () => {
-    const result = await organizationsController.getSitesForOrganization(
-      { params: {}, ...context },
-    );
+    const result = await organizationsController.getSitesForOrganization({
+      params: {},
+      pathInfo: { headers: { 'x-product': 'abcd' } },
+      ...context,
+    });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
@@ -557,6 +1111,15 @@ describe('Organizations Controller', () => {
     expect(organization).to.be.an('object');
     expect(result.status).to.equal(200);
     expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
+  });
+
+  it('GET org by id includes semrushWorkspaceId on the response', async () => {
+    mockDataAccess.Organization.findById.resolves(organizations[1]);
+    const result = await organizationsController.getByID({ params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' }, ...context });
+    const organization = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(organization).to.have.property('semrushWorkspaceId', 'ws_test_org2');
   });
 
   it('gets an organization by id for non belonging organization', async () => {
@@ -909,6 +1472,8 @@ describe('Organizations Controller', () => {
     let mockTierClient;
 
     beforeEach(() => {
+      context.pathInfo = { headers: { 'x-product': 'abcd' } };
+
       delegatedSite = {
         getId: () => 'delegated-site-1',
         getBaseURL: () => 'https://delegated.com',

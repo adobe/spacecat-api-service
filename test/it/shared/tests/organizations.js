@@ -78,6 +78,36 @@ export default function organizationTests(getHttpClient, resetData) {
         const res = await http.trialUser.get('/organizations');
         expect(res.status).to.equal(403);
       });
+
+      // ── S2S readAll capability path ──
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('s2sConsumerReadAll: returns all organizations (organization:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get('/organizations');
+        expect(res.status).to.equal(200);
+        // Admin baseline returns 5: ORG_1, ORG_2, ORG_3 + LLMO fixtures.
+        expect(res.body).to.be.an('array').with.lengthOf(5);
+        const ids = res.body.map((org) => org.id);
+        expect(ids).to.include(ORG_1_ID);
+        expect(ids).to.include(ORG_2_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no organization:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies - required capability is organization:readAll
+        // and CONSUMER_1 is not granted it.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get('/organizations');
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        // Trust-boundary assertion: a token signed correctly by the auth-service for
+        // a (clientId, imsOrgId) pair that has no Consumer row is rejected at Layer 1.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get('/organizations');
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /organizations/:organizationId', () => {
@@ -153,9 +183,17 @@ export default function organizationTests(getHttpClient, resetData) {
     });
 
     describe('GET /organizations/:organizationId/sites', () => {
-      it('user: returns sites for accessible org (empty — no site enrollments)', async () => {
+      it('user: x-product=ASO returns empty (no ASO enrollments for ORG_1)', async () => {
+        // Forced x-product: ASO — ORG_1 has no ASO site enrollments, so the
+        // controller filters everything out. (The http-client's URL-derived
+        // default would otherwise pick LLMO and return ORG_1's LLMO-enrolled
+        // site SITE_1; see the explicit-LLMO / explicit-ASO delegatedUser
+        // tests below for the contrast pair.)
         const http = getHttpClient();
-        const res = await http.user.get(`/organizations/${ORG_1_ID}/sites`);
+        const res = await http.user.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
@@ -288,6 +326,59 @@ export default function organizationTests(getHttpClient, resetData) {
           imsOrgId: 'USERATTEMPT123456789012@AdobeOrg',
         });
         expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 400 for invalid x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          '/organizations',
+          {
+            name: 'Invalid Product Org',
+            imsOrgId: 'INVALIDPROD123456789012@AdobeOrg',
+          },
+          { 'x-product': 'NOT_A_PRODUCT' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/Unsupported product code/);
+      });
+
+      it('admin: x-product creates FREE_TRIAL ASO entitlement for new org', async () => {
+        const http = getHttpClient();
+        const imsOrgId = 'TRIALORG1234567890123456@AdobeOrg';
+        const createRes = await http.admin.post(
+          '/organizations',
+          { name: 'Trial Provisioned Org', imsOrgId },
+          { 'x-product': 'ASO' },
+        );
+        expect(createRes.status).to.equal(201);
+        expectOrgDto(createRes.body);
+
+        const entitlementsRes = await http.admin.get(
+          `/organizations/${createRes.body.id}/entitlements`,
+        );
+        expect(entitlementsRes.status).to.equal(200);
+        const asoEntitlement = entitlementsRes.body.find((e) => e.productCode === 'ASO');
+        expect(asoEntitlement).to.exist;
+        expect(asoEntitlement.tier).to.equal('FREE_TRIAL');
+      });
+
+      it('admin: idempotent re-POST with x-product returns 200', async () => {
+        const http = getHttpClient();
+        const imsOrgId = 'IDEMPORG12345678901234567@AdobeOrg';
+        const first = await http.admin.post(
+          '/organizations',
+          { name: 'Idempotent Org', imsOrgId },
+          { 'x-product': 'ASO' },
+        );
+        expect(first.status).to.equal(201);
+
+        const second = await http.admin.post(
+          '/organizations',
+          { name: 'Different Name', imsOrgId },
+          { 'x-product': 'ASO' },
+        );
+        expect(second.status).to.equal(200);
+        expect(second.body.id).to.equal(first.body.id);
       });
     });
 

@@ -51,6 +51,7 @@ export const PlgOnboardingDto = {
   toAdminJSON: (onboarding) => ({
     ...PlgOnboardingDto.toJSON(onboarding),
     reviews: onboarding.getReviews() || [],
+    createdBy: onboarding.getCreatedBy(),
     updatedBy: onboarding.getUpdatedBy(),
   }),
 };
