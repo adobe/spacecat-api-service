@@ -552,6 +552,10 @@ describe('getRouteHandlers', () => {
     getRedirects: sinon.stub(),
   };
 
+  const mockMarketingConsultantController = {
+    generateBrief: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -613,6 +617,7 @@ describe('getRouteHandlers', () => {
       mockSerenityController,
       mockProxyController,
       mockRedirectsController,
+      mockMarketingConsultantController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -1181,6 +1186,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'POST /sites/:siteId/marketing-consultant/brief',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 

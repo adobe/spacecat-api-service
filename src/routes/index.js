@@ -167,6 +167,7 @@ export default function getRouteHandlers(
   serenityController,
   proxyController,
   redirectsController,
+  marketingConsultantController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -252,6 +253,8 @@ export default function getRouteHandlers(
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'POST /sites/:siteId/preflights': preflightController.createPreflight,
+    // POC: AI Marketing Consultant brief generated live via Adobe Marketing Agent / CoWorker.
+    'POST /sites/:siteId/marketing-consultant/brief': marketingConsultantController.generateBrief,
     'GET /sites/:siteId/preflights': preflightController.getAllPreflights,
     'GET /sites/:siteId/preflights/:preflightId': preflightController.getPreflightById,
     'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,

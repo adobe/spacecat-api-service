@@ -340,6 +340,8 @@ const routeRequiredCapabilities = {
   // preflight jobs (legacy)
   'POST /preflight/jobs': 'site:write',
   'GET /preflight/jobs/:jobId': 'site:read',
+  // AI Marketing Consultant (POC) — read-only brief synthesis via the AEP agent
+  'POST /sites/:siteId/marketing-consultant/brief': 'site:read',
   // preflight site-scoped endpoints
   'POST /sites/:siteId/preflights': 'site:write',
   'GET /sites/:siteId/preflights': 'site:read',
