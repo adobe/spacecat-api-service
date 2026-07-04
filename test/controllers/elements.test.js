@@ -274,6 +274,14 @@ describe('ElementsController', () => {
       expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise token xyz');
     });
 
+    it('falls back to the raw header value when it is not valid percent-encoding', async () => {
+      const ctx = fakeContext({ promiseToken: 'promise%zztoken' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise%zztoken');
+    });
+
     it('401s with a generic message (no leaked exchange detail) when the promise token exchange fails', async () => {
       exchangePromiseTokenStub.rejects(new Error('upstream IMS exchange failed: secret detail'));
       const log = fakeLog();

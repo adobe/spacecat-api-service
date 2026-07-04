@@ -374,6 +374,15 @@ describe('SerenityController', () => {
         expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise token xyz');
       });
 
+      it('falls back to the raw header value when it is not valid percent-encoding', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ promiseToken: 'promise%zztoken' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise%zztoken');
+      });
+
       it('401s with a generic message (no leaked exchange detail) when the promise token exchange fails', async () => {
         exchangePromiseTokenStub.rejects(new Error('upstream IMS exchange failed: secret detail'));
         const log = fakeLog();
