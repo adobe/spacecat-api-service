@@ -1,3 +1,10 @@
+## [1.622.3](https://github.com/adobe/spacecat-api-service/compare/v1.622.2...v1.622.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **llmo:** reject CDN auto-routing for subpath sites (LLMO-4579) ([#2463](https://github.com/adobe/spacecat-api-service/issues/2463)) ([eac33c5](https://github.com/adobe/spacecat-api-service/commit/eac33c5a36efbc13fd679d7d61456f7374280fe3))
+
 ## [1.622.2](https://github.com/adobe/spacecat-api-service/compare/v1.622.1...v1.622.2) (2026-07-04)
 
 
