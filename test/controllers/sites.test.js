@@ -7420,11 +7420,11 @@ describe('Sites Controller', () => {
 
       it('resolveByOrg: picks first viewable enrolled site (not first enrolled)', async () => {
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([
             // Only the SECOND site is granted can_view.
-            { resource_id: SITE_IDS[1], granted_capabilities: ['abcd/can_view'] },
+            { resource_id: SITE_IDS[1], granted_capabilities: ['aso/can_view'] },
           ]),
         };
 
@@ -7449,7 +7449,7 @@ describe('Sites Controller', () => {
 
       it('resolveByOrg: returns 404 site_not_enrolled when no enrolled site is viewable', async () => {
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([]), // no can_view grants
         };
@@ -7471,7 +7471,7 @@ describe('Sites Controller', () => {
       it('siteId path: returns 404 site_not_enrolled when specific site is not viewable', async () => {
         const validSiteId = SITE_IDS[0];
         context.data = { siteId: validSiteId, organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([]), // caller has no can_view on this site
         };
@@ -7493,12 +7493,12 @@ describe('Sites Controller', () => {
 
       it('skips filter when JWT carries the federal can_view grant', async () => {
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         // JWT carries the federal can_view → no PostgREST query needed.
         context.attributes.authInfo = new AuthInfo()
           .withType('jwt')
           .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true, email: 'test@test.com', facs_permissions: ['abcd/can_view'] })
+          .withProfile({ is_admin: true, email: 'test@test.com', facs_permissions: ['aso/can_view'] })
           .withAuthenticated(true);
 
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -7514,7 +7514,7 @@ describe('Sites Controller', () => {
 
       it('resolveByOrg: returns 503 when PostgREST is unavailable', async () => {
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {}; // no postgrestClient
 
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -7530,10 +7530,10 @@ describe('Sites Controller', () => {
           .returns(makeConfigWithDefault(SITE_IDS[0]));
 
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([
-            { resource_id: SITE_IDS[0], granted_capabilities: ['abcd/can_view'] },
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
           ]),
         };
 
@@ -7550,10 +7550,10 @@ describe('Sites Controller', () => {
 
       it('resolveByOrg: returns 404 no_entitlement_for_product when org has no entitlement', async () => {
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([
-            { resource_id: SITE_IDS[0], granted_capabilities: ['abcd/can_view'] },
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
           ]),
         };
 
@@ -7571,10 +7571,10 @@ describe('Sites Controller', () => {
         const hasAdminStub = sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
 
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([
-            { resource_id: SITE_IDS[0], granted_capabilities: ['abcd/can_view'] },
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
           ]),
         };
 
@@ -7595,10 +7595,10 @@ describe('Sites Controller', () => {
       it('resolveByOrg: admin bypasses tier check and returns first viewable site', async () => {
         // Default ctx has is_admin: true → hasAdminAccess() is true → skips aso_pre_onboard.
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([
-            { resource_id: SITE_IDS[0], granted_capabilities: ['abcd/can_view'] },
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
           ]),
         };
 
@@ -7618,10 +7618,10 @@ describe('Sites Controller', () => {
 
       it('resolveByOrg: returns 404 when viewable enrollment found but Site.findById returns null', async () => {
         context.data = { organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {
           postgrestClient: fakeFacsPostgrest([
-            { resource_id: SITE_IDS[0], granted_capabilities: ['abcd/can_view'] },
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
           ]),
         };
 
@@ -7641,7 +7641,7 @@ describe('Sites Controller', () => {
 
       it('siteId path: returns 503 when PostgREST is unavailable', async () => {
         context.data = { siteId: SITE_IDS[0], organizationId: testOrganizations[0].getId() };
-        context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
         context.dataAccess.services = {}; // no postgrestClient
 
         mockDataAccess.Site.findById.resolves(testSites[0]);
@@ -7654,6 +7654,26 @@ describe('Sites Controller', () => {
         const response = await sitesController.resolveSite(context);
 
         expect(response.status).to.equal(503);
+      });
+
+      it('skips the site filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
+        // LLMO ReBAC-scopes `brand`, not `site` — resolveSite must not apply the
+        // per-site filter. No postgrestClient: if the filter engaged it would 503.
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
       });
     });
   });

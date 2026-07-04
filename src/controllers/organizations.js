@@ -33,6 +33,7 @@ import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import {
   ensureOrgEntitlement,
   resolveProductCode,
@@ -337,11 +338,16 @@ function OrganizationsController(ctx, env) {
     // may view via a state-layer grant. Delegated sites are governed by the
     // delegation grant itself and pass through unchanged. Absent flag (admin /
     // internal org / non-ReBAC org / org-wide viewer) => full list.
+    //
+    // Cross-product bypass: only filter when the current product actually
+    // ReBAC-scopes `site` (ASO). Under LLMO, `site` is not a ReBAC resource
+    // (LLMO scopes `brand`), so the state layer holds no per-site grants and
+    // filtering would wrongly hide every site — return the full list instead.
     let visibleOwnSites = filteredSites;
     const facs = context.attributes?.facs;
     const hasFACSCapability = facs?.enabled
       && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
-    if (facs?.enabled && !hasFACSCapability) {
+    if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
       const unavailable = requirePostgrestForFacsMappings(context);
       if (unavailable) {
         return unavailable;
