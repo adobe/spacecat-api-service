@@ -33,6 +33,12 @@ import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
+const PRERENDER_VALIDATION_STATUSES = [
+  'in_progress',
+  'completed_success',
+  'completed_fail',
+  'error',
+];
 
 /**
  * Opportunities controller.
@@ -356,12 +362,74 @@ function OpportunitiesController(ctx) {
     }
   };
 
+  /**
+   * Merges prerender-validation lifecycle state into an opportunity's data.
+   * Only `data.prerenderValidation` is updated — all other `data` fields are
+   * preserved (server-side merge), so external callers cannot clobber the data
+   * written by the prerender audit.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Updated opportunity response.
+   */
+  const patchPrerenderValidation = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can edit its opportunities');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No updates provided');
+    }
+
+    const { status, startedAt, completedAt } = context.data;
+    if (!hasText(status) || !PRERENDER_VALIDATION_STATUSES.includes(status)) {
+      return badRequest(`status must be one of: ${PRERENDER_VALIDATION_STATUSES.join(', ')}`);
+    }
+
+    try {
+      const currentData = opportunity.getData() || {};
+      const prerenderValidation = { ...currentData.prerenderValidation, status };
+      if (startedAt !== undefined) {
+        prerenderValidation.startedAt = startedAt;
+      }
+      if (completedAt !== undefined) {
+        prerenderValidation.completedAt = completedAt;
+      }
+
+      opportunity.setData({ ...currentData, prerenderValidation });
+      opportunity.setUpdatedBy(profile.email || 'system');
+      const updatedOppty = await opportunity.save(opportunity);
+      return ok(OpportunityDto.toJSON(updatedOppty));
+    } catch (e) {
+      return handleDataAccessError(e, 'Error updating prerender validation');
+    }
+  };
+
   return {
     createOpportunity,
     getAllForSite,
     getByID,
     getByStatus,
     patchOpportunity,
+    patchPrerenderValidation,
     removeOpportunity,
   };
 }
