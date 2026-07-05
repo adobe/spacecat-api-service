@@ -531,6 +531,7 @@ const routeFacsCapabilities = {
       'PATCH /sites/:siteId': 'llmo/can_configure',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId': 'llmo/can_configure',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/prerender-validation': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'llmo/can_configure',
@@ -851,6 +852,7 @@ const routeFacsCapabilities = {
       // ---- Edit (opportunity / suggestion / fix / report / sentiment / url-store content) ----
       'POST /sites/:siteId/opportunities': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId': 'aso/can_edit',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/prerender-validation': 'aso/can_edit',
       'DELETE /sites/:siteId/opportunities/:opportunityId': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'aso/can_edit',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'aso/can_edit',
