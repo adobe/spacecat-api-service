@@ -1,3 +1,10 @@
+# [1.623.0](https://github.com/adobe/spacecat-api-service/compare/v1.622.3...v1.623.0) (2026-07-06)
+
+
+### Features
+
+* add Slack commands for path-level prerender suggestions ([#2758](https://github.com/adobe/spacecat-api-service/issues/2758)) ([6c7dd48](https://github.com/adobe/spacecat-api-service/commit/6c7dd4857d8bf1d2c105f44e91675c3cac079e75))
+
 ## [1.622.3](https://github.com/adobe/spacecat-api-service/compare/v1.622.2...v1.622.3) (2026-07-04)
 
 
