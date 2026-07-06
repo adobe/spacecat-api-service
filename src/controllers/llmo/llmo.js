@@ -48,6 +48,7 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectAemCsFastlyForDomain,
+  hasSubpath,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1603,7 +1604,12 @@ function LlmoController(ctx) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
       }
-
+      if (hasSubpath(baseURL)) {
+        log.info(`[edge-optimize-routing] ${baseURL} subpath sites not eligible for auto routing`);
+        return ok({
+          ...metaconfig,
+        });
+      }
       let cdnTypeNormalized = null;
       if (hasText(cdnType)) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`

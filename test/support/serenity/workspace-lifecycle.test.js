@@ -54,9 +54,9 @@ function makeBrand({ workspaceId = null, name = 'Adobe Express', id = BRAND_ID }
   let ws = workspaceId;
   return {
     getId: () => id,
-    getSemrushWorkspaceId: () => ws,
+    getSemrushSubWorkspaceId: () => ws,
     getName: () => name,
-    setSemrushWorkspaceId: sinon.spy((v) => { ws = v; }),
+    setSemrushSubWorkspaceId: sinon.spy((v) => { ws = v; }),
     save: sinon.stub().resolves(),
   };
 }
@@ -106,7 +106,7 @@ describe('workspace-lifecycle', () => {
       expect(transport.createSubworkspace)
         .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE, CREATE_ALLOCATION);
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
     });
 
@@ -133,7 +133,7 @@ describe('workspace-lifecycle', () => {
 
       expect(result).to.equal('adopted-ws');
       expect(transport.createSubworkspace).to.have.been.calledOnce;
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith('adopted-ws');
     });
 
     it('refuses to adopt a NON-empty created family match (shared empty-check)', async () => {
@@ -152,7 +152,7 @@ describe('workspace-lifecycle', () => {
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
         .to.be.rejectedWith(/refusing to adopt/);
       expect(transport.createSubworkspace).to.not.have.been.called;
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
     });
 
     it('throws when the sole created family match has no id', async () => {
@@ -245,7 +245,7 @@ describe('workspace-lifecycle', () => {
 
         expect(result).to.equal('existing-ws');
         expect(transport.createSubworkspace).to.not.have.been.called;
-        expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly('existing-ws');
+        expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly('existing-ws');
         expect(brand.save).to.have.been.calledOnce;
       });
 
@@ -263,7 +263,7 @@ describe('workspace-lifecycle', () => {
 
         expect(result).to.equal(SUB_WS);
         expect(transport.createSubworkspace).to.have.been.calledOnce;
-        expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+        expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       });
 
       it('adopts the one created match when a not-ready zombie shares the title', async () => {
@@ -281,7 +281,7 @@ describe('workspace-lifecycle', () => {
 
         expect(result).to.equal('good-ws');
         expect(transport.createSubworkspace).to.not.have.been.called;
-        expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('good-ws');
+        expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith('good-ws');
       });
 
       it('accumulated not-ready zombies do NOT inflate the ambiguity 409; create proceeds', async () => {
@@ -427,7 +427,7 @@ describe('workspace-lifecycle', () => {
       expect(transport.transferWorkspaceResources)
         .to.have.been.calledOnceWithExactly(SUB_WS, RELEASE_ALLOCATION);
       // The winner's pointer is NOT clobbered.
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
     });
 
@@ -447,7 +447,7 @@ describe('workspace-lifecycle', () => {
       );
 
       expect(result).to.equal(SUB_WS);
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
     });
 
@@ -478,8 +478,8 @@ describe('workspace-lifecycle', () => {
       // Both persist (divergent): neither releases its allocation, both save.
       expect(resA).to.equal('ws-A');
       expect(resB).to.equal('ws-B');
-      expect(brandA.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly('ws-A');
-      expect(brandB.setSemrushWorkspaceId).to.have.been.calledOnceWithExactly('ws-B');
+      expect(brandA.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly('ws-A');
+      expect(brandB.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly('ws-B');
       expect(transportA.transferWorkspaceResources).to.not.have.been.called;
       expect(transportB.transferWorkspaceResources).to.not.have.been.called;
     });
@@ -502,7 +502,7 @@ describe('workspace-lifecycle', () => {
       );
 
       expect(result).to.equal('winner-ws');
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
     });
   });
 
@@ -689,7 +689,7 @@ describe('workspace-lifecycle', () => {
 
         expect(result).to.equal('adopted-ws');
         expect(transport.createSubworkspace).to.not.have.been.called;
-        expect(brand.setSemrushWorkspaceId).to.have.been.calledWith('adopted-ws');
+        expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith('adopted-ws');
       });
     });
 

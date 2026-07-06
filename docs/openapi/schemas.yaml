@@ -3822,9 +3822,18 @@ Brand:
       readOnly: true
     semrushWorkspaceId:
       description: >-
-        Read-only. The brand's own Semrush sub-workspace id (dual-mode). Null
-        for brands still in flat mode (no sub-workspace minted yet). Used to
-        scope per-brand Semrush views to the sub-workspace.
+        Read-only. DEPRECATED — kept for backward compatibility only, mirrored
+        from semrushSubWorkspaceId (below). Prefer semrushSubWorkspaceId; this
+        field will be removed once every direct consumer has migrated.
+      type: [string, 'null']
+      readOnly: true
+      deprecated: true
+    semrushSubWorkspaceId:
+      description: >-
+        Read-only. The brand's own Semrush sub-workspace id (dual-mode) — the
+        canonical, correctly-named field. Null for brands still in flat mode
+        (no sub-workspace minted yet). Used to scope per-brand Semrush views
+        to the sub-workspace.
       type: [string, 'null']
       readOnly: true
     pendingSemrushProvisioning:

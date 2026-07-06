@@ -82,10 +82,20 @@ export function initialMarketProjectName(market, languageCode) {
  *   brands to track") tracked as region-filtered project benchmarks (domain-only).
  *   Best-effort: a failed sync is logged and skipped, never aborts provisioning.
  * @param {object} [log]
- * @returns {Promise<{semrushWorkspaceId: string, published: boolean}>} the new
- *   sub-workspace id and whether the initial market was published. Publish is
- *   required (`publishMode: 'require'`): a quota 405 does NOT return a draft, it
- *   throws (surfaced as 409 "Quota exceeded").
+ * @returns {Promise<{
+ *   semrushSubWorkspaceId: string,
+ *   published: boolean,
+ *   projectId: string,
+ *   geoTargetId: number | null,
+ *   languageCode: string,
+ * }>} the new sub-workspace id, whether the initial market was published, and
+ *   the initial market's identity — deliberately NOT written to
+ *   `brand_to_semrush_projects` here (this function runs before the brand row
+ *   exists, and the mapping row's FK requires it); the caller writes the
+ *   mapping row itself once the brand row is persisted, mirroring how it
+ *   already handles `ensureMarketSite` (see `controllers/brands.js`). Publish
+ *   is required (`publishMode: 'require'`): a quota 405 does NOT return a
+ *   draft, it throws (surfaced as 409 "Quota exceeded").
  * @throws {ErrorWithStatusCode} on workspace/project create or publish failure
  *   (the caller then skips the brand write). URL and competitor propagation are
  *   best-effort and never throw.
@@ -129,8 +139,8 @@ export async function provisionBrandSubworkspace(context, {
   const brandStub = {
     getId: () => brandId,
     getName: () => brandName,
-    getSemrushWorkspaceId: () => undefined,
-    setSemrushWorkspaceId: (id) => { capturedWorkspaceId = id; },
+    getSemrushSubWorkspaceId: () => undefined,
+    setSemrushSubWorkspaceId: (id) => { capturedWorkspaceId = id; },
     save: async () => {},
   };
 
@@ -220,9 +230,21 @@ export async function provisionBrandSubworkspace(context, {
   if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
     throw new ErrorWithStatusCode('Semrush provisioning returned no sub-workspace id', 502);
   }
+  // handleCreateMarketSubworkspace's own body already carries the initial
+  // market's identity (geoTargetId/languageCode resolved from the same
+  // resolvedMarket/resolvedLanguageCode this call passed in) — read it back
+  // rather than re-deriving it.
+  /** @type {any} */
+  const resultBody = result.body || {};
   return {
-    semrushWorkspaceId: capturedWorkspaceId,
-    published: Boolean(/** @type {{ published?: boolean }} */ (result.body || {}).published),
+    semrushSubWorkspaceId: capturedWorkspaceId,
+    published: Boolean(resultBody.published),
+    projectId: String(resultBody.projectId || ''),
+    // Absent stays null (not 0) so upsertMappingRow's `!geoTargetId` guard
+    // rejects an unresolvable slice explicitly rather than persisting a
+    // sentinel value.
+    geoTargetId: resultBody.geoTargetId != null ? Number(resultBody.geoTargetId) : null,
+    languageCode: String(resultBody.languageCode || resolvedLanguageCode),
   };
 }
 
