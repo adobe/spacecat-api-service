@@ -69,7 +69,7 @@ function fakeContext({
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
     : undefined;
   return {
-    params: { spaceCatId: ORG_ID, brandId: BRAND_ID, ...params },
+    params: { spaceCatId: ORG_ID, ...params },
     request: { url },
     pathInfo: {
       headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
@@ -103,7 +103,9 @@ async function readBody(response) {
 
 describe('ElementsController', () => {
   let listSpacecatBrandsStub;
+  let getBrandByIdStub;
   let resolveWorkspaceIdStub;
+  let resolveBrandWorkspaceStub;
   let accessControlHasAccessStub;
   let serviceStub;
   let createElementsServiceStub;
@@ -113,9 +115,11 @@ describe('ElementsController', () => {
 
   beforeEach(async () => {
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE_ID);
+    resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'subworkspace', workspaceId: 'sub-ws-uuid-456' });
     accessControlHasAccessStub = sinon.stub().resolves(true);
 
     listSpacecatBrandsStub = sinon.stub().resolves([{ id: 'brand-1', name: 'Adobe' }]);
+    getBrandByIdStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
 
     serviceStub = {
       getUrlInspectorFilterDimensions: sinon.stub().resolves(URL_INSPECTOR_RESULT),
@@ -150,9 +154,11 @@ describe('ElementsController', () => {
       },
       '../../src/support/brands-storage.js': {
         listBrands: listSpacecatBrandsStub,
+        getBrandById: getBrandByIdStub,
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveWorkspaceId: resolveWorkspaceIdStub,
+        resolveBrandWorkspace: resolveBrandWorkspaceStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
     })).default;
@@ -399,6 +405,54 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  // ─── brand-scoped (:brandId) ──────────────────────────────────────────────
+
+  describe('listUrlInspectorFilterDimensions (brand-scoped)', () => {
+    it('returns 400 when brandId is not a valid UUID', async () => {
+      const ctx = fakeContext({ params: { brandId: 'not-a-uuid' } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 403 when the brand does not belong to the org', async () => {
+      getBrandByIdStub.resolves(null);
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 404 when the brand has no resolvable workspace', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('calls the service with the brand sub-workspace ID and scopes to that single brand', async () => {
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(resolveBrandWorkspaceStub).to.have.been.calledWith(ctx, ORG_ID, BRAND_ID);
+      expect(listSpacecatBrandsStub).to.not.have.been.called;
+      const [workspaceId, , brands] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
+      expect(workspaceId).to.equal('sub-ws-uuid-456');
+      expect(brands).to.deep.equal([{ id: BRAND_ID, name: 'Adobe Brand' }]);
+    });
+
+    it('falls back to the org parent workspace when the brand has no sub-workspace yet', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: WORKSPACE_ID });
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      const [workspaceId] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
+      expect(workspaceId).to.equal(WORKSPACE_ID);
     });
   });
 

@@ -11,16 +11,18 @@
  */
 
 import {
-  createResponse, forbidden, internalServerError, notFound, ok,
+  badRequest, createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { listBrands as listSpacecatBrands, getBrandBySite } from '../support/brands-storage.js';
+import {
+  listBrands as listSpacecatBrands, getBrandById, getBrandBySite,
+} from '../support/brands-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
-import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
+import { resolveWorkspaceId, resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
@@ -150,8 +152,8 @@ function requireImsBearer(ctx) {
 
 /**
  * Controller for Semrush Elements API wrapper endpoints.
- * Org-scoped handlers use the org's workspace ID; brand-scoped handlers (Phase 2)
- * will use the brand's subworkspace ID.
+ * The `all` path segment scopes to the org's own workspace ID; a real `:brandId`
+ * scopes to that brand's Semrush sub-workspace ID (see `authorizeOrg`).
  *
  * @param {object} context - Request context.
  * @param {object} log - Logger.
@@ -159,10 +161,19 @@ function requireImsBearer(ctx) {
  */
 /**
  * Validates org access and resolves the Semrush workspace ID.
- * Returns `{ workspaceId }` on success or `{ error: Response }` on failure.
+ *
+ * When the route carries a `:brandId` other than the `all` sentinel, the
+ * result is brand-scoped: `workspaceId` is the brand's Semrush sub-workspace
+ * ID (falling back to the org's parent workspace when the brand hasn't been
+ * provisioned one yet, per `resolveBrandWorkspace`'s dual-mode resolution),
+ * and `brand` is the resolved brand record. Otherwise behaves as before,
+ * scoped to the org's own workspace.
+ *
+ * Returns `{ workspaceId, brand? }` on success or `{ error: Response }` on failure.
  */
 async function authorizeOrg(ctx) {
   const spaceCatId = ctx?.params?.spaceCatId;
+  const brandIdParam = ctx?.params?.brandId;
   const Organization = ctx?.dataAccess?.Organization;
   if (!Organization || typeof Organization.findById !== 'function') {
     return { error: internalServerError('Organization data-access not available') };
@@ -175,6 +186,24 @@ async function authorizeOrg(ctx) {
   if (!await accessControl.hasAccess(organization)) {
     return { error: forbidden('User does not have access to this organization') };
   }
+
+  const isBrandScoped = hasText(brandIdParam) && brandIdParam !== 'all';
+  if (isBrandScoped) {
+    if (!isValidUUID(brandIdParam)) {
+      return { error: badRequest('Brand id must be a valid UUID') };
+    }
+    const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+    const brand = await getBrandById(spaceCatId, brandIdParam, postgrestClient);
+    if (!brand) {
+      return { error: forbidden('Brand not found or not accessible for this organization') };
+    }
+    const { workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandIdParam);
+    if (!hasText(workspaceId)) {
+      return { error: notFound('Brand has no resolvable Semrush workspace') };
+    }
+    return { workspaceId, brand };
+  }
+
   const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
   if (!hasText(workspaceId)) {
     return { error: notFound('Organization has no semrush_workspace_id') };
@@ -197,8 +226,10 @@ export default function ElementsController(context, log, env) {
 
   /**
    * GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions
+   * GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/filter-dimensions
    * Returns filter dimensions for the URL Inspector dashboard
    * (brands, regions, topics, categories, page_intents, origins).
+   * With a real `:brandId`, scoped to that single brand instead of every org brand.
    */
   const listUrlInspectorFilterDimensions = async (ctx) => {
     try {
@@ -210,7 +241,9 @@ export default function ElementsController(context, log, env) {
       const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
 
-      const spacecatBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
+      const spacecatBrands = auth.brand
+        ? [auth.brand]
+        : await listSpacecatBrands(spaceCatId, postgrestClient);
 
       const brandSemrushProjects = await fetchBrandSemrushProjects(
         BrandSemrushProject,
@@ -231,7 +264,9 @@ export default function ElementsController(context, log, env) {
 
   /**
    * GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks
+   * GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/weeks
    * Returns the list of weeks that have Brand Presence data (week filter dropdown).
+   * With a real `:brandId`, scoped to that brand (an unrelated siteId filter is rejected).
    */
   /* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
   const listWeeks = async (ctx) => {
@@ -242,13 +277,26 @@ export default function ElementsController(context, log, env) {
       }
       const { spaceCatId } = ctx?.params ?? {};
       const query = extractQuery(ctx);
-
-      // The URL Inspector filter sends a siteId, which Semrush has no concept of.
-      // Reverse-map it to the site's primary brand (brands.site_id) and scope the
-      // weeks to that brand. Omitted siteId → workspace-wide weeks.
       const siteId = query.siteId || query.site_id;
       let brand;
-      if (hasText(siteId)) {
+
+      if (auth.brand) {
+        // Brand-scoped route: the path already names the brand. A siteId query
+        // param is only honored when it actually belongs to that brand — this
+        // catches a caller mixing a brand-scoped path with a stale/mismatched
+        // siteId filter from a different brand.
+        brand = auth.brand.name;
+        if (hasText(siteId)) {
+          const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+          const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+          if (!resolved || resolved.id !== auth.brand.id) {
+            return badRequest('siteId does not belong to the specified brand');
+          }
+        }
+      } else if (hasText(siteId)) {
+        // The URL Inspector filter sends a siteId, which Semrush has no concept of.
+        // Reverse-map it to the site's primary brand (brands.site_id) and scope the
+        // weeks to that brand. Omitted siteId → workspace-wide weeks.
         const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
         const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
         if (!resolved) {
