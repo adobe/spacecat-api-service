@@ -24,8 +24,9 @@ export const ELEMENT_IDS = Object.freeze({
   WEEKS: 'afa7458b-d34f-43d9-8cc5-e8794753551c',
 
   // Aggregated Stats
-  // URL Inspector — Cited Domains ("Stats per Domain"). `table` envelope,
-  // date + model filters only (no brand/project/category push-down per the wiki).
+  // URL Inspector — Cited Domains ("Stats per Domain"). `table` envelope. Honors: date +
+  // `CBF_model` + `CBF_tags` (category) filters, and a top-level `project_id` (region/market).
+  // Brand scoping is via the request's sub-workspace, not a filter (`CBF_ws_brand` is a no-op).
   CITED_DOMAINS: '98b91d00-9531-4120-b3b5-17cc27489fce',
 
   MENTIONS: 'e1a6811b-d0c9-4d6f-8a29-290a32db863f',
