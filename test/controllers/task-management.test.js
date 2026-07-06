@@ -102,11 +102,22 @@ function makePostgrestClient({
   const updateEqStub = sinon.stub().returns(Promise.resolve({ data: null, error: null }));
   const updateStub = sinon.stub().returns({ eq: updateEqStub });
 
+  function makeDeleteChain() {
+    const p = Promise.resolve({ data: null, error: null });
+    const chain = Object.assign(p, {
+      eq: sinon.stub().callsFake(() => makeDeleteChain()),
+      lt: sinon.stub().callsFake(() => Promise.resolve({ data: null, error: null })),
+    });
+    return chain;
+  }
+  const deleteStub = sinon.stub().callsFake(() => makeDeleteChain());
+
   return {
     from: sinon.stub().returns({
       select: selectStub,
       insert: insertStub,
       update: updateStub,
+      delete: deleteStub,
     }),
   };
 }
@@ -243,6 +254,7 @@ describe('TaskManagementController', () => {
         'listTicketsByOpportunity',
         'createTicket',
         'listProjects',
+        'listIssueTypes',
       );
     });
   });
@@ -1860,6 +1872,143 @@ describe('TaskManagementController', () => {
 
       const { listProjects } = Ctrl(ctx);
       const res = await listProjects(makeReqCtx());
+      expect(res.status).to.equal(500);
+    });
+  });
+
+  describe('listIssueTypes', () => {
+    const PROJECT_ID = 'PROJ';
+
+    function makeReqCtx(overrides = {}) {
+      return {
+        params: { organizationId: ORG_ID, connectionId: CONN_ID, ...(overrides.params ?? {}) },
+        pathInfo: { suffix: `?projectId=${PROJECT_ID}`, ...(overrides.pathInfo ?? {}) },
+      };
+    }
+
+    it('returns 400 for invalid organizationId', async () => {
+      const { listIssueTypes } = TaskManagementController(makeContext());
+      const res = await listIssueTypes(makeReqCtx({ params: { organizationId: 'bad', connectionId: CONN_ID } }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for invalid connectionId', async () => {
+      const { listIssueTypes } = TaskManagementController(makeContext());
+      const res = await listIssueTypes(makeReqCtx({ params: { organizationId: ORG_ID, connectionId: 'not-a-uuid' } }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when projectId is missing', async () => {
+      const { listIssueTypes } = TaskManagementController(makeContext());
+      const res = await listIssueTypes(makeReqCtx({ pathInfo: { suffix: '' } }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when no active connection found', async () => {
+      const { listIssueTypes } = TaskManagementController(makeContext());
+      const res = await listIssueTypes(makeReqCtx());
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 500 on connection load error', async () => {
+      const ctx = makeContext();
+      ctx.dataAccess.TaskManagementConnection.findById.rejects(new Error('db'));
+      const { listIssueTypes } = TaskManagementController(ctx);
+      const res = await listIssueTypes(makeReqCtx());
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns 200 with issue type list', async () => {
+      const conn = makeConnection();
+      const issueTypes = [{ id: '10001', name: 'Story' }, { id: '10002', name: 'Bug' }];
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findById: sinon.stub().resolves(conn),
+          },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              listIssueTypes: sinon.stub().resolves(issueTypes),
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { listIssueTypes } = Ctrl(ctx);
+      const res = await listIssueTypes(makeReqCtx());
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.issueTypes).to.deep.equal(issueTypes);
+    });
+
+    it('returns 409 and marks reauth when Jira client returns 401', async () => {
+      const conn = makeConnection();
+      const err = Object.assign(new Error('Unauthorized'), { status: 401 });
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findById: sinon.stub().resolves(conn),
+          },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ listIssueTypes: sinon.stub().rejects(err) }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { listIssueTypes } = Ctrl(ctx);
+      const res = await listIssueTypes(makeReqCtx());
+      expect(res.status).to.equal(409);
+      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+    });
+
+    it('returns 500 on generic list issue types error', async () => {
+      const conn = makeConnection();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findById: sinon.stub().resolves(conn),
+          },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ listIssueTypes: sinon.stub().rejects(new Error('timeout')) }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { listIssueTypes } = Ctrl(ctx);
+      const res = await listIssueTypes(makeReqCtx());
       expect(res.status).to.equal(500);
     });
   });
