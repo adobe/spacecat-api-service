@@ -21,9 +21,10 @@ import { CACHE_TTL_MS, NEG_TTL_MS, MAX_ENTRIES } from './workspace-resolver.js';
  * The org-wide rollout switch for the Semrush-backed "serenity" experience,
  * stored in the `feature_flags` table (keyed organization_id + product +
  * flag_name). Flipping it to `true` activates serenity for that org; until
- * then the org's UI keeps reading the normal backend data — even if the org /
- * its brands have already had a `semrush_workspace_id` backfilled for rollout
- * prep. This decouples the rollout from provisioning.
+ * then the org's UI keeps reading the normal backend data — even if the org's
+ * `semrush_workspace_id` / its brands' `semrush_sub_workspace_id` have
+ * already been backfilled for rollout prep. This decouples the rollout from
+ * provisioning.
  */
 export const SERENITY_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const SERENITY_FEATURE_FLAG_NAME = 'serenity';

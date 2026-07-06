@@ -74,7 +74,7 @@ describe('provisionBrandSubworkspace', () => {
     // Mimic the real handler: ensureSubworkspace would set the brand stub's
     // workspace id, then a project is created. Stub captures that side-effect.
     handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
-      brand.setSemrushWorkspaceId(NEW_WS);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
       return { status: 201, body: { brandId: brand.getId() } };
     });
   });
@@ -84,15 +84,17 @@ describe('provisionBrandSubworkspace', () => {
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: false });
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
+    });
   });
 
   it('exposes a brand stub whose getters/save are usable by the handler', async () => {
-    // Exercises the stub's getSemrushWorkspaceId() (initially undefined) and the
+    // Exercises the stub's getSemrushSubWorkspaceId() (initially undefined) and the
     // no-op save() that the real handler invokes while driving provisioning.
     handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
-      expect(brand.getSemrushWorkspaceId()).to.equal(undefined);
-      brand.setSemrushWorkspaceId(NEW_WS);
+      expect(brand.getSemrushSubWorkspaceId()).to.equal(undefined);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
       await brand.save();
       return { status: 201, body: { brandId: brand.getId() } };
     });
@@ -100,34 +102,64 @@ describe('provisionBrandSubworkspace', () => {
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result.semrushWorkspaceId).to.equal(NEW_WS);
+    expect(result.semrushSubWorkspaceId).to.equal(NEW_WS);
   });
 
   it('returns published:true when the initial market was published', async () => {
     // result.body.published truthy → Boolean(...) true branch (line 225).
     handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
-      brand.setSemrushWorkspaceId(NEW_WS);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
       return { status: 201, body: { brandId: brand.getId(), published: true } };
     });
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: true });
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS, published: true, projectId: '', geoTargetId: null, languageCode: 'en',
+    });
   });
 
   it('returns published:false when a successful result carries no body (result.body || {})', async () => {
     // result.body is undefined on the success path → the `|| {}` fallback fires
     // before reading `.published` (line 225 right branch).
     handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
-      brand.setSemrushWorkspaceId(NEW_WS);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
       return { status: 200 };
     });
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: false });
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
+    });
+  });
+
+  it('surfaces the initial market identity from the handler body, deliberately without writing the mapping row', async () => {
+    // provisionBrandSubworkspace runs before the brand row is written (a
+    // throwaway id), so it can't satisfy the mapping row's FK to brands —
+    // the caller (brands.js) writes it once the real row is persisted.
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      return {
+        status: 201,
+        body: {
+          brandId: brand.getId(), projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
+        },
+      };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS,
+      published: false,
+      projectId: 'proj-initial',
+      geoTargetId: 2840,
+      languageCode: 'en',
+    });
   });
 
   it('passes the "REGION - LANG" project name and brand identity to the handler', async () => {
@@ -159,7 +191,7 @@ describe('provisionBrandSubworkspace', () => {
     // The stub drives the sub-workspace title off the brand's name + id.
     expect(brandStub.getName()).to.equal('Acme');
     expect(brandStub.getId()).to.equal('brand-1');
-    expect(brandStub.getSemrushWorkspaceId()).to.equal(undefined);
+    expect(brandStub.getSemrushSubWorkspaceId()).to.equal(undefined);
   });
 
   it('falls back to US/EN and publishes best-effort when generateTopics is false with no market or models', async () => {
@@ -326,7 +358,7 @@ describe('provisionBrandSubworkspace', () => {
     // brand row is never written, so the caller's compensation can't fire).
     const transfer = sinon.stub().resolves({});
     const handler = sinon.stub().callsFake(async (transport, brand) => {
-      brand.setSemrushWorkspaceId(NEW_WS);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
       return { status: 502, body: { message: 'upstream blew up' } };
     });
     const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
@@ -451,11 +483,11 @@ describe('defensive branch coverage', () => {
   describe('releaseCapturedOnFailure catch block (lines 141-145)', () => {
     it('logs error when provisioning fails after workspace creation AND the release itself throws', async () => {
       // The catch on line 140 fires when: handleCreateMarketSubworkspace captures a
-      // workspaceId (via brand.setSemrushWorkspaceId) and then returns a 4xx result
+      // workspaceId (via brand.setSemrushSubWorkspaceId) and then returns a 4xx result
       // triggering releaseCapturedOnFailure, AND transferWorkspaceResources throws.
       const transfer = sinon.stub().rejects(new Error('release network error'));
       const handler = sinon.stub().callsFake(async (transport, brand) => {
-        brand.setSemrushWorkspaceId(NEW_WS);
+        brand.setSemrushSubWorkspaceId(NEW_WS);
         return { status: 422, body: {} };
       });
       const log = { error: sinon.stub(), info: sinon.stub() };
@@ -493,7 +525,7 @@ describe('defensive branch coverage', () => {
       // Line 196: result.body?.message || 'Failed to provision Semrush sub-workspace'
       // right side fires when body.message is absent/falsy.
       const handler = sinon.stub().callsFake(async (transport, brand) => {
-        brand.setSemrushWorkspaceId(NEW_WS);
+        brand.setSemrushSubWorkspaceId(NEW_WS);
         return { status: 422, body: {} };
       });
       const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
@@ -520,7 +552,7 @@ describe('defensive branch coverage', () => {
     it('uses fallback message when result has no body at all', async () => {
       // result.body is undefined -> result.body?.message = undefined -> fallback.
       const handler = sinon.stub().callsFake(async (transport, brand) => {
-        brand.setSemrushWorkspaceId(NEW_WS);
+        brand.setSemrushSubWorkspaceId(NEW_WS);
         return { status: 500 };
       });
       const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
