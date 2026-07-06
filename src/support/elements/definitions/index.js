@@ -19,3 +19,4 @@ export {
   transformIntentsToFilterDimensions,
   transformOriginsToFilterDimensions,
 } from './topics.js';
+export { buildWeeksPayload, transformWeeksResponse } from './weeks.js';
