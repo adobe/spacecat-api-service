@@ -318,6 +318,12 @@ export default function ElementsController(context, log, env) {
         projectId = await service.resolveRegionProjectId(workspaceId, {
           brandId, region, brandSemrushProjects,
         });
+        // Don't silently fall back to all-region data when the caller asked for a specific
+        // region we can't resolve to a market — that would return a superset of what was
+        // requested. Fail explicitly, mirroring the brandId/workspaceId guards above.
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
       }
 
       // Normalize the aliases the UI may send under either casing/key. `category` (the UI
