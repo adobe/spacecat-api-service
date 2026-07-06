@@ -863,7 +863,7 @@ function SitesController(ctx, log, env) {
             postgrestClient,
             log,
           );
-          attachedToSemrushBrand = hasText(attachedBrand?.semrushWorkspaceId)
+          attachedToSemrushBrand = hasText(attachedBrand?.semrushSubWorkspaceId)
             || await isSemrushMarketMirrorSite(
               site.getOrganizationId(),
               site.getId(),

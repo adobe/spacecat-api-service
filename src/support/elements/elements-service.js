@@ -21,6 +21,8 @@ import {
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,
   transformOriginsToFilterDimensions,
+  buildWeeksPayload,
+  transformWeeksResponse,
 } from './definitions/index.js';
 
 /**
@@ -60,5 +62,23 @@ export function createElementsService(transport) {
         origins: transformOriginsToFilterDimensions(rawTopics),
       };
     },
+
+    /**
+     * Fetches the list of weeks that have Brand Presence data (week filter dropdown).
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query parameters (model, etc.).
+     * @returns {Promise<object>} `{ weeks: [{ week, startDate, endDate }] }`.
+     */
+    /* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
+    async getWeeks(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.WEEKS,
+        buildWeeksPayload(params),
+      );
+      return { weeks: transformWeeksResponse(raw) };
+    },
+    /* c8 ignore stop */
   };
 }

@@ -74,6 +74,7 @@ import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromis
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
+import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -248,8 +249,8 @@ function requireImsBearer(ctx) {
 
 /**
  * Builds an async reload callback that re-reads the brand's CURRENT
- * semrush_workspace_id from the data layer. ensureSubworkspace uses it as a
- * lost-update concurrency guard so a parallel activation cannot orphan a
+ * semrush_sub_workspace_id from the data layer. ensureSubworkspace uses it as
+ * a lost-update concurrency guard so a parallel activation cannot orphan a
  * freshly-created, resourced sub-workspace.
  */
 export function brandPointerReloader(ctx, brandUuid) {
@@ -259,7 +260,7 @@ export function brandPointerReloader(ctx, brandUuid) {
       return null;
     }
     const fresh = await Brand.findById(brandUuid);
-    return fresh?.getSemrushWorkspaceId?.() ?? null;
+    return fresh?.getSemrushSubWorkspaceId?.() ?? null;
   };
 }
 
@@ -318,7 +319,7 @@ function SerenityController(context, log, env) {
    *
    * Returns either `{ error: Response }` or
    * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
-   *   - `mode` is 'subworkspace' when brands.semrush_workspace_id is set, else 'flat'
+   *   - `mode` is 'subworkspace' when brands.semrush_sub_workspace_id is set, else 'flat'
    *   - `workspaceId` is the workspace handlers call upstream (subworkspace ws in subworkspace
    *     mode, org parent in flat mode)
    *   - `parentWorkspaceId` is the org parent (needed for subworkspace create/activate)
@@ -362,9 +363,9 @@ function SerenityController(context, log, env) {
     // its `LLMO/serenity` feature flag is ON *and* a Semrush workspace resolves
     // for the brand (the workspace half is enforced below by
     // resolveBrandWorkspace). While the flag is OFF the org's UI keeps reading
-    // the normal backend data — even if a `semrush_workspace_id` has already
-    // been backfilled for rollout prep — so reject the serenity surface with a
-    // 404 (the same "no serenity for this org" contract the UI already handles
+    // the normal backend data — even if a `semrush_sub_workspace_id` has
+    // already been backfilled for rollout prep — so reject the serenity
+    // surface with a 404 (the same "no serenity for this org" contract the UI already handles
     // for an org without a workspace). Checked before brand resolution so an
     // inactive org never leaks brand existence.
     if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
@@ -642,13 +643,20 @@ function SerenityController(context, log, env) {
             brandAliases,
             brandUrlSources,
             competitors,
+            // auth.brandUuid is an already-persisted brand row here (loadBrand
+            // above), so the mapping-row upsert's FK to brands is satisfied —
+            // see mapping-rows.js upsertMappingRow doc.
+            // Narrowed to the one model the mapping-row helpers touch (defense
+            // in depth: this options bag flows into markets-subworkspace.js and
+            // shouldn't carry access to unrelated tables).
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
         // market's own domain, once its Semrush project is created. Best-effort:
         // never fails a live market.
         if (result?.status === 201) {
-          await ensureMarketSite(ctx, {
+          const linkedSiteId = await ensureMarketSite(ctx, {
             // Optional-chained so a missing/throwing accessor can't 500 a market
             // that is already live upstream — the mirror is best-effort.
             organizationId: brand.getOrganizationId?.(),
@@ -657,6 +665,9 @@ function SerenityController(context, log, env) {
             updatedBy: 'serenity-create-market',
             log,
           });
+          // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
+          // never overwrites an existing link.
+          await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
         }
       } else {
         result = await handleCreateMarket(
@@ -699,6 +710,9 @@ function SerenityController(context, log, env) {
           geoTargetId,
           languageCode,
           log,
+          // Narrowed to the one model the mapping-row helpers touch — see the
+          // create-market call site above for the same rationale.
+          { dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject } },
         )
         : handleDeleteMarket(
           transport,
@@ -1155,6 +1169,11 @@ function SerenityController(context, log, env) {
               brandAliases,
               brandUrlSources,
               competitors,
+              // `brand` was loaded via loadBrand above — an already-persisted
+              // row, so the mapping-row upsert's FK to brands is satisfied.
+              // Narrowed to the one model the mapping-row helpers touch — see
+              // the single-market create call site for the same rationale.
+              dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
             },
           );
         } catch (e) {
@@ -1219,6 +1238,11 @@ function SerenityController(context, log, env) {
           log,
         });
         siteLinked = !!linkedSiteId && hasText(linkedSiteId);
+        // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
+        // never overwrites an existing link. All markets in this batch share
+        // one resolved brandDomain and thus one mirror Site, so by-brand picks
+        // up every row this batch wrote (including 409/already-live ones).
+        await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
       }
 
       let fullySucceeded = allMarketsLive && siteLinked;
@@ -1320,7 +1344,7 @@ function SerenityController(context, log, env) {
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
    * (design flow 6): delete every project and release the allocation back to
    * the parent pool, then DISCONNECT the brand by clearing its
-   * semrush_workspace_id pointer. The sub-workspace itself is NEVER deleted
+   * semrush_sub_workspace_id pointer. The sub-workspace itself is NEVER deleted
    * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
    * is left empty and unowned. Clearing the pointer flips the brand back to
    * flat mode, so a future activate allocates a fresh sub-workspace. Sets
@@ -1336,7 +1360,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
-      const subworkspaceId = brand.getSemrushWorkspaceId?.();
+      const subworkspaceId = brand.getSemrushSubWorkspaceId?.();
       if (hasText(subworkspaceId)) {
         await decommissionBrandWorkspace(
           transport,
@@ -1355,8 +1379,14 @@ function SerenityController(context, log, env) {
         // keep routing to the already-emptied sub-workspace for the full
         // positive-TTL window (the upstream is empty the moment decommission
         // returns).
-        brand.setSemrushWorkspaceId?.(null);
+        brand.setSemrushSubWorkspaceId?.(null);
         clearBrandWorkspaceCache();
+        // Every project the brand owned is gone now that decommission emptied
+        // the sub-workspace — tombstone the brand's live mapping rows
+        // (best-effort, spec §4.2). By-brand because decommission only knows
+        // the workspace id; also sweeps rows whose upstream project had
+        // already vanished before decommission ran.
+        await tombstoneAllForBrand(ctx.dataAccess, auth.brandUuid, log);
       }
       brand.setStatus?.('pending');
       if (typeof brand.save === 'function') {
@@ -1366,7 +1396,7 @@ function SerenityController(context, log, env) {
           // Non-atomic seam: the sub-workspace was already decommissioned
           // (emptied + allocation released) upstream, but persisting the
           // cleared pointer / pending status failed. The state is divergent —
-          // brands.semrush_workspace_id still points at the now-empty
+          // brands.semrush_sub_workspace_id still points at the now-empty
           // sub-workspace and status is not 'pending'. A re-activate converges
           // (the re-grant path re-uses the emptied workspace), so this
           // self-heals, but emit a DISTINCT, greppable token so the orphan is
