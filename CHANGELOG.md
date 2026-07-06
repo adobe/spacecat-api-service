@@ -1,3 +1,17 @@
+# [1.627.0](https://github.com/adobe/spacecat-api-service/compare/v1.626.0...v1.627.0) (2026-07-06)
+
+
+### Features
+
+* **serenity:** maintain mapping rows + cut over to semrushSubWorkspaceId ([#2739](https://github.com/adobe/spacecat-api-service/issues/2739)) ([01ff865](https://github.com/adobe/spacecat-api-service/commit/01ff86541fdc7cca5488718e769b7b28b7aa6073)), closes [Hi#level](https://github.com/Hi/issues/level) [mysticat-data-service#765](https://github.com/mysticat-data-service/issues/765)
+
+# [1.626.0](https://github.com/adobe/spacecat-api-service/compare/v1.625.0...v1.626.0) (2026-07-06)
+
+
+### Features
+
+* map LLMO and traffic read endpoints to read capabilities for read-only admin org users ([#2761](https://github.com/adobe/spacecat-api-service/issues/2761)) ([f2f311d](https://github.com/adobe/spacecat-api-service/commit/f2f311d77152e81d9d3a762f06233fef5a6e535e))
+
 # [1.625.0](https://github.com/adobe/spacecat-api-service/compare/v1.624.0...v1.625.0) (2026-07-06)
 
 
