@@ -795,6 +795,24 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('resolveUrl', () => {
+    it('GETs /v1/url/resolve with the primary_url query param and returns the body', async () => {
+      fetchStub.resolves(fetchOk({ domain: 'lovesac.com', primary_url: 'lovesac.com', is_valid: true }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.resolveUrl('https://www.lovesac.com');
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      const url = new URL(call.url);
+      expect(url.pathname).to.equal('/enterprise/projects/api/v1/url/resolve');
+      // The raw URL is passed verbatim as the query value (decoded here to stay
+      // robust to the client's query-encoding).
+      expect(url.searchParams.get('primary_url')).to.equal('https://www.lovesac.com');
+      expect(result).to.deep.equal({ domain: 'lovesac.com', primary_url: 'lovesac.com', is_valid: true });
+    });
+  });
+
   describe('createProjectTags', () => {
     it('POSTs { names } to /v2/workspaces/{ws}/projects/{pid}/aio/tags', async () => {
       fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'source:ai' }));
