@@ -108,16 +108,19 @@ export function collectBrandUrlEntries(sources, market) {
 }
 
 /**
- * Normalizes the WEBSITE-type brand-URL entries to Semrush's canonical stored
- * form by resolving each raw URL through Project Engine's `url/resolve` endpoint,
- * so the value we write matches the benchmark Semrush already holds instead of
- * creating a duplicate `www.`-vs-apex entry (serenity-docs#25). The resolve
- * `primary_url` (scheme-less, subdomain + path preserved, e.g. `lovesac.com`) is
- * used as the stored value.
+ * Normalizes EVERY brand-URL entry to Semrush's canonical stored form by
+ * resolving each raw URL through Project Engine's `url/resolve` endpoint, so the
+ * value we write matches what Semrush's own frontend holds instead of creating a
+ * duplicate `www.`-vs-apex (or scheme-vs-scheme-less) entry (serenity-docs#25).
+ * The resolve `primary_url` (scheme + `www.` stripped, but subdomain + path
+ * PRESERVED, e.g. `lovesac.com`, `instagram.com/brand`) is the stored value.
  *
- * Only `type: 'website'` entries are resolved: `social`/`earned` URLs are
- * identity handles (e.g. `https://instagram.com/brand`), not brand domains, so
- * apex-normalizing them would be wrong — they pass through unchanged.
+ * All types — `website`, `social`, `earned` — are resolved. An earlier revision
+ * resolved `website` only, on the assumption that resolving a social would
+ * apex-collapse it (`instagram.com/brand` → `instagram.com`). That was wrong: we
+ * store the resolve `primary_url`, which keeps the profile path intact, so a
+ * social's identity survives. The Semrush team confirmed the raw (scheme-ful)
+ * form is what's incorrect, for every type.
  *
  * `url/resolve` returns `is_valid: false` with empty strings (still HTTP 200) for
  * unresolvable input; that (and the defensive `is_valid: true` but empty
@@ -129,31 +132,24 @@ export function collectBrandUrlEntries(sources, market) {
  * A resolve can collapse two raw URLs (e.g. `https://www.x.com` and
  * `https://x.com`) onto one canonical value, so the result is re-de-duplicated by
  * url (first-seen wins) — {@link collectBrandUrlEntries} de-duped by the RAW url.
- * De-dup keys on `url` alone (like `collectBrandUrlEntries`): a Semrush brand URL
- * is unique by its url, and a canonicalized website (scheme-less apex) can't
- * collide with a social/earned handle (a full `https://` profile url).
+ * De-dup keys on `url` alone: a Semrush brand URL is unique by its url.
  *
- * The optional `cache` (raw url → canonical string | null) is resolved-once memo
- * shared across calls: brand website `urls` are region-less, so the per-market
- * edit re-sync passes ONE cache to avoid re-resolving the same url for every
- * market. Only a cache MISS calls the transport (and warns on an unusable result),
- * so a bad url warns once, not once per market.
+ * The optional `cache` (raw url → canonical string | null) is a resolved-once memo
+ * shared across calls: brand `urls` are region-less, so the per-market edit
+ * re-sync passes ONE cache to avoid re-resolving the same url for every market.
+ * Only a cache MISS calls the transport (and warns on an unusable result), so a
+ * bad url warns once, not once per market.
  *
  * @param {object} transport - Semrush transport (exposes `resolveUrl`).
  * @param {Array<{url: string, type: string}>} entries - collected brand-URL entries.
  * @param {object} [log] - optional logger ({ warn? }).
  * @param {Map<string, (string|null)>} [cache] - raw-url → canonical memo (see above).
- * @returns {Promise<{url: string, type: string}[]>} entries with website URLs
- *   canonicalized (a no-op passthrough for social/earned), re-de-duped by url.
+ * @returns {Promise<{url: string, type: string}[]>} entries with every url
+ *   canonicalized (raw kept when unresolvable), re-de-duped by url.
  */
-export async function resolveWebsiteEntries(transport, entries, log, cache = new Map()) {
+export async function resolveBrandUrlEntries(transport, entries, log, cache = new Map()) {
   const resolved = [];
   for (const entry of entries) {
-    if (entry.type !== BRAND_URL_TYPE.WEBSITE) {
-      resolved.push(entry);
-      // eslint-disable-next-line no-continue
-      continue;
-    }
     let canonical;
     if (cache.has(entry.url)) {
       canonical = cache.get(entry.url);
@@ -315,7 +311,7 @@ export async function attachBrandUrlsToProject(
   // Canonicalize website URLs to Semrush's stored form before writing them, so a
   // create doesn't seed a `www.`-vs-apex duplicate of the benchmark (#25). Done
   // only once a benchmark exists to write to (no wasted resolve on a skip).
-  const resolvedEntries = await resolveWebsiteEntries(transport, entries, log);
+  const resolvedEntries = await resolveBrandUrlEntries(transport, entries, log);
   await transport.createBrandUrls(workspaceId, projectId, benchmarkId, resolvedEntries);
   log?.info?.('brand-urls: attached to project benchmark', {
     workspaceId, projectId, benchmarkId, count: resolvedEntries.length,
@@ -387,7 +383,7 @@ export async function syncBrandUrlsAcrossMarkets(
 
   // Website `urls` are region-less (identical across every market), so resolve
   // each distinct one a single time and reuse the result across markets — one
-  // shared memo passed into every per-market resolveWebsiteEntries call.
+  // shared memo passed into every per-market resolveBrandUrlEntries call.
   const resolveCache = new Map();
 
   for (const project of projects) {
@@ -433,7 +429,7 @@ export async function syncBrandUrlsAcrossMarkets(
       // canonical form) — otherwise every re-sync would churn `www.`-vs-apex (#25).
       // The shared cache resolves each region-less website url once across markets.
       // eslint-disable-next-line no-await-in-loop
-      const desired = await resolveWebsiteEntries(transport, collected, log, resolveCache);
+      const desired = await resolveBrandUrlEntries(transport, collected, log, resolveCache);
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
       const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];

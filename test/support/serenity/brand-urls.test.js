@@ -21,7 +21,7 @@ import {
   collectBrandUrlEntries,
   normalizeBenchmarkDomain,
   ensureOwnBrandBenchmark,
-  resolveWebsiteEntries,
+  resolveBrandUrlEntries,
   attachBrandUrlsToProject,
   syncBrandUrlsAcrossMarkets,
 } from '../../../src/support/serenity/brand-urls.js';
@@ -244,12 +244,12 @@ describe('brand-urls helpers', () => {
     });
   });
 
-  describe('resolveWebsiteEntries', () => {
+  describe('resolveBrandUrlEntries', () => {
     it('canonicalizes website entries to the resolve primary_url', async () => {
       const transport = {
         resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
       };
-      const out = await resolveWebsiteEntries(
+      const out = await resolveBrandUrlEntries(
         transport,
         [{ url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE }],
         undefined,
@@ -258,15 +258,25 @@ describe('brand-urls helpers', () => {
       expect(transport.resolveUrl).to.have.been.calledOnceWith('https://www.acme.com');
     });
 
-    it('passes social/earned entries through unchanged (never resolved)', async () => {
-      const transport = { resolveUrl: sandbox.stub() };
+    it('resolves social/earned entries too (primary_url keeps the profile path)', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().callsFake((u) => Promise.resolve({
+          // mimic url/resolve: strip scheme + www, keep the path.
+          primary_url: u.replace(/^https?:\/\/(www\.)?/, ''),
+          domain: u.replace(/^https?:\/\/(www\.)?/, '').split('/')[0],
+          is_valid: true,
+        })),
+      };
       const entries = [
-        { url: 'https://instagram.com/acme', type: BRAND_URL_TYPE.SOCIAL },
+        { url: 'https://www.instagram.com/acme', type: BRAND_URL_TYPE.SOCIAL },
         { url: 'https://press.example/acme', type: BRAND_URL_TYPE.EARNED },
       ];
-      const out = await resolveWebsiteEntries(transport, entries, undefined);
-      expect(out).to.deep.equal(entries);
-      expect(transport.resolveUrl).to.not.have.been.called;
+      const out = await resolveBrandUrlEntries(transport, entries, undefined);
+      expect(out).to.deep.equal([
+        { url: 'instagram.com/acme', type: BRAND_URL_TYPE.SOCIAL },
+        { url: 'press.example/acme', type: BRAND_URL_TYPE.EARNED },
+      ]);
+      expect(transport.resolveUrl).to.have.been.calledTwice;
     });
 
     it('keeps the raw url (and warns) when resolve returns is_valid:false', async () => {
@@ -274,7 +284,7 @@ describe('brand-urls helpers', () => {
       const transport = {
         resolveUrl: sandbox.stub().resolves({ domain: '', primary_url: '', is_valid: false }),
       };
-      const out = await resolveWebsiteEntries(
+      const out = await resolveBrandUrlEntries(
         transport,
         [{ url: 'https://not-a-real-host', type: BRAND_URL_TYPE.WEBSITE }],
         { warn },
@@ -289,7 +299,7 @@ describe('brand-urls helpers', () => {
 
     it('keeps the raw url when resolve resolves null/undefined (optional-chaining defense)', async () => {
       const transport = { resolveUrl: sandbox.stub().resolves(null) };
-      const out = await resolveWebsiteEntries(
+      const out = await resolveBrandUrlEntries(
         transport,
         [{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }],
         undefined,
@@ -304,8 +314,8 @@ describe('brand-urls helpers', () => {
       const cache = new Map();
       const entry = [{ url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE }];
       // Two calls sharing one cache (mirrors the per-market edit loop) → one HTTP call.
-      await resolveWebsiteEntries(transport, entry, undefined, cache);
-      const out = await resolveWebsiteEntries(transport, entry, undefined, cache);
+      await resolveBrandUrlEntries(transport, entry, undefined, cache);
+      const out = await resolveBrandUrlEntries(transport, entry, undefined, cache);
       expect(out).to.deep.equal([{ url: 'acme.com', type: BRAND_URL_TYPE.WEBSITE }]);
       expect(transport.resolveUrl).to.have.been.calledOnce;
     });
@@ -314,7 +324,7 @@ describe('brand-urls helpers', () => {
       const transport = {
         resolveUrl: sandbox.stub().resolves({ domain: 'x.com', primary_url: '', is_valid: true }),
       };
-      const out = await resolveWebsiteEntries(
+      const out = await resolveBrandUrlEntries(
         transport,
         [{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }],
         undefined,
@@ -326,7 +336,7 @@ describe('brand-urls helpers', () => {
       const transport = {
         resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
       };
-      const out = await resolveWebsiteEntries(
+      const out = await resolveBrandUrlEntries(
         transport,
         [
           { url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE },
@@ -342,7 +352,7 @@ describe('brand-urls helpers', () => {
       const transport = {
         resolveUrl: sandbox.stub().rejects(new SerenityTransportError(502, 'boom')),
       };
-      await expect(resolveWebsiteEntries(
+      await expect(resolveBrandUrlEntries(
         transport,
         [{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }],
         undefined,
