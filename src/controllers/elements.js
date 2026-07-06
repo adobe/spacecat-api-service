@@ -326,17 +326,20 @@ export default function ElementsController(context, log, env) {
         }
       }
 
-      // Normalize the aliases the UI may send under either casing/key. `category` (the UI
-      // sends it as `categoryId`) is pushed to Semrush as a tag; `channel` is applied
-      // client-side as a content-type filter in the transform; `region` is resolved above.
+      // Explicitly pick the params the service needs (normalizing the aliases the UI may send
+      // under either casing/key) rather than spreading all raw query keys through. `category`
+      // (sent as `categoryId`) becomes a Semrush tag; `channel` is a client-side content-type
+      // filter in the transform; `region` was resolved to `projectId` above; page/pageSize
+      // drive the client-side slice.
       const params = {
-        ...query,
         projectId,
         model: query.model || query.platform,
         startDate: query.startDate || query.start_date,
         endDate: query.endDate || query.end_date,
         category: query.categoryId || query.category,
         channel: query.channel || query.selectedChannel,
+        page: query.page,
+        pageSize: query.pageSize,
       };
 
       const result = await service.getCitedDomains(workspaceId, params);
