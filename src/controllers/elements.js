@@ -11,7 +11,7 @@
  */
 
 import {
-  createResponse, forbidden, internalServerError, notFound, ok,
+  badRequest, createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -20,7 +20,7 @@ import { listBrands as listSpacecatBrands, getBrandBySite } from '../support/bra
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
-import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
+import { resolveWorkspaceId, resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
@@ -265,8 +265,85 @@ export default function ElementsController(context, log, env) {
   };
   /* c8 ignore stop */
 
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/cited-domains
+   * Returns domains most frequently cited alongside owned URLs (Cited Domains panel).
+   */
+  /* c8 ignore start -- LLMO-6020 POC endpoint; unit tests intentionally deferred */
+  const listCitedDomains = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId } = ctx?.params ?? {};
+      const query = extractQuery(ctx);
+      const service = buildService(ctx);
+
+      // Every Semrush element is scoped by the BRAND's mapped sub-workspace, not the org
+      // workspace (LLMO-6029 tracks the same fix for filter-dimensions/weeks). `brandId` is
+      // therefore required — it selects the sub-workspace we query. The URL Inspector UI has
+      // no brand picker, so it cross-maps its selected site → brandId before calling.
+      const { brandId } = query;
+      if (!hasText(brandId)) {
+        return badRequest('brandId is required for cited-domains');
+      }
+      // Confirm the brand belongs to this org before resolving its workspace (prevents
+      // reading another tenant's sub-workspace). Reused for region resolution below.
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const orgBrands = await listSpacecatBrands(spaceCatId, postgrestClient);
+      if (!orgBrands.some((b) => b.id === brandId)) {
+        return notFound(`Brand not found in organization: ${brandId}`);
+      }
+
+      // Resolve the brand's Semrush sub-workspace (falls back to the org/parent workspace for
+      // flat-mode brands with no sub-workspace minted). This — not authorizeOrg's org
+      // workspace — is the workspace every element call below must target.
+      const { workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandId);
+      if (!hasText(workspaceId)) {
+        return notFound('No Semrush workspace resolved for the brand');
+      }
+
+      // Region scoping: a Semrush project == one (brand, market). Resolve the UI's region
+      // code to that project's id (via the Markets element) and pass it as top-level
+      // `project_id`. region=all/absent → all of the brand's markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          orgBrands,
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+      }
+
+      // Normalize the aliases the UI may send under either casing/key. `category` (the UI
+      // sends it as `categoryId`) is pushed to Semrush as a tag; `channel` is applied
+      // client-side as a content-type filter in the transform; `region` is resolved above.
+      const params = {
+        ...query,
+        projectId,
+        model: query.model || query.platform,
+        startDate: query.startDate || query.start_date,
+        endDate: query.endDate || query.end_date,
+        category: query.categoryId || query.category,
+        channel: query.channel || query.selectedChannel,
+      };
+
+      const result = await service.getCitedDomains(workspaceId, params);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
+    listCitedDomains,
   };
 }

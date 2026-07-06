@@ -5,7 +5,7 @@
   of the License at http://www.apache.org/licenses/LICENSE-2.0
 -->
 
-# LLMO Semrush Elements API — Filter Dimensions & Weeks
+# LLMO Semrush Elements API — Filter Dimensions, Weeks & Cited Domains
 
 SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence / URL Inspector dashboards.
 
@@ -17,7 +17,8 @@ SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence
 
 1. [List URL Inspector Filter Dimensions](#1-list-url-inspector-filter-dimensions)
 2. [List Weeks](#2-list-weeks)
-3. [Supported Models](#3-supported-models)
+3. [List Cited Domains](#3-list-cited-domains)
+4. [Supported Models](#4-supported-models)
 
 ---
 
@@ -111,7 +112,7 @@ Returns the weeks that have Brand Presence data, for the week/date filter dropdo
 | Name | In | Required | Description |
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
-| `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins if both are sent). UI platform codes are translated to Semrush models — see [Supported Models](#3-supported-models) (default: `search-gpt`) |
+| `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins if both are sent). UI platform codes are translated to Semrush models — see [Supported Models](#4-supported-models) (default: `search-gpt`) |
 | `siteId` / `site_id` | query | ❌ | Site UUID. Reverse-mapped to the site's **primary brand** (`brands.site_id`), which scopes the weeks via a `CBF_ws_brand` filter. Returns `404` if the site has no brand. Omitted → workspace-wide weeks |
 
 ### Underlying Element
@@ -145,7 +146,80 @@ The daily rows are rolled up into ISO weeks spanning the earliest→latest day p
 
 ---
 
-## 3. Supported Models
+## 3. List Cited Domains
+
+**`GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/cited-domains`**
+
+Returns the domains most frequently cited alongside owned URLs, for the URL Inspector **Cited Domains** panel. **Drop-in compatible with the legacy `url-inspector/cited-domains` contract** — same JSON shape, so the panel consumes it unchanged.
+
+### Parameters
+
+| Name | In | Required | Description |
+|---|---|---|---|
+| `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins). Translated via [Supported Models](#4-supported-models) (default: `search-gpt`) |
+| `startDate` / `start_date` | query | ❌ | ISO date `YYYY-MM-DD`. Default: 28 days ago |
+| `endDate` / `end_date` | query | ❌ | ISO date `YYYY-MM-DD`. Default: today |
+| `categoryId` / `category` | query | ❌ | Category label (e.g. `Firefly`). Pushed to Semrush **server-side** as the tag `category:<label>` |
+| `channel` / `selectedChannel` | query | ❌ | Content-type (e.g. `Owned`, `Social`, `Earned`). Applied **client-side** on `contentType` (case-insensitive) — the element has no server-side content-type filter |
+| `brandId` | query | ✅ | SpaceCat brand UUID. Selects the brand whose Semrush **sub-workspace** is queried (every element is brand-scoped). `400` if missing, `404` if the brand isn't in the org. The URL Inspector UI cross-maps its selected site → `brandId`. See gap 3 for sub-workspace vs flat-mode |
+| `region` | query | ❌ | Region code (e.g. `US`, `AU`). Resolved to the market's Semrush **project** (via the Markets element) and sent as top-level `project_id`. `all`/absent → all markets |
+| `page` | query | ❌ | 0-based page index (default `0`) |
+| `pageSize` | query | ❌ | Rows per page (default `50`, clamped to `[1, 1000]`) |
+
+### Underlying Element
+
+| Element | UUID | Shape |
+|---|---|---|
+| `CITED_DOMAINS` | `98b91d00-9531-4120-b3b5-17cc27489fce` | `table` — one row per cited domain ("Stats per Domain") |
+
+The element accepts **only** a date range (`CBF_date__start`/`CBF_date__end`, duplicated in both the `simple` and `advanced` filter blocks — a Semrush quirk) and `CBF_model`.
+
+### What it returns
+
+Rows are sorted by `totalCitations` **descending** and sliced client-side (Semrush has no server-side pagination); `totalCount` is the full pre-slice count. Fields map from the element as:
+
+- **`domain`** ← `domain`
+- **`totalCitations`** ← `mentions_end`
+- **`totalUrls`** ← `urls_count`
+- **`promptsCited`** ← `prompts_with_citations`
+- **`contentType`** ← `domain_type` (Owned / Other / Social / Earned / Benchmark Competitors) — the UI filters its Third-Party table on `contentType !== 'owned'`, so the Semrush ownership class maps directly
+- **`categories`**, **`regions`** → **`''`** (see gap below)
+
+### Response example
+
+```json
+{
+  "domains": [
+    {
+      "domain": "example.com",
+      "totalCitations": 42,
+      "totalUrls": 7,
+      "promptsCited": 19,
+      "contentType": "Benchmark Competitors",
+      "categories": "",
+      "regions": ""
+    }
+  ],
+  "totalCount": 128
+}
+```
+
+> **Filters (behaviour confirmed via live testing 2026-07-06):**
+> - **`model` — server-side** (`CBF_model`). Works.
+> - **`category` — server-side** as the tag `category:<label>`. Works (e.g. `Firefly` → result set shrinks).
+> - **`channel` — client-side** on `contentType`/`domain_type` (the element ignores a server-side content-type filter, but we already receive `domain_type` per row). Case-insensitive.
+> - **`region` — server-side** via a top-level `project_id` (NOT a `CBF_*` filter, which the element ignores). The region code is resolved to the market's Semrush project via the Markets element. Works (US → 1,675, AU → 12,655, all → 14,012 in the hackathon workspace). All three (region, category, channel) compose correctly.
+>
+> **⚠️ Gaps (POC):**
+> 1. Element `98b91d00` cannot source `categories` or `regions` — returned as **`''`** (matching the legacy handler's `|| ''` and the UI's non-nullable `string` contract). *Ask Semrush* to expose per-domain category/region breakdowns.
+> 2. **`channel` value taxonomy:** the client-side filter matches the UI's channel value against Semrush `domain_type` (Owned / Other / Social / Earned / Benchmark Competitors). This assumes the channel dropdown is populated from those values; the Serenity `filter-dimensions` endpoint does not yet return a `content_types` list, so populating that dropdown is a separate follow-up.
+> 3. **Region resolution is org-wide, not site-brand-scoped.** The Markets element and `project_id` are resolved across ALL of the org's brands (the site's own primary brand may own no Semrush projects), preferring the site's brand only as a tiebreaker. When multiple brands share a region code this is a best-effort pick.
+> 4. **Brand scoping is via the sub-workspace, not `CBF_ws_brand`.** Every Semrush element is scoped by the brand's mapped **sub-workspace**; this endpoint takes a required `brandId`, verifies it belongs to the org, and queries `brand.semrushWorkspaceId` (`CBF_ws_brand` is a confirmed no-op and is not sent). **Flat-mode brands** (no sub-workspace minted) fall back to the org/parent workspace — so a flat-mode brand's results are org-wide until its sub-workspace exists. The sibling endpoints (`filter-dimensions`, `weeks`) still take no brand and query the org workspace — that fix (add required `brandId` + sub-workspace) is tracked in **LLMO-6029**.
+
+---
+
+## 4. Supported Models
 
 The `model` (or `platform`) query parameter is accepted by these endpoints. Only the following Semrush values are valid; any unrecognised value silently falls back to the default (`search-gpt`).
 

@@ -240,6 +240,7 @@ export default function getRouteHandlers(
     // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
     'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
     'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks': elementsController.listWeeks,
+    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
