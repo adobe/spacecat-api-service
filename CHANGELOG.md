@@ -1,3 +1,10 @@
+# [1.624.0](https://github.com/adobe/spacecat-api-service/compare/v1.623.0...v1.624.0) (2026-07-06)
+
+
+### Features
+
+* **serenity:** resolve brand URLs to Semrush's canonical form before writing them ([#2748](https://github.com/adobe/spacecat-api-service/issues/2748)) ([a064a84](https://github.com/adobe/spacecat-api-service/commit/a064a84f0a9908f7d69ab22f97fa2521dd87eeec)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.623.0](https://github.com/adobe/spacecat-api-service/compare/v1.622.3...v1.623.0) (2026-07-06)
 
 
