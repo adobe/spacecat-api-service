@@ -166,23 +166,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
     expect(e.code).to.equal('orgPoolExhausted');
   });
 
-  it('retries the transient "workspace not ready" 422 then succeeds', async () => {
-    const transfer = sinon.stub();
-    transfer.onCall(0).rejects(notReady());
-    transfer.onCall(1).resolves();
-    const t = makeTransport({
-      child: resources(dim(2, 0, 2), dim(0, 0, 0)),
-      master: resources(dim(0, 0, 100), dim(0, 0, 800)),
-      transfer,
-    });
-    const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 10 }, poll,
-    }, log);
-    expect(r.toppedUp).to.equal(true);
-    expect(transfer).to.have.callCount(2);
-  });
-
-  it('throws a transient workspaceBusy (503) when "workspace not ready" never clears — NOT pool exhaustion', async () => {
+  it('FAIL-FAST: a transient "workspace not ready" 422 → immediate 503 workspaceBusy, ONE transfer, NO poll', async () => {
     const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({
       child: resources(dim(2, 0, 2), dim(0, 0, 0)),
@@ -190,12 +174,54 @@ describe('resource-manager — ensureAiHeadroom', () => {
       transfer,
     });
     const e = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 10 }, poll,
+      childId: CHILD, masterId: MASTER, need: { prompts: 10 },
     }, log).catch((x) => x);
     expect(e.status).to.equal(503);
     expect(e.code).to.equal('workspaceBusy');
-    expect(e.message).to.match(/never cleared/);
-    expect(transfer).to.have.callCount(4); // 1 initial + NOT_READY_RETRIES(3)
+    expect(e.message).to.match(/provisioning, retry/);
+    // Hard constraint (serenity-docs#22): NO retry loop, NO settle poll on the request path.
+    expect(transfer).to.have.callCount(1);
+    expect(t.getWorkspaceStatus).to.not.have.been.called;
+  });
+
+  it('FAIL-FAST: a successful top-up does exactly ONE transfer and never polls getWorkspaceStatus', async () => {
+    const t = makeTransport({
+      child: resources(dim(2, 0, 2), dim(0, 0, 0)),
+      master: resources(dim(0, 0, 100), dim(0, 0, 800)),
+    });
+    const r = await ensureAiHeadroom(t, {
+      childId: CHILD, masterId: MASTER, need: { prompts: 10 },
+    }, log);
+    expect(r.toppedUp).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.callCount(1);
+    expect(t.getWorkspaceStatus).to.not.have.been.called;
+  });
+
+  it('publish-seam sizing (includeDrafted): sizes prompts from used + drafted, staleness-immune', async () => {
+    // used=50 (stale-low), drafted=120 just staged. Without includeDrafted required=50 (covered by
+    // total 100 → no top-up, then publish 405s). With includeDrafted required=50+120=170 → top up
+    // to the next PROMPT_BLOCK (200).
+    const t = makeTransport({
+      child: resources(dim(1, 0, 5), dim(50, 120, 100)),
+      master: resources(dim(0, 0, 100), dim(0, 0, 800)),
+    });
+    const r = await ensureAiHeadroom(t, {
+      childId: CHILD, masterId: MASTER, need: {}, includeDrafted: true,
+    }, log);
+    expect(r.toppedUp).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.been.calledWith(CHILD, ai(5, 200));
+  });
+
+  it('publish-seam sizing (includeDrafted) is a hot-path no-op when used + drafted already fits', async () => {
+    const t = makeTransport({
+      child: resources(dim(1, 0, 5), dim(50, 120, 200)),
+      master: resources(dim(0, 0, 100), dim(0, 0, 800)),
+    });
+    const r = await ensureAiHeadroom(t, {
+      childId: CHILD, masterId: MASTER, need: {}, includeDrafted: true,
+    }, log);
+    expect(r.toppedUp).to.equal(false);
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
 
   it('propagates a non-quota transfer error (e.g. 500) unchanged', async () => {
@@ -252,6 +278,36 @@ describe('resource-manager — releaseAiSurplus', () => {
     const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
     t.getWorkspaceResources.withArgs(CHILD).rejects(new TypeError('undefined is not a function'));
     await expect(releaseAiSurplus(t, { childId: CHILD, poll }, log)).to.be.rejectedWith(TypeError);
+  });
+
+  it('release path (async/reconciler) retries the transient "workspace not ready" 422 then settles', async () => {
+    // releaseAiSurplus keeps the settle-poll + not-ready retry loop — it is the async/reconciler
+    // path, NOT the synchronous hot path (only ensureAiHeadroom fails fast).
+    const transfer = sinon.stub();
+    transfer.onCall(0).rejects(notReady());
+    transfer.onCall(1).resolves();
+    const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
+    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, log);
+    expect(r.released).to.equal(true);
+    expect(transfer).to.have.callCount(2);
+  });
+
+  it('release path surfaces workspaceBusy (503) as an EXPECTED best-effort failure when not-ready never clears', async () => {
+    const transfer = sinon.stub().rejects(notReady());
+    const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
+    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, log);
+    // Best-effort: the ErrorWithStatusCode(503) is swallowed and reported as released:false.
+    expect(r).to.deep.equal({ released: false });
+    expect(transfer).to.have.callCount(4); // 1 initial + NOT_READY_RETRIES(3)
+  });
+
+  it('release path maps a poll timeout to a swallowed best-effort failure', async () => {
+    const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)) });
+    t.getWorkspaceStatus = sinon.stub().resolves({ status: 'not ready' });
+    const r = await releaseAiSurplus(t, {
+      childId: CHILD, poll: { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() },
+    }, log);
+    expect(r).to.deep.equal({ released: false });
   });
 
   it('exports the default blocks', () => {

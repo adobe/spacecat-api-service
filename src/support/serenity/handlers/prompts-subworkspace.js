@@ -33,6 +33,7 @@ import {
 } from './prompts.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
+import { createHeadroomGuard } from '../dynamic-allocation-active.js';
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -116,7 +117,13 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * project from ONE live listing (buildSliceProjectMap) instead of the DB
  * mapping, then reuses the shared per-slice create + publish-once fan-out.
  */
-export async function handleCreatePromptsSubworkspace(transport, workspaceId, body, log) {
+export async function handleCreatePromptsSubworkspace(
+  transport,
+  workspaceId,
+  body,
+  log,
+  { dynamicAllocation = false, masterId = '' } = {},
+) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
@@ -193,6 +200,20 @@ export async function handleCreatePromptsSubworkspace(transport, workspaceId, bo
 
   for (const pid of new Set(affectedProjectIds)) {
     invalidateTagCacheForProject(workspaceId, pid);
+  }
+
+  // PROMPT metering seam: the just-created prompts are drafted synchronously across the affected
+  // projects of THIS child; size headroom from `used + drafted` (includeDrafted, staleness-immune)
+  // before the publish. One workspace-level top-up covers all affected projects (the allocation is
+  // per sub-workspace, not per project). No-op when the flag is OFF; skipped when nothing was
+  // created so the OFF path and the empty path issue zero headroom reads.
+  if (affectedProjectIds.length > 0) {
+    const headroom = createHeadroomGuard(
+      transport,
+      { enabled: dynamicAllocation, childId: workspaceId, masterId },
+      log,
+    );
+    await headroom.ensure({}, { includeDrafted: true });
   }
 
   const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);

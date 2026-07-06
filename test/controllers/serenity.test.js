@@ -1145,6 +1145,9 @@ describe('SerenityController', () => {
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+          // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
+          dynamicAllocation: false,
+          masterId: WORKSPACE,
         });
     });
 
@@ -1744,6 +1747,8 @@ describe('SerenityController', () => {
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+        dynamicAllocation: false,
+        masterId: WORKSPACE,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       expect(firstCall.args[7]).to.deep.equal(expectedOpts);

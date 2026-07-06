@@ -209,6 +209,37 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
   throw workspaceBusy(`Transfer for ${workspaceId} never cleared 'workspace not ready'`);
 }
 
+/**
+ * FAIL-FAST hot-path transfer (serenity-docs#22, Rainer's hard constraint). A synchronous metered
+ * write cannot afford the {@link transferAndSettle} settle-poll + not-ready retry loop: a Semrush
+ * `/resources` transfer now gates every Adobe write, and stacking a 12s poll + 1+2+3s backoff blows
+ * the ~15s Fastly/Lambda edge budget → a 504 with a half-applied absolute transfer stranded. So on
+ * the request path we do exactly ONE transfer attempt and NO blocking settle loop: the transfer is
+ * absolute + idempotent, so if the child is still settling (`422 "workspace not ready"`) we return
+ * a retryable `503` (`workspaceBusy`) IMMEDIATELY and let the client/UI retry — the next attempt
+ * finds it settled. Terminal pool exhaustion still maps to `orgPoolExhausted` (409); anything else
+ * propagates for the controller to map. (The multi-second settle is a hot-path defect, not a tuning
+ * knob — shrinking the poll doesn't fix it, removing it from the request does.)
+ * @param {any} transport
+ * @param {string} workspaceId
+ * @param {{ projects: number, prompts: number }} totals
+ * @returns {Promise<void>}
+ */
+async function transferOnce(transport, workspaceId, totals) {
+  try {
+    await transport.transferWorkspaceResources(workspaceId, { ai: totals });
+  } catch (e) {
+    if (isPoolExhausted(e)) {
+      throw orgPoolExhausted(`Org pool cannot cover the transfer for ${workspaceId}`);
+    }
+    if (isWorkspaceNotReady(e)) {
+      // Still settling — do NOT poll. Fail fast with a retryable 503; the transfer is idempotent.
+      throw workspaceBusy(`Sub-workspace ${workspaceId} is provisioning, retry`);
+    }
+    throw e;
+  }
+}
+
 // ---- entry points -------------------------------------------------------------------------------
 
 /**
@@ -222,12 +253,17 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
  * @param {Dims} opts.need per-dimension units the imminent op will consume
  * @param {Partial<Blocks>} [opts.ceiling] per-brand max `total` per dim (default: no ceiling)
  * @param {Blocks} [opts.blocks] grace blocks (default {@link DEFAULT_BLOCKS})
- * @param {PollOpts} [opts.poll] settle-poll budget (default {@link DEFAULT_POLL})
+ * @param {boolean} [opts.includeDrafted] size the PROMPT dimension from `used + drafted + need`
+ *   instead of `used + need`. Set at the PUBLISH seam: `drafted` is written synchronously at draft
+ *   time and converts to `used` at publish, but the post-publish `used` reconciles asynchronously
+ *   (stale-low). Sizing from `used + drafted` is staleness-immune, so a just-drafted batch has the
+ *   quota it needs the instant it publishes (plan §21). Prompts only — a project has
+ *   no draft-then-publish metering seam.
  * @param {any} [log]
  * @returns {Promise<{ toppedUp: boolean, newTotal: { projects: number, prompts: number } }>}
  */
 export async function ensureAiHeadroom(transport, {
-  childId, masterId, need, ceiling = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL,
+  childId, masterId, need, ceiling = {}, blocks = DEFAULT_BLOCKS, includeDrafted = false,
 }, log) {
   const child = readAiTotals(await transport.getWorkspaceResources(childId));
 
@@ -235,7 +271,8 @@ export async function ensureAiHeadroom(transport, {
   const newTotal = { projects: child.projects.total, prompts: child.prompts.total };
   let toppedUp = false;
   for (const dim of DIMS) {
-    const required = child[dim].used + (Number(need?.[dim]) || 0);
+    const draftedAdd = includeDrafted && dim === 'prompts' ? child[dim].drafted : 0;
+    const required = child[dim].used + draftedAdd + (Number(need?.[dim]) || 0);
     if (required > child[dim].total) {
       const target = roundUpToBlock(required, blocks[dim]);
       const cap = ceiling[dim];
@@ -262,7 +299,10 @@ export async function ensureAiHeadroom(transport, {
     }
   }
 
-  await transferAndSettle(transport, childId, newTotal, poll, log);
+  // FAIL-FAST: one transfer attempt, no settle poll (serenity-docs#22). A still-settling child
+  // returns a retryable 503 immediately rather than blocking the request on a poll.
+  log?.info?.('SERENITY_ALLOC top-up', { childId, newTotal });
+  await transferOnce(transport, childId, newTotal);
   return { toppedUp: true, newTotal };
 }
 

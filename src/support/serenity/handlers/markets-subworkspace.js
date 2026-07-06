@@ -27,6 +27,7 @@ import {
   listGlobalModelCatalog,
   listSliceModels,
   syncModelsForProject,
+  countPublishedPrompts,
   MAX_MODEL_IDS,
   validateParentIdQuery,
 } from './markets.js';
@@ -34,6 +35,8 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
+import { createHeadroomGuard } from '../dynamic-allocation-active.js';
+import { modelChangeUnits } from '../resource-manager.js';
 import { TYPE_TAG, topicTag } from '../prompt-tags.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
@@ -302,6 +305,11 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted
  *   row — see `mapping-rows.js` `upsertMappingRow` doc.
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, JIT
+ *   top-up fronts the project-create and publish seams (fail-fast) and the flat re-grant in
+ *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
+ * @param {string} [options.masterId=''] - the org parent/master workspace id (the units pool),
+ *   needed to size JIT top-ups when `dynamicAllocation` is on.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -322,6 +330,8 @@ export async function handleCreateMarketSubworkspace(
     competitors = [],
     publishMode = 'require',
     dataAccess = null,
+    dynamicAllocation = false,
+    masterId = '',
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -347,7 +357,24 @@ export async function handleCreateMarketSubworkspace(
   // path passes nothing, so we ensure on the spot, sized for one market.
   const workspaceId = preResolvedWorkspaceId && hasText(preResolvedWorkspaceId)
     ? preResolvedWorkspaceId
-    : await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log, {}, reloadPointer);
+    : await ensureSubworkspace(
+      transport,
+      brand,
+      parentWorkspaceId,
+      1,
+      log,
+      {},
+      reloadPointer,
+      { dynamicAllocation },
+    );
+
+  // JIT top-up choke point. childId is only known after ensureSubworkspace resolves it; OFF (or a
+  // missing master) yields a no-op guard so the flag-OFF path issues zero headroom reads.
+  const headroom = createHeadroomGuard(
+    transport,
+    { enabled: dynamicAllocation, childId: workspaceId, masterId },
+    log,
+  );
 
   const existing = await resolveProject(
     transport,
@@ -371,6 +398,9 @@ export async function handleCreateMarketSubworkspace(
     if (!languageId) {
       return { status: 400, body: { error: 'unknownLanguage', message: `Language '${languageCode}' not found` } };
     }
+    // PROJECT metering seam: ensure one project of headroom before creating a new project (no-op
+    // when the flag is OFF). Not needed on the adopt-existing-draft branch above (no new project).
+    await headroom.ensure({ projects: 1 });
     const createResp = await transport.createProject(
       workspaceId,
       buildCreateProjectBody(body, location, languageId, aliasNames),
@@ -481,6 +511,14 @@ export async function handleCreateMarketSubworkspace(
     log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_COMPETITOR_SYNC_DIVERGENCE — competitor benchmark sync failed (non-fatal); market live without competitor benchmarks', {
       workspaceId, projectId, error: e?.message,
     });
+  }
+
+  // PROMPT metering seam: before publishing, ensure prompt headroom sized from `used + drafted`
+  // (includeDrafted) — the just-staged models + generated prompts are drafted synchronously and
+  // meter at publish, while the post-publish `used` reconciles asynchronously (stale-low). No-op
+  // when the flag is OFF. Skipped when we won't publish at all.
+  if (publishMode !== 'skip') {
+    await headroom.ensure({}, { includeDrafted: true });
   }
 
   // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
@@ -720,8 +758,25 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  * PUT /serenity/models (subworkspace) — replace the AI-model set for a slice. Resolves
  * the slice's project from the live listing (404 if absent), then reuses the
  * shared diff-based sync. Validation mirrors the flat-mode handler exactly.
+ *
+ * @param {object} transport
+ * @param {string} workspaceId
+ * @param {object} body
+ * @param {object} log
+ * @param {object} [options]
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch. When on, front the
+ *   prompt re-meter (`publishedTexts × Δmodels`) BEFORE the sync's inner publish. Fronting lives at
+ *   this mode-guarded caller, NOT inside the shared `syncModelsForProject`, so flat mode is
+ *   untouched (byte-for-byte).
+ * @param {string} [options.masterId=''] - org parent/master workspace id (units pool).
  */
-export async function handleUpdateModelsSubworkspace(transport, workspaceId, body, log) {
+export async function handleUpdateModelsSubworkspace(
+  transport,
+  workspaceId,
+  body,
+  log,
+  { dynamicAllocation = false, masterId = '' } = {},
+) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -742,10 +797,36 @@ export async function handleUpdateModelsSubworkspace(transport, workspaceId, bod
   if (!project) {
     throw new ErrorWithStatusCode('Market not found for this brand', 404);
   }
+  const projectId = String(project.id);
+
+  // PROMPT re-meter seam: attaching Δ models re-meters every published text at the sync's inner
+  // publish (`publishedTexts × Δmodels`). Front it here (no-op when OFF). Guarded on `enabled` so
+  // the OFF path issues zero extra reads. `added` is computed the same way syncModelsForProject
+  // diffs (catalog id set difference) so the metered count matches what will actually be added.
+  const headroom = createHeadroomGuard(
+    transport,
+    { enabled: dynamicAllocation, childId: workspaceId, masterId },
+    log,
+  );
+  if (headroom.enabled) {
+    const current = await listSliceModels(transport, workspaceId, projectId);
+    const currentIds = new Set();
+    for (const m of current.items || []) {
+      if (m && hasText(m.id)) {
+        currentIds.add(String(m.id));
+      }
+    }
+    const added = [...new Set(modelIds.map(String))].filter((id) => !currentIds.has(id)).length;
+    if (added > 0) {
+      const publishedTexts = await countPublishedPrompts(transport, workspaceId, projectId, log);
+      await headroom.ensure({ prompts: modelChangeUnits(publishedTexts, added) });
+    }
+  }
+
   return syncModelsForProject(
     transport,
     workspaceId,
-    String(project.id),
+    projectId,
     modelIds,
     { geoTargetId, languageCode },
     log,

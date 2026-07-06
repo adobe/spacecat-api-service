@@ -1,0 +1,118 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
+import sinon from 'sinon';
+import {
+  isDynamicAllocationEnabled,
+  createHeadroomGuard,
+  DYNAMIC_ALLOCATION_ENV_FLAG,
+} from '../../../src/support/serenity/dynamic-allocation-active.js';
+import { clearResourceLocks } from '../../../src/support/serenity/resource-lock.js';
+
+use(sinonChai);
+
+const CHILD = 'child-ws';
+const MASTER = 'master-ws';
+const log = { info: () => {}, warn: () => {}, error: () => {} };
+
+const dimObj = (used, drafted, total) => ({ used, drafted, total });
+const resources = (projects, prompts) => ({
+  product_resources: { ai: { resources: { projects, prompts } } },
+});
+
+function makeTransport({ child, master } = {}) {
+  const ample = resources(dimObj(0, 0, 100), dimObj(0, 0, 800));
+  const getWorkspaceResources = sinon.stub();
+  getWorkspaceResources.withArgs(CHILD).resolves(child ?? ample);
+  getWorkspaceResources.withArgs(MASTER).resolves(master ?? ample);
+  return {
+    getWorkspaceResources,
+    transferWorkspaceResources: sinon.stub().resolves(),
+    getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
+  };
+}
+
+describe('dynamic-allocation-active — isDynamicAllocationEnabled', () => {
+  it('is true ONLY for the exact string "true"', () => {
+    expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: 'true' })).to.equal(true);
+  });
+
+  it('is false for unset, "false", "TRUE", "1", boolean true, or no env (fail-safe OFF)', () => {
+    expect(isDynamicAllocationEnabled({})).to.equal(false);
+    expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: 'false' })).to.equal(false);
+    expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: 'TRUE' })).to.equal(false);
+    expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: '1' })).to.equal(false);
+    expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: true })).to.equal(false);
+    expect(isDynamicAllocationEnabled(undefined)).to.equal(false);
+  });
+});
+
+describe('dynamic-allocation-active — createHeadroomGuard', () => {
+  afterEach(() => clearResourceLocks());
+
+  it('OFF: a genuine no-op — enabled=false and ZERO transport calls', async () => {
+    const t = makeTransport();
+    const guard = createHeadroomGuard(t, { enabled: false, childId: CHILD, masterId: MASTER }, log);
+    expect(guard.enabled).to.equal(false);
+    const r = await guard.ensure({ prompts: 100 }, { includeDrafted: true });
+    expect(r).to.deep.equal({ toppedUp: false });
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON with ids: routes ensure() through ensureAiHeadroom (reads child, tops up short dim)', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(t, { enabled: true, childId: CHILD, masterId: MASTER }, log);
+    expect(guard.enabled).to.equal(true);
+    const r = await guard.ensure({ projects: 1 });
+    expect(r.toppedUp).to.equal(true);
+    expect(t.getWorkspaceResources).to.have.been.calledWith(CHILD);
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+  });
+
+  it('ON but missing childId/masterId: no-op guard + a warn (never blocks the write)', async () => {
+    const warn = sinon.spy();
+    const t = makeTransport();
+    const guard = createHeadroomGuard(t, { enabled: true, childId: CHILD, masterId: '' }, { ...log, warn });
+    expect(guard.enabled).to.equal(false);
+    await guard.ensure({ projects: 1 });
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+    expect(warn).to.have.been.called;
+  });
+
+  it('serializes concurrent ensure() calls against the same child (lock)', async () => {
+    // Two concurrent top-ups against the same child must not both read the pre-top-up total and
+    // clobber each other — the second reads after the first's transfer via the per-child lock.
+    const reads = [];
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    t.getWorkspaceResources = sinon.stub().callsFake(async (id) => {
+      if (id === CHILD) {
+        reads.push('child');
+      }
+      return id === CHILD
+        ? resources(dimObj(0, 0, 0), dimObj(0, 0, 0))
+        : resources(dimObj(0, 0, 100), dimObj(0, 0, 800));
+    });
+    const guard = createHeadroomGuard(t, { enabled: true, childId: CHILD, masterId: MASTER }, log);
+    await Promise.all([guard.ensure({ projects: 1 }), guard.ensure({ projects: 1 })]);
+    // Serialized: each op did its own child read + transfer; no interleaving lost a transfer.
+    expect(t.transferWorkspaceResources).to.have.callCount(2);
+  });
+});
