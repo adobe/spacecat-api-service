@@ -28,6 +28,10 @@
  * distributed lock or an async worker and is deferred to the PR-4 rollout hardening — the
  * fail-fast single-attempt transfer already shrinks that cross-instance window (fewer, faster
  * inline transfers, no multi-second settle hold).
+ *
+ * Queue depth is self-bounding: a key's chain is only as deep as the same-child ops in flight in
+ * this container (the batch `mapLimit` fan-out is itself capped, e.g. `BULK_CREATE_CONCURRENCY`),
+ * and the chain entry is evicted the moment it drains — so no explicit depth cap is needed.
  */
 
 /** @type {Map<string, Promise<void>>} tail of the in-flight chain per key. */

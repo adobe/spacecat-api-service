@@ -809,6 +809,10 @@ export async function handleUpdateModelsSubworkspace(
     log,
   );
   if (headroom.enabled) {
+    // NOTE: this reads the current model set to size the top-up, and syncModelsForProject below
+    // reads it again to diff — one duplicate ai_models fetch on the flag-ON path. Deduping it needs
+    // a shared pre-mutation diff seam in syncModelsForProject (tracked as a PR-4 follow-up); the
+    // duplicate read is latency-only (not a correctness/pool concern), so it is accepted here.
     const current = await listSliceModels(transport, workspaceId, projectId);
     const currentIds = new Set();
     for (const m of current.items || []) {

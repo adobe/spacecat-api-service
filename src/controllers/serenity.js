@@ -618,6 +618,8 @@ function SerenityController(context, log, env) {
             // in depth: this options bag flows into markets-subworkspace.js and
             // shouldn't carry access to unrelated tables).
             dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            // Dynamic-allocation kill-switch + the org parent as the JIT top-up units pool
+            // (masterId). auth.parentWorkspaceId is the org parent resolved by authorize().
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             masterId: auth.parentWorkspaceId ?? '',
           },

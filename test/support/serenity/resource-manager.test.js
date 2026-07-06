@@ -141,17 +141,20 @@ describe('resource-manager — ensureAiHeadroom', () => {
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
 
-  it('throws orgPoolExhausted (409) when the master pool free < delta (advisory precheck)', async () => {
+  it('advisory pool-free low: does NOT throw (non-atomic read) — warns and PROCEEDS to the transfer', async () => {
+    // The precheck is advisory only; a low reading races concurrent top-ups. It must not throw a
+    // spurious 409 — it warns and proceeds, letting the transfer 422 be the authoritative signal.
+    const warn = sinon.spy();
     const t = makeTransport({
       child: resources(dim(2, 0, 2), dim(750, 0, 750)), // prompts need 100 → 850 target, delta 100
       master: resources(dim(2, 0, 13), dim(760, 0, 800)), // prompts free = 40 < 100
     });
-    const e = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 100 }, poll,
-    }, log).catch((x) => x);
-    expect(e.status).to.equal(409);
-    expect(e.code).to.equal('orgPoolExhausted');
-    expect(t.transferWorkspaceResources).to.not.have.been.called;
+    const r = await ensureAiHeadroom(t, {
+      childId: CHILD, masterId: MASTER, need: { prompts: 100 },
+    }, { ...log, warn });
+    expect(r.toppedUp).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce; // proceeded despite the low gauge
+    expect(warn).to.have.been.calledWithMatch('SERENITY_ALLOC advisory pool-free low (proceeding; transfer 422 is authoritative)');
   });
 
   it('maps a terminal 422 "insufficient units" on the transfer to orgPoolExhausted', async () => {

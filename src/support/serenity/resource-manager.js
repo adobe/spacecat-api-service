@@ -142,28 +142,34 @@ export function readAiTotals(resources) {
 }
 
 // ---- typed errors -------------------------------------------------------------------------------
+//
+// Client-facing messages are GENERIC and carry NO internal ids or pool numbers — the controller's
+// mapError echoes `.message` to the client, so anything embedded here (child/master workspace ids,
+// free/needed counts) would leak internal Semrush topology + capacity. The distinguishing signal is
+// `.code` (part of the public contract); the detailed context (ids, numbers) is logged at the throw
+// site instead.
 
-/** @param {string} message @returns {ErrorWithStatusCode} */
-function orgPoolExhausted(message) {
-  const e = new ErrorWithStatusCode(message, 409);
+/** @returns {ErrorWithStatusCode} */
+function orgPoolExhausted() {
+  const e = new ErrorWithStatusCode('Organization AI resource pool is exhausted', 409);
   e.code = ERROR_CODES.ORG_POOL_EXHAUSTED;
   return e;
 }
 
-/** @param {string} message @returns {ErrorWithStatusCode} */
-function brandAiLimit(message) {
-  const e = new ErrorWithStatusCode(message, 409);
+/** @returns {ErrorWithStatusCode} */
+function brandAiLimit() {
+  const e = new ErrorWithStatusCode('Brand AI resource allocation limit reached', 409);
   e.code = ERROR_CODES.BRAND_AI_LIMIT;
   return e;
 }
 
 /**
- * A transient failure — the transfer never cleared the async `workspace not ready` lock within the
- * retry bound. `503` (retryable), NOT `orgPoolExhausted`: this is lock contention, not a full pool.
- * @param {string} message @returns {ErrorWithStatusCode}
+ * A transient failure — the transfer hit the async `workspace not ready` lock. `503` (retryable),
+ * NOT `orgPoolExhausted`: this is lock contention, not a full pool.
+ * @returns {ErrorWithStatusCode}
  */
-function workspaceBusy(message) {
-  const e = new ErrorWithStatusCode(message, 503);
+function workspaceBusy() {
+  const e = new ErrorWithStatusCode('Sub-workspace is provisioning, retry', 503);
   e.code = ERROR_CODES.WORKSPACE_BUSY;
   return e;
 }
@@ -192,7 +198,8 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
       return;
     } catch (e) {
       if (isPoolExhausted(e)) {
-        throw orgPoolExhausted(`Org pool cannot cover the transfer for ${workspaceId}`);
+        log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
+        throw orgPoolExhausted();
       }
       if (!isWorkspaceNotReady(e)) {
         throw e; // any other error (incl. poll timeout 504) propagates for the caller to map
@@ -200,13 +207,14 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
       if (attempt === NOT_READY_RETRIES) {
         break; // exhausted retries on the transient lock
       }
-      log?.info?.(`SERENITY_ALLOC workspace-not-ready, retrying transfer (attempt ${attempt + 1})`);
+      log?.info?.(`SERENITY_ALLOC workspace-not-ready, retrying transfer (attempt ${attempt + 1})`, { workspaceId });
       // eslint-disable-next-line no-await-in-loop
       await poll.sleep(poll.intervalMs * (attempt + 1));
     }
   }
   // Lock contention, not a full pool — surface a retryable 503, not orgPoolExhausted.
-  throw workspaceBusy(`Transfer for ${workspaceId} never cleared 'workspace not ready'`);
+  log?.warn?.('SERENITY_ALLOC transfer never cleared workspace-not-ready', { workspaceId });
+  throw workspaceBusy();
 }
 
 /**
@@ -223,18 +231,21 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
  * @param {any} transport
  * @param {string} workspaceId
  * @param {{ projects: number, prompts: number }} totals
+ * @param {any} [log]
  * @returns {Promise<void>}
  */
-async function transferOnce(transport, workspaceId, totals) {
+async function transferOnce(transport, workspaceId, totals, log) {
   try {
     await transport.transferWorkspaceResources(workspaceId, { ai: totals });
   } catch (e) {
     if (isPoolExhausted(e)) {
-      throw orgPoolExhausted(`Org pool cannot cover the transfer for ${workspaceId}`);
+      log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
+      throw orgPoolExhausted();
     }
     if (isWorkspaceNotReady(e)) {
       // Still settling — do NOT poll. Fail fast with a retryable 503; the transfer is idempotent.
-      throw workspaceBusy(`Sub-workspace ${workspaceId} is provisioning, retry`);
+      log?.info?.('SERENITY_ALLOC workspace not ready on transfer — returning 503', { workspaceId });
+      throw workspaceBusy();
     }
     throw e;
   }
@@ -277,7 +288,10 @@ export async function ensureAiHeadroom(transport, {
       const target = roundUpToBlock(required, blocks[dim]);
       const cap = ceiling[dim];
       if (typeof cap === 'number' && target > cap) {
-        throw brandAiLimit(`Brand AI ${dim} allocation ${target} exceeds ceiling ${cap} for ${childId}`);
+        log?.warn?.('SERENITY_ALLOC brand ceiling reached', {
+          childId, dim, target, cap,
+        });
+        throw brandAiLimit();
       }
       newTotal[dim] = target;
       toppedUp = true;
@@ -288,21 +302,27 @@ export async function ensureAiHeadroom(transport, {
     return { toppedUp: false, newTotal }; // hot path — no transfer, no poll
   }
 
-  // Advisory pool precheck (the transfer 422 is authoritative). Read the MASTER's OWN /resources —
-  // NOT /parent/resources, which returns child-relative numbers (Gate 0).
+  // Advisory pool gauge (NOT a gate): read the MASTER's OWN /resources — NOT /parent/resources,
+  // which returns child-relative numbers (Gate 0). This read is a non-atomic advisory: under
+  // concurrent top-ups it can race ahead of the authoritative transfer and report the pool low when
+  // it isn't. So we do NOT throw on it — a low reading is logged (a greppable pool-free signal for
+  // the observability follow-up) and we PROCEED to the transfer, whose `422 insufficient units` is
+  // the single authoritative exhaustion signal (mapped to orgPoolExhausted in transferOnce).
   const master = readAiTotals(await transport.getWorkspaceResources(masterId));
   for (const dim of DIMS) {
     const delta = newTotal[dim] - child[dim].total;
     const free = master[dim].total - master[dim].used;
     if (delta > 0 && free < delta) {
-      throw orgPoolExhausted(`Org pool ${dim} free ${free} < needed ${delta} for ${childId}`);
+      log?.warn?.('SERENITY_ALLOC advisory pool-free low (proceeding; transfer 422 is authoritative)', {
+        childId, dim, free, delta,
+      });
     }
   }
 
   // FAIL-FAST: one transfer attempt, no settle poll (serenity-docs#22). A still-settling child
   // returns a retryable 503 immediately rather than blocking the request on a poll.
   log?.info?.('SERENITY_ALLOC top-up', { childId, newTotal });
-  await transferOnce(transport, childId, newTotal);
+  await transferOnce(transport, childId, newTotal, log);
   return { toppedUp: true, newTotal };
 }
 

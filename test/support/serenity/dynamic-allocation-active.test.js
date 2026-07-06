@@ -94,25 +94,27 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
     expect(warn).to.have.been.called;
   });
 
-  it('serializes concurrent ensure() calls against the same child (lock)', async () => {
-    // Two concurrent top-ups against the same child must not both read the pre-top-up total and
-    // clobber each other — the second reads after the first's transfer via the per-child lock.
-    const reads = [];
-    const t = makeTransport({
-      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
-      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
-    });
-    t.getWorkspaceResources = sinon.stub().callsFake(async (id) => {
+  it('serializes concurrent ensure() calls against the same child — the 2nd reads the 1st\'s write', async () => {
+    // STATEFUL stub: the child's `total` reflects the last absolute transfer. Two concurrent
+    // top-ups each needing +1 project. WITH the lock, op1 tops projects 0→1 and op2 then reads
+    // total=1 (used=0) → already covered → NO second transfer. WITHOUT the lock both read the stale
+    // total=0 and both transfer (a lost-update clobber). Asserting exactly ONE transfer proves the
+    // critical section actually serializes the read-then-absolute-set.
+    const childState = { projects: dimObj(0, 0, 0), prompts: dimObj(0, 0, 0) };
+    const t = makeTransport();
+    t.getWorkspaceResources = sinon.stub().callsFake(async (id) => (id === CHILD
+      ? resources(childState.projects, childState.prompts)
+      : resources(dimObj(0, 0, 100), dimObj(0, 0, 800))));
+    t.transferWorkspaceResources = sinon.stub().callsFake(async (id, payload) => {
       if (id === CHILD) {
-        reads.push('child');
+        childState.projects = dimObj(0, 0, payload.ai.projects);
+        childState.prompts = dimObj(0, 0, payload.ai.prompts);
       }
-      return id === CHILD
-        ? resources(dimObj(0, 0, 0), dimObj(0, 0, 0))
-        : resources(dimObj(0, 0, 100), dimObj(0, 0, 800));
+      return null;
     });
     const guard = createHeadroomGuard(t, { enabled: true, childId: CHILD, masterId: MASTER }, log);
     await Promise.all([guard.ensure({ projects: 1 }), guard.ensure({ projects: 1 })]);
-    // Serialized: each op did its own child read + transfer; no interleaving lost a transfer.
-    expect(t.transferWorkspaceResources).to.have.callCount(2);
+    expect(t.transferWorkspaceResources).to.have.callCount(1);
+    expect(childState.projects.total).to.equal(1);
   });
 });
