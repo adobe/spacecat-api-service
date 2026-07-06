@@ -2332,10 +2332,10 @@ describe('llmo-agentic-traffic', () => {
 describe('llmo-agentic-traffic — rotation (demo sites)', () => {
   // Configured demo site (agentic + referral) — demoStrategy. See ROTATION_CONFIG.
   const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
-  const CANNED_START = '2026-06-01'; // canned block = Jun 1–28 2026 (w23–26)
-  const CANNED_END = '2026-06-28';
-  // Freeze now=2026-06-29 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 1, Jun 28].
-  const FULL = { startDate: '2026-06-01', endDate: '2026-06-28' };
+  const CANNED_START = '2026-06-08'; // canned block = Jun 8–Jul 5 2026 (w24–27)
+  const CANNED_END = '2026-07-05';
+  // Freeze now=2026-07-06 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 8, Jul 5].
+  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
   // A rich row carrying every field the various handlers map.
   const ROW = {
     total_hits: 10,
@@ -2361,7 +2361,7 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
 
   let clock;
   beforeEach(() => {
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 5, 29), toFake: ['Date'] });
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
   });
   afterEach(() => clock.restore());
 
@@ -2432,17 +2432,17 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
   });
 
   it('by-region: combines 2 canned segments on a wrap-spanning sub-range', async () => {
-    // now=2026-07-06 (phase 1) ⇒ P0=Jun 8, window Jun 8–Jul 5. The last two slots
-    // (j2,j3 = Jun 22–Jul 5) map to frozen weeks {3,0} → 2 non-contiguous segments.
+    // now=2026-07-13 (phase 1) ⇒ P0=Jun 15, window Jun 15–Jul 12. The last two slots
+    // (j2,j3 = Jun 29–Jul 12) map to frozen weeks {3,0} → 2 non-contiguous segments.
     clock.restore();
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 13), toFake: ['Date'] });
     const client = createMockClient({
       rpc_agentic_traffic_by_region: { data: [{ region: 'US', total_hits: 10 }], error: null },
     });
     const ctx = makeContext({
       client,
       params: { siteId: ROTATION_SITE_ID },
-      data: { startDate: '2026-06-22', endDate: '2026-07-05' },
+      data: { startDate: '2026-06-29', endDate: '2026-07-12' },
     });
     const res = await createAgenticTrafficByRegionHandler(stubbedValidateAccess)(ctx);
     expect(client.rpc).to.have.been.calledTwice; // 2 canned segments

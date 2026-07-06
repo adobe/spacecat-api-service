@@ -414,9 +414,9 @@ describe('traffic-rotation engine', () => {
       await wrapped.rpc('rpc_agentic_traffic_movers', {
         p_start_date: '2020-01-01', p_end_date: '2020-01-02', p_limit: 5,
       });
-      // demo anchor 2026-06-01 → canned block 2026-06-01..2026-06-28
+      // demo anchor 2026-06-08 → canned block 2026-06-08..2026-07-05
       expect(calls[0].params).to.deep.equal({
-        p_start_date: '2026-06-01', p_end_date: '2026-06-28', p_limit: 5,
+        p_start_date: '2026-06-08', p_end_date: '2026-07-05', p_limit: 5,
       });
     });
 

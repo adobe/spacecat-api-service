@@ -1261,12 +1261,12 @@ describe('llmo-referral-traffic', () => {
 });
 
 describe('llmo-referral-traffic — rotation (demo sites)', () => {
-  // demoStrategy has referral:true in ROTATION_CONFIG. Canned block = Jun 1–28 2026.
+  // demoStrategy has referral:true in ROTATION_CONFIG. Canned block = Jun 8–Jul 5 2026.
   const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
-  const CANNED_START = '2026-06-01';
-  const CANNED_END = '2026-06-28';
-  // Freeze now=2026-06-29 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 1, Jun 28].
-  const FULL = { startDate: '2026-06-01', endDate: '2026-06-28' };
+  const CANNED_START = '2026-06-08';
+  const CANNED_END = '2026-07-05';
+  // Freeze now=2026-07-06 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 8, Jul 5].
+  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
   const REF_ROW = {
     total_pageviews: 100,
     bounce_rate: 0.3,
@@ -1295,7 +1295,7 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
 
   let clock;
   beforeEach(() => {
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 5, 29), toFake: ['Date'] });
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
   });
   afterEach(() => clock.restore());
 

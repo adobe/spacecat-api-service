@@ -46,8 +46,9 @@ const WEEK_MS = 7 * MS_PER_DAY;
  * Values come from the prod demo seed (project-elmo-ui branch
  * `fix/referral-demo-commerce`): rows are tagged `updated_by` =
  * 'demo-seed-frescopaadobe' / 'demo-seed-frescopacommerce', seeded into the 4
- * ISO weeks Jun 1–28 2026 (w23–26; the referral file's stray July boundary rows
- * fall outside the 4-week block and are harmlessly ignored).
+ * ISO weeks Jun 8–Jul 5 2026 (w24–27). Some referral sources
+ * (adobe_analytics, commerce optel) still carry an older Jun 1 week left over
+ * from a prior seed; it falls before the anchor and is harmlessly clipped.
  *
  * `agentic` / `referral` flag which datasets rotate.
  *   - frescopaadobe (demoStrategy, frescopa.coffee): both are frozen demo seeds.
@@ -62,14 +63,14 @@ export const ROTATION_CONFIG = {
   // demoStrategy — frescopa.coffee — agentic + referral.
   '66b55446-4cc3-46f1-9cd4-9eb57601b3f1': {
     marker: 'demo-seed-frescopaadobe',
-    cannedAnchorMonday: '2026-06-01',
+    cannedAnchorMonday: '2026-06-08',
     agentic: true,
     referral: true,
   },
   // frescopacommerce.com — referral only (agentic is live, not a frozen seed).
   '70de8f34-32f9-47dd-8b8a-5bf40b89030c': {
     marker: 'demo-seed-frescopacommerce',
-    cannedAnchorMonday: '2026-06-01',
+    cannedAnchorMonday: '2026-06-08',
     agentic: false,
     referral: true,
   },
