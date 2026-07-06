@@ -73,7 +73,7 @@ import {
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
-import { X_PROMISE_TOKEN_HEADER } from '../utils/constants.js';
+import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -233,7 +233,7 @@ function requireImsBearer(ctx) {
       `Serenity proxy requires IMS authentication; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
       401,
     );
-    err.code = 'promiseTokenRequired';
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
     throw err;
   }
   const header = ctx?.pathInfo?.headers?.authorization;

@@ -37,6 +37,7 @@ import {
   STATUS_BAD_REQUEST,
   STATUS_UNAUTHORIZED,
   X_PROMISE_TOKEN_HEADER,
+  PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
 // Two signals indicate a previous paid onboarding:
@@ -715,7 +716,7 @@ export function getImsUserTokenStrict(context) {
       `IMS authentication required; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
       STATUS_UNAUTHORIZED,
     );
-    err.code = 'promiseTokenRequired';
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
     throw err;
   }
   return getImsUserToken(context);
