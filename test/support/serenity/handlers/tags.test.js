@@ -869,6 +869,46 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
     });
 
+    it('promote-to-root falls back to the BARE name when the inherited dimension is undeterminable', async () => {
+      // Child under a root whose name carries no recognized dimension prefix →
+      // target.dimension is undefined, so the promote path must NOT guess a
+      // prefix; it sends the bare value.
+      const listProjectTags = sinon.stub();
+      listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: '' }))
+        .resolves({ page: 1, total: 1, items: [{ id: 'root-x', name: 'BareRoot', children_count: 1 }] });
+      listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: 'root-x' }))
+        .resolves({
+          page: 1,
+          total: 1,
+          items: [{
+            id: 'child-x', name: 'Leaf', parent_id: 'root-x', path: [{ id: 'root-x', name: 'BareRoot' }],
+          }],
+        });
+      const transport = makeTransport({
+        listProjectTags,
+        updateProjectTag: sinon.stub().resolves({ id: 'child-x', name: 'Leaf', parent_id: null }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'child-x',
+        {
+          name: 'Leaf', parentId: null, geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        'child-x',
+        { name: 'Leaf', parentId: null },
+      );
+    });
+
     it('treats an explicit null parentId on a ROOT as a no-op (defensive, not live-verified)', async () => {
       const transport = makeRootTreeTransport('root-1', {
         updateProjectTag: sinon.stub().resolves({ id: 'root-1', name: 'category:Footwear' }),
@@ -1431,6 +1471,19 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
           expect(err.code).to.equal('tagHasChildren');
         });
       // The children guard fires BEFORE any upstream delete.
+      expect(transport.deleteProjectTags).to.not.have.been.called;
+    });
+
+    it('404s (tagNotResolved) when the tag id cannot be located in the tree', async () => {
+      // Empty tree → any id resolves to 'unknown'. This must be a 404, not a
+      // misleading 400 categoryDeleteNotYetSupported.
+      const transport = makeTransport({ deleteProjectTags: sinon.stub().resolves(undefined) });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleDeleteTag(transport, dataAccess, BRAND, WORKSPACE, 'ghost', query, fakeLog()))
+        .to.be.rejected.then((err) => {
+          expect(err.status).to.equal(404);
+          expect(err.code).to.equal('tagNotResolved');
+        });
       expect(transport.deleteProjectTags).to.not.have.been.called;
     });
 

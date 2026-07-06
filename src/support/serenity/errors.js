@@ -58,4 +58,5 @@ export const ERROR_CODES = Object.freeze({
   // Tag delete (DELETE /serenity/tags/:tagId, tag-dimension only for now).
   TAG_HAS_CHILDREN: 'tagHasChildren',
   CATEGORY_DELETE_NOT_YET_SUPPORTED: 'categoryDeleteNotYetSupported',
+  TAG_NOT_RESOLVED: 'tagNotResolved',
 });

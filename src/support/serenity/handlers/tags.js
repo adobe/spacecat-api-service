@@ -929,6 +929,14 @@ function requireSliceFilters(query) {
  */
 async function deleteResolvedTag(transport, semrushWorkspaceId, projectId, tagId, log) {
   const target = await resolveTagTarget(transport, semrushWorkspaceId, projectId, tagId, log);
+  // Unresolvable target (never stored, already deleted, or beyond the tree-walk
+  // cap): 404, not a dimension error — we genuinely could not locate the tag, so
+  // "category delete not supported" would be factually wrong and unactionable.
+  if (target.kind === 'unknown') {
+    const err = new ErrorWithStatusCode('Tag not found in the project tag tree', 404);
+    err.code = ERROR_CODES.TAG_NOT_RESOLVED;
+    throw err;
+  }
   if (target.dimension !== TAG_DIMENSION.TAG) {
     const err = new ErrorWithStatusCode(
       'Only tag-dimension tags can be deleted; category delete is not yet supported',

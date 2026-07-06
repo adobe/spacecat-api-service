@@ -728,7 +728,7 @@ v2-serenity-tag-by-id:
           pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     responses:
       '204':
-        description: Tag deleted (or already absent upstream).
+        description: Tag deleted.
       '400':
         description: |
           Missing/invalid slice filters, or the tag is not a `tag`-dimension tag
@@ -737,8 +737,15 @@ v2-serenity-tag-by-id:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '401': { $ref: './responses.yaml#/401' }
       '404':
-        description: Organization, brand, or the (geoTargetId, languageCode) market not found.
+        description: |
+          Organization, brand, or the (geoTargetId, languageCode) market not
+          found; or the tag id could not be located in the project tag tree
+          (`tagNotResolved`).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '409':
         description: |
           The tag is a root that still has children (`tagHasChildren`) — delete

@@ -1023,6 +1023,26 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(result.items[0]).to.not.have.property('dimension');
   });
 
+  it('listProjectTagTree omits dimension for a child with an empty path[] or an unrecognized root prefix', async () => {
+    const listProjectTags = sinon.stub().resolves({
+      page: 1,
+      total: 2,
+      items: [
+        // Empty path array → length 0 → dimension undeterminable.
+        {
+          id: 'child-empty', name: 'A', parent_id: 'root-1', children_count: 0, path: [],
+        },
+        // Root ancestor's name has an unrecognized prefix → dimension undeterminable.
+        {
+          id: 'child-weird', name: 'B', parent_id: 'root-2', children_count: 0, path: [{ id: 'root-2', name: 'weird:Root' }],
+        },
+      ],
+    });
+    const result = await listProjectTagTree({ listProjectTags }, WORKSPACE, 'proj-1', 'root-1', fakeLog());
+    expect(result.items[0]).to.not.have.property('dimension');
+    expect(result.items[1]).to.not.have.property('dimension');
+  });
+
   it('listProjectTagTree warns and stops at the page ceiling when the last page is still full', async () => {
     const fullPage = Array.from({ length: 100 }, (_, i) => ({
       id: `tag-${i}`, name: `Tag ${i}`, parent_id: null, children_count: 0,
