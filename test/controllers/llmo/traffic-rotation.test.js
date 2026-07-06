@@ -22,6 +22,8 @@ import {
   combineGroupedRows,
   cannedBlockRange,
   relabelAndFilterSeries,
+  rotateRpc,
+  rotatingPostgrest,
   ROTATION_CONFIG,
 } from '../../../src/controllers/llmo/traffic-rotation.js';
 
@@ -308,6 +310,132 @@ describe('traffic-rotation engine', () => {
       expect(out.map((r) => r.period_start)).to.deep.equal(['2026-01-05', '2026-01-26']);
       // ascending order preserved
       expect(out[0].total_hits).to.equal(1);
+    });
+  });
+
+  // rotateRpc is the per-call dispatcher behind the client decorator. Driven with
+  // a fixed `now` here (deterministic) — the controller suites cover it end-to-end
+  // through the injected wrapper.
+  describe('rotateRpc', () => {
+    // records each underlying .rpc call and returns a canned response
+    const recorder = (respond) => {
+      const calls = [];
+      return {
+        calls,
+        rpc: (name, params) => {
+          calls.push({ name, params });
+          return Promise.resolve(respond(name, params, calls.length));
+        },
+      };
+    };
+
+    it('passes an unconfigured rpc straight through (no date rewrite)', async () => {
+      const client = recorder(() => ({ data: [{ ok: true }] }));
+      const params = { p_site_id: 's', p_start_date: '2026-01-05', p_end_date: '2026-01-11' };
+      const res = await rotateRpc(client, 'rpc_brand_presence_url_detail', params, {
+        config: CONFIG, dataset: 'agentic', now: D('2026-02-02'),
+      });
+      expect(res.data).to.deep.equal([{ ok: true }]);
+      // called once, with the ORIGINAL params (rotation did not touch them)
+      expect(client.calls).to.have.length(1);
+      expect(client.calls[0].params).to.deep.equal(params);
+    });
+
+    it('fullblock: rewrites the range to the whole canned block, preserving other params', async () => {
+      const client = recorder(() => ({ data: [] }));
+      await rotateRpc(client, 'rpc_agentic_traffic_movers', {
+        p_start_date: '2020-01-01', p_end_date: '2020-01-02', p_limit: 5,
+      }, { config: CONFIG, dataset: 'agentic', now: D('2026-02-02') });
+      expect(client.calls[0].params).to.deep.equal({
+        p_start_date: '2026-01-05', p_end_date: '2026-02-01', p_limit: 5,
+      });
+    });
+
+    it('timeseries: reads the canned block then relabels + filters to the window', async () => {
+      const client = recorder(() => ({
+        data: [
+          { period_start: '2026-01-05', total_hits: 1 },
+          { period_start: '2025-12-01', total_hits: 9 }, // outside block → dropped
+        ],
+      }));
+      const { data } = await rotateRpc(client, 'rpc_agentic_traffic_kpis_trend', {
+        p_start_date: '2026-01-05', p_end_date: '2026-02-01',
+      }, { config: CONFIG, dataset: 'agentic', now: D('2026-02-02') });
+      // fetched the full canned block, not the requested range
+      expect(client.calls[0].params).to.include({ p_start_date: '2026-01-05', p_end_date: '2026-02-01' });
+      expect(data.map((r) => r.period_start)).to.deep.equal(['2026-01-05']);
+    });
+
+    it('timeseries: surfaces the underlying rpc error unchanged', async () => {
+      const client = recorder(() => ({ error: { message: 'boom' } }));
+      const res = await rotateRpc(client, 'rpc_referral_traffic_trend', {
+        p_start_date: '2026-01-05', p_end_date: '2026-02-01',
+      }, { config: CONFIG, dataset: 'referral', now: D('2026-02-02') });
+      expect(res.error.message).to.equal('boom');
+    });
+
+    it('aggregate singleRow: fans out, combines, and returns a single-row array', async () => {
+      const client = recorder(() => ({ data: [{ total_hits: 100, success_rate: 0.9 }] }));
+      const { data } = await rotateRpc(client, 'rpc_agentic_traffic_kpis', {
+        p_start_date: '2026-01-05', p_end_date: '2026-02-01',
+      }, { config: CONFIG, dataset: 'agentic', now: D('2026-02-02') }); // phase 0 → 1 segment
+      expect(data).to.have.length(1);
+      expect(data[0].total_hits).to.equal(100);
+    });
+
+    it('aggregate grouped: caps merged rows to the limitParam value across a 2-segment wrap', async () => {
+      // now=2026-01-12 (phase 1), range 2025-12-29..2026-01-11 → 2 canned segments.
+      const client = recorder((name, params, n) => ({
+        data: n === 1
+          ? [{ host: 'a', url_path: '/x', total_hits: 30 }]
+          : [{ host: 'b', url_path: '/y', total_hits: 20 }],
+      }));
+      const { data } = await rotateRpc(client, 'rpc_agentic_traffic_by_url', {
+        p_start_date: '2025-12-29', p_end_date: '2026-01-11', p_page_limit: 1,
+      }, { config: CONFIG, dataset: 'agentic', now: D('2026-01-12') });
+      expect(client.calls).to.have.length(2); // fanned out to both segments
+      expect(data).to.have.length(1); // capped to p_page_limit
+      expect(data[0].host).to.equal('a'); // heaviest kept
+    });
+  });
+
+  describe('rotatingPostgrest', () => {
+    const [demoSite] = Object.keys(ROTATION_CONFIG); // agentic + referral demo
+
+    it('intercepts .rpc() and rotates (fullblock date rewrite is deterministic)', async () => {
+      const calls = [];
+      const client = {
+        rpc: (name, params) => {
+          calls.push({ name, params });
+          return Promise.resolve({ data: [] });
+        },
+      };
+      const wrapped = rotatingPostgrest(client, demoSite, 'agentic');
+      await wrapped.rpc('rpc_agentic_traffic_movers', {
+        p_start_date: '2020-01-01', p_end_date: '2020-01-02', p_limit: 5,
+      });
+      // demo anchor 2026-06-01 → canned block 2026-06-01..2026-06-28
+      expect(calls[0].params).to.deep.equal({
+        p_start_date: '2026-06-01', p_end_date: '2026-06-28', p_limit: 5,
+      });
+    });
+
+    it('passes .from() straight through, bound to the real client', () => {
+      const client = {
+        from(table) {
+          return { table, self: this };
+        },
+      };
+      const wrapped = rotatingPostgrest(client, demoSite, 'agentic');
+      const q = wrapped.from('agentic_traffic');
+      expect(q.table).to.equal('agentic_traffic');
+      expect(q.self).to.equal(client); // `this` is the real client, not the proxy
+    });
+
+    it('passes non-function members straight through', () => {
+      const client = { rpc: () => {}, marker: 'real-client' };
+      const wrapped = rotatingPostgrest(client, demoSite, 'agentic');
+      expect(wrapped.marker).to.equal('real-client');
     });
   });
 });

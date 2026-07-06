@@ -521,3 +521,213 @@ export function relabelAndFilterSeries(rows, dateField, {
     .filter((row) => row && row[dateField] >= startStr && row[dateField] <= endStr)
     .sort((a, b) => String(a[dateField]).localeCompare(String(b[dateField])));
 }
+
+// --- client decorator: consolidate rotation behind one wrapped PostgREST client ---
+
+/**
+ * Per-RPC rotation config, keyed by PostgREST function name. Each entry encodes
+ * exactly what used to live inline in the two controllers so `rotateRpc` can
+ * rewrite/relabel/recombine without any handler branching. RPC names not listed
+ * here (e.g. `rpc_brand_presence_url_detail`) pass straight through, so they
+ * always read the real (un-rotated) data.
+ *
+ *   - `kind: 'fullblock'`   — rewrite p_start_date/p_end_date to the whole canned
+ *                             block; single call, raw rows (distinct filters,
+ *                             movers: phase-independent or date-less internally).
+ *   - `kind: 'timeseries'`  — full-block fetch + `relabelAndFilterSeries` on
+ *                             `dateField`.
+ *   - `kind: 'aggregate'`   — per-segment fetch + combine. `singleRow: true` uses
+ *                             `combineSingleRow(combine)`; otherwise
+ *                             `combineGroupedRows(combine)` with the grouped spec.
+ *                             `limitParam` names the RPC param whose value caps the
+ *                             merged rows on a 2-segment wrap.
+ *
+ * Agentic and referral RPC names are disjoint, so one flat table serves both.
+ */
+export const ROTATION_RPC_CONFIG = {
+  // --- agentic ---
+  rpc_agentic_traffic_kpis: {
+    kind: 'aggregate',
+    singleRow: true,
+    combine: {
+      additiveKeys: ['total_hits'],
+      rateKeys: ['success_rate', 'avg_ttfb_ms', 'avg_citability_score'],
+      weightKey: 'total_hits',
+    },
+  },
+  rpc_agentic_traffic_kpis_trend: { kind: 'timeseries', dateField: 'period_start' },
+  rpc_agentic_traffic_by_region: {
+    kind: 'aggregate',
+    combine: { groupKeys: ['region'], additiveKeys: ['total_hits'], weightKey: 'total_hits' },
+  },
+  rpc_agentic_traffic_by_category: {
+    kind: 'aggregate',
+    combine: { groupKeys: ['category_name'], additiveKeys: ['total_hits'], weightKey: 'total_hits' },
+  },
+  rpc_agentic_traffic_by_page_type: {
+    kind: 'aggregate',
+    combine: { groupKeys: ['page_type'], additiveKeys: ['total_hits'], weightKey: 'total_hits' },
+  },
+  rpc_agentic_traffic_by_status: {
+    kind: 'aggregate',
+    combine: { groupKeys: ['http_status'], additiveKeys: ['total_hits'], weightKey: 'total_hits' },
+  },
+  rpc_agentic_traffic_by_user_agent: {
+    kind: 'aggregate',
+    combine: {
+      groupKeys: ['page_type', 'agent_type'],
+      additiveKeys: ['total_hits'],
+      unionKeys: ['unique_agent_names'],
+      countFromUnion: { unique_agents: 'unique_agent_names' },
+      weightKey: 'total_hits',
+    },
+  },
+  rpc_agentic_traffic_by_url: {
+    kind: 'aggregate',
+    combine: {
+      groupKeys: ['host', 'url_path'],
+      additiveKeys: ['total_hits'],
+      rateKeys: ['success_rate', 'avg_ttfb_ms', 'avg_citability_score'],
+      weightKey: 'total_hits',
+      unionKeys: ['unique_agent_names', 'response_codes'],
+      countFromUnion: { unique_agents: 'unique_agent_names' },
+      carryKeys: ['top_agent', 'top_agent_type', 'category_name', 'deployed_at_edge', 'total_count'],
+      trend: { key: 'hits_trend', dateField: 'week_start' },
+    },
+    limitParam: 'p_page_limit',
+  },
+  rpc_agentic_hits_for_urls: {
+    kind: 'aggregate',
+    combine: {
+      groupKeys: ['host', 'url_path'],
+      additiveKeys: ['total_hits'],
+      weightKey: 'total_hits',
+      trend: { key: 'hits_trend', dateField: 'week_start' },
+    },
+  },
+  rpc_agentic_traffic_distinct_filters: { kind: 'fullblock' },
+  rpc_agentic_traffic_movers: { kind: 'fullblock' },
+  // --- referral ---
+  rpc_referral_traffic_filter_dimensions: { kind: 'fullblock' },
+  rpc_referral_traffic_kpis: {
+    kind: 'aggregate',
+    singleRow: true,
+    combine: {
+      additiveKeys: ['total_pageviews'],
+      rateKeys: ['bounce_rate', 'consent_rate'],
+      weightKey: 'total_pageviews',
+    },
+  },
+  rpc_referral_traffic_trend: { kind: 'timeseries', dateField: 'traffic_date' },
+  rpc_referral_traffic_by_platform: {
+    kind: 'aggregate',
+    combine: {
+      groupKeys: ['platform'],
+      additiveKeys: ['total_pageviews', 'visits', 'visitors', 'orders', 'revenue'],
+      rateKeys: ['bounce_rate', 'avg_time_on_site'],
+      weightKey: 'total_pageviews',
+      unionKeys: ['channels'],
+    },
+  },
+  rpc_referral_traffic_by_device: {
+    kind: 'aggregate',
+    combine: {
+      groupKeys: ['device'],
+      additiveKeys: ['total_pageviews'],
+      rateKeys: ['bounce_rate'],
+      weightKey: 'total_pageviews',
+    },
+  },
+  rpc_referral_traffic_by_region: {
+    kind: 'aggregate',
+    combine: { groupKeys: ['region'], additiveKeys: ['total_pageviews'], weightKey: 'total_pageviews' },
+  },
+  rpc_referral_traffic_by_page_intent: {
+    kind: 'aggregate',
+    combine: { groupKeys: ['page_intent'], additiveKeys: ['total_pageviews'], weightKey: 'total_pageviews' },
+  },
+  rpc_referral_traffic_by_url: {
+    kind: 'aggregate',
+    combine: {
+      groupKeys: ['url_path', 'host'],
+      additiveKeys: ['total_pageviews', 'entries', 'exits', 'revenue'],
+      rateKeys: ['bounce_rate', 'consent_rate', 'avg_time_on_site'],
+      weightKey: 'total_pageviews',
+      carryKeys: ['page_intent', 'total_count'],
+    },
+    limitParam: 'p_limit',
+  },
+  rpc_referral_traffic_url_trend: { kind: 'timeseries', dateField: 'week_start' },
+  rpc_referral_traffic_business_impact: {
+    kind: 'aggregate',
+    singleRow: true,
+    combine: {
+      additiveKeys: ['total_pageviews', 'visits', 'orders', 'revenue', 'entries'],
+      rateKeys: ['bounce_rate', 'avg_session_duration', 'pages_per_visit', 'conversion_rate'],
+      weightKey: 'visits',
+    },
+  },
+};
+
+/**
+ * Rotate a single `.rpc(name, params)` call for a demo (site, dataset). Dispatches
+ * on `ROTATION_RPC_CONFIG[name]` and returns the same `{ data, error }` shape as
+ * `client.rpc`, so the caller's response mapping is unchanged. Unconfigured RPCs
+ * pass straight through to the real client. `config`/`dataset`/`now` are captured
+ * once per request by `rotatingPostgrest`.
+ */
+export async function rotateRpc(client, name, params, { config, dataset, now }) {
+  const cfg = ROTATION_RPC_CONFIG[name];
+  if (!cfg) {
+    return client.rpc(name, params);
+  }
+  if (cfg.kind === 'fullblock') {
+    return client.rpc(name, { ...params, ...cannedBlockRange(config, dataset) });
+  }
+  if (cfg.kind === 'timeseries') {
+    const res = await client.rpc(name, { ...params, ...cannedBlockRange(config, dataset) });
+    if (res.error) {
+      return res;
+    }
+    return {
+      data: relabelAndFilterSeries(res.data, cfg.dateField, {
+        config, dataset, now, startStr: params.p_start_date, endStr: params.p_end_date,
+      }),
+    };
+  }
+  // aggregate
+  const combine = cfg.singleRow
+    ? (segs) => [combineSingleRow(segs, cfg.combine)]
+    : (segs) => combineGroupedRows(segs, {
+      ...cfg.combine,
+      config,
+      dataset,
+      now,
+      limit: cfg.limitParam != null ? params[cfg.limitParam] : null,
+    });
+  return runRotatedAggregate(client, name, params, {
+    config, dataset, now, combine,
+  });
+}
+
+/**
+ * Wrap a PostgREST client so `.rpc()` rotates frozen demo-site data for a given
+ * (site, dataset), while every other member (`.from()`, etc.) passes straight
+ * through to the real client. Rotation happens on the raw RPC rows before the
+ * handlers' snake_case→camelCase mapping, so the controllers need no rotation
+ * code. Capture `now` once here so every RPC in the request resolves the same
+ * phase/window. Only construct this when `shouldRotate(siteId, dataset)` is true.
+ */
+export function rotatingPostgrest(realClient, siteId, dataset) {
+  const config = getRotationConfig(siteId);
+  const now = new Date();
+  return new Proxy(realClient, {
+    get(target, prop, receiver) {
+      if (prop === 'rpc') {
+        return (name, params) => rotateRpc(target, name, params, { config, dataset, now });
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
