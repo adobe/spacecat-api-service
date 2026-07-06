@@ -1245,4 +1245,26 @@ export const PRODUCTS_CAPABILITIES = {
   ],
 };
 
+/**
+ * Whether a product ReBAC-scopes a given resource type at the state layer.
+ *
+ * The collection-filter controllers (list-sites, list-brands, resolveSite,
+ * getSitesByProjectId) narrow their results to the resources a FACS-enrolled
+ * caller may view. That narrowing is only valid when the resource type is
+ * actually a ReBAC-enforced resource **for the current product** — LLMO scopes
+ * `brand` (not `site`), ASO scopes `site` (not `brand`). Applying a `site`
+ * filter under LLMO (or a `brand` filter under ASO) would query a state layer
+ * that holds no grants for that type and wrongly hide the whole collection.
+ * Callers use this to bypass the filter for cross-product resources.
+ *
+ * @param {string} product - Product code (any case), e.g. 'LLMO' / 'ASO'.
+ * @param {string} resourceType - ReBAC resource type, e.g. 'site' / 'brand'.
+ * @returns {boolean} true iff `resourceType` is ReBAC-scoped for `product`.
+ */
+export function isFacsRebacResource(product, resourceType) {
+  const aliases = routeFacsCapabilities
+    .PRODUCTS_FACS_RESOURCE_PARAM_ALIASES?.[product?.toUpperCase?.()];
+  return !!aliases && Object.prototype.hasOwnProperty.call(aliases, resourceType);
+}
+
 export default routeFacsCapabilities;
