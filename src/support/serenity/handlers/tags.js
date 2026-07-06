@@ -313,6 +313,11 @@ async function resolveOrCreateClosedTag(transport, semrushWorkspaceId, projectId
  * name is bare), falling back to the root being drilled when the child listing
  * omits it.
  *
+ * NOTE: `childrenCount` is only meaningful for `kind: 'root'`. For `'child'` it
+ * reflects the child's own listing (typically 0), and for `'unknown'` it is a
+ * placeholder `0` meaning "no data", NOT a verified zero — never treat an
+ * `unknown` result's `childrenCount` as authoritative.
+ *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId

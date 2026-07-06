@@ -901,6 +901,8 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         fakeLog(),
       );
       expect(res.status).to.equal(200);
+      // No dimension to inherit → the response echoes the bare name unchanged.
+      expect(res.body).to.include({ tag: 'Leaf', parentId: null });
       expect(transport.updateProjectTag).to.have.been.calledOnceWithExactly(
         WORKSPACE,
         'proj-1',

@@ -28,8 +28,11 @@ const ALL_TAG_DIMENSIONS = new Set(/** @type {string[]} */ (Object.values(TAG_DI
 
 /**
  * Derives a tag's DIMENSION from its full `<dimension>:<value>` name, e.g.
- * `category:Footwear` → `'category'`, `tag:Priority` → `'tag'`. Returns
- * `undefined` for a bare name (no prefix) or an unrecognized prefix — callers
+ * `category:Footwear` → `'category'`, `tag:Priority` → `'tag'`. The prefix
+ * match is case-INSENSITIVE (the prefix is lowercased before lookup), so
+ * `Category:X` still resolves to `'category'` — the `.toLowerCase()` is load-
+ * bearing, not dead code. Returns `undefined` for a bare name (no prefix) or an
+ * unrecognized prefix — callers
  * MUST treat a missing dimension as "unknown, don't guess", never as "bare =
  * subcategory" (that silent fallback is the exact bug the `tag:` dimension
  * feature removes, and it would otherwise reappear during any rollout skew).
