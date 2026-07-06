@@ -255,26 +255,53 @@ export function createSerenityTransport({ env, imsToken }) {
     return imsToken;
   };
 
-  // Typed Project Engine client over the project gateway. maxRetries:0 preserves
-  // the one-shot behaviour the hand-rolled transport had; the injected fetch
-  // re-adds the 15s timeout + Accept header the client does not impose. `root` is
-  // the validated origin; the client appends its own '/enterprise/projects/api'
+  // Typed Project Engine client over the project gateway. `root` is the
+  // validated origin; the client appends its own '/enterprise/projects/api'
   // prefix.
+  //
+  // Retries: the client's own bounded-backoff retry (createRetryingFetch in
+  // spacecat-shared-project-engine-client's internal.js) is left at its library
+  // defaults (maxRetries: 2, retryBaseDelayMs: 200 — 3 attempts total, jittered
+  // exponential backoff up to a 20s/attempt ceiling, honouring Retry-After).
+  // It was explicitly pinned to maxRetries: 0 when this transport migrated onto
+  // the typed clients, purely to preserve the hand-rolled transport's one-shot
+  // behaviour at the time — api-service had no retry logic at all, unlike the
+  // sibling shared client. That gap is closed here: idempotent methods (GET,
+  // HEAD, PUT, DELETE, OPTIONS) retry on 429 and on retryable 5xx; POST (and any
+  // other non-idempotent method) retries ONLY on 429, never on 5xx, so a create
+  // (createProject, createSubworkspace, createBenchmarks, createBrandUrls,
+  // createTaggedPrompts, transferWorkspaceResources, addAiModel,
+  // createProjectTags, publishProject, listPromptsByTags — all POST) can never
+  // be double-submitted by the retry layer on a 5xx; a 429 is safe to retry for
+  // any method because the Semrush gateway rejects it at the edge before the
+  // handler runs, so the create never happened.
+  //
+  // Per-attempt timeout: the injected `fetch` is `createTimeoutFetch`, which the
+  // retry layer calls once per attempt (it wraps `injectedFetch`, not the other
+  // way around) — so every retry gets its OWN fresh 15s AbortController/timer,
+  // not one 15s budget shared across the whole retry+backoff sequence. A timeout
+  // is surfaced to the retry layer as a thrown error (SerenityTransportError
+  // status 504), gated by the same idempotent-method rule as any other network
+  // error.
   const projects = createSerenityProjectEngineApiClient({
     baseUrl: root,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
   // Typed User Manager client over the sub-workspace lifecycle gateway. Same
-  // shape as the project client; appends its own '/enterprise/users/api' prefix.
-  // Uses `usersRoot` (SEMRUSH_USERS_BASE_URL, or `root` by fallback) so the
-  // lifecycle gateway can be a separate host from Project Engine.
+  // shape and retry/timeout rationale as the project client above; appends its
+  // own '/enterprise/users/api' prefix. Uses `usersRoot` (SEMRUSH_USERS_BASE_URL,
+  // or `root` by fallback) so the lifecycle gateway can be a separate host from
+  // Project Engine. Its own POST creates (createSubworkspace,
+  // transferWorkspaceResources) are covered by the same POST-never-retries-on-5xx
+  // rule — createSubworkspace in particular must never be silently double-fired
+  // by the retry layer (see workspace-lifecycle.js's own 504-triggered adoption
+  // recovery, which is a SEPARATE, application-level mechanism for the transport
+  // timeout case and unaffected by this change).
   const users = createSerenityUserManagerApiClient({
     baseUrl: usersRoot,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
