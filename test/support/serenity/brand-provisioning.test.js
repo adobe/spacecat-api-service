@@ -33,15 +33,27 @@ function buildContext() {
   };
 }
 
-async function loadModule({ resolveWorkspaceId, handleCreateMarketSubworkspace }) {
-  return esmock('../../../src/support/serenity/brand-provisioning.js', {
+async function loadModule({
+  resolveWorkspaceId,
+  handleCreateMarketSubworkspace,
+  resolveSemrushImsToken,
+  createSerenityTransport,
+}) {
+  const overrides = {
     '../../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId },
     '../../../src/support/serenity/rest-transport.js': {
-      createSerenityTransport: () => ({}),
+      createSerenityTransport: createSerenityTransport || (() => ({})),
       SerenityTransportError,
     },
     '../../../src/support/serenity/handlers/markets-subworkspace.js': { handleCreateMarketSubworkspace },
-  });
+  };
+  // Only override when a test supplies one; otherwise the real
+  // support/utils.js#resolveSemrushImsToken runs (its own decode/exchange
+  // logic is covered directly in test/support/utils.test.js).
+  if (resolveSemrushImsToken) {
+    overrides['../../../src/support/utils.js'] = { resolveSemrushImsToken };
+  }
+  return esmock('../../../src/support/serenity/brand-provisioning.js', overrides);
 }
 
 const baseParams = {
@@ -192,6 +204,33 @@ describe('provisionBrandSubworkspace', () => {
     expect(brandStub.getName()).to.equal('Acme');
     expect(brandStub.getId()).to.equal('brand-1');
     expect(brandStub.getSemrushSubWorkspaceId()).to.equal(undefined);
+  });
+
+  it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
+    const context = {
+      ...buildContext(),
+      pathInfo: { headers: { 'x-promise-token': 'raw-promise-token' } },
+      attributes: { authInfo: { getType: () => 'jwt' } },
+    };
+    const resolveSemrushImsTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    const createSerenityTransportStub = sinon.stub().returns({});
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId,
+      handleCreateMarketSubworkspace,
+      resolveSemrushImsToken: resolveSemrushImsTokenStub,
+      createSerenityTransport: createSerenityTransportStub,
+    });
+
+    await provisionBrandSubworkspace(context, baseParams);
+
+    expect(resolveSemrushImsTokenStub.calledOnce).to.equal(true);
+    expect(resolveSemrushImsTokenStub.firstCall.args[0]).to.equal(context);
+    expect(resolveSemrushImsTokenStub.firstCall.args[2]).to.equal('brand-provisioning');
+    expect(createSerenityTransportStub.calledOnce).to.equal(true);
+    expect(createSerenityTransportStub.firstCall.args[0]).to.deep.equal({
+      env: context.env,
+      imsToken: 'exchanged-ims-token',
+    });
   });
 
   it('falls back to US/EN and publishes best-effort when generateTopics is false with no market or models', async () => {
@@ -420,13 +459,21 @@ describe('releaseProvisionedWorkspace', () => {
     };
   }
 
-  async function loadWithTransport(transferWorkspaceResources) {
-    return esmock('../../../src/support/serenity/brand-provisioning.js', {
+  async function loadWithTransport(
+    transferWorkspaceResources,
+    { resolveSemrushImsToken, createSerenityTransport } = {},
+  ) {
+    const overrides = {
       '../../../src/support/serenity/rest-transport.js': {
-        createSerenityTransport: () => ({ transferWorkspaceResources }),
+        createSerenityTransport: createSerenityTransport
+          || (() => ({ transferWorkspaceResources })),
         SerenityTransportError,
       },
-    });
+    };
+    if (resolveSemrushImsToken) {
+      overrides['../../../src/support/utils.js'] = { resolveSemrushImsToken };
+    }
+    return esmock('../../../src/support/serenity/brand-provisioning.js', overrides);
   }
 
   it('releases the orphaned workspace allocation back to the parent pool', async () => {
@@ -456,6 +503,35 @@ describe('releaseProvisionedWorkspace', () => {
     await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, log);
     expect(log.error.calledOnce).to.equal(true);
     expect(log.error.firstCall.args[1].semrushWorkspaceId).to.equal(NEW_WS);
+  });
+
+  it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
+    const context = {
+      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
+      pathInfo: { headers: { 'x-promise-token': 'raw-promise-token' } },
+      attributes: { authInfo: { getType: () => 'jwt' } },
+    };
+    const transfer = sinon.stub().resolves({});
+    const resolveSemrushImsTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    const createSerenityTransportStub = sinon.stub()
+      .returns({ transferWorkspaceResources: transfer });
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer, {
+      resolveSemrushImsToken: resolveSemrushImsTokenStub,
+      createSerenityTransport: createSerenityTransportStub,
+    });
+    const log = { info: sinon.stub(), error: sinon.stub() };
+
+    await releaseProvisionedWorkspace(context, NEW_WS, log);
+
+    expect(resolveSemrushImsTokenStub.calledOnce).to.equal(true);
+    expect(resolveSemrushImsTokenStub.firstCall.args[0]).to.equal(context);
+    expect(resolveSemrushImsTokenStub.firstCall.args[2]).to.equal('brand-provisioning');
+    expect(createSerenityTransportStub.calledOnce).to.equal(true);
+    expect(createSerenityTransportStub.firstCall.args[0]).to.deep.equal({
+      env: context.env,
+      imsToken: 'exchanged-ims-token',
+    });
+    expect(log.error.called).to.equal(false);
   });
 });
 
