@@ -122,47 +122,17 @@ export function getBedrockConfig(env) {
 }
 
 /**
- * Builds the system prompt that describes the task + the component catalog.
- * @returns {string}
- */
-function buildSystemPrompt() {
-  const catalog = COMPONENT_CATALOG
-    .map((c) => `- "${c.id}": ${c.description}\n    ${c.dataShape}`)
-    .join('\n');
-
-  return `You build a goal-oriented "profile" for a website from its real opportunities.
-You are given the customer's request and a list of that site's opportunities (each with an id, type, title, and data).
-
-Choose AT MOST ${MAX_COMPONENTS} components from the catalog below that best represent the requested opportunities, and fill each component's "data" using the real opportunity data provided. Only use opportunities that match the customer's request.
-
-Available components (use the exact "id" and the described data shape):
-${catalog}
-
-Respond with ONLY a JSON object (no prose, no markdown) of this exact form:
-{
-  "name": "<short profile name derived from the request>",
-  "rationale": "<one or two sentences explaining what you surfaced and why>",
-  "components": [ { "id": "<catalog id>", "title": "<human title>", "data": { ... } } ],
-  "opportunityIds": ["<id of each opportunity you used>"],
-  "reply": "<one short sentence to show the user in chat>"
-}
-Rules: components length <= ${MAX_COMPONENTS}; every component id must be from the catalog; every opportunityId must be one of the provided opportunity ids.`;
-}
-
-/**
- * Calls Claude (Bedrock Converse) to select components for a profile from the
- * given opportunities.
- *
+ * Shared Bedrock Converse call. Returns the parsed JSON object from the model,
+ * or null if Bedrock is unconfigured / the call failed / the output wasn't JSON.
  * @param {object} params
- * @param {string} params.message the customer's request
- * @param {Array<{id,type,title,data}>} params.opportunities candidate opportunities
- * @param {object} params.env environment variables (Bedrock config)
- * @param {object} params.log logger
- * @returns {Promise<{ name, rationale, components, opportunityIds, reply }|null>}
- *   parsed+validated profile spec, or null if the LLM is unavailable/failed.
+ * @param {object} params.env
+ * @param {object} params.log
+ * @param {string} params.systemPrompt
+ * @param {object} params.userPayload serialized as the user message
+ * @returns {Promise<object|null>}
  */
-export async function selectComponentsWithClaude({
-  message, opportunities, env, log,
+async function callBedrock({
+  env, log, systemPrompt, userPayload,
 }) {
   const config = getBedrockConfig(env);
   if (!config) {
@@ -171,13 +141,6 @@ export async function selectComponentsWithClaude({
   }
 
   try {
-    const userPayload = {
-      request: message,
-      opportunities: opportunities.map((o) => ({
-        id: o.id, type: o.type, title: o.title, data: o.data,
-      })),
-    };
-
     const response = await fetch(config.url, {
       method: 'POST',
       headers: {
@@ -185,7 +148,7 @@ export async function selectComponentsWithClaude({
         Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
-        system: [{ text: buildSystemPrompt() }],
+        system: [{ text: systemPrompt }],
         messages: [{ role: 'user', content: [{ text: JSON.stringify(userPayload) }] }],
         inferenceConfig: { maxTokens: 4096 },
       }),
@@ -209,6 +172,118 @@ export async function selectComponentsWithClaude({
     log.warn(`Bedrock profile-builder call failed: ${error.message}`);
     return null;
   }
+}
+
+/**
+ * Builds the system prompt that describes the task + the component catalog.
+ * @returns {string}
+ */
+function buildSystemPrompt() {
+  const catalog = COMPONENT_CATALOG
+    .map((c) => `- "${c.id}": ${c.description}\n    ${c.dataShape}`)
+    .join('\n');
+
+  return `You build a goal-oriented "profile" for a website from its real opportunities.
+You are given the customer's request and a list of that site's opportunities (each with an id, type, title, and data).
+
+Choose AT MOST ${MAX_COMPONENTS} components from the catalog below that best represent the requested opportunities, and fill each component's "data" using the real opportunity data provided. Only use opportunities that match the customer's request.
+
+Available components (use the exact "id" and the described data shape):
+${catalog}
+
+Respond with ONLY a JSON object (no prose, no markdown) of this exact form:
+{
+  "name": "<short, descriptive profile name (2–5 words) that reflects the goal or theme of the selected opportunities — NOT a concatenation of opportunity titles>",
+  "rationale": "<one or two sentences explaining what you surfaced and why>",
+  "components": [ { "id": "<catalog id>", "title": "<human title>", "data": { ... } } ],
+  "opportunityIds": ["<id of each opportunity you used>"],
+  "reply": "<one short sentence to show the user in chat>"
+}
+Rules: components length <= ${MAX_COMPONENTS}; every component id must be from the catalog; every opportunityId must be one of the provided opportunity ids; name must be a meaningful business-oriented label (e.g. "SEO Health", "Accessibility & Discovery", "Link & Metadata Fix") — never a raw concatenation like "Opportunity A + Opportunity B".`;
+}
+
+/**
+ * Calls Claude (Bedrock Converse) to select components for a profile from the
+ * given opportunities.
+ *
+ * @param {object} params
+ * @param {string} params.message the customer's request
+ * @param {Array<{id,type,title,data}>} params.opportunities candidate opportunities
+ * @param {object} params.env environment variables (Bedrock config)
+ * @param {object} params.log logger
+ * @returns {Promise<{ name, rationale, components, opportunityIds, reply }|null>}
+ *   parsed+validated profile spec, or null if the LLM is unavailable/failed.
+ */
+export async function selectComponentsWithClaude({
+  message, opportunities, env, log,
+}) {
+  const userPayload = {
+    request: message,
+    opportunities: opportunities.map((o) => ({
+      id: o.id, type: o.type, title: o.title, data: o.data,
+    })),
+  };
+  return callBedrock({
+    env, log, systemPrompt: buildSystemPrompt(), userPayload,
+  });
+}
+
+/**
+ * System prompt for building component(s) for a SINGLE opportunity that is
+ * being added to an existing profile.
+ * @returns {string}
+ */
+function buildAddOpportunityPrompt() {
+  const catalog = COMPONENT_CATALOG
+    .map((c) => `- "${c.id}": ${c.description}\n    ${c.dataShape}`)
+    .join('\n');
+
+  return `You are adding ONE opportunity to an existing website profile.
+You are given the customer's request and a single opportunity (id, type, title, data).
+
+Build 1 (at most 2) component(s) from the catalog below that best represent this
+opportunity, filling each component's "data" from the opportunity data.
+
+Available components (use the exact "id" and the described data shape):
+${catalog}
+
+Respond with ONLY a JSON object (no prose, no markdown) of this exact form:
+{
+  "name": "<revised short profile name (2–5 words) that reflects all opportunities now in the profile — a meaningful business-oriented label, never a raw concatenation of titles>",
+  "components": [ { "id": "<catalog id>", "title": "<human title>", "data": { ... } } ],
+  "opportunityIds": ["<the opportunity id you used>"],
+  "reply": "<one short sentence to show the user in chat>"
+}
+Rules: components length <= ${MAX_COMPONENTS}; every component id must be from the catalog; opportunityIds must be the provided opportunity id; name must be a meaningful business-oriented label (e.g. "SEO Health", "Accessibility & Discovery", "Link & Metadata Fix") — never a raw concatenation like "Custom profile + Broken Backlinks + Meta Tags".`;
+}
+
+/**
+ * Calls Claude to build component(s) for a single opportunity being added to a
+ * profile.
+ *
+ * @param {object} params
+ * @param {string} params.message the customer's request (e.g. "add alt text")
+ * @param {{id,type,title,data}} params.opportunity the matched opportunity
+ * @param {object} params.env
+ * @param {object} params.log
+ * @returns {Promise<{ components, opportunityIds, reply }|null>}
+ */
+export async function buildComponentsForOpportunity({
+  message, opportunity, currentProfileName, env, log,
+}) {
+  const userPayload = {
+    request: message,
+    currentProfileName: currentProfileName ?? 'Custom profile',
+    opportunity: {
+      id: opportunity.id,
+      type: opportunity.type,
+      title: opportunity.title,
+      data: opportunity.data,
+    },
+  };
+  return callBedrock({
+    env, log, systemPrompt: buildAddOpportunityPrompt(), userPayload,
+  });
 }
 
 /**
@@ -248,5 +323,35 @@ export function validateProfileSpec(raw, validOpportunityIds) {
     components,
     opportunityIds,
     reply: hasText(raw.reply) ? raw.reply : 'I created a profile from your request.',
+  };
+}
+
+/**
+ * Validates the component(s) returned when adding a single opportunity.
+ * @param {object} raw parsed LLM output
+ * @returns {{ components: Array, reply: string }|null} null when no valid component survived
+ */
+export function validateComponents(raw) {
+  if (!raw || !Array.isArray(raw.components)) {
+    return null;
+  }
+
+  const components = raw.components
+    .filter((c) => c && VALID_COMPONENT_IDS.has(c.id) && c.data && typeof c.data === 'object')
+    .slice(0, MAX_COMPONENTS)
+    .map((c) => ({
+      id: c.id,
+      title: hasText(c.title) ? c.title : c.id,
+      data: c.data,
+    }));
+
+  if (components.length === 0) {
+    return null;
+  }
+
+  return {
+    name: hasText(raw.name) ? raw.name : null,
+    components,
+    reply: hasText(raw.reply) ? raw.reply : 'I added that opportunity to your profile.',
   };
 }

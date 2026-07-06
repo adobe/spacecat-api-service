@@ -21,11 +21,15 @@ import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
 import {
   selectComponentsWithClaude,
+  buildComponentsForOpportunity,
   validateProfileSpec,
+  validateComponents,
 } from '../support/profile-builder.js';
 import {
   createProfile,
+  updateProfile,
   getProfileById,
+  deleteProfile,
   listProfilesBySite,
 } from '../support/profiles-storage.js';
 
@@ -49,14 +53,15 @@ function ProfilesController(ctx, log, env) {
 
   /**
    * POST /sites/:siteId/profiles/chat
-   * Body: { message }
-   * Fetches the site's opportunities, asks Claude to build a profile from the
-   * ones matching the request, persists it, and returns it. Returns 404 when
-   * no matching opportunities exist (no profile is created).
+   * Body: { message, profileId? }
+   *
+   * Unified chat endpoint. When `profileId` is provided the message is treated
+   * as an "add opportunity" request on the existing profile. When it is absent a
+   * brand-new profile is created from the message.
    */
   const createFromChat = async (context) => {
     const siteId = context.params?.siteId;
-    const message = context?.data?.message;
+    const { message, profileId } = context?.data ?? {};
 
     if (!hasText(message)) {
       return badRequest('A non-empty "message" is required.');
@@ -67,6 +72,102 @@ function ProfilesController(ctx, log, env) {
       return internalServerError('Data access is not available.');
     }
 
+    // ── ADD-TO-EXISTING branch ────────────────────────────────────────────────
+    if (hasText(profileId)) {
+      try {
+        const postgrestClient = getPostgrestClient();
+        const profile = await getProfileById({ postgrestClient, siteId, profileId });
+        if (!profile) {
+          return notFound('Profile not found.');
+        }
+
+        const opportunities = await Opportunity.allBySiteId(siteId);
+        if (!opportunities || opportunities.length === 0) {
+          return notFound('This site has no opportunities to add.');
+        }
+
+        const candidates = opportunities.map((o) => ({
+          id: o.getId(),
+          type: o.getType(),
+          title: o.getTitle(),
+          data: o.getData(),
+        }));
+
+        const selection = await selectComponentsWithClaude({
+          message, opportunities: candidates, env, log,
+        });
+        if (!selection) {
+          return createResponse(
+            { message: 'The profile builder is unavailable right now. Please try again.' },
+            503,
+          );
+        }
+
+        const validIds = new Set(candidates.map((c) => c.id));
+        const matchedIds = [...new Set(selection.opportunityIds || [])]
+          .filter((id) => validIds.has(id));
+        if (matchedIds.length === 0) {
+          return notFound('No matching opportunity found for your request on this site.');
+        }
+
+        const newComponents = [];
+        const addedIds = [];
+        const alreadyPresent = [];
+        let revisedName = null;
+        for (const id of matchedIds) {
+          if (profile.opportunityIds.includes(id)) {
+            alreadyPresent.push(id);
+            // eslint-disable-next-line no-continue
+            continue;
+          }
+          const matched = candidates.find((c) => c.id === id);
+          // eslint-disable-next-line no-await-in-loop
+          const built = await buildComponentsForOpportunity({
+            message,
+            opportunity: matched,
+            currentProfileName: profile.name,
+            env,
+            log,
+          });
+          const validated = validateComponents(built);
+          if (validated) {
+            newComponents.push(...validated.components);
+            addedIds.push(id);
+            // Use the last non-null name the LLM returned across all added opps.
+            if (validated.name) {
+              revisedName = validated.name;
+            }
+          }
+        }
+
+        if (addedIds.length === 0) {
+          const reply = alreadyPresent.length > 0
+            ? 'Those opportunities are already in this profile.'
+            : 'Could not build a component for that opportunity.';
+          return ok({ ...profile, reply });
+        }
+
+        const patch = {
+          components: [...profile.components, ...newComponents],
+          opportunityIds: [...profile.opportunityIds, ...addedIds],
+        };
+        if (revisedName) {
+          patch.name = revisedName;
+        }
+
+        const updated = await updateProfile({
+          postgrestClient, siteId, profileId, patch,
+        });
+
+        const reply = `Added ${addedIds.length} opportunit${addedIds.length === 1 ? 'y' : 'ies'} to your profile.`;
+        return ok({ ...updated, reply });
+      } catch (error) {
+        log.error(`Profile add-opportunity error: ${error.message}`);
+        return internalServerError('Failed to add opportunity.');
+      }
+    }
+
+    // ── CREATE-NEW branch ─────────────────────────────────────────────────────
     try {
       const site = await Site.findById(siteId);
       if (!site) {
@@ -119,6 +220,45 @@ function ProfilesController(ctx, log, env) {
   };
 
   /**
+   * POST /sites/:siteId/profiles
+   * Body (optional): { name }
+   * Creates an EMPTY profile (no components / opportunities) that the user then
+   * builds up by adding opportunities via the add endpoint.
+   */
+  const createEmpty = async (context) => {
+    const siteId = context.params?.siteId;
+    const { Site } = dataAccess ?? {};
+    if (!isNonEmptyObject(Site)) {
+      return internalServerError('Data access is not available.');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found.');
+      }
+
+      const name = hasText(context?.data?.name)
+        ? context.data.name
+        : 'Custom profile';
+
+      const profile = await createProfile({
+        postgrestClient: getPostgrestClient(),
+        siteId,
+        name,
+        rationale: '',
+        components: [],
+        opportunityIds: [],
+      });
+
+      return createResponse(profile, 201);
+    } catch (error) {
+      log.error(`Profile create-empty error: ${error.message}`);
+      return internalServerError('Failed to create profile.');
+    }
+  };
+
+  /**
    * GET /sites/:siteId/profiles
    */
   const list = async (context) => {
@@ -160,7 +300,32 @@ function ProfilesController(ctx, log, env) {
     }
   };
 
-  return { createFromChat, list, getById };
+  /**
+   * DELETE /sites/:siteId/profiles/:profileId
+   */
+  const deleteById = async (context) => {
+    const siteId = context.params?.siteId;
+    const profileId = context.params?.profileId;
+    if (!hasText(profileId)) {
+      return badRequest('Profile ID is required.');
+    }
+    try {
+      const postgrestClient = getPostgrestClient();
+      const existing = await getProfileById({ postgrestClient, siteId, profileId });
+      if (!existing) {
+        return notFound('Profile not found.');
+      }
+      await deleteProfile({ postgrestClient, siteId, profileId });
+      return createResponse(null, 204);
+    } catch (error) {
+      log.error(`Profile delete error: ${error.message}`);
+      return internalServerError('Failed to delete profile.');
+    }
+  };
+
+  return {
+    createFromChat, createEmpty, list, getById, deleteById,
+  };
 }
 
 export default ProfilesController;

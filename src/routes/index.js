@@ -182,8 +182,10 @@ export default function getRouteHandlers(
 
   const routeDefinitions = {
     'POST /sites/:siteId/profiles/chat': profilesController.createFromChat,
+    'POST /sites/:siteId/profiles': profilesController.createEmpty,
     'GET /sites/:siteId/profiles': profilesController.list,
     'GET /sites/:siteId/profiles/:profileId': profilesController.getById,
+    'DELETE /sites/:siteId/profiles/:profileId': profilesController.deleteById,
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,

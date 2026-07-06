@@ -76,6 +76,52 @@ export async function createProfile({
 }
 
 /**
+ * Updates a profile's mutable fields (name, rationale, components,
+ * opportunityIds), scoped to a site. Only provided fields are changed.
+ * @param {object} params
+ * @param {object} params.postgrestClient
+ * @param {string} params.siteId
+ * @param {string} params.profileId
+ * @param {object} params.patch camelCase fields to update
+ * @returns {Promise<object|null>} the updated profile (API shape) or null if not found
+ */
+export async function updateProfile({
+  postgrestClient, siteId, profileId, patch,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required for profiles');
+  }
+
+  const row = {};
+  if (patch.name !== undefined) {
+    row.name = patch.name;
+  }
+  if (patch.rationale !== undefined) {
+    row.rationale = patch.rationale;
+  }
+  if (patch.components !== undefined) {
+    row.components = patch.components;
+  }
+  if (patch.opportunityIds !== undefined) {
+    row.opportunity_ids = patch.opportunityIds;
+  }
+
+  const { data, error } = await postgrestClient
+    .from(TABLE)
+    .update(row)
+    .eq('id', profileId)
+    .eq('site_id', siteId)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update profile: ${error.message}`);
+  }
+
+  return data ? rowToProfile(data) : null;
+}
+
+/**
  * Fetches a single profile by id, scoped to a site.
  * @param {object} params
  * @param {object} params.postgrestClient
@@ -100,6 +146,30 @@ export async function getProfileById({ postgrestClient, siteId, profileId }) {
   }
 
   return data ? rowToProfile(data) : null;
+}
+
+/**
+ * Deletes a profile by id, scoped to a site.
+ * @param {object} params
+ * @param {object} params.postgrestClient
+ * @param {string} params.siteId
+ * @param {string} params.profileId
+ * @returns {Promise<void>}
+ */
+export async function deleteProfile({ postgrestClient, siteId, profileId }) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required for profiles');
+  }
+
+  const { error } = await postgrestClient
+    .from(TABLE)
+    .delete()
+    .eq('id', profileId)
+    .eq('site_id', siteId);
+
+  if (error) {
+    throw new Error(`Failed to delete profile: ${error.message}`);
+  }
 }
 
 /**
