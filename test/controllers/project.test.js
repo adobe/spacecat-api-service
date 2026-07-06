@@ -664,13 +664,13 @@ describe('Projects Controller', () => {
           ...mockDataAccess,
           services: {
             postgrestClient: fakeFacsPostgrest([
-              { resource_id: 'site1', granted_capabilities: ['abcd/can_view'] },
+              { resource_id: 'site1', granted_capabilities: ['aso/can_view'] },
             ]),
           },
         },
         attributes: {
           ...context.attributes,
-          facs: { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' },
+          facs: { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' },
         },
       });
       expect(response.status).to.equal(200);
@@ -687,7 +687,7 @@ describe('Projects Controller', () => {
         ...context,
         attributes: {
           ...context.attributes,
-          facs: { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' },
+          facs: { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' },
         },
       });
       expect(response.status).to.equal(503);
@@ -695,20 +695,37 @@ describe('Projects Controller', () => {
 
     it('skips filter when JWT carries the federal can_view grant', async () => {
       // projectsController from beforeEach has is_admin: true → hasAccess passes.
-      // The per-request authInfo carries facs_permissions: ['abcd/can_view'] → filter bypassed.
+      // The per-request authInfo carries facs_permissions: ['aso/can_view'] → filter bypassed.
       const response = await projectsController.getSitesByProjectId({
         params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
         ...context,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
-            .withProfile({ email: 'test@example.com', is_admin: false, facs_permissions: ['abcd/can_view'] }),
-          facs: { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' },
+            .withProfile({ email: 'test@example.com', is_admin: false, facs_permissions: ['aso/can_view'] }),
+          facs: { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' },
         },
       });
       expect(response.status).to.equal(200);
       const body = await response.json();
       // Both sites returned — state-layer query was not needed.
+      expect(body).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('skips the site filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
+      // LLMO ReBAC-scopes `brand`, not `site`. No services provided: if the
+      // filter wrongly engaged it would 503 — the cross-product bypass must
+      // return the project's full site list instead.
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+        attributes: {
+          ...context.attributes,
+          facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
+        },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
       expect(body).to.be.an('array').with.lengthOf(2);
     });
   });

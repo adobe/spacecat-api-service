@@ -5,9 +5,9 @@
   of the License at http://www.apache.org/licenses/LICENSE-2.0
 -->
 
-# LLMO Semrush Elements API — Filter Dimensions
+# LLMO Semrush Elements API — Filter Dimensions & Weeks
 
-SpaceCat wrapper endpoint over the Semrush Elements APIs for the Brand Presence / URL Inspector dashboards.
+SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence / URL Inspector dashboards.
 
 > **Upstream wiki:** https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
 
@@ -16,7 +16,8 @@ SpaceCat wrapper endpoint over the Semrush Elements APIs for the Brand Presence 
 ## Index
 
 1. [List URL Inspector Filter Dimensions](#1-list-url-inspector-filter-dimensions)
-2. [Supported Models](#2-supported-models)
+2. [List Weeks](#2-list-weeks)
+3. [Supported Models](#3-supported-models)
 
 ---
 
@@ -99,9 +100,54 @@ A single object with six dimension arrays, each shaped for direct use as filter 
 
 ---
 
-## 2. Supported Models
+## 2. List Weeks
 
-The `model` query parameter is accepted by the Filter Dimensions endpoint. Only the following values are valid. Any unrecognised value silently falls back to the default (`search-gpt`).
+**`GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks`**
+
+Returns the weeks that have Brand Presence data, for the week/date filter dropdown. **Drop-in compatible with the legacy Brand Presence `weeks` contract**, so the URL Inspector filter consumes it unchanged.
+
+### Parameters
+
+| Name | In | Required | Description |
+|---|---|---|---|
+| `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins if both are sent). UI platform codes are translated to Semrush models — see [Supported Models](#3-supported-models) (default: `search-gpt`) |
+| `siteId` / `site_id` | query | ❌ | Site UUID. Reverse-mapped to the site's **primary brand** (`brands.site_id`), which scopes the weeks via a `CBF_ws_brand` filter. Returns `404` if the site has no brand. Omitted → workspace-wide weeks |
+
+### Underlying Element
+
+| Element | UUID | Shape |
+|---|---|---|
+| `WEEKS` | `afa7458b-d34f-43d9-8cc5-e8794753551c` | `table` — one row per day that has data (`{ date, models }`) |
+
+### What it returns
+
+The daily rows are rolled up into ISO weeks spanning the earliest→latest day present, ordered **newest-first**. Each entry matches the legacy contract exactly:
+
+- **`week`** — ISO week string `YYYY-Wnn`
+- **`startDate`** — Monday of that week (`YYYY-MM-DD`)
+- **`endDate`** — Sunday of that week (`YYYY-MM-DD`)
+
+### Response example
+
+```json
+{
+  "weeks": [
+    { "week": "2026-W27", "startDate": "2026-06-29", "endDate": "2026-07-05" },
+    { "week": "2026-W26", "startDate": "2026-06-22", "endDate": "2026-06-28" }
+  ]
+}
+```
+
+> **`siteId` → brand:** Semrush has no concept of a site. The endpoint resolves `siteId` to the site's primary brand via `getBrandBySite` and scopes the query with `CBF_ws_brand` (brand **name**), mirroring the Markets element. The brand ID itself is not sent upstream.
+
+> **⚠️ Open (POC):** (1) the `openai`→`gpt-5` and `chatgpt`→`search-gpt` model mappings are provisional pending product confirmation; (2) whether the `WEEKS` element honours `CBF_ws_brand` is unverified — if it does not, brand scoping will move to `CBF_project` via the brand's Semrush projects.
+
+---
+
+## 3. Supported Models
+
+The `model` (or `platform`) query parameter is accepted by these endpoints. Only the following Semrush values are valid; any unrecognised value silently falls back to the default (`search-gpt`).
 
 | # | Model value | Default |
 |---|---|---|
@@ -117,4 +163,18 @@ The `model` query parameter is accepted by the Filter Dimensions endpoint. Only 
 | 10 | `search-gpt` | ✅ |
 | 11 | `perplexity` | |
 
-> Source of truth: [`src/support/elements/constants.js`](../../src/support/elements/constants.js) — `ELEMENT_MODELS` and `DEFAULT_ELEMENT_MODEL`.
+### UI platform code → Semrush model
+
+The UI keeps sending its existing platform filter codes (project-elmo-ui `PLATFORM_CODES`); SpaceCat translates them to Semrush model values via `resolveElementModel`. Codes already identical to a Semrush model, and Semrush-only models with no UI counterpart, pass through unchanged.
+
+| UI platform code | Semrush model | Note |
+|---|---|---|
+| `openai` (ChatGPT Paid) | `gpt-5` | ⚠️ provisional — confirm with product |
+| `chatgpt` (ChatGPT Free) | `search-gpt` | ⚠️ provisional — confirm with product |
+| `copilot` | `microsoft-copilot` | rename |
+| `gemini` | `gemini-2.5-flash` | rename |
+| `google-ai-overview` | `google-ai-overview` | identical |
+| `google-ai-mode` | `google-ai-mode` | identical |
+| `perplexity` | `perplexity` | identical |
+
+> Source of truth: [`src/support/elements/constants.js`](../../src/support/elements/constants.js) — `ELEMENT_MODELS`, `DEFAULT_ELEMENT_MODEL`, `PLATFORM_TO_ELEMENT_MODEL`, and `resolveElementModel`.

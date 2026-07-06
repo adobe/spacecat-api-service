@@ -1,3 +1,31 @@
+# [1.624.0](https://github.com/adobe/spacecat-api-service/compare/v1.623.0...v1.624.0) (2026-07-06)
+
+
+### Features
+
+* **serenity:** resolve brand URLs to Semrush's canonical form before writing them ([#2748](https://github.com/adobe/spacecat-api-service/issues/2748)) ([a064a84](https://github.com/adobe/spacecat-api-service/commit/a064a84f0a9908f7d69ab22f97fa2521dd87eeec)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.623.0](https://github.com/adobe/spacecat-api-service/compare/v1.622.3...v1.623.0) (2026-07-06)
+
+
+### Features
+
+* add Slack commands for path-level prerender suggestions ([#2758](https://github.com/adobe/spacecat-api-service/issues/2758)) ([6c7dd48](https://github.com/adobe/spacecat-api-service/commit/6c7dd4857d8bf1d2c105f44e91675c3cac079e75))
+
+## [1.622.3](https://github.com/adobe/spacecat-api-service/compare/v1.622.2...v1.622.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **llmo:** reject CDN auto-routing for subpath sites (LLMO-4579) ([#2463](https://github.com/adobe/spacecat-api-service/issues/2463)) ([eac33c5](https://github.com/adobe/spacecat-api-service/commit/eac33c5a36efbc13fd679d7d61456f7374280fe3))
+
+## [1.622.2](https://github.com/adobe/spacecat-api-service/compare/v1.622.1...v1.622.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **facs:** bypass ReBAC collection filter for cross-product resources ([#2754](https://github.com/adobe/spacecat-api-service/issues/2754)) ([85b0dd2](https://github.com/adobe/spacecat-api-service/commit/85b0dd278d29efb94bfc7592efe124eb98e72dc3))
+
 ## [1.622.1](https://github.com/adobe/spacecat-api-service/compare/v1.622.0...v1.622.1) (2026-07-03)
 
 
