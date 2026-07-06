@@ -1,3 +1,17 @@
+# [1.626.0](https://github.com/adobe/spacecat-api-service/compare/v1.625.0...v1.626.0) (2026-07-06)
+
+
+### Features
+
+* map LLMO and traffic read endpoints to read capabilities for read-only admin org users ([#2761](https://github.com/adobe/spacecat-api-service/issues/2761)) ([f2f311d](https://github.com/adobe/spacecat-api-service/commit/f2f311d77152e81d9d3a762f06233fef5a6e535e))
+
+# [1.625.0](https://github.com/adobe/spacecat-api-service/compare/v1.624.0...v1.625.0) (2026-07-06)
+
+
+### Features
+
+* Semrush Elements weeks endpoint for URL Inspector | LLMO-6011 ([#2755](https://github.com/adobe/spacecat-api-service/issues/2755)) ([fd6a78e](https://github.com/adobe/spacecat-api-service/commit/fd6a78e1adf1f6cf055baf0f4b927995973abe50)), closes [#2666](https://github.com/adobe/spacecat-api-service/issues/2666) [#2666](https://github.com/adobe/spacecat-api-service/issues/2666)
+
 # [1.624.0](https://github.com/adobe/spacecat-api-service/compare/v1.623.0...v1.624.0) (2026-07-06)
 
 
