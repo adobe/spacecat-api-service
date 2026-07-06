@@ -70,7 +70,7 @@ import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors,
 } from '../support/brands-storage.js';
-import { ErrorWithStatusCode, exchangePromiseToken } from '../support/utils.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER } from '../utils/constants.js';
@@ -296,24 +296,15 @@ function SerenityController(context, log, env) {
    *
    * Fallback path: no `x-promise-token` — behaves exactly as before, requiring
    * IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+   *
+   * Delegates the promise-token decode/exchange to the shared
+   * `resolveSemrushImsToken` helper in support/utils.js (also used by
+   * elements.js and the brand create/edit/provisioning re-sync paths),
+   * passing this controller's own `requireImsBearer` as the fallback since it
+   * additionally supports the SERENITY_ALLOW_NON_IMS_AUTH test-only escape hatch.
    */
   async function resolveSemrushImsToken(ctx) {
-    const promiseTokenHeader = ctx?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
-    if (hasText(promiseTokenHeader)) {
-      let decoded = promiseTokenHeader;
-      try {
-        decoded = decodeURIComponent(promiseTokenHeader);
-      } catch {
-        // Bearer-style tokens may contain literal %; use as-is.
-      }
-      try {
-        return await exchangePromiseToken(ctx, decoded);
-      } catch (e) {
-        log.error('serenity: promise token exchange failed', { error: e?.message });
-        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
-      }
-    }
-    return requireImsBearer(ctx);
+    return resolveImsTokenViaPromise(ctx, log, 'serenity', requireImsBearer);
   }
 
   /**

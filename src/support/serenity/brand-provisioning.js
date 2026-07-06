@@ -14,7 +14,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserTokenStrict } from '../utils.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken } from '../utils.js';
 import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
@@ -118,10 +118,11 @@ export async function provisionBrandSubworkspace(context, {
   }
 
   // Match the /serenity/* IMS-only contract: the upstream gateway only
-  // understands IMS user tokens, so refuse to forward anything else. POST
-  // /brands is organization:write and thus S2S-reachable; getImsUserTokenStrict
-  // 401s a non-IMS bearer before it can be proxied upstream.
-  const imsToken = getImsUserTokenStrict(context);
+  // understands IMS user tokens. POST /brands is organization:write and thus
+  // S2S-reachable, so prefer an x-promise-token exchange (same as serenity.js/
+  // elements.js) and otherwise fall back to strict IMS-bearer forwarding,
+  // 401ing a non-IMS bearer before it can be proxied upstream.
+  const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
   /** @type {string|null} */
@@ -246,10 +247,10 @@ export async function releaseProvisionedWorkspace(context, workspaceId, log = co
     return;
   }
   try {
-    // Use the strict IMS-type guard, matching every other Semrush-transport
-    // call site — keeps the IMS-only forwarding invariant uniform even though
-    // this helper is only reachable after provisioning already passed it.
-    const imsToken = getImsUserTokenStrict(context);
+    // Prefer x-promise-token, matching every other Semrush-transport call site
+    // — keeps the IMS-only forwarding invariant uniform even though this
+    // helper is only reachable after provisioning already passed it.
+    const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
     const transport = createSerenityTransport({ env: context.env, imsToken });
     await transport.transferWorkspaceResources(workspaceId, RELEASE_ALLOCATION);
     log?.info?.('serenity: released orphaned subworkspace allocation back to parent pool', {

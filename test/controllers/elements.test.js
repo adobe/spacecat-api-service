@@ -15,6 +15,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -42,6 +43,35 @@ function fakeLog() {
     warn: sinon.stub(),
     error: sinon.stub(),
     debug: sinon.stub(),
+  };
+}
+
+// Faithful re-implementation of support/utils.js#resolveSemrushImsToken, wired to
+// a controllable exchange stub. The controller now delegates the promise-token
+// decode/exchange to that shared helper, so exercising it here (rather than
+// stubbing the whole thing away) keeps this suite's fallback-path assertions
+// (IMS-type gate, hint message) exercising the REAL `fallback` the controller
+// passes in, while still allowing the promise-token exchange itself to be
+// controlled per-test. The authoritative unit tests for the decode/error-wrap
+// behavior itself live in test/support/utils.test.js.
+function makeResolveSemrushImsTokenStub(exchangeStub) {
+  return async (ctx, log, logLabel, fallback) => {
+    const promiseTokenHeader = ctx?.pathInfo?.headers?.['x-promise-token'];
+    if (promiseTokenHeader) {
+      let decoded = promiseTokenHeader;
+      try {
+        decoded = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use as-is.
+      }
+      try {
+        return await exchangeStub(ctx, decoded);
+      } catch (e) {
+        log.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
+        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+      }
+    }
+    return fallback(ctx);
   };
 }
 
@@ -162,7 +192,9 @@ describe('ElementsController', () => {
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/utils.js': {
-        exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
+        resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
+          (...args) => exchangePromiseTokenStub(...args),
+        ),
       },
     })).default;
   });
@@ -382,7 +414,6 @@ describe('ElementsController', () => {
     });
 
     it('maps ErrorWithStatusCode with a code property to that code token', async () => {
-      const { ErrorWithStatusCode } = await import('../../src/support/utils.js');
       const err = new ErrorWithStatusCode('config error', 503);
       err.code = 'configurationError';
       serviceStub.getUrlInspectorFilterDimensions.rejects(err);

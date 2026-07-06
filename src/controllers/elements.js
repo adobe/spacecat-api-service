@@ -22,7 +22,7 @@ import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { ErrorWithStatusCode, exchangePromiseToken } from '../support/utils.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
 import { X_PROMISE_TOKEN_HEADER } from '../utils/constants.js';
 
 const MAX_ERR_MSG_LEN = 500;
@@ -218,26 +218,13 @@ export default function ElementsController(context, log, env) {
    * Fallback path: no `x-promise-token` — behaves exactly as before, requiring
    * IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
    *
-   * Mirrors `resolveSemrushImsToken` in src/controllers/serenity.js, which
-   * proxies to the same Semrush workspace via a different Elements API surface.
+   * Delegates the promise-token decode/exchange to the shared
+   * `resolveSemrushImsToken` helper in support/utils.js (also used by
+   * serenity.js and the brand create/edit/provisioning re-sync paths),
+   * passing this controller's own `requireImsBearer` as the fallback.
    */
   async function resolveElementsImsToken(ctx) {
-    const promiseTokenHeader = ctx?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
-    if (hasText(promiseTokenHeader)) {
-      let decoded = promiseTokenHeader;
-      try {
-        decoded = decodeURIComponent(promiseTokenHeader);
-      } catch {
-        // Bearer-style tokens may contain literal %; use as-is.
-      }
-      try {
-        return await exchangePromiseToken(ctx, decoded);
-      } catch (e) {
-        log.error('elements: promise token exchange failed', { error: e?.message });
-        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
-      }
-    }
-    return requireImsBearer(ctx);
+    return resolveSemrushImsToken(ctx, log, 'elements', requireImsBearer);
   }
 
   async function buildService(ctx) {
