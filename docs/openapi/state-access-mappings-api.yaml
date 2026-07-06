@@ -1,14 +1,3 @@
-x-product-header: &xProductHeader
-  name: x-product
-  in: header
-  required: true
-  description: |
-    Uppercase product code that scopes the request (e.g. `LLMO`, `ASO`).
-    Must match a product declared in `routeFacsCapabilities.PRODUCTS_ROUTES`.
-  schema:
-    type: string
-    example: LLMO
-
 state-access-mappings:
   get:
     tags:
@@ -16,7 +5,7 @@ state-access-mappings:
     summary: List active state-layer access mappings
     description: |
       Returns active (non-revoked) `facs_access_mappings` rows scoped to the
-      caller's IMS org and the product carried by the `x-product` header.
+      caller's IMS org and product.
 
       At least one of (`subjectType` + `subjectId`) or (`resourceType` +
       `resourceId`) must be supplied. Pagination is cursor-based; page size
@@ -29,7 +18,6 @@ state-access-mappings:
       filter) are FACS-only and return `403` for a state-layer manager.
     operationId: listStateAccessMappings
     parameters:
-      - *xProductHeader
       - in: query
         name: subjectType
         schema: { type: string, enum: [user, org] }
@@ -88,8 +76,6 @@ state-access-mappings:
       and may never grant `can_manage_users` itself (FACS-only). The same rules
       apply to `PATCH` (evaluated against the target row's resource).
     operationId: createStateAccessMapping
-    parameters:
-      - *xProductHeader
     requestBody:
       required: true
       content:
@@ -132,7 +118,6 @@ state-access-mappings-history:
       `GET /state/access-mappings` but includes tombstoned (revoked) rows.
     operationId: listStateAccessMappingHistory
     parameters:
-      - *xProductHeader
       - in: query
         name: subjectType
         schema: { type: string, enum: [user, org] }
@@ -173,7 +158,6 @@ state-access-mappings-history:
 
 state-access-mapping-by-id:
   parameters:
-    - *xProductHeader
     - in: path
       name: id
       required: true
@@ -268,8 +252,6 @@ product-capabilities:
           manager can assign every other capability but cannot mint new
           managers.
     operationId: getProductCapabilities
-    parameters:
-      - *xProductHeader
     responses:
       '200':
         description: Product capability catalog.
@@ -302,7 +284,6 @@ user-capabilities-by-resource:
       caller must supply `?resourceType=<type>`.
     operationId: getUserCapabilities
     parameters:
-      - *xProductHeader
       - in: path
         name: resourceId
         required: true
@@ -333,7 +314,6 @@ user-capabilities-by-resource:
 
 permission-audit-logs:
   parameters:
-    - *xProductHeader
     - in: path
       name: organizationId
       required: true
@@ -345,9 +325,9 @@ permission-audit-logs:
     summary: List the FACS state-mapping audit log for an organization
     description: |
       Returns the `facs_access_mapping_audit_events` for the org, scoped to the
-      product carried by the `x-product` header. Every create / patch / delete /
-      revoke on a state-layer binding is logged with its outcome; this is the
-      operation history behind the hybrid permission model.
+      caller's product. Every create / patch / delete / revoke on a state-layer
+      binding is logged with its outcome; this is the operation history behind
+      the hybrid permission model.
 
       Authority (hybrid-model §3): this is an **org-wide** read, admitted for a
       FACS-layer `<product>/can_manage_users` holder (or admin) only — a

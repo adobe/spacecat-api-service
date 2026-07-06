@@ -137,14 +137,15 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
 | GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. tagIds is repeatable (OR semantics, max 50). | `listSerenityPrompts` |
-| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode) | `createSerenityPrompts` |
-| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + new fields | `updateSerenityPrompt` |
+| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries at most one of `tags` (names) or `tagIds` (upstream ids, id-based write path) | `createSerenityPrompts` |
+| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + exactly one of `tags`/`tagIds` | `updateSerenityPrompt` |
 | POST | `/serenity/prompts/bulk-delete` | Delete prompts; body is `{ prompts: [{semrushPromptId, geoTargetId, languageCode}] }` | `bulkDeleteSerenityPrompts` |
 | GET | `/serenity/markets` | List markets configured for the brand (incl. live `status`) | `listSerenityMarkets` |
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
-| GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice | `listSerenityTags` |
-| POST | `/serenity/tags` | Register an open-dimension (`category`/`topic`) tag on one slice; body is `{ type, name, geoTargetId, languageCode }` | `createSerenityTag` |
+| GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice. Add `parentId` (present, even empty) to switch to the nested-tree read instead: `parentId=''` returns root categories with `childrenCount`, `parentId=<tagId>` returns that root's children with a `path` breadcrumb. | `listSerenityTags` |
+| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `type` is `category`/`topic` (open — customer-authored, `parentId` nests a 1-level bare-named child) or `source`/`intent`/`type` (closed — `name` must match the fixed enum; resolve-before-create, idempotent, `parentId` not allowed; response is `200 { ..., created }` not `201`). | `createSerenityTag` |
+| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is the full `<dimension>:<value>` string for a root, or a bare value for a child. `parentId`: an id RE-PARENTS, explicit `null` PROMOTES a child to root, omitted preserves the current parent (the proxy re-sends a child's current parent itself — omission is only safe for a root). | `updateSerenityTag` |
 | GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
 | PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
 | POST | `/serenity/activate` | Activate the brand into sub-workspace mode (ensure sub-workspace + publish supplied markets) | `activateSerenityBrand` |

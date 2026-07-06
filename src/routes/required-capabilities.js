@@ -308,6 +308,7 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:read',
@@ -326,12 +327,14 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
   'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:write',
   // Org-level Semrush catalogue lookups (brand-independent): read-only, org
   // access enforced in the controller (listOrgModels / listOrgLanguages).
   'GET /v2/orgs/:spaceCatId/serenity/models': 'organization:read',
   'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',

@@ -416,7 +416,7 @@ function detectCdnFromHeaders(headers) {
   if (has('cf-ray') || match('cf-cache-status', /./) || match('server', /cloudflare/i)) {
     return 'Cloudflare';
   }
-  if (hasKey('x-akamai-') || has('akamai-origin-hop') || match('server', /akamaighost/i) || has('x-akamai-transformed')) {
+  if (hasKey('x-akamai-') || has('akamai-origin-hop') || match('server', /akamaighost/i) || has('x-akamai-transformed') || has('akamai-grn')) {
     return 'Akamai';
   }
   if (has('x-served-by') || has('x-fastly-request-id') || has('fastly-ff') || has('fastly-debug-digest') || match('via', /fastly/i)) {

@@ -836,6 +836,7 @@ describe('cdn-detection', () => {
     const headerCases = [
       { name: 'Cloudflare (cf-ray)', headers: { 'cf-ray': 'abc' }, token: 'byocdn-cloudflare' },
       { name: 'Akamai (x-akamai-transformed)', headers: { 'x-akamai-transformed': '9' }, token: 'byocdn-akamai' },
+      { name: 'Akamai (akamai-grn)', headers: { 'akamai-grn': '0.abc123.1234567.deadbeef' }, token: 'byocdn-akamai' },
       { name: 'Fastly BYOCDN (x-fastly-request-id)', headers: { 'x-fastly-request-id': 'abc' }, token: 'byocdn-fastly' },
       { name: 'CloudFront (x-amz-cf-id)', headers: { 'x-amz-cf-id': 'abc' }, token: 'byocdn-other' },
       { name: 'Imperva (x-iinfo)', headers: { 'x-iinfo': 'a' }, token: 'byocdn-imperva' },

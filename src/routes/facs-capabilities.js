@@ -540,6 +540,7 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'llmo/can_configure',
@@ -579,6 +580,7 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
@@ -786,6 +788,7 @@ const routeFacsCapabilities = {
       // Org-level Serenity catalog reads (no brandId).
       'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)
       'GET /sites/:siteId/preflights': 'llmo/can_view',
@@ -1175,9 +1178,9 @@ const routeFacsCapabilities = {
     // an X-ASO-API-Key-authenticated internal route, not a FACS resource.
     'service',
     // Serenity proxy params — identifiers from the upstream API (geo
-    // target / language / semrush prompt id), not SpaceCat resources. The
-    // enclosing :brandId is the FACS resource for these routes.
-    'semrushPromptId', 'geoTargetId', 'languageCode',
+    // target / language / semrush prompt id / aio tag id), not SpaceCat
+    // resources. The enclosing :brandId is the FACS resource for these routes.
+    'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId',
     // Preflight job id — sub-resource of the enclosing :siteId.
     'preflightId',
     // Filter / pagination / format params (not entities):
@@ -1240,5 +1243,27 @@ export const PRODUCTS_CAPABILITIES = {
     'aso/can_manage_users',
   ],
 };
+
+/**
+ * Whether a product ReBAC-scopes a given resource type at the state layer.
+ *
+ * The collection-filter controllers (list-sites, list-brands, resolveSite,
+ * getSitesByProjectId) narrow their results to the resources a FACS-enrolled
+ * caller may view. That narrowing is only valid when the resource type is
+ * actually a ReBAC-enforced resource **for the current product** — LLMO scopes
+ * `brand` (not `site`), ASO scopes `site` (not `brand`). Applying a `site`
+ * filter under LLMO (or a `brand` filter under ASO) would query a state layer
+ * that holds no grants for that type and wrongly hide the whole collection.
+ * Callers use this to bypass the filter for cross-product resources.
+ *
+ * @param {string} product - Product code (any case), e.g. 'LLMO' / 'ASO'.
+ * @param {string} resourceType - ReBAC resource type, e.g. 'site' / 'brand'.
+ * @returns {boolean} true iff `resourceType` is ReBAC-scoped for `product`.
+ */
+export function isFacsRebacResource(product, resourceType) {
+  const aliases = routeFacsCapabilities
+    .PRODUCTS_FACS_RESOURCE_PARAM_ALIASES?.[product?.toUpperCase?.()];
+  return !!aliases && Object.prototype.hasOwnProperty.call(aliases, resourceType);
+}
 
 export default routeFacsCapabilities;

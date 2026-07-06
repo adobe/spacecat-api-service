@@ -83,6 +83,22 @@ export const CREATABLE_TAG_DIMENSIONS = Object.freeze([
   TAG_DIMENSION.TOPIC,
 ]);
 
+/**
+ * The closed dimensions — `source` / `intent` / `type` — whose values are a
+ * fixed enum ({@link PROJECT_STANDARD_TAGS}), never customer-authored. A
+ * caller may still "create" one of these (POST /serenity/tags) to learn its
+ * upstream id, but ONLY a value already in the enum, and the create is
+ * resolve-before-create/idempotent (unlike {@link CREATABLE_TAG_DIMENSIONS}'s
+ * open dimensions, where a duplicate name is a hard upstream 500 by design —
+ * see serenity-docs#24 §3.1 gate 7). Closed-dimension tags are always roots;
+ * `parentId` is rejected for them.
+ */
+export const CLOSED_TAG_DIMENSIONS = Object.freeze([
+  TAG_DIMENSION.SOURCE,
+  TAG_DIMENSION.INTENT,
+  TAG_DIMENSION.TYPE,
+]);
+
 // Tags applied to EVERY AI-generated prompt on top of its `topic:<NAME>` tag:
 // `source:ai` (AI-authored) plus the default `intent:Informational` (the most
 // common intent for brand-topic prompts; re-classification can refine it

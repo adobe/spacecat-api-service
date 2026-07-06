@@ -21,6 +21,7 @@ import {
   collectBrandUrlEntries,
   normalizeBenchmarkDomain,
   ensureOwnBrandBenchmark,
+  resolveWebsiteEntries,
   attachBrandUrlsToProject,
   syncBrandUrlsAcrossMarkets,
 } from '../../../src/support/serenity/brand-urls.js';
@@ -36,6 +37,12 @@ const BID = 'bench-1';
 describe('brand-urls helpers', () => {
   const sandbox = sinon.createSandbox();
   const benchOk = () => ({ aio_benchmarks: [{ id: BID, main_brand: true }] });
+  // Identity url/resolve stub: echoes the input as a valid canonical value, so the
+  // pre-existing plumbing tests keep asserting the RAW url they were written for.
+  // The actual www→apex normalization is covered by the dedicated tests below.
+  const identityResolve = () => sandbox.stub().callsFake(
+    (url) => Promise.resolve({ domain: url, primary_url: url, is_valid: true }),
+  );
   afterEach(() => sandbox.restore());
 
   describe('regionApplies', () => {
@@ -237,6 +244,112 @@ describe('brand-urls helpers', () => {
     });
   });
 
+  describe('resolveWebsiteEntries', () => {
+    it('canonicalizes website entries to the resolve primary_url', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+      };
+      const out = await resolveWebsiteEntries(
+        transport,
+        [{ url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE }],
+        undefined,
+      );
+      expect(out).to.deep.equal([{ url: 'acme.com', type: BRAND_URL_TYPE.WEBSITE }]);
+      expect(transport.resolveUrl).to.have.been.calledOnceWith('https://www.acme.com');
+    });
+
+    it('passes social/earned entries through unchanged (never resolved)', async () => {
+      const transport = { resolveUrl: sandbox.stub() };
+      const entries = [
+        { url: 'https://instagram.com/acme', type: BRAND_URL_TYPE.SOCIAL },
+        { url: 'https://press.example/acme', type: BRAND_URL_TYPE.EARNED },
+      ];
+      const out = await resolveWebsiteEntries(transport, entries, undefined);
+      expect(out).to.deep.equal(entries);
+      expect(transport.resolveUrl).to.not.have.been.called;
+    });
+
+    it('keeps the raw url (and warns) when resolve returns is_valid:false', async () => {
+      const warn = sandbox.stub();
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: '', primary_url: '', is_valid: false }),
+      };
+      const out = await resolveWebsiteEntries(
+        transport,
+        [{ url: 'https://not-a-real-host', type: BRAND_URL_TYPE.WEBSITE }],
+        { warn },
+      );
+      // Never write the empty value — fall back to the raw (already https-filtered) url.
+      expect(out).to.deep.equal([{ url: 'https://not-a-real-host', type: BRAND_URL_TYPE.WEBSITE }]);
+      expect(warn).to.have.been.calledWithMatch(
+        'brand-urls: url/resolve returned no usable primary_url — keeping raw url',
+        sinon.match({ url: 'https://not-a-real-host' }),
+      );
+    });
+
+    it('keeps the raw url when resolve resolves null/undefined (optional-chaining defense)', async () => {
+      const transport = { resolveUrl: sandbox.stub().resolves(null) };
+      const out = await resolveWebsiteEntries(
+        transport,
+        [{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }],
+        undefined,
+      );
+      expect(out).to.deep.equal([{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }]);
+    });
+
+    it('resolves each distinct website url once via the shared cache', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+      };
+      const cache = new Map();
+      const entry = [{ url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE }];
+      // Two calls sharing one cache (mirrors the per-market edit loop) → one HTTP call.
+      await resolveWebsiteEntries(transport, entry, undefined, cache);
+      const out = await resolveWebsiteEntries(transport, entry, undefined, cache);
+      expect(out).to.deep.equal([{ url: 'acme.com', type: BRAND_URL_TYPE.WEBSITE }]);
+      expect(transport.resolveUrl).to.have.been.calledOnce;
+    });
+
+    it('keeps the raw url when is_valid:true but primary_url is empty (defensive)', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'x.com', primary_url: '', is_valid: true }),
+      };
+      const out = await resolveWebsiteEntries(
+        transport,
+        [{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }],
+        undefined,
+      );
+      expect(out).to.deep.equal([{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }]);
+    });
+
+    it('re-de-dups when two raw website urls resolve to the same canonical value', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+      };
+      const out = await resolveWebsiteEntries(
+        transport,
+        [
+          { url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE },
+          { url: 'https://acme.com', type: BRAND_URL_TYPE.WEBSITE },
+        ],
+        undefined,
+      );
+      expect(out).to.deep.equal([{ url: 'acme.com', type: BRAND_URL_TYPE.WEBSITE }]);
+      expect(transport.resolveUrl).to.have.been.calledTwice;
+    });
+
+    it('propagates a transport error (leaving best-effort/hard-fail to the caller)', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().rejects(new SerenityTransportError(502, 'boom')),
+      };
+      await expect(resolveWebsiteEntries(
+        transport,
+        [{ url: 'https://x.com', type: BRAND_URL_TYPE.WEBSITE }],
+        undefined,
+      )).to.be.rejectedWith('boom');
+    });
+  });
+
   describe('attachBrandUrlsToProject', () => {
     const BRAND = { name: 'Acme', domain: 'https://acme.com' };
 
@@ -250,6 +363,7 @@ describe('brand-urls helpers', () => {
 
     it('ensures the benchmark and creates the URLs', async () => {
       const transport = {
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         createBenchmarks: sandbox.stub(),
         createBrandUrls: sandbox.stub().resolves({ ids: ['a'], existing_count: 0 }),
@@ -260,8 +374,24 @@ describe('brand-urls helpers', () => {
       expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, PID, BID, entries);
     });
 
+    it('canonicalizes website URLs (via url/resolve) before creating them', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        createBrandUrls: sandbox.stub().resolves({ ids: ['a'], existing_count: 0 }),
+      };
+      const entries = [{ url: 'https://www.acme.com', type: 'website' }];
+      const result = await attachBrandUrlsToProject(transport, WS, PID, entries, BRAND, undefined);
+      expect(result).to.deep.equal({ created: 1 });
+      // The raw https://www.acme.com is stored as its canonical scheme-less form.
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, PID, BID, [
+        { url: 'acme.com', type: 'website' },
+      ]);
+    });
+
     it('creates the benchmark first when the project has none, then attaches', async () => {
       const transport = {
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
         createBenchmarks: sandbox.stub().resolves({ ids: ['new-1'], existing_count: 0 }),
         createBrandUrls: sandbox.stub().resolves({ ids: ['a'], existing_count: 0 }),
@@ -310,6 +440,7 @@ describe('brand-urls helpers', () => {
 
     it('propagates a create-URL failure', async () => {
       const transport = {
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         createBrandUrls: sandbox.stub().rejects(new SerenityTransportError(400, 'bad url')),
       };
@@ -331,6 +462,7 @@ describe('brand-urls helpers', () => {
       };
       const transport = {
         listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({
           brand_urls: [
@@ -353,9 +485,82 @@ describe('brand-urls helpers', () => {
       expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 1 });
     });
 
+    it('diffs on the resolved canonical form — no churn when Semrush already stores it', async () => {
+      // Desired https://www.acme.com resolves to acme.com, which Semrush already
+      // stores → the re-sync is idempotent (no create/delete/publish).
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [{ id: 'keep', url: 'acme.com' }] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://www.acme.com'] },
+        WS,
+        undefined,
+      );
+      expect(transport.createBrandUrls).to.not.have.been.called;
+      expect(transport.deleteBrandUrls).to.not.have.been.called;
+      expect(transport.publishProject).to.not.have.been.called;
+      expect(result).to.deep.equal({ markets: 1, created: 0, deleted: 0 });
+    });
+
+    it('migrates a legacy raw-URL entry to its canonical form (delete raw, create scheme-less)', async () => {
+      // Semrush still holds the pre-#25 raw https value; the resolved desired set
+      // is scheme-less, so the one-time re-sync replaces it (self-correcting).
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [{ id: 'legacy', url: 'https://www.acme.com' }] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://www.acme.com'] },
+        WS,
+        undefined,
+      );
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, [
+        { url: 'acme.com', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
+      expect(transport.deleteBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, ['legacy']);
+      expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 1 });
+    });
+
+    it('resolves a region-less website url once across markets (shared cache)', async () => {
+      const transport = {
+        resolveUrl: sandbox.stub().resolves({ domain: 'acme.com', primary_url: 'acme.com', is_valid: true }),
+        listProjects: sandbox.stub().resolves({
+          items: [projectWith('p-us', 'us'), projectWith('p-de', 'de')],
+        }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [{ id: 'keep', url: 'acme.com' }] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://www.acme.com'] },
+        WS,
+        undefined,
+      );
+      expect(result.markets).to.equal(2);
+      // One region-less website url shared by both markets → resolved once (cache hit).
+      expect(transport.resolveUrl).to.have.been.calledOnce;
+    });
+
     it('reuses a pre-fetched project listing instead of calling listProjects', async () => {
       const transport = {
         listProjects: sandbox.stub().resolves({ items: [] }), // would be empty if called
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().resolves({}),
@@ -382,6 +587,7 @@ describe('brand-urls helpers', () => {
       const boom = new SerenityTransportError(502, 'Semrush POST https://gw.internal/x failed: 502');
       const transport = {
         listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().rejects(boom),
@@ -403,6 +609,7 @@ describe('brand-urls helpers', () => {
       const sources = { urls: ['https://acme.com'] };
       const transport = {
         listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [{ id: 'keep', url: 'https://acme.com' }] }),
         createBrandUrls: sandbox.stub().resolves({}),
@@ -461,6 +668,7 @@ describe('brand-urls helpers', () => {
       const warn = sandbox.stub();
       const transport = {
         listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().resolves({}),
@@ -477,6 +685,7 @@ describe('brand-urls helpers', () => {
       const sources = { urls: ['https://acme.com'] };
       const transport = {
         listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().resolves({}),
@@ -583,6 +792,7 @@ describe('brand-urls helpers', () => {
       // undefined logger, leaving the truthy log?.info path uncovered.
       const info = sandbox.stub();
       const transport = {
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         createBrandUrls: sandbox.stub().resolves({}),
       };
@@ -625,6 +835,7 @@ describe('brand-urls helpers', () => {
             settings: { ai: { country: { code: 'us' } } },
           }],
         }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().resolves({}),
@@ -655,6 +866,7 @@ describe('brand-urls helpers', () => {
             },
           }],
         }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().resolves({}),
@@ -683,6 +895,7 @@ describe('brand-urls helpers', () => {
             },
           }],
         }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().resolves({}),
@@ -705,6 +918,7 @@ describe('brand-urls helpers', () => {
             settings: { ai: { country: { code: 'us' } } },
           }],
         }),
+        resolveUrl: identityResolve(),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({}),
         createBrandUrls: sandbox.stub().resolves({}),

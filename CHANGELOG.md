@@ -1,3 +1,78 @@
+# [1.624.0](https://github.com/adobe/spacecat-api-service/compare/v1.623.0...v1.624.0) (2026-07-06)
+
+
+### Features
+
+* **serenity:** resolve brand URLs to Semrush's canonical form before writing them ([#2748](https://github.com/adobe/spacecat-api-service/issues/2748)) ([a064a84](https://github.com/adobe/spacecat-api-service/commit/a064a84f0a9908f7d69ab22f97fa2521dd87eeec)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.623.0](https://github.com/adobe/spacecat-api-service/compare/v1.622.3...v1.623.0) (2026-07-06)
+
+
+### Features
+
+* add Slack commands for path-level prerender suggestions ([#2758](https://github.com/adobe/spacecat-api-service/issues/2758)) ([6c7dd48](https://github.com/adobe/spacecat-api-service/commit/6c7dd4857d8bf1d2c105f44e91675c3cac079e75))
+
+## [1.622.3](https://github.com/adobe/spacecat-api-service/compare/v1.622.2...v1.622.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **llmo:** reject CDN auto-routing for subpath sites (LLMO-4579) ([#2463](https://github.com/adobe/spacecat-api-service/issues/2463)) ([eac33c5](https://github.com/adobe/spacecat-api-service/commit/eac33c5a36efbc13fd679d7d61456f7374280fe3))
+
+## [1.622.2](https://github.com/adobe/spacecat-api-service/compare/v1.622.1...v1.622.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **facs:** bypass ReBAC collection filter for cross-product resources ([#2754](https://github.com/adobe/spacecat-api-service/issues/2754)) ([85b0dd2](https://github.com/adobe/spacecat-api-service/commit/85b0dd278d29efb94bfc7592efe124eb98e72dc3))
+
+## [1.622.1](https://github.com/adobe/spacecat-api-service/compare/v1.622.0...v1.622.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **cdn-detection:** detect Akamai via akamai-grn response header ([#2747](https://github.com/adobe/spacecat-api-service/issues/2747)) ([ec9568f](https://github.com/adobe/spacecat-api-service/commit/ec9568fa793650cb32549e08681c611fb6b52858))
+
+# [1.622.0](https://github.com/adobe/spacecat-api-service/compare/v1.621.0...v1.622.0) (2026-07-03)
+
+
+### Features
+
+* introduce semrush elements apis wrapper for llmo ui ([#2666](https://github.com/adobe/spacecat-api-service/issues/2666)) ([5dc6d3b](https://github.com/adobe/spacecat-api-service/commit/5dc6d3b647f9c331d5808153d0a2c25db0ba59cf))
+
+# [1.621.0](https://github.com/adobe/spacecat-api-service/compare/v1.620.0...v1.621.0) (2026-07-03)
+
+
+### Features
+
+* guard edge deploy against out-of-scope suggestions for subpath sites ([#2595](https://github.com/adobe/spacecat-api-service/issues/2595)) ([f084db1](https://github.com/adobe/spacecat-api-service/commit/f084db102d6d2167835c04670a363b24c63bf07e))
+
+# [1.620.0](https://github.com/adobe/spacecat-api-service/compare/v1.619.0...v1.620.0) (2026-07-02)
+
+
+### Features
+
+* **serenity:** id-based prompt writes, closed-dimension tag resolve, promote-to-root ([#2741](https://github.com/adobe/spacecat-api-service/issues/2741)) ([395c7a7](https://github.com/adobe/spacecat-api-service/commit/395c7a78f0b5a7bd9768716aa59adb6647e44184)), closes [serenity-docs#24](https://github.com/serenity-docs/issues/24) [#21](https://github.com/adobe/spacecat-api-service/issues/21) [serenity-docs#24](https://github.com/serenity-docs/issues/24) [Hi#level](https://github.com/Hi/issues/level) [#2737](https://github.com/adobe/spacecat-api-service/issues/2737)
+
+# [1.619.0](https://github.com/adobe/spacecat-api-service/compare/v1.618.0...v1.619.0) (2026-07-02)
+
+
+### Bug Fixes
+
+* Return cited prompts in URL Inspector details for Postgres-backed (-pg) domains | LLMO-5992 ([#2743](https://github.com/adobe/spacecat-api-service/issues/2743)) ([067969a](https://github.com/adobe/spacecat-api-service/commit/067969af2cb2c52da182a8db106ef867ec73cf48))
+
+
+### Features
+
+* self-serve activate-brand endpoint | LLMO-5605 ([#2706](https://github.com/adobe/spacecat-api-service/issues/2706)) ([5155192](https://github.com/adobe/spacecat-api-service/commit/5155192d632a29b2ea8aa3a7ec9439e0bc0f13c5))
+
+# [1.618.0](https://github.com/adobe/spacecat-api-service/compare/v1.617.0...v1.618.0) (2026-07-02)
+
+
+### Features
+
+* **serenity:** consume nested AIO tags (parentId create, tree read, PATCH re-parent) ([#2737](https://github.com/adobe/spacecat-api-service/issues/2737)) ([640cba5](https://github.com/adobe/spacecat-api-service/commit/640cba510d4bfda6fe7ee9d633dcb1f7a09b5d17)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.617.0](https://github.com/adobe/spacecat-api-service/compare/v1.616.0...v1.617.0) (2026-07-02)
 
 
