@@ -368,6 +368,23 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.callCount).to.equal(2);
     }));
 
+    it('retries a retryable DELETE (503) and returns the eventual success', withFakeTimers(async (clock) => {
+      // GET is the only idempotent method exercised for retryable 5xx above.
+      // The idempotency gate treats GET/HEAD/PUT/DELETE/OPTIONS alike, so this
+      // locks in that DELETE gets the same guarantee, using deleteProject (a
+      // real transport method) rather than a synthetic call.
+      fetchStub.onCall(0).resolves(fetchFail(503, { code: 'unavailable' }));
+      fetchStub.onCall(1).resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.deleteProject(WORKSPACE_ID, PROJECT_ID);
+      await clock.tickAsync(60_000);
+      await promise;
+
+      expect(fetchStub.callCount).to.equal(2);
+      expect((await callOf(fetchStub, 1)).method).to.equal('DELETE');
+    }));
+
     it('retries a 429 even on a POST create (createSubworkspace) and returns the eventual success', withFakeTimers(async (clock) => {
       // createSubworkspace is the real brand-provisioning create-call shape
       // (brand-provisioning.js -> workspace-lifecycle.js#ensureSubworkspace ->
@@ -445,10 +462,7 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.callCount).to.equal(2);
     }));
 
-    it('honours Retry-After (delta-seconds) as a floor on the backoff wait', async () => {
-      // No fake timers here: assert real elapsed time is at least the
-      // server-requested delay, proving Retry-After is actually being read
-      // and applied (not just backoff jitter, which defaults to ~100-200ms).
+    it('honours Retry-After (delta-seconds) as a floor on the backoff wait', withFakeTimers(async (clock) => {
       fetchStub.onCall(0).resolves(new Response(JSON.stringify({ code: 'rate_limited' }), {
         status: 429,
         headers: { 'content-type': 'application/json', 'retry-after': '1' },
@@ -456,14 +470,21 @@ describe('Semrush REST transport', () => {
       fetchStub.onCall(1).resolves(fetchOk({ status: 'created' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const start = Date.now();
-      const result = await transport.getWorkspaceStatus(WORKSPACE_ID);
-      const elapsed = Date.now() - start;
+      const promise = transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      // Retry-After: 1 is a 1s FLOOR on the wait. Advancing to just under it
+      // must not dispatch the retry yet -- proving the header is what's gating
+      // the delay, not backoff jitter alone (which defaults to ~100-200ms and
+      // would otherwise let this pass for the wrong reason).
+      await clock.tickAsync(900);
+      expect(fetchStub.callCount).to.equal(1);
+
+      await clock.tickAsync(200);
+      const result = await promise;
 
       expect(result.status).to.equal('created');
       expect(fetchStub.callCount).to.equal(2);
-      expect(elapsed).to.be.at.least(950); // ~1s Retry-After, small slack for timer drift
-    }).timeout(5000);
+    }));
 
     it('returns the last retryable response after exhausting all retries (does not swallow into an exception)', withFakeTimers(async (clock) => {
       fetchStub.resolves(fetchFail(503, { code: 'still_unavailable' }));
@@ -477,6 +498,23 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.callCount).to.equal(3);
       expect(err).to.be.instanceOf(SerenityTransportError);
       expect(err.status).to.equal(503);
+    }));
+
+    it('exhausts all retries on a POST create under sustained 429 (createProject)', withFakeTimers(async (clock) => {
+      // The other exhaustion test above only covers GET+503. POST retries via a
+      // different branch of the idempotency gate (429-only, never 5xx), so
+      // exhaustion needs its own coverage in case that branch's retry-count/
+      // last-response behavior ever drifts from the idempotent-method path.
+      fetchStub.resolves(fetchFail(429, { code: 'rate_limited' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.createProject(WORKSPACE_ID, { name: 'US - EN' }).catch((e) => e);
+      await clock.tickAsync(60_000);
+      const err = await promise;
+
+      expect(fetchStub.callCount).to.equal(3);
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.status).to.equal(429);
     }));
 
     it('rethrows the last network error after exhausting all retries on an idempotent method', withFakeTimers(async (clock) => {
