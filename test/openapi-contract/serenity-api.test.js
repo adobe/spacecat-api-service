@@ -238,6 +238,14 @@ const FIXTURES = {
       name: 'category:Running Shoes', parentId: 'tag-parent', geoTargetId: 2840, languageCode: 'en',
     },
   },
+  deleteSerenityTag: {
+    expectedStatus: 204,
+    controllerMethod: 'deleteTag',
+    handlerName: 'handleDeleteTag',
+    handlerResult: { status: 204 },
+    params: { tagId: 'tag-1' },
+    query: { geoTargetId: '2840', languageCode: 'en' },
+  },
   listSerenityModels: {
     expectedStatus: 200,
     controllerMethod: 'listModels',
@@ -356,6 +364,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleListTags: sinon.stub(),
         handleCreateTag: sinon.stub(),
         handleUpdateTag: sinon.stub(),
+        handleDeleteTag: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
@@ -407,6 +416,8 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleCreateTagSubworkspace: sinon.stub(),
             handleUpdateTag: handlerStubs.handleUpdateTag,
             handleUpdateTagSubworkspace: sinon.stub(),
+            handleDeleteTag: handlerStubs.handleDeleteTag,
+            handleDeleteTagSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: sinon.stub(),

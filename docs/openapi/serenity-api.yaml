@@ -500,8 +500,8 @@ v2-serenity-tags:
             properties:
               type:
                 type: string
-                enum: [category, topic, source, intent, type]
-                description: The tag dimension. category/topic are open (customer-authored); source/intent/type are closed (fixed enum).
+                enum: [category, topic, tag, source, intent, type]
+                description: The tag dimension. category/topic/tag are open (customer-authored); source/intent/type are closed (fixed enum).
               name:
                 type: string
                 minLength: 1
@@ -556,7 +556,7 @@ v2-serenity-tags:
                 brandId: { type: string, format: uuid }
                 geoTargetId: { type: integer }
                 languageCode: { type: string }
-                type: { type: string, enum: [category, topic] }
+                type: { type: string, enum: [category, topic, tag] }
                 name: { type: string }
                 tag:
                   type: string
@@ -688,6 +688,66 @@ v2-serenity-tag-by-id:
           serenity proxy write, an upstream error surfaces as 502.
       '502':
         description: Upstream returned a non-2xx response (including an unknown tag id).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  delete:
+    tags: [serenity]
+    summary: Delete a tag (tag-dimension only)
+    description: |
+      Deletes a single AIO tag on the market addressed by the
+      `(geoTargetId, languageCode)` query filters. Removes the standalone tag
+      only; prompts that carry it are untouched.
+
+      SCOPE: `tag`-dimension tags ONLY for now. Deleting a `category:` (or any
+      other non-`tag:`) tag returns 400 (`categoryDeleteNotYetSupported`) — a
+      deliberate temporary restriction, because category delete conflicts with
+      DRS's existing idempotent category re-sync/soft-delete system (a separate
+      store with its own delete/resurrection semantics). Deleting a ROOT tag
+      that still has children returns 409 (`tagHasChildren`); delete or
+      re-parent the children first. This children guard is enforced BEFORE any
+      upstream call, so a rejected delete never reaches Semrush.
+    operationId: deleteSerenityTag
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        description: Google Ads Geo Target ID of the market slice.
+        schema:
+          type: integer
+          minimum: 1
+      - name: languageCode
+        in: query
+        required: true
+        description: BCP-47 primary subtag of the market slice.
+        schema:
+          type: string
+          pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    responses:
+      '204':
+        description: Tag deleted (or already absent upstream).
+      '400':
+        description: |
+          Missing/invalid slice filters, or the tag is not a `tag`-dimension tag
+          (`categoryDeleteNotYetSupported` — category delete is out of scope for
+          now).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '404':
+        description: Organization, brand, or the (geoTargetId, languageCode) market not found.
+      '409':
+        description: |
+          The tag is a root that still has children (`tagHasChildren`) — delete
+          or re-parent them first.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Upstream returned a non-2xx response.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }

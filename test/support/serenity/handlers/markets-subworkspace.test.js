@@ -702,6 +702,8 @@ describe('markets-subworkspace handlers', () => {
         parentId: 'root-1',
         childrenCount: 0,
         path: [{ id: 'root-1', name: 'category:Footwear' }],
+        // Derived from the root ancestor in path[0].
+        dimension: 'category',
       }]);
       expect(transport.listPromptsByTags).to.not.have.been.called;
       expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(WS, 'p-tag', {

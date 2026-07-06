@@ -549,6 +549,32 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * DELETE /v2/workspaces/{ws}/projects/{pid}/aio/tags — removes STANDALONE
+     * AIO tags by their upstream ids (model.BatchDeleteRequest body: { ids }).
+     * Targets the standalone tag collection only; prompts carrying the tag are
+     * untouched. The spec's `prompt_id` query param is REQUIRED but functionally
+     * unused for this collection-level delete (the upstream never reads it — see
+     * spacecat-shared project-engine mock), so we pass an empty string to satisfy
+     * the typed contract.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} ids - upstream tag ids to delete.
+     */
+    async deleteProjectTags(semrushWorkspaceId, projectId, ids) {
+      return unwrap('DELETE', await projects.DELETE(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: { prompt_id: '' },
+          },
+          body: { ids },
+        },
+      ));
+    },
+
+    /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      */
     async createProject(semrushWorkspaceId, body) {

@@ -881,6 +881,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',

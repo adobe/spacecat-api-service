@@ -912,7 +912,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     }, fakeLog());
 
     expect(result.items).to.deep.equal([{
-      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null,
+      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null, dimension: 'category',
     }]);
     // Tree read, not the prompt-derived path.
     expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -956,6 +956,8 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       parentId: 'root-1',
       childrenCount: 0,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
+      // Derived from the root ancestor in path[0] (root-first), not the child's own name.
+      dimension: 'category',
     }]);
     expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
   });
@@ -986,6 +988,39 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}`,
     }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
     expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('listProjectTagTree derives dimension for a tag: root and omits it for an unrecognized prefix', async () => {
+    const listProjectTags = sinon.stub().resolves({
+      page: 1,
+      total: 2,
+      items: [
+        {
+          id: 'tag-root', name: 'tag:Priority', parent_id: null, children_count: 0,
+        },
+        // Unrecognized prefix → dimension omitted (unknown, don't guess).
+        {
+          id: 'weird', name: 'bogus:Thing', parent_id: null, children_count: 0,
+        },
+      ],
+    });
+    const result = await listProjectTagTree({ listProjectTags }, WORKSPACE, 'proj-1', '', fakeLog());
+    expect(result.items[0]).to.include({ id: 'tag-root', dimension: 'tag' });
+    expect(result.items[1]).to.not.have.property('dimension');
+  });
+
+  it('listProjectTagTree omits dimension for a child with a null path (fallback, no throw)', async () => {
+    const listProjectTags = sinon.stub().resolves({
+      page: 1,
+      total: 1,
+      // A child (parent_id set) but path is null — dimension is undeterminable.
+      items: [{
+        id: 'child-x', name: 'Bare', parent_id: 'root-x', children_count: 0, path: null,
+      }],
+    });
+    const result = await listProjectTagTree({ listProjectTags }, WORKSPACE, 'proj-1', 'root-x', fakeLog());
+    expect(result.items[0]).to.include({ id: 'child-x', parentId: 'root-x' });
+    expect(result.items[0]).to.not.have.property('dimension');
   });
 
   it('listProjectTagTree warns and stops at the page ceiling when the last page is still full', async () => {

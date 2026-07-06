@@ -20,6 +20,8 @@ import {
   topicTag,
   STANDARD_PROMPT_TAGS,
   PROJECT_STANDARD_TAGS,
+  CREATABLE_TAG_DIMENSIONS,
+  CLOSED_TAG_DIMENSIONS,
 } from '../../../src/support/serenity/prompt-tags.js';
 
 describe('serenity prompt-tags taxonomy', () => {
@@ -71,6 +73,25 @@ describe('serenity prompt-tags taxonomy', () => {
       Object.values(SOURCE_TAG).forEach((t) => expect(t).to.match(/^source:/));
       Object.values(INTENT_TAG).forEach((t) => expect(t).to.match(/^intent:/));
       Object.values(TYPE_TAG).forEach((t) => expect(t).to.match(/^type:/));
+    });
+  });
+
+  describe('CREATABLE_TAG_DIMENSIONS', () => {
+    it('is exactly [category, topic, tag] — the open, customer-authored dimensions', () => {
+      expect([...CREATABLE_TAG_DIMENSIONS]).to.deep.equal([
+        TAG_DIMENSION.CATEGORY,
+        TAG_DIMENSION.TOPIC,
+        TAG_DIMENSION.TAG,
+      ]);
+    });
+
+    it('is frozen', () => {
+      expect(Object.isFrozen(CREATABLE_TAG_DIMENSIONS)).to.equal(true);
+    });
+
+    it('is disjoint from CLOSED_TAG_DIMENSIONS (no dimension is both open and closed)', () => {
+      const closed = new Set(CLOSED_TAG_DIMENSIONS);
+      CREATABLE_TAG_DIMENSIONS.forEach((d) => expect(closed.has(d)).to.equal(false));
     });
   });
 });

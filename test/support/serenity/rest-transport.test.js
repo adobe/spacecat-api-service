@@ -932,6 +932,32 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('deleteProjectTags', () => {
+    it('DELETEs /aio/tags with { ids } and the (unused) prompt_id query param', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.deleteProjectTags(WORKSPACE_ID, PROJECT_ID, ['tag-1']);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('DELETE');
+      expect(call.url).to.contain(
+        `/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags`,
+      );
+      // prompt_id is required by the spec but functionally unused; sent empty.
+      expect(call.url).to.contain('prompt_id=');
+      expect(JSON.parse(call.body)).to.deep.equal({ ids: ['tag-1'] });
+    });
+
+    it('surfaces an upstream 404 as a SerenityTransportError', async () => {
+      fetchStub.resolves(fetchFail(404, { message: 'not found' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.deleteProjectTags(WORKSPACE_ID, PROJECT_ID, ['ghost']))
+        .to.be.rejected.then((err) => expect(err.status).to.equal(404));
+    });
+  });
+
   describe('getBrandTopics', () => {
     it('GETs /v1/workspaces/{ws}/brand-topics with domain + country query', async () => {
       fetchStub.resolves(fetchOk([

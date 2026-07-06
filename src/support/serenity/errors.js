@@ -55,4 +55,7 @@ export const ERROR_CODES = Object.freeze({
   // Subworkspace provisioning (serenity dual-mode, subworkspace path).
   AMBIGUOUS_WORKSPACE: 'ambiguousWorkspace',
   LINKED_SUBWORKSPACES: 'linkedSubworkspaces',
+  // Tag delete (DELETE /serenity/tags/:tagId, tag-dimension only for now).
+  TAG_HAS_CHILDREN: 'tagHasChildren',
+  CATEGORY_DELETE_NOT_YET_SUPPORTED: 'categoryDeleteNotYetSupported',
 });

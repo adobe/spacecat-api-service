@@ -26,6 +26,7 @@ export const TAG_DIMENSION = Object.freeze({
   INTENT: 'intent',
   TYPE: 'type',
   CATEGORY: 'category',
+  TAG: 'tag',
 });
 
 // `source:<value>` — who authored the prompt.
@@ -77,10 +78,16 @@ export function topicTag(name) {
  * NOT mint arbitrary values under them; only `topic` and `category` accept
  * customer-authored values. The create-tag endpoint validates the requested
  * `type` against this list, which is what bounds the allowed tag prefixes.
+ *
+ * `tag` is the open, nestable "plain tags" dimension (serenity-docs#26):
+ * customer-authored roots `tag:<name>` with one level of bare-named children,
+ * structurally identical to `category` but a distinct dimension so the two
+ * taxonomies never collide.
  */
 export const CREATABLE_TAG_DIMENSIONS = Object.freeze([
   TAG_DIMENSION.CATEGORY,
   TAG_DIMENSION.TOPIC,
+  TAG_DIMENSION.TAG,
 ]);
 
 /**

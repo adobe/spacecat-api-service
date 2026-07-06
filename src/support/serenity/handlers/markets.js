@@ -20,6 +20,34 @@ import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { SerenityTransportError } from '../rest-transport.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
+import { TAG_DIMENSION } from '../prompt-tags.js';
+
+// Every recognized `<dimension>:` prefix (open + closed). A tag whose name
+// carries none of these has no derivable dimension.
+const ALL_TAG_DIMENSIONS = new Set(/** @type {string[]} */ (Object.values(TAG_DIMENSION)));
+
+/**
+ * Derives a tag's DIMENSION from its full `<dimension>:<value>` name, e.g.
+ * `category:Footwear` → `'category'`, `tag:Priority` → `'tag'`. Returns
+ * `undefined` for a bare name (no prefix) or an unrecognized prefix — callers
+ * MUST treat a missing dimension as "unknown, don't guess", never as "bare =
+ * subcategory" (that silent fallback is the exact bug the `tag:` dimension
+ * feature removes, and it would otherwise reappear during any rollout skew).
+ *
+ * @param {string} [name]
+ * @returns {string | undefined}
+ */
+export function dimensionFromTagName(name) {
+  if (typeof name !== 'string') {
+    return undefined;
+  }
+  const colon = name.indexOf(':');
+  if (colon <= 0) {
+    return undefined;
+  }
+  const prefix = name.slice(0, colon).toLowerCase();
+  return ALL_TAG_DIMENSIONS.has(prefix) ? prefix : undefined;
+}
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
@@ -690,9 +718,18 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   requested. Callers that only need to test membership (e.g. resolve-or-
  *   create) pass this to avoid paginating the whole tree; omit it to collect
  *   every item, as every pre-existing caller does.
+ * Each item also carries its `dimension` (`category` / `topic` / `tag` / a
+ * closed dimension) when derivable: a ROOT's dimension comes from its own name
+ * prefix; a CHILD's from walking its `path[]` breadcrumb to the root ancestor
+ * and reading THAT root's prefix (a child's own name is bare). The field is
+ * OMITTED when the dimension can't be determined (malformed/missing prefix, or
+ * a child with a null `path`) — consumers must treat a missing `dimension` as
+ * "unknown, don't guess", never as "bare = subcategory".
+ *
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
  *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ *   dimension?: string,
  * }> }>}
  */
 export async function listProjectTagTree(
@@ -717,6 +754,9 @@ export async function listProjectTagTree(
     for (const t of batch) {
       // AIOTag.id is required upstream; guard defensively and skip a malformed row.
       if (t && typeof t.id === 'string' && t.id) {
+        /** @type {{ id: string, name: string, parentId: string | null,
+         *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+         *   dimension?: string }} */
         const item = {
           id: t.id,
           name: typeof t.name === 'string' ? t.name : '',
@@ -729,6 +769,20 @@ export async function listProjectTagTree(
             }))
             : null,
         };
+        // Derive the dimension: a root from its own `<dimension>:` prefix; a
+        // child from the ROOT ancestor of its breadcrumb. `path[]` is root-first
+        // (schemas.yaml SerenityTag: "Ancestor breadcrumb (root → ...)"), and
+        // nothing upstream enforces 1-level depth, so read `path[0]` rather than
+        // assuming a single-element path. Left absent when undeterminable.
+        let dimension;
+        if (item.parentId === null) {
+          dimension = dimensionFromTagName(item.name);
+        } else if (item.path && item.path.length > 0) {
+          dimension = dimensionFromTagName(item.path[0].name);
+        }
+        if (dimension !== undefined) {
+          item.dimension = dimension;
+        }
         items.push(item);
         if (stopWhen && stopWhen(item)) {
           matched = true;

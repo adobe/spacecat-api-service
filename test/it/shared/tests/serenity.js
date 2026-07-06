@@ -417,6 +417,75 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(res.status).to.equal(400);
     });
 
+    // Plain tags: the `tag:` open dimension (serenity-docs#26) — structurally
+    // identical to `category` but a distinct dimension, and the only dimension
+    // the DELETE endpoint accepts for now.
+    const createPlainTag = (name, parentId) => getHttpClient().admin.post(`${base}/tags`, {
+      type: 'tag',
+      name,
+      geoTargetId: US_GEO,
+      languageCode: 'en',
+      ...(parentId ? { parentId } : {}),
+    });
+
+    it('POST /serenity/tags registers a tag:<NAME> root and nests a bare child, exposing dimension on read', async () => {
+      await createUsMarket();
+      const root = await createPlainTag('Priority');
+      expect(root.status).to.equal(201);
+      expect(root.body).to.include({ type: 'tag', tag: 'tag:Priority' });
+
+      const child = await createPlainTag('High', root.body.id);
+      expect(child.status).to.equal(201);
+      expect(child.body.tag).to.equal('High');
+      expect(child.body.parentId).to.equal(root.body.id);
+
+      // The tree read exposes the derived dimension on both root and child.
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const rootRow = roots.body.items.find((t) => t.id === root.body.id);
+      expect(rootRow.dimension).to.equal('tag');
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${root.body.id}`,
+      );
+      expect(children.body.items.find((t) => t.id === child.body.id).dimension).to.equal('tag');
+    });
+
+    it('DELETE /serenity/tags/:tagId removes a tag: leaf (204) and 409s a populated root', async () => {
+      await createUsMarket();
+      const root = await createPlainTag('Priority');
+      const child = await createPlainTag('High', root.body.id);
+
+      // A populated root is refused (409, tagHasChildren) before any upstream delete.
+      const blocked = await getHttpClient().admin.delete(
+        `${base}/tags/${root.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(blocked.status).to.equal(409);
+      expect(blocked.body.error).to.equal('tagHasChildren');
+
+      // The leaf deletes cleanly (204).
+      const delLeaf = await getHttpClient().admin.delete(
+        `${base}/tags/${child.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(delLeaf.status).to.equal(204);
+
+      // Now childless, the root deletes (204).
+      const delRoot = await getHttpClient().admin.delete(
+        `${base}/tags/${root.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(delRoot.status).to.equal(204);
+    });
+
+    it('DELETE /serenity/tags/:tagId 400s a category tag (categoryDeleteNotYetSupported)', async () => {
+      await createUsMarket();
+      const category = await createTag('Footwear');
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('categoryDeleteNotYetSupported');
+    });
+
     it('POST /serenity/prompts creates a prompt by id-based tagIds (serenity-docs#24)', async () => {
       await createUsMarket();
       const category = await createTag('Photography');
