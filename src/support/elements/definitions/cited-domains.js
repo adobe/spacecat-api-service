@@ -133,9 +133,11 @@ export function transformCitedDomainsResponse(raw, params = {}) {
   let domains = rows
     .map((row) => ({
       domain: row.domain || '',
-      totalCitations: Number(row.mentions_end ?? 0),
-      totalUrls: Number(row.urls_count ?? 0),
-      promptsCited: Number(row.prompts_with_citations ?? 0),
+      // `Number(x) || 0` (not `Number(x ?? 0)`) so a non-numeric value coerces to 0 instead
+      // of NaN — NaN would corrupt the totalCitations sort and serialize as null.
+      totalCitations: Number(row.mentions_end) || 0,
+      totalUrls: Number(row.urls_count) || 0,
+      promptsCited: Number(row.prompts_with_citations) || 0,
       // Semrush ownership classification; drives the UI's owned-vs-third-party filter.
       contentType: row.domain_type || '',
       // No source on element 98b91d00 (Semrush gap) — '' matches the legacy handler.
