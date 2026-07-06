@@ -114,6 +114,7 @@ import AgenticPageTypesController from './controllers/agentic-page-types.js';
 import SerenityController from './controllers/serenity.js';
 import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
+import ProfilesController from './controllers/profiles.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
@@ -293,6 +294,7 @@ async function run(request, context) {
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
+    const profilesController = ProfilesController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -358,6 +360,7 @@ async function run(request, context) {
       elementsController,
       proxyController,
       redirectsController,
+      profilesController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

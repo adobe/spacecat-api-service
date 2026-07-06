@@ -175,11 +175,15 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   redirectsController,
+  profilesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
+    'POST /sites/:siteId/profiles/chat': profilesController.createFromChat,
+    'GET /sites/:siteId/profiles': profilesController.list,
+    'GET /sites/:siteId/profiles/:profileId': profilesController.getById,
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
