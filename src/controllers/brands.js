@@ -61,6 +61,7 @@ import {
   getBrandCompetitors,
 } from '../support/brands-storage.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
@@ -1006,10 +1007,15 @@ function BrandsController(ctx, log, env) {
       // context.attributes.facs), narrow the listed brands to those the caller
       // may view via a state-layer grant. Absent flag (admin / internal org /
       // non-ReBAC org / org-wide viewer) => full list.
+      //
+      // Cross-product bypass: only filter when the current product actually
+      // ReBAC-scopes `brand` (LLMO). Under ASO, `brand` is not a ReBAC resource
+      // (ASO scopes `site`), so the state layer holds no per-brand grants and
+      // filtering would wrongly hide every brand — return the full list instead.
       const facs = context.attributes?.facs;
       const hasFACSCapability = facs?.enabled
         && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
-      if (facs?.enabled && !hasFACSCapability) {
+      if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'brand')) {
         const viewable = await listViewableResourceIds(postgrestClient, {
           imsOrgId: organization.getImsOrgId(),
           product: facs.product,

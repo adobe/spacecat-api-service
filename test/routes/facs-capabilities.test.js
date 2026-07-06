@@ -15,7 +15,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { expect } from 'chai';
 
-import routeFacsCapabilities from '../../src/routes/facs-capabilities.js';
+import routeFacsCapabilities, { isFacsRebacResource } from '../../src/routes/facs-capabilities.js';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(testDir, '..', '..');
@@ -394,6 +394,30 @@ describe('routeFacsCapabilities', () => {
         stale,
         `FACS_NON_RESOURCE_PARAMS contains params not used in any route: ${stale.join(', ')}`,
       ).to.deep.equal([]);
+    });
+  });
+
+  describe('isFacsRebacResource', () => {
+    it('LLMO ReBAC-scopes brand but not site (cross-product bypass for sites)', () => {
+      expect(isFacsRebacResource('LLMO', 'brand')).to.be.true;
+      expect(isFacsRebacResource('LLMO', 'site')).to.be.false;
+    });
+
+    it('ASO ReBAC-scopes site but not brand (cross-product bypass for brands)', () => {
+      expect(isFacsRebacResource('ASO', 'site')).to.be.true;
+      expect(isFacsRebacResource('ASO', 'brand')).to.be.false;
+    });
+
+    it('is case-insensitive on the product code', () => {
+      expect(isFacsRebacResource('llmo', 'brand')).to.be.true;
+      expect(isFacsRebacResource('aso', 'site')).to.be.true;
+    });
+
+    it('returns false for unknown products and nullish input', () => {
+      expect(isFacsRebacResource('ACO', 'site')).to.be.false;
+      expect(isFacsRebacResource('NOPE', 'site')).to.be.false;
+      expect(isFacsRebacResource(undefined, 'site')).to.be.false;
+      expect(isFacsRebacResource('LLMO', undefined)).to.be.false;
     });
   });
 });

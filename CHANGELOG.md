@@ -1,3 +1,38 @@
+# [1.623.0](https://github.com/adobe/spacecat-api-service/compare/v1.622.3...v1.623.0) (2026-07-06)
+
+
+### Features
+
+* add Slack commands for path-level prerender suggestions ([#2758](https://github.com/adobe/spacecat-api-service/issues/2758)) ([6c7dd48](https://github.com/adobe/spacecat-api-service/commit/6c7dd4857d8bf1d2c105f44e91675c3cac079e75))
+
+## [1.622.3](https://github.com/adobe/spacecat-api-service/compare/v1.622.2...v1.622.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **llmo:** reject CDN auto-routing for subpath sites (LLMO-4579) ([#2463](https://github.com/adobe/spacecat-api-service/issues/2463)) ([eac33c5](https://github.com/adobe/spacecat-api-service/commit/eac33c5a36efbc13fd679d7d61456f7374280fe3))
+
+## [1.622.2](https://github.com/adobe/spacecat-api-service/compare/v1.622.1...v1.622.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **facs:** bypass ReBAC collection filter for cross-product resources ([#2754](https://github.com/adobe/spacecat-api-service/issues/2754)) ([85b0dd2](https://github.com/adobe/spacecat-api-service/commit/85b0dd278d29efb94bfc7592efe124eb98e72dc3))
+
+## [1.622.1](https://github.com/adobe/spacecat-api-service/compare/v1.622.0...v1.622.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **cdn-detection:** detect Akamai via akamai-grn response header ([#2747](https://github.com/adobe/spacecat-api-service/issues/2747)) ([ec9568f](https://github.com/adobe/spacecat-api-service/commit/ec9568fa793650cb32549e08681c611fb6b52858))
+
+# [1.622.0](https://github.com/adobe/spacecat-api-service/compare/v1.621.0...v1.622.0) (2026-07-03)
+
+
+### Features
+
+* introduce semrush elements apis wrapper for llmo ui ([#2666](https://github.com/adobe/spacecat-api-service/issues/2666)) ([5dc6d3b](https://github.com/adobe/spacecat-api-service/commit/5dc6d3b647f9c331d5808153d0a2c25db0ba59cf))
+
 # [1.621.0](https://github.com/adobe/spacecat-api-service/compare/v1.620.0...v1.621.0) (2026-07-03)
 
 
