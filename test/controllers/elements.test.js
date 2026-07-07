@@ -150,7 +150,7 @@ async function readBody(response) {
 }
 
 describe('ElementsController', () => {
-  let getBrandByIdStub;
+  let getBrandIdentityStub;
   let getBrandBySiteStub;
   let resolveBrandWorkspaceStub;
   let accessControlHasAccessStub;
@@ -169,7 +169,7 @@ describe('ElementsController', () => {
     });
     accessControlHasAccessStub = sinon.stub().resolves(true);
 
-    getBrandByIdStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+    getBrandIdentityStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
     getBrandBySiteStub = sinon.stub().resolves(null);
 
     serviceStub = {
@@ -207,7 +207,7 @@ describe('ElementsController', () => {
         ElementsTransportError: MockElementsTransportError,
       },
       '../../src/support/brands-storage.js': {
-        getBrandById: getBrandByIdStub,
+        getBrandIdentity: getBrandIdentityStub,
         getBrandBySite: getBrandBySiteStub,
       },
       '../../src/support/prompts-storage.js': {
@@ -551,11 +551,21 @@ describe('ElementsController', () => {
     });
 
     it('returns 404 when the brand does not belong to the org', async () => {
-      getBrandByIdStub.resolves(null);
+      getBrandIdentityStub.resolves(null);
       const ctx = fakeContext({ params: { brandId: BRAND_ID } });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(404);
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ params: { brandId: BRAND_ID }, postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+      expect(getBrandIdentityStub).to.not.have.been.called;
     });
 
     it('returns 404 when the brand has no resolvable workspace', async () => {
@@ -786,6 +796,16 @@ describe('ElementsController', () => {
       expect(serviceStub.getWeeks).to.have.been.calledWith(SUB_WORKSPACE_ID, { model: 'perplexity' });
       const [, params] = serviceStub.getWeeks.firstCall.args;
       expect(params).to.not.have.property('brand');
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: weeksUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+      expect(serviceStub.getWeeks).to.not.have.been.called;
     });
 
     it('returns 400 when siteId does not resolve to any brand', async () => {

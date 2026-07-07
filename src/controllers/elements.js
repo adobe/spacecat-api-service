@@ -16,7 +16,7 @@ import {
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { getBrandById, getBrandBySite } from '../support/brands-storage.js';
+import { getBrandIdentity, getBrandBySite } from '../support/brands-storage.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
@@ -213,7 +213,9 @@ async function authorizeOrgAccess(ctx) {
  * Validates org + brand access and resolves the Semrush workspace ID for
  * `:brandId`. `workspaceId` is the brand's Semrush sub-workspace ID, falling
  * back to the org's parent workspace when the brand hasn't been provisioned
- * one yet (per `resolveBrandWorkspace`'s dual-mode resolution).
+ * one yet (per `resolveBrandWorkspace`'s dual-mode resolution). `brand` is
+ * looked up via {@link getBrandIdentity} (a lightweight `id, name` select) —
+ * a missing PostgREST client is reported as 503, not masked as a brand 404.
  *
  * Returns `{ workspaceId, brand }` on success or `{ error: Response }` on failure.
  */
@@ -228,7 +230,10 @@ async function authorizeOrg(ctx) {
     return { error: badRequest('Brand id must be a valid UUID') };
   }
   const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-  const brand = await getBrandById(spaceCatId, brandIdParam, postgrestClient);
+  if (!postgrestClient?.from) {
+    return { error: createResponse({ error: 'configurationError', message: 'PostgREST client not available' }, 503) };
+  }
+  const brand = await getBrandIdentity(spaceCatId, brandIdParam, postgrestClient);
   if (!brand) {
     return { error: notFound('Brand not found for this organization') };
   }
