@@ -417,6 +417,51 @@ async function assertValidParent(
 }
 
 /**
+ * Resolves the id-based injection of a server-computed `type:*` tag into a
+ * prompt write (serenity-docs#31). Lists the project's ROOT tags ONCE and:
+ *   - collects the ids of ALL existing `type:` roots, so the caller can strip
+ *     any caller-supplied `type:*` tag id (the client must never set the value);
+ *   - ensures the WANTED `type:<value>` has an upstream id, creating it on-demand
+ *     for older projects that predate the standard taxonomy (idempotent — new
+ *     projects already carry both values from {@link PROJECT_STANDARD_TAGS}).
+ * Both `type:branded` and `type:non-branded` are roots (closed dims never nest).
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} wantTag - the computed `type:<value>` wire name.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string | undefined, typeTagIds: string[] }>}
+ *   `computedId` is the wanted value's id; `typeTagIds` is every `type:` root id
+ *   present after resolution (the strip set).
+ */
+export async function resolveTypeTagInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  wantTag,
+  log,
+) {
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  const typeRoots = roots.items.filter(
+    (t) => typeof t.name === 'string' && t.name.startsWith(`${TAG_DIMENSION.TYPE}:`),
+  );
+  const typeTagIds = typeRoots.map((t) => t.id).filter(Boolean);
+  const existing = typeRoots.find((t) => t.name === wantTag);
+  if (existing) {
+    return { computedId: existing.id, typeTagIds };
+  }
+  // Create-on-demand for the wanted `type:` root. We only reach here when the
+  // list above had no matching root, so this is safe against duplicates for a
+  // single request; concurrent writers racing the same missing tag rely on the
+  // upstream tag resolver being idempotent by (project, name) — the same
+  // resolve-or-create assumption `resolveOrCreateClosedTag` makes.
+  const createdList = await transport.createProjectTags(semrushWorkspaceId, projectId, [wantTag]);
+  const { id } = pickTagIds(createdList, undefined);
+  return { computedId: id, typeTagIds: id ? [...typeTagIds, id] : typeTagIds };
+}
+
+/**
  * Flat mode — the market's project id comes from the persisted
  * `BrandSemrushProject` mapping (same resolution as handleListTags).
  *

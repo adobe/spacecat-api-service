@@ -19,6 +19,8 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
+import { resolveTypeTagInjection } from './tags.js';
+import { TAG_DIMENSION } from '../prompt-tags.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -284,6 +286,57 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
 }
 
 /**
+ * Builds the per-request `type:*` injector — the UNIFIED classification layer
+ * (serenity-docs#31). Given a pure `classifyPromptType(text, geoTargetId)`
+ * closure (built by the controller from the brand name + region-clamped
+ * aliases), it returns `injectComputedType(projectId, input)` which:
+ *   - STRIPS any caller-supplied `type:*` tag (the client may never set it), and
+ *   - APPENDS the server-computed one — as a tag NAME on the name-based path, or
+ *     as a pre-resolved upstream tag ID on the id-based path (the atomic
+ *     `createPromptsByIds` 500s on an unresolved id, so it must be resolved
+ *     BEFORE the write).
+ * The returned input carries the rewritten `tags`/`tagIds`, so the caller's
+ * response echo reflects the computed type without a refetch (decision 5).
+ *
+ * Id-based resolution ({@link resolveTypeTagInjection}, one tag-tree read per
+ * distinct `type:` value per project) is memoized for the request, so a bulk
+ * create fans out at most two tag-tree reads per project regardless of item
+ * count. A non-function `classifyPromptType` (defensive) is a pass-through.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
+ * @param {object} [log]
+ * @returns {(projectId: string, input: { text: string, geoTargetId: number,
+ *   tags: string[], tagIds: string[] | undefined }) =>
+ *   Promise<{ text: string, geoTargetId: number, tags: string[], tagIds: string[] | undefined }>}
+ */
+export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptType, log) {
+  /** @type {Map<string, Promise<{ computedId: string | undefined, typeTagIds: string[] }>>} */
+  const cache = new Map();
+  return async function injectComputedType(projectId, input) {
+    if (typeof classifyPromptType !== 'function') {
+      return input;
+    }
+    const typeTag = classifyPromptType(input.text, input.geoTargetId);
+    if (input.tagIds === undefined) {
+      const stripped = (Array.isArray(input.tags) ? input.tags : [])
+        .filter((t) => !String(t).startsWith(`${TAG_DIMENSION.TYPE}:`));
+      return { ...input, tags: [...stripped, typeTag] };
+    }
+    const key = `${projectId} ${typeTag}`;
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = resolveTypeTagInjection(transport, semrushWorkspaceId, projectId, typeTag, log);
+      cache.set(key, pending);
+    }
+    const { computedId, typeTagIds } = await pending;
+    const stripped = input.tagIds.filter((id) => !typeTagIds.includes(id));
+    return { ...input, tagIds: computedId ? [...stripped, computedId] : stripped };
+  };
+}
+
+/**
  * Validates + normalizes a PATCH prompt body's `text`/`tags`/`tagIds`, shared
  * by {@link handleUpdatePrompt} and its subworkspace twin. `tags` (names) and
  * `tagIds` (upstream ids) are mutually exclusive, mirroring
@@ -371,6 +424,7 @@ export async function handleCreatePrompts(
   semrushWorkspaceId,
   body,
   log,
+  classifyPromptType,
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -388,6 +442,13 @@ export async function handleCreatePrompts(
   for (const p of projects || []) {
     projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
   }
+
+  const injectComputedType = makeTypeInjector(
+    transport,
+    semrushWorkspaceId,
+    classifyPromptType,
+    log,
+  );
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const input = normalizePromptInput(raw);
@@ -410,20 +471,22 @@ export async function handleCreatePrompts(
     }
     const projectId = project.getSemrushProjectId();
     try {
+      // Unified layer: strip any caller-supplied type + inject the computed one.
+      const typed = await injectComputedType(projectId, input);
       const semrushPromptId = await createOnePrompt(
         transport,
         semrushWorkspaceId,
         projectId,
-        input,
+        typed,
       );
       return {
         created: {
           semrushPromptId,
-          geoTargetId: input.geoTargetId,
+          geoTargetId: typed.geoTargetId,
           languageCode: input.languageCode,
-          text: input.text,
-          tags: input.tags,
-          ...(input.tagIds !== undefined ? { tagIds: input.tagIds } : {}),
+          text: typed.text,
+          tags: typed.tags,
+          ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
         },
         affectedProjectId: projectId,
       };
@@ -519,6 +582,7 @@ export async function handleUpdatePrompt(
   semrushPromptId,
   body,
   log,
+  classifyPromptType,
 ) {
   // `semrushPromptId` is validated as non-empty at the controller boundary
   // (serenity.js:259) before this handler is invoked over HTTP, so no
@@ -556,6 +620,19 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
+  // Recompute the type tag from the NEW text BEFORE the delete: the unified layer
+  // (tree read / on-demand tag create) must not run between delete and create,
+  // so a classification failure aborts cleanly with the old prompt still present.
+  const injectComputedType = makeTypeInjector(
+    transport,
+    semrushWorkspaceId,
+    classifyPromptType,
+    log,
+  );
+  const typed = await injectComputedType(projectId, {
+    text: nextText, geoTargetId, tags: nextTags, tagIds: nextTagIds,
+  });
+
   try {
     await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [semrushPromptId]);
   } catch (e) {
@@ -578,9 +655,7 @@ export async function handleUpdatePrompt(
 
   let newSemrushPromptId;
   try {
-    newSemrushPromptId = await createOnePrompt(transport, semrushWorkspaceId, projectId, {
-      text: nextText, tags: nextTags, tagIds: nextTagIds,
-    });
+    newSemrushPromptId = await createOnePrompt(transport, semrushWorkspaceId, projectId, typed);
   } catch (e) {
     // The DELETE above already succeeded, so the old prompt is gone upstream —
     // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
@@ -606,8 +681,8 @@ export async function handleUpdatePrompt(
       geoTargetId,
       languageCode,
       text: nextText,
-      tags: nextTags,
-      ...(nextTagIds !== undefined ? { tagIds: nextTagIds } : {}),
+      tags: typed.tags,
+      ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
     },
   };
 }

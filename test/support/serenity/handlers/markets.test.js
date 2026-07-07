@@ -28,6 +28,7 @@ import {
   clearLanguageCache,
   clearTagCache,
   listProjectTagTree,
+  dimensionFromTagName,
 } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
@@ -988,6 +989,27 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}`,
     }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
     expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  describe('dimensionFromTagName', () => {
+    it('returns the dimension for a recognized "<dimension>:<value>" name (case-insensitive)', () => {
+      expect(dimensionFromTagName('category:Footwear')).to.equal('category');
+      expect(dimensionFromTagName('tag:Priority')).to.equal('tag');
+      // .toLowerCase() is load-bearing — an upper-cased prefix still resolves.
+      expect(dimensionFromTagName('Category:X')).to.equal('category');
+    });
+
+    it('returns undefined for a bare name, an unrecognized prefix, or a leading colon', () => {
+      expect(dimensionFromTagName('Bare')).to.equal(undefined);
+      expect(dimensionFromTagName('weird:Root')).to.equal(undefined);
+      expect(dimensionFromTagName(':x')).to.equal(undefined);
+    });
+
+    it('returns undefined for a non-string input (defensive)', () => {
+      expect(dimensionFromTagName(undefined)).to.equal(undefined);
+      expect(dimensionFromTagName(null)).to.equal(undefined);
+      expect(dimensionFromTagName(123)).to.equal(undefined);
+    });
   });
 
   it('listProjectTagTree derives dimension for a tag: root and omits it for an unrecognized prefix', async () => {

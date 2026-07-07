@@ -1,3 +1,10 @@
+# [1.630.0](https://github.com/adobe/spacecat-api-service/compare/v1.629.0...v1.630.0) (2026-07-07)
+
+
+### Features
+
+* **geo-experiment:** return impact-measurement insights from S3 on includeInsights=true ([#2767](https://github.com/adobe/spacecat-api-service/issues/2767)) ([99d3a88](https://github.com/adobe/spacecat-api-service/commit/99d3a888df007cb5db4de6f88af1c160d3e535c0))
+
 # [1.629.0](https://github.com/adobe/spacecat-api-service/compare/v1.628.1...v1.629.0) (2026-07-07)
 
 
