@@ -22,7 +22,6 @@ import {
   mergeIntoTree,
   managedRuleNames,
   failoverEnabled,
-  hostInSiteDomain,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
 const HOSTNAME = 'www.example.com';
@@ -254,34 +253,6 @@ describe('llmo-akamai-utils', () => {
 
     it('throws when the tree has no top-level rules object', () => {
       expect(() => mergeIntoTree({}, cfg)).to.throw("missing a top-level 'rules' object");
-    });
-  });
-
-  describe('hostInSiteDomain', () => {
-    const base = 'https://www.example.com';
-    it('accepts the apex, www, and subdomains of the site domain', () => {
-      expect(hostInSiteDomain('example.com', base)).to.equal(true);
-      expect(hostInSiteDomain('www.example.com', base)).to.equal(true);
-      expect(hostInSiteDomain('shop.example.com', base)).to.equal(true);
-    });
-
-    it('rejects unrelated and look-alike domains', () => {
-      expect(hostInSiteDomain('evil.com', base)).to.equal(false);
-      expect(hostInSiteDomain('example.com.evil.com', base)).to.equal(false);
-    });
-
-    it('returns false for empty or unparseable inputs', () => {
-      expect(hostInSiteDomain('', base)).to.equal(false);
-      expect(hostInSiteDomain('example.com', 'not a url')).to.equal(false);
-    });
-
-    it('matches against a site base URL that has no www', () => {
-      expect(hostInSiteDomain('example.com', 'https://example.com')).to.equal(true);
-      expect(hostInSiteDomain('shop.example.com', 'https://example.com')).to.equal(true);
-    });
-
-    it('returns false when the site base URL has an empty hostname', () => {
-      expect(hostInSiteDomain('example.com', 'mailto:someone@example.com')).to.equal(false);
     });
   });
 

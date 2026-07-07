@@ -5984,6 +5984,11 @@ site-llmo-akamai-config:
       right values. EdgeGrid credentials are client-supplied per request (never persisted or logged
       by the service), so there is no server-side "configured" state.
 
+      **PAPI permissions:** the supplied EdgeGrid credentials must grant both READ access (used by
+      `properties` and `plan` to search properties and read the rule tree) and WRITE access (used by
+      `deploy` and `activate` to create a version, update rules, and activate). Read-only credentials
+      succeed on `properties`/`plan` but fail with 403 on `deploy`/`activate`.
+
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:
       - llmo

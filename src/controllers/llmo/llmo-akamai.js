@@ -44,6 +44,7 @@ const NETWORKS = ['STAGING', 'PRODUCTION'];
 const PROPERTY_ID_RE = /^prp_[A-Za-z0-9]+$/;
 const CONTRACT_ID_RE = /^ctr_[A-Za-z0-9-]+$/;
 const GROUP_ID_RE = /^grp_[A-Za-z0-9]+$/;
+const ACTIVATION_ID_RE = /^atv_[A-Za-z0-9]+$/;
 
 /**
  * Identifies the API caller for audit logging. profile.email is an IMS user GUID (see
@@ -153,9 +154,11 @@ function LlmoAkamaiController(ctx) {
     try {
       return { client: new AkamaiClient({ ...creds, notifyEmails }, log) };
     } catch (e) {
-      // The constructor re-validates the required keys; after the check above this is unexpected,
-      // so surface it as a caller error without echoing any credential value.
-      return { error: badRequest(`Invalid Akamai credentials: ${e.message}`) };
+      // The constructor re-validates the required keys; after the check above this is unexpected.
+      // Log the detail internally but return a generic message — the constructor error can echo
+      // credential-derived detail (host, token prefixes) we must not leak to the caller.
+      log.error(`AkamaiClient construction failed: ${e.message}`);
+      return { error: badRequest('Invalid Akamai credentials') };
     }
   };
 
@@ -173,6 +176,10 @@ function LlmoAkamaiController(ctx) {
     }
     if (/-> 403\b/.test(message)) {
       return forbidden('Akamai authorization failed');
+    }
+    if (/-> 404\b/.test(message)) {
+      // A missing property/version/activation is a caller-addressable 404, not an upstream fault.
+      return notFound(`Akamai ${action} target not found`);
     }
     if (/-> 429\b/.test(message)) {
       return createResponse({ message: 'Akamai rate limit exceeded' }, 429);
@@ -210,6 +217,23 @@ function LlmoAkamaiController(ctx) {
       return { error: badRequest('groupId is required and must look like grp_<id>') };
     }
     return { ref: { propertyId, contractId, groupId } };
+  };
+
+  /**
+   * Validates the optional insertIndex, consistent with how `version` is validated in activate.
+   * mergeIntoTree already clamps/truncates it, but rejecting a malformed value here gives the
+   * caller a clean 400 instead of silently coercing garbage to 0.
+   * @returns {Response|null} a badRequest to block, or null when absent/valid
+   */
+  const validateInsertIndex = (insertIndex) => {
+    if (insertIndex === undefined || insertIndex === null || insertIndex === '') {
+      return null;
+    }
+    const n = Number(insertIndex);
+    if (!Number.isInteger(n) || n < 0) {
+      return badRequest('insertIndex must be a non-negative integer');
+    }
+    return null;
   };
 
   /**
@@ -349,6 +373,10 @@ function LlmoAkamaiController(ctx) {
 
     const { propertyId, contractId, groupId } = ref;
     const { insertIndex } = context.data;
+    const insertIndexError = validateInsertIndex(insertIndex);
+    if (insertIndexError) {
+      return insertIndexError;
+    }
 
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);
@@ -410,6 +438,10 @@ function LlmoAkamaiController(ctx) {
 
     const { propertyId, contractId, groupId } = ref;
     const { insertIndex } = context.data;
+    const insertIndexError = validateInsertIndex(insertIndex);
+    if (insertIndexError) {
+      return insertIndexError;
+    }
     const siteId = site.getId();
 
     const guard = await assertPropertyServesSite(client, ref, site, context, 'deploy');
@@ -581,7 +613,13 @@ function LlmoAkamaiController(ctx) {
     const siteId = site.getId();
 
     let network;
-    if (!hasText(activationId)) {
+    if (hasText(activationId)) {
+      // Boundary validation consistent with the other PAPI identifiers: reject a malformed id
+      // here with a clean 400 rather than passing it straight through to PAPI.
+      if (!ACTIVATION_ID_RE.test(activationId)) {
+        return badRequest('activationId must look like atv_<id>');
+      }
+    } else {
       network = hasText(rawNetwork) ? rawNetwork.toUpperCase() : 'STAGING';
       if (!NETWORKS.includes(network)) {
         return badRequest(`network must be one of ${NETWORKS.join(', ')}`);

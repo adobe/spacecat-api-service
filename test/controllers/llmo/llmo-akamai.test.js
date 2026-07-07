@@ -413,10 +413,12 @@ describe('LlmoAkamaiController', () => {
   });
 
   describe('remaining branches', () => {
-    it('returns 400 when the AkamaiClient constructor rejects the credentials', async () => {
+    it('returns a generic 400 (no leaked detail) when the AkamaiClient constructor rejects', async () => {
       mockContext.pathInfo.headers['x-akamai-client-token'] = '__throw__';
       const res = await controller.listProperties(mockContext);
+      const body = await res.json();
       expect(res.status).to.equal(400);
+      expect(body.message).to.equal('Invalid Akamai credentials');
     });
 
     it('deploy returns 500 when the site has no LLMO API key (cfg error)', async () => {
@@ -489,6 +491,51 @@ describe('LlmoAkamaiController', () => {
       mockAkamaiClient.activate.rejects({ code: 'BOOM' });
       const res = await controller.activate(withData(propertyRef));
       expect(res.status).to.equal(502);
+    });
+  });
+
+  describe('review follow-ups', () => {
+    it('rejects a malformed activationId', async () => {
+      const res = await controller.activationStatus(withData({ ...propertyRef, activationId: 'nope' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.getActivation).to.not.have.been.called;
+    });
+
+    it('deploy is blocked when the matching property is not matched on hostname (e.g. cname only)', async () => {
+      mockAkamaiClient.findPropertiesByDomain.resolves([
+        { propertyId: PROPERTY_ID, matchedOn: ['cname'] },
+      ]);
+      const res = await controller.deploy(withData(propertyRef));
+      expect(res.status).to.equal(403);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('plan is read-only and does not invoke the domain-serves-site guard', async () => {
+      await controller.plan(withData(propertyRef));
+      expect(mockAkamaiClient.findPropertiesByDomain).to.not.have.been.called;
+    });
+
+    it('rejects a malformed insertIndex on plan', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, insertIndex: -1 }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.getLatestVersion).to.not.have.been.called;
+    });
+
+    it('accepts a valid insertIndex on deploy', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, insertIndex: 1 }));
+      expect(res.status).to.equal(200);
+    });
+
+    it('rejects a malformed insertIndex on deploy', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, insertIndex: 'x' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('maps a PAPI 404 (target not found) to 404', async () => {
+      mockAkamaiClient.getLatestVersion.rejects(new Error('PAPI GET /x -> 404: not found'));
+      const res = await controller.plan(withData(propertyRef));
+      expect(res.status).to.equal(404);
     });
   });
 });

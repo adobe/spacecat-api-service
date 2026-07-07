@@ -24,8 +24,6 @@
  * and dependency-free so it can be unit-tested and previewed offline (no Akamai credentials).
  */
 
-import { normalizeDomain } from '@adobe/spacecat-shared-akamai-client';
-
 // Loop guard: one of the headers the routing rule ALREADY injects via
 // modifyIncomingRequestHeader (see buildRoutingRule). No real client ever sends this on its own —
 // only this rule sets it. On the first pass it doesn't exist yet; on Akamai's internal failover
@@ -502,34 +500,4 @@ export function buildRuleConfig({ hostname, apiKey, enableFailoverTag = false })
     ruleNames: { ...d.ruleNames },
     failover: { enabled: enableFailoverTag, alternateHostname: hostname },
   };
-}
-
-/**
- * Whether a candidate host equals or is a subdomain of the site's registrable domain. Used to
- * guard that a caller-supplied target only ever affects the site's own domain. Reuses the shared
- * client's normalizeDomain so URL/host:port/trailing-dot inputs are handled consistently.
- *
- * @param {string} host - candidate hostname
- * @param {string} siteBaseUrl - the site's base URL
- * @returns {boolean}
- */
-export function hostInSiteDomain(host, siteBaseUrl) {
-  const candidate = normalizeDomain(host);
-  if (!candidate) {
-    return false;
-  }
-  let siteHost;
-  try {
-    siteHost = normalizeDomain(new URL(siteBaseUrl).hostname);
-  } catch {
-    return false;
-  }
-  if (!siteHost) {
-    return false;
-  }
-  // Compare on the apex: strip a leading "www." from each side, then require exact match or a
-  // dotted-suffix (subdomain) match.
-  const apex = (h) => (h.startsWith('www.') ? h.slice(4) : h);
-  const siteApex = apex(siteHost);
-  return candidate === siteApex || candidate.endsWith(`.${siteApex}`) || candidate === siteHost;
 }
