@@ -154,6 +154,13 @@ Returns the prompts matching the given filters, plus their **count**. Powers the
 
 **Brand-scoped (not org-scoped).** Semrush projects — and therefore prompts — live only in a brand's own Semrush **sub-workspace**, never in the org's shared parent workspace (verified against prod: the same project payload returns data on the sub-workspace and `0` on the parent). The endpoint resolves the brand's sub-workspace and **refuses to run against an org workspace**.
 
+**Auth (required).** Like all Semrush-wrapping endpoints, this needs **two** credentials on the request:
+
+- `Authorization: Bearer <jwt>` — a **spacecat JWT session token** (authenticates the caller to SpaceCat).
+- `x-promise-token: <token>` — exchanged server-side for the upstream Semrush IMS token. A request without it cannot reach Semrush.
+
+In project-elmo-ui the JWT is attached automatically by `authenticatedFetch`; the promise token is **not** — the v2 machinery (`getValidPromiseToken()`, `POST /auth/v2/promise`) is built but has no live consumer yet, so this endpoint would be its first. Attach it per the pattern in the elmo `docs/api/promise-token.md`: `headers: { 'x-promise-token': await getValidPromiseToken() }`.
+
 ### Parameters
 
 | Name | In | Required | Description |
@@ -169,13 +176,39 @@ Returns the prompts matching the given filters, plus their **count**. Powers the
 Both metrics are **per project** — issue one request per `projectId`.
 
 - **Intent coverage** — one call, no tag filter. Group the returned rows by
-  `primary_intent` (`informational` / `commercial` / `navigational` / `task` / …) and
-  compare each intent's share against its target band. `count` is the denominator.
+  `primary_intent` and compare each intent's share against its target band. `count` is
+  the denominator. `primary_intent` is the **Semrush 5-value taxonomy**:
+  `informational` / `task` / `commercial` / `transactional` / `navigational`. This is
+  the same set the serenity SR surface already uses (`SRBrandTopicCatalogIntent`); the
+  legacy LLMO 6-value intents map onto it via `INTENT_MAP` in mysticat-data-service
+  (`scripts/serenity_migration/tags.py`): `informational→Informational`,
+  `instructional→Task`, `comparative→Commercial`, `transactional→Transactional`,
+  `delegation→Task`, `planning→Task` (`Navigational` is Semrush-only, no LLMO source).
 - **Branded / unbranded** — the branded flag is a **tag**, not a row field. Two counts:
   - total = `?projectId=<id>` → `count`
   - branded = `?projectId=<id>&tag=type:branded` → `count`
   - branded% = branded ÷ total. (`type:branded` + `type:non-branded` partition the
     total exactly — verified in prod: 510 + 687 = 1197 → **43%**.)
+
+### Consumer integration (project-elmo-ui prompt healthcheck)
+
+The serenity healthcheck consumes this **raw** endpoint and aggregates client-side (the
+established serenity pattern — e.g. `buildTopicResearchIntentBreakdownFromRows`), rather
+than the brand-wide `/prompts/stats` + Postgres RPC used by the legacy path. Wiring it up
+means:
+
+1. **Attach `x-promise-token`** on the call (see Auth above) — the endpoint's hard
+   requirement and elmo's first live use of the v2 promise-token path.
+2. **Resolve per-project ids.** The health panel holds only `orgId` + `brandId`; fetch
+   the brand's Semrush project ids (the `regions` from [filter-dimensions](#1-list-url-inspector-filter-dimensions),
+   held as `semrush_project_id`) and issue one call per project. Omitting `projectId`
+   yields a brand-wide number instead.
+3. **Branded needs a second call** per project (`&tag=type:branded`) divided by the
+   unfiltered total.
+4. **Re-base the intent tile.** `IntentCoverageTile` / `intentCoverageMath.ts` still
+   encode the legacy 6-value LLMO taxonomy; point them at the 5-value Semrush set above
+   so the bands line up with `primary_intent` (this aligns the tile with the rest of the
+   serenity surface).
 
 ### Errors
 
