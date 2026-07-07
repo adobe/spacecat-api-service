@@ -887,7 +887,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/serenity/languages',
       'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions',
       'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks',
-      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/cited-domains',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',

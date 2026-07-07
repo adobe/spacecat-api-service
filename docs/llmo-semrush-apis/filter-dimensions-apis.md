@@ -148,7 +148,7 @@ The daily rows are rolled up into ISO weeks spanning the earliest→latest day p
 
 ## 3. List Cited Domains
 
-**`GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/cited-domains`**
+**`GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/cited-domains`**
 
 Returns the domains most frequently cited alongside owned URLs, for the URL Inspector **Cited Domains** panel. **Drop-in compatible with the legacy `url-inspector/cited-domains` contract** — same JSON shape, so the panel consumes it unchanged.
 
@@ -157,12 +157,12 @@ Returns the domains most frequently cited alongside owned URLs, for the URL Insp
 | Name | In | Required | Description |
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `brandId` | path | ✅ | SpaceCat brand UUID. Selects the brand whose Semrush **sub-workspace** is queried (every element is brand-scoped); classified as an LLMO ReBAC `brand` resource so FACS enforces `llmo/can_view` on it, and it requires the `brand:read` S2S capability. `404` if the brand isn't in the org. The URL Inspector UI cross-maps its selected site → `brandId`. See gap 3 for sub-workspace vs flat-mode |
 | `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins). Translated via [Supported Models](#4-supported-models) (default: `search-gpt`) |
 | `startDate` / `start_date` | query | ❌ | ISO date `YYYY-MM-DD`. Default: 28 days ago |
 | `endDate` / `end_date` | query | ❌ | ISO date `YYYY-MM-DD`. Default: today |
 | `categoryId` / `category` | query | ❌ | Category label (e.g. `Firefly`). Pushed to Semrush **server-side** as the tag `category:<label>` |
 | `channel` / `selectedChannel` | query | ❌ | Content-type (e.g. `Owned`, `Social`, `Earned`). Applied **client-side** on `contentType` (case-insensitive) — the element has no server-side content-type filter |
-| `brandId` | query | ✅ | SpaceCat brand UUID. Selects the brand whose Semrush **sub-workspace** is queried (every element is brand-scoped). `400` if missing, `404` if the brand isn't in the org. The URL Inspector UI cross-maps its selected site → `brandId`. See gap 3 for sub-workspace vs flat-mode |
 | `region` | query | ❌ | Region code (e.g. `US`, `AU`). Resolved to the market's Semrush **project** (via the Markets element) and sent as top-level `project_id`. `all`/absent → all markets |
 | `page` | query | ❌ | 0-based page index (default `0`) |
 | `pageSize` | query | ❌ | Rows per page (default `50`, clamped to `[1, 1000]`) |

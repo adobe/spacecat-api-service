@@ -11,7 +11,7 @@
  */
 
 import {
-  badRequest, createResponse, forbidden, internalServerError, notFound, ok,
+  createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -276,18 +276,14 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { spaceCatId } = ctx?.params ?? {};
+      // `:brandId` is a required path param (UUID-validated in index.js). Every Semrush element
+      // is scoped by the BRAND's mapped sub-workspace, not the org workspace (LLMO-6029 tracks
+      // the same route + sub-workspace fix for filter-dimensions/weeks). The URL Inspector UI
+      // has no brand picker, so it cross-maps its selected site → brandId before calling.
+      const { spaceCatId, brandId } = ctx?.params ?? {};
       const query = extractQuery(ctx);
       const service = buildService(ctx);
 
-      // Every Semrush element is scoped by the BRAND's mapped sub-workspace, not the org
-      // workspace (LLMO-6029 tracks the same fix for filter-dimensions/weeks). `brandId` is
-      // therefore required — it selects the sub-workspace we query. The URL Inspector UI has
-      // no brand picker, so it cross-maps its selected site → brandId before calling.
-      const { brandId } = query;
-      if (!hasText(brandId)) {
-        return badRequest('brandId is required for cited-domains');
-      }
       // Confirm the brand belongs to this org before resolving its workspace (prevents
       // reading another tenant's sub-workspace). Reused for region resolution below.
       const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
