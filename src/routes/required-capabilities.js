@@ -241,6 +241,19 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/permission/audit-logs',
   'GET /product/capabilities',
   'GET /user/capabilities/:resourceId',
+
+  // Profiles feature — AI-generated custom profiles + workflows. Not yet
+  // exposed to S2S consumers; auth handled by SKIP_AUTH / SkipAuthHandler.
+  'POST /sites/:siteId/profiles/chat',
+  'POST /sites/:siteId/profiles',
+  'GET /sites/:siteId/profiles',
+  'GET /sites/:siteId/profiles/:profileId',
+  'POST /sites/:siteId/profiles/:profileId/copy',
+  'DELETE /sites/:siteId/profiles/:profileId',
+  'GET /sites/:siteId/profiles/:profileId/workflows',
+  'POST /sites/:siteId/profiles/:profileId/workflows',
+  'PATCH /sites/:siteId/profiles/:profileId/workflows/:workflowId',
+  'DELETE /sites/:siteId/profiles/:profileId/workflows/:workflowId',
 ];
 
 /**

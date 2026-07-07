@@ -202,9 +202,85 @@ Respond with ONLY a JSON object (no prose, no markdown) of this exact form:
 Rules: components length <= ${MAX_COMPONENTS}; every component id must be from the catalog; every opportunityId must be one of the provided opportunity ids; name must be a meaningful business-oriented label (e.g. "SEO Health", "Accessibility & Discovery", "Link & Metadata Fix") — never a raw concatenation like "Opportunity A + Opportunity B".`;
 }
 
+// ---------------------------------------------------------------------------
+// Keyword-based opportunity matching — fallback when LLM is unavailable.
+// Maps common search terms to opportunity type strings used in the DB.
+// ---------------------------------------------------------------------------
+
+const OPPORTUNITY_KEYWORD_MAP = [
+  { types: ['alt-text'], keywords: ['alt text', 'alt-text', 'alttext', 'alternative text', 'image accessibility', 'image alt'] },
+  { types: ['meta-tags'], keywords: ['meta tag', 'meta tags', 'metadata', 'title tag', 'description tag', 'meta description'] },
+  { types: ['broken-backlinks'], keywords: ['backlink', 'broken backlink', 'external link'] },
+  { types: ['broken-internal-links'], keywords: ['internal link', 'broken link', 'broken internal'] },
+  { types: ['cwv'], keywords: ['cwv', 'core web vitals', 'web vitals', 'lcp', 'cls', 'fid', 'inp', 'page speed', 'pagespeed'] },
+  { types: ['canonical'], keywords: ['canonical'] },
+  { types: ['structured-data'], keywords: ['structured data', 'schema markup', 'schema.org', 'json-ld', 'schema'] },
+  { types: ['sitemap'], keywords: ['sitemap'] },
+  { types: ['consent-banner'], keywords: ['consent', 'cookie banner', 'gdpr', 'cookie consent'] },
+  { types: ['high-organic-low-ctr'], keywords: ['ctr', 'organic ctr', 'click through', 'click-through', 'low ctr'] },
+  { types: ['security', 'security-xss', 'security-vulnerabilities', 'security-permissions', 'security-csp'], keywords: ['security', 'xss', 'csp', 'vulnerability', 'vulnerabilities'] },
+  { types: ['a11y-assistive', 'a11y-color-contrast'], keywords: ['accessibility', 'a11y', 'color contrast', 'wcag', 'assistive'] },
+];
+
+/**
+ * Keyword-based opportunity selector used as a fallback when the LLM is
+ * unavailable. Matches the user message against known opportunity type keywords
+ * and returns the IDs of any candidate opportunities whose type is matched.
+ *
+ * @param {string} message
+ * @param {Array<{id,type,title,data}>} opportunities
+ * @returns {{ opportunityIds: string[] }|null} null when nothing matched
+ */
+function selectOpportunitiesFromKeywords(message, opportunities) {
+  const lower = ` ${message.toLowerCase()} `;
+
+  const matchedTypes = new Set();
+  for (const entry of OPPORTUNITY_KEYWORD_MAP) {
+    if (entry.keywords.some((kw) => lower.includes(kw))) {
+      entry.types.forEach((t) => matchedTypes.add(t));
+    }
+  }
+
+  if (matchedTypes.size === 0) {
+    return null;
+  }
+
+  const opportunityIds = opportunities
+    .filter((o) => matchedTypes.has(o.type))
+    .map((o) => o.id);
+
+  return opportunityIds.length > 0 ? { opportunityIds } : null;
+}
+
+/**
+ * Builds a minimal fallback component for an opportunity without using the LLM.
+ * Returns a single `callout` summarising the opportunity so the profile is
+ * still usable when Bedrock is unavailable.
+ *
+ * @param {{ id, type, title }} opportunity
+ * @returns {{ components, opportunityIds, reply }}
+ */
+function buildDefaultComponentForOpportunity(opportunity) {
+  return {
+    components: [
+      {
+        id: 'callout',
+        title: opportunity.title,
+        data: {
+          message: `Added "${opportunity.title}" to your profile. Visit the Opportunities page to see details and suggested fixes.`,
+          variant: 'info',
+        },
+      },
+    ],
+    opportunityIds: [opportunity.id],
+    reply: `Added "${opportunity.title}" to your profile.`,
+  };
+}
+
 /**
  * Calls Claude (Bedrock Converse) to select components for a profile from the
- * given opportunities.
+ * given opportunities. Falls back to keyword matching when the LLM is
+ * unavailable so basic requests ("add alt-text opportunity") always work.
  *
  * @param {object} params
  * @param {string} params.message the customer's request
@@ -212,7 +288,7 @@ Rules: components length <= ${MAX_COMPONENTS}; every component id must be from t
  * @param {object} params.env environment variables (Bedrock config)
  * @param {object} params.log logger
  * @returns {Promise<{ name, rationale, components, opportunityIds, reply }|null>}
- *   parsed+validated profile spec, or null if the LLM is unavailable/failed.
+ *   parsed+validated profile spec, or null if both the LLM and keyword match failed.
  */
 export async function selectComponentsWithClaude({
   message, opportunities, env, log,
@@ -223,9 +299,16 @@ export async function selectComponentsWithClaude({
       id: o.id, type: o.type, title: o.title, data: o.data,
     })),
   };
-  return callBedrock({
+  const result = await callBedrock({
     env, log, systemPrompt: buildSystemPrompt(), userPayload,
   });
+  if (result !== null) {
+    return result;
+  }
+
+  // LLM unavailable — fall back to keyword matching so common requests
+  // ("add alt-text opportunity") always resolve.
+  return selectOpportunitiesFromKeywords(message, opportunities);
 }
 
 /**
@@ -281,9 +364,16 @@ export async function buildComponentsForOpportunity({
       data: opportunity.data,
     },
   };
-  return callBedrock({
+  const result = await callBedrock({
     env, log, systemPrompt: buildAddOpportunityPrompt(), userPayload,
   });
+  if (result !== null) {
+    return result;
+  }
+
+  // LLM unavailable — return a simple callout so the opportunity is still
+  // added to the profile with at least minimal visual representation.
+  return buildDefaultComponentForOpportunity(opportunity);
 }
 
 /**
@@ -324,6 +414,177 @@ export function validateProfileSpec(raw, validOpportunityIds) {
     opportunityIds,
     reply: hasText(raw.reply) ? raw.reply : 'I created a profile from your request.',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Workflow intent detection
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_REGISTRY = [
+  { id: 'createJiraTicket', description: 'Open a Jira issue pre-filled with opportunity details and suggestions.' },
+  { id: 'createGitHubPR', description: 'Generate a pull request with automated fixes for the selected items.' },
+  { id: 'deployAndPublish', description: 'Deploy fixes to AEM author environment and publish affected pages.' },
+];
+
+const KNOWN_SCOPE_TYPES = [
+  'broken-backlinks', 'broken-internal-links', 'meta-tags', 'alt-text', 'cwv',
+  'canonical', 'structured-data', 'sitemap', 'consent-banner',
+  'high-organic-low-ctr', 'security', 'all',
+];
+
+const VALID_WORKFLOW_IDS = new Set(WORKFLOW_REGISTRY.map((w) => w.id));
+
+const WORKFLOW_DEFAULT_NAMES = {
+  createJiraTicket: 'Jira ticket workflow',
+  createGitHubPR: 'GitHub PR workflow',
+  deployAndPublish: 'Deploy and publish workflow',
+};
+
+// Keyword maps used as a fallback when the LLM is unavailable.
+const WORKFLOW_KEYWORD_MAP = [
+  { id: 'createJiraTicket', keywords: ['jira', 'ticket', 'jira ticket', 'jira issue'] },
+  { id: 'createGitHubPR', keywords: ['github pr', 'pull request', ' pr ', 'github pull'] },
+  { id: 'deployAndPublish', keywords: ['deploy', 'publish', 'deployment'] },
+];
+
+const SCOPE_KEYWORD_MAP = [
+  { scope: 'cwv', keywords: ['cwv', 'core web vitals', 'web vitals'] },
+  { scope: 'broken-backlinks', keywords: ['backlink', 'broken backlink'] },
+  { scope: 'broken-internal-links', keywords: ['internal link', 'broken link', 'internal links'] },
+  { scope: 'meta-tags', keywords: ['meta tag', 'meta tags'] },
+  { scope: 'alt-text', keywords: ['alt text', 'alt-text', 'alttext'] },
+  { scope: 'canonical', keywords: ['canonical'] },
+  { scope: 'structured-data', keywords: ['structured data', 'schema markup', 'schema.org'] },
+  { scope: 'sitemap', keywords: ['sitemap'] },
+  { scope: 'consent-banner', keywords: ['consent', 'cookie banner', 'gdpr'] },
+  { scope: 'high-organic-low-ctr', keywords: ['ctr', 'organic ctr', 'low ctr'] },
+  { scope: 'security', keywords: ['security'] },
+];
+
+/**
+ * Lightweight keyword-based workflow intent detector used as a fallback when
+ * the LLM is unavailable. Returns null when the message doesn't look like a
+ * workflow scheduling request.
+ * @param {string} message
+ * @returns {{ isWorkflow: true, workflowId, scope, name, reply }|null}
+ */
+function detectWorkflowIntentFromKeywords(message) {
+  const lower = ` ${message.toLowerCase()} `;
+
+  // Must contain a scheduling verb to avoid misclassifying "add a jira field"
+  const hasScheduleVerb = /\b(schedule|automate|automation|set up|setup|trigger|run workflow)\b/.test(lower);
+  if (!hasScheduleVerb) {
+    return null;
+  }
+
+  const match = WORKFLOW_KEYWORD_MAP.find((w) => w.keywords.some((kw) => lower.includes(kw)));
+  if (!match) {
+    return null;
+  }
+
+  const scopeMatch = SCOPE_KEYWORD_MAP.find((s) => s.keywords.some((kw) => lower.includes(kw)));
+  const scope = scopeMatch?.scope ?? 'all';
+  const baseName = WORKFLOW_DEFAULT_NAMES[match.id];
+  const name = scope === 'all' ? baseName : `${baseName} for ${scope}`;
+
+  return {
+    isWorkflow: true,
+    workflowId: match.id,
+    scope,
+    name,
+    reply: `Scheduled "${name}" for your profile.`,
+  };
+}
+
+function buildWorkflowDetectionPrompt() {
+  const workflows = WORKFLOW_REGISTRY
+    .map((w) => `- "${w.id}": ${w.description}`)
+    .join('\n');
+  const scopes = KNOWN_SCOPE_TYPES.join(', ');
+  return `You are a workflow scheduling assistant for a website optimization profile.
+Decide whether the user's message is asking to CREATE or SCHEDULE a workflow/automation.
+
+Available workflows:\n${workflows}
+
+Valid scope values (pick the closest match, or "all"): ${scopes}
+
+Rules:
+- If the message is clearly about scheduling/creating a workflow (even if incomplete or trailing off), set isWorkflow to true.
+- If no scope is mentioned or the message is cut off, always default scope to "all".
+- If no name is clear from the message, generate a short descriptive one from the workflowId.
+- Only set isWorkflow to false when the message is clearly about something else (adding an opportunity, asking a question, etc.).
+
+If NOT a workflow request: {"isWorkflow":false}
+
+If IS a workflow request, respond with ONLY valid JSON (no prose, no markdown):
+{
+  "isWorkflow": true,
+  "workflowId": "<exact id from the list above>",
+  "scope": "<one scope value from the valid list, or 'all'>",
+  "name": "<short descriptive label, e.g. 'Jira tickets for broken backlinks'>",
+  "reply": "<one short sentence confirming what was scheduled>"
+}`;
+}
+
+/**
+ * Calls Claude to determine whether the user's message is a workflow creation
+ * request. Returns the parsed intent or null on failure.
+ *
+ * @param {object} params
+ * @param {string} params.message
+ * @param {object} params.env
+ * @param {object} params.log
+ * @returns {Promise<{isWorkflow: boolean, workflowId?: string, scope?: string,
+ *   name?: string, reply?: string}|null>}
+ */
+export async function detectWorkflowIntent({ message, env, log }) {
+  const bedrockResult = await callBedrock({
+    env,
+    log,
+    systemPrompt: buildWorkflowDetectionPrompt(),
+    userPayload: { message },
+  });
+  if (bedrockResult !== null) {
+    return bedrockResult;
+  }
+
+  // LLM unavailable — fall back to keyword matching so basic workflow
+  // scheduling ("schedule jira ticket for cwv") always works.
+  return detectWorkflowIntentFromKeywords(message);
+}
+
+/**
+ * Normalizes a raw workflow intent from the LLM, filling in defaults for any
+ * missing fields. Returns null only when the intent is definitively not a
+ * workflow or carries an unrecognized workflowId.
+ *
+ * @param {object|null} intent result of detectWorkflowIntent
+ * @returns {{ isWorkflow: true, workflowId, scope, name, reply }|null}
+ */
+export function normalizeWorkflowIntent(intent) {
+  if (!intent?.isWorkflow || !VALID_WORKFLOW_IDS.has(intent?.workflowId)) {
+    return null;
+  }
+  return {
+    isWorkflow: true,
+    workflowId: intent.workflowId,
+    scope: hasText(intent.scope) ? intent.scope : 'all',
+    name: hasText(intent.name)
+      ? intent.name
+      : (WORKFLOW_DEFAULT_NAMES[intent.workflowId] ?? intent.workflowId),
+    reply: hasText(intent.reply)
+      ? intent.reply
+      : `Scheduled "${WORKFLOW_DEFAULT_NAMES[intent.workflowId] ?? intent.workflowId}" for your profile.`,
+  };
+}
+
+/**
+ * @deprecated Use normalizeWorkflowIntent — this strict check drops intents
+ *   with missing scope/name rather than applying safe defaults.
+ * @param {object|null} intent
+ */
+export function isValidWorkflowIntent(intent) {
+  return normalizeWorkflowIntent(intent) !== null;
 }
 
 /**

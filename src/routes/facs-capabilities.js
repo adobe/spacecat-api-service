@@ -237,6 +237,20 @@ const routeFacsCapabilities = {
     'PATCH /consumers/:consumerId', // admin
     'POST /consumers/:consumerId/revoke', // admin
     'POST /consumers/register', // admin
+
+    // Profiles feature — AI-generated custom profiles + workflows. Auth is
+    // handled by SKIP_AUTH / SkipAuthHandler in local dev; not yet a FACS
+    // product surface.
+    'POST /sites/:siteId/profiles/chat',
+    'POST /sites/:siteId/profiles',
+    'GET /sites/:siteId/profiles',
+    'GET /sites/:siteId/profiles/:profileId',
+    'POST /sites/:siteId/profiles/:profileId/copy',
+    'DELETE /sites/:siteId/profiles/:profileId',
+    'GET /sites/:siteId/profiles/:profileId/workflows',
+    'POST /sites/:siteId/profiles/:profileId/workflows',
+    'PATCH /sites/:siteId/profiles/:profileId/workflows/:workflowId',
+    'DELETE /sites/:siteId/profiles/:profileId/workflows/:workflowId',
   ],
 
   PRODUCTS_ROUTES: {
@@ -1197,6 +1211,9 @@ const routeFacsCapabilities = {
     // capability set computed for (still a row/path identifier rather than
     // a ReBAC-gated entity).
     'id', 'resourceId',
+    // Profiles feature — sub-resources of the enclosing :siteId, not yet
+    // under ReBAC. Graduate to a product alias when FACS scope is added.
+    'profileId', 'workflowId',
   ],
 };
 

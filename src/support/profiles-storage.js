@@ -196,3 +196,32 @@ export async function listProfilesBySite({ postgrestClient, siteId }) {
 
   return (data ?? []).map(rowToProfile);
 }
+
+/**
+ * Fetches workflows for a profile and merges them into the profile object.
+ * @param {object} postgrestClient
+ * @param {object} profile already-mapped profile (API shape)
+ * @returns {Promise<object>} profile with workflows array embedded
+ */
+export async function embedWorkflows(postgrestClient, profile) {
+  if (!profile) {
+    return profile;
+  }
+  const { data } = await postgrestClient
+    .from('workflows')
+    .select('*')
+    .eq('profile_id', profile.profileId)
+    .order('created_at', { ascending: true });
+  const workflows = (data ?? []).map((row) => ({
+    id: row.id,
+    profileId: row.profile_id,
+    siteId: row.site_id,
+    name: row.name,
+    workflowId: row.workflow_id,
+    scope: row.scope,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+  return { ...profile, workflows };
+}
