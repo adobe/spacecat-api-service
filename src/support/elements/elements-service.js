@@ -23,6 +23,8 @@ import {
   transformOriginsToFilterDimensions,
   buildWeeksPayload,
   transformWeeksResponse,
+  buildPromptsPayload,
+  transformPromptsResponse,
 } from './definitions/index.js';
 
 /**
@@ -80,5 +82,21 @@ export function createElementsService(transport) {
       return { weeks: transformWeeksResponse(raw) };
     },
     /* c8 ignore stop */
+
+    /**
+     * Fetches the prompts matching the given filters, plus their count.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Filter parameters (model/platform, topics, projectIds).
+     * @returns {Promise<{count: number, prompts: object[]}>} `{ count, prompts }`.
+     */
+    async getPrompts(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.PROMPTS,
+        buildPromptsPayload(params),
+      );
+      return transformPromptsResponse(raw);
+    },
   };
 }

@@ -51,6 +51,13 @@ export const ELEMENT_IDS = Object.freeze({
   // Shared UUID: powers rows 21 (Citations+Source Count), 23 (AI Answers), 30 (Executions).
   CITATIONS_SOURCES: '141adc88-830c-4801-a67d-f8a86d0a21f7',
 
+  // Prompts (filtered list + count). Returns a `table` of prompts — one row per
+  // prompt with `{ prompt, prompt_topic, primary_intent, volume }` — filtered by
+  // topic tag, AI model, and Semrush project(s). Backs the Prompts (count)
+  // endpoint that feeds the prompt healthcheck metrics (intent %, and — via a
+  // filtered count ratio — branded %).
+  PROMPTS: '406ba6e0-0de2-475e-80d9-42fab8616032',
+
   // Topic Prompts
   PROMPTS_BY_TOPIC: '78864493-90a7-449a-89ab-1ba3d09a712e',
   SOURCES: '553cd819-d507-460d-a8ff-e34486bad3e1',

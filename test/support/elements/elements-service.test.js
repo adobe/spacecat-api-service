@@ -142,4 +142,47 @@ describe('createElementsService', () => {
         .to.be.rejectedWith('upstream failure');
     });
   });
+
+  describe('getPrompts', () => {
+    const RAW_PROMPTS = {
+      type: 'table',
+      blocks: {
+        data: [
+          {
+            primary_intent: 'informational',
+            prompt: 'can i make ai influencer for free',
+            prompt_topic: 'AI Instagram Influencers',
+            volume: 2119,
+          },
+        ],
+      },
+    };
+
+    beforeEach(() => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, sinon.match.any)
+        .resolves(RAW_PROMPTS);
+    });
+
+    it('fetches the PROMPTS element and returns { count, prompts }', async () => {
+      const result = await service.getPrompts('ws-1', { tags: ['type:branded'], projectIds: ['proj-a'] });
+      expect(transport.fetchElement).to.have.been.calledWith('ws-1', ELEMENT_IDS.PROMPTS, sinon.match.object);
+      expect(result.count).to.equal(1);
+      expect(result.prompts[0]).to.deep.include({ prompt_topic: 'AI Instagram Influencers', volume: 2119 });
+    });
+
+    it('passes the built filter payload to the transport', async () => {
+      await service.getPrompts('ws-1', { model: 'perplexity' });
+      const call = transport.fetchElement.getCalls().find((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      const modelClause = call.args[2].filters.advanced.filters
+        .find((f) => f.filters?.[0]?.col === 'CBF_model');
+      expect(modelClause.filters[0].val).to.equal('perplexity');
+    });
+
+    it('propagates transport errors', async () => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, sinon.match.any)
+        .rejects(new Error('prompts upstream failure'));
+      await expect(service.getPrompts('ws-1', {})).to.be.rejectedWith('prompts upstream failure');
+    });
+  });
 });
