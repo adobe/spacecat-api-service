@@ -5,7 +5,7 @@
   of the License at http://www.apache.org/licenses/LICENSE-2.0
 -->
 
-# LLMO Semrush Elements API — Filter Dimensions & Weeks
+# LLMO Semrush Elements API — Filter Dimensions, Weeks & Prompts
 
 SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence / URL Inspector dashboards.
 
@@ -17,7 +17,8 @@ SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence
 
 1. [List URL Inspector Filter Dimensions](#1-list-url-inspector-filter-dimensions)
 2. [List Weeks](#2-list-weeks)
-3. [Supported Models](#3-supported-models)
+3. [List Prompts](#3-list-prompts)
+4. [Supported Models](#4-supported-models)
 
 ---
 
@@ -32,7 +33,7 @@ Returns all filter dimensions needed to initialise the URL Inspector dashboard i
 | Name | In | Required | Description |
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
-| `model` | query | ❌ | AI model filter. See [Supported Models](#2-supported-models) for valid values (default: `search-gpt`) |
+| `model` | query | ❌ | AI model filter. See [Supported Models](#4-supported-models) for valid values (default: `search-gpt`) |
 
 ### Underlying Elements
 
@@ -111,7 +112,7 @@ Returns the weeks that have Brand Presence data, for the week/date filter dropdo
 | Name | In | Required | Description |
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
-| `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins if both are sent). UI platform codes are translated to Semrush models — see [Supported Models](#3-supported-models) (default: `search-gpt`) |
+| `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins if both are sent). UI platform codes are translated to Semrush models — see [Supported Models](#4-supported-models) (default: `search-gpt`) |
 | `siteId` / `site_id` | query | ❌ | Site UUID. Reverse-mapped to the site's **primary brand** (`brands.site_id`), which scopes the weeks via a `CBF_ws_brand` filter. Returns `404` if the site has no brand. Omitted → workspace-wide weeks |
 
 ### Underlying Element
@@ -145,7 +146,74 @@ The daily rows are rolled up into ISO weeks spanning the earliest→latest day p
 
 ---
 
-## 3. Supported Models
+## 3. List Prompts
+
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts`**
+
+Returns the prompts matching the given filters, plus their **count**. Powers the prompt healthcheck metrics: **intent %** is derived by grouping the returned rows on `primary_intent`; **branded %** by comparing a topic-filtered count against the unfiltered count.
+
+**Brand-scoped (not org-scoped).** Semrush projects — and therefore prompts — live only in a brand's own Semrush **sub-workspace**, never in the org's shared parent workspace (verified against prod: the same project payload returns data on the sub-workspace and `0` on the parent). The endpoint resolves the brand's sub-workspace and **refuses to run against an org workspace**.
+
+### Parameters
+
+| Name | In | Required | Description |
+|---|---|---|---|
+| `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `brandId` | path | ✅ | Brand UUID. Must be a UUID (`400` otherwise) and resolve to a brand in the org (`404` otherwise) |
+| `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins if both are sent). UI platform codes are translated to Semrush models — see [Supported Models](#4-supported-models) (default: `search-gpt`) |
+| `tag` | query | ❌ | Comma-separated **full** tag values (`tags contains <value>`), AND-ed (a prompt must carry all). Pass the whole prefixed value — the tag taxonomy varies by brand: `type:branded` / `type:non-branded`, `category:<name>`, `intent:<name>`, `source:<name>`, `topic:<name>`. Omitted → no tag filter |
+| `projectId` / `project_id` | query | ❌ | Comma-separated Semrush project UUIDs to scope to (OR-ed). The UI already holds these as `semrush_project_id` from the [filter-dimensions `regions`](#1-list-url-inspector-filter-dimensions). Omitted → all of the brand's projects in its sub-workspace |
+
+### Computing the prompt healthcheck metrics (per project)
+
+Both metrics are **per project** — issue one request per `projectId`.
+
+- **Intent coverage** — one call, no tag filter. Group the returned rows by
+  `primary_intent` (`informational` / `commercial` / `navigational` / `task` / …) and
+  compare each intent's share against its target band. `count` is the denominator.
+- **Branded / unbranded** — the branded flag is a **tag**, not a row field. Two counts:
+  - total = `?projectId=<id>` → `count`
+  - branded = `?projectId=<id>&tag=type:branded` → `count`
+  - branded% = branded ÷ total. (`type:branded` + `type:non-branded` partition the
+    total exactly — verified in prod: 510 + 687 = 1197 → **43%**.)
+
+### Errors
+
+| Status | error | When |
+|---|---|---|
+| `400` | `invalidRequest` | `brandId` is not a UUID |
+| `403` | `forbidden` | Caller has no access to the organisation |
+| `404` | `notFound` | Organisation or brand not found |
+| `404` | `subWorkspaceRequired` | Brand has no Semrush sub-workspace (flat mode / org workspace) — nothing to query |
+| `409` | `workspaceMisconfigured` | Brand sub-workspace pointer equals the org parent workspace (bad backfill) |
+
+### Underlying Element
+
+| Element | UUID | Shape |
+|---|---|---|
+| `PROMPTS` | `406ba6e0-0de2-475e-80d9-42fab8616032` | `table` — one row per prompt (`{ prompt, prompt_topic, primary_intent, volume }`) |
+
+### What it returns
+
+`count` (number of matching prompts) plus the `prompts` array. Semrush field names are passed through unchanged.
+
+### Response example
+
+```json
+{
+  "count": 2,
+  "prompts": [
+    { "prompt": "can i make ai influencer for free", "prompt_topic": "AI Instagram Influencers", "primary_intent": "informational", "volume": 2119 },
+    { "prompt": "What is the best AI free image generator?", "prompt_topic": "AI Image Generators", "primary_intent": "informational", "volume": 997 }
+  ]
+}
+```
+
+> **Project ids stay explicit:** within the resolved sub-workspace, the endpoint filters by Semrush project id via `CBF_project` (the UI already holds these as `semrush_project_id` from the filter-dimensions `regions`). Omitting `projectId` returns every prompt in the brand's sub-workspace.
+
+---
+
+## 4. Supported Models
 
 The `model` (or `platform`) query parameter is accepted by these endpoints. Only the following Semrush values are valid; any unrecognised value silently falls back to the default (`search-gpt`).
 
