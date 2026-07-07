@@ -105,6 +105,7 @@ function fakeContext({
   brandSemrushProjects = [],
   withBrandSemrushProject = false,
   promiseToken = undefined,
+  postgrestClient = { from: sinon.stub() },
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
@@ -123,7 +124,7 @@ function fakeContext({
     },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves(org) },
-      services: { postgrestClient: { from: sinon.stub() } },
+      services: { postgrestClient },
       ...(BrandSemrushProject && { BrandSemrushProject }),
     },
     _spacecatBrands: spacecatBrands,
@@ -617,6 +618,16 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listPrompts(ctx);
       expect(res.status).to.equal(404);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('503s when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: promptsUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
       expect(serviceStub.getPrompts).to.not.have.been.called;
     });
 
