@@ -24,15 +24,16 @@ SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence
 
 ## 1. List URL Inspector Filter Dimensions
 
-**`GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions`**
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions`**
 
-Returns all filter dimensions needed to initialise the URL Inspector dashboard in a single call. Makes **three upstream Elements API calls in parallel** (Brands, Topics, Markets) and merges the results.
+Returns all filter dimensions needed to initialise the URL Inspector dashboard in a single call, scoped to a single brand. Makes **three upstream Elements API calls in parallel** (Brands, Topics, Markets) and merges the results.
 
 ### Parameters
 
 | Name | In | Required | Description |
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `brandId` | path | ✅ | SpaceCat brand UUID. Resolves to the brand's Semrush sub-workspace (falling back to the org's parent workspace if the brand has none provisioned yet) |
 | `model` | query | ❌ | AI model filter. See [Supported Models](#4-supported-models) for valid values (default: `search-gpt`) |
 
 ### Underlying Elements
@@ -103,17 +104,18 @@ A single object with six dimension arrays, each shaped for direct use as filter 
 
 ## 2. List Weeks
 
-**`GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks`**
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks`**
 
-Returns the weeks that have Brand Presence data, for the week/date filter dropdown. **Drop-in compatible with the legacy Brand Presence `weeks` contract**, so the URL Inspector filter consumes it unchanged.
+Returns the weeks that have Brand Presence data, for the week/date filter dropdown, scoped to a single brand. **Drop-in compatible with the legacy Brand Presence `weeks` contract**, so the URL Inspector filter consumes it unchanged.
 
 ### Parameters
 
 | Name | In | Required | Description |
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `brandId` | path | ✅ | SpaceCat brand UUID. Weeks are scoped to this brand via its resolved Semrush (sub-)workspace — the request does **not** add a `CBF_ws_brand` name filter (see note below) |
 | `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins if both are sent). UI platform codes are translated to Semrush models — see [Supported Models](#4-supported-models) (default: `search-gpt`) |
-| `siteId` / `site_id` | query | ❌ | Site UUID. Reverse-mapped to the site's **primary brand** (`brands.site_id`), which scopes the weeks via a `CBF_ws_brand` filter. Returns `404` if the site has no brand. Omitted → workspace-wide weeks |
+| `siteId` / `site_id` | query | ❌ | Site UUID. Must resolve (via `brands.site_id`) to the **same brand** named in the path — a mismatched or unrelated `siteId` is rejected with `400` |
 
 ### Underlying Element
 
@@ -140,7 +142,9 @@ The daily rows are rolled up into ISO weeks spanning the earliest→latest day p
 }
 ```
 
-> **`siteId` → brand:** Semrush has no concept of a site. The endpoint resolves `siteId` to the site's primary brand via `getBrandBySite` and scopes the query with `CBF_ws_brand` (brand **name**), mirroring the Markets element. The brand ID itself is not sent upstream.
+> **`siteId` → brand:** Semrush has no concept of a site. When `siteId` is sent, the endpoint resolves it to the site's primary brand via `getBrandBySite` and verifies it matches the path's `:brandId` — a mismatch is rejected with `400`. It is used only for this validation, not as an upstream filter.
+
+> **`CBF_ws_brand` filter:** `buildWeeksPayload` still supports an optional brand-name filter (`{ op: 'eq', val: brand, col: 'CBF_ws_brand' }`), but the controller no longer passes it — brand scoping comes entirely from the resolved workspace/sub-workspace for `:brandId`. Passing a brand name (e.g. `"Lovesac"`) that isn't registered as a `CBF_ws_brand` value in that workspace caused upstream `404 element not found in workspace` errors, so it's omitted by default.
 
 > **⚠️ Open (POC):** (1) the `openai`→`gpt-5` and `chatgpt`→`search-gpt` model mappings are provisional pending product confirmation; (2) whether the `WEEKS` element honours `CBF_ws_brand` is unverified — if it does not, brand scoping will move to `CBF_project` via the brand's Semrush projects.
 
