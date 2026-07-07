@@ -214,6 +214,16 @@ const routeFacsCapabilities = {
     // Monitoring / admin telemetry
     'GET /monitoring/drs-bp-pg-audit', // internal monitoring
 
+    // Task management (Jira OAuth 3LO) — org-scoped, JWT-authenticated; not a FACS surface in v1.
+    'GET /organizations/:organizationId/task-management/connections', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId', // JWT session
+    'GET /organizations/:organizationId/task-management/tickets', // JWT session
+    'GET /organizations/:organizationId/suggestions/:suggestionId/ticket', // JWT session
+    'GET /organizations/:organizationId/opportunities/:opportunityId/tickets', // JWT session
+    'POST /organizations/:organizationId/task-management/:provider/tickets', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/projects', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types', // JWT session
+
     // Ephemeral-run admin surface
     'POST /ephemeral-run/batch', // admin/internal
     'GET /ephemeral-run/batch/:batchId/status', // admin/internal
