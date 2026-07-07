@@ -11667,11 +11667,15 @@ ReferralTrafficHasData:
       example: true
     availableSources:
       type: array
-      description: Available sources in priority order; items are `optel` or `cdn` only (optel first)
+      description: >-
+        Sources that have data for the site, in resolution-priority order
+        (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`). Callers use the
+        first entry as the active source. The ARRAY order — not the `enum`
+        order, which is an unordered set — is the priority contract.
       items:
         type: string
-        enum: [optel, cdn]
-      example: ['optel', 'cdn']
+        enum: [adobe_analytics, cja, ga4, cdn, optel]
+      example: ['adobe_analytics', 'cdn']
   required:
     - hasData
     - availableSources

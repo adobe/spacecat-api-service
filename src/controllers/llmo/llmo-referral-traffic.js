@@ -773,32 +773,36 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
 }
 
 /**
- * Traffic Insights sources — the only tables that feed the Traffic Insights tab.
- * Business Impact (adobe_analytics, ga4) has its own DRS provider check and is
- * intentionally excluded here.
+ * All referral sources probed by has-data, in resolution-priority order.
  *
- * Order matters: optel is listed first because it is the preferred source.
- * The has-data response preserves this order in availableSources so callers
- * can pick the first entry as the active source (optel wins over cdn).
+ * Business Impact sources (adobe_analytics, cja, ga4) rank ABOVE the Traffic
+ * Insights sources (cdn, optel): a site connected to an analytics provider
+ * should resolve to it first. The has-data response preserves this order in
+ * availableSources so callers pick the first entry as the active source.
+ *
+ * NOTE: this list is intentionally broader than the Traffic Insights tab
+ * (optel/cdn). Consumers that only care about Traffic Insights must filter
+ * availableSources down to those two sources themselves.
  */
-const TRAFFIC_INSIGHTS_SOURCES = ['optel', 'cdn'];
-const TRAFFIC_INSIGHTS_TABLES = TRAFFIC_INSIGHTS_SOURCES.map((s) => SOURCE_TO_TABLE[s]);
+export const REFERRAL_HAS_DATA_SOURCES = ['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel'];
+export const REFERRAL_HAS_DATA_TABLES = REFERRAL_HAS_DATA_SOURCES.map((s) => SOURCE_TO_TABLE[s]);
 
 /**
  * GET /sites/:siteId/referral-traffic/has-data
  *
- * Fast existence check for Traffic Insights data (optel and cdn).
- * Business Impact sources (adobe_analytics, ga4) are gated separately via DRS.
+ * Fast existence check across ALL referral sources (adobe_analytics, cja, ga4,
+ * cdn, optel).
  *
  * Response:
- *   { hasData: boolean, availableSources: Array<'optel'|'cdn'> }
+ *   { hasData: boolean,
+ *     availableSources: Array<'adobe_analytics'|'cja'|'ga4'|'cdn'|'optel'> }
  *
- * availableSources lists whichever of optel/cdn has at least one row, in
- * priority order (optel first). Callers should use the first entry as the
- * active source so they naturally prefer optel over cdn.
- * hasData is true iff availableSources is non-empty.
+ * availableSources lists whichever sources have at least one row for the site,
+ * in resolution-priority order (adobe_analytics > cja > ga4 > cdn > optel).
+ * Callers use the first entry as the active source. hasData is true iff
+ * availableSources is non-empty.
  *
- * Both tables are checked in parallel with limit(1) — no RPC required.
+ * All source tables are checked in parallel with limit(1) — no RPC required.
  * Fails closed: if any query errors, returns 500 rather than a partial result.
  */
 export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
@@ -811,7 +815,7 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
         let results;
         try {
           results = await Promise.all(
-            TRAFFIC_INSIGHTS_TABLES.map((table) => client.from(table).select('traffic_date').eq('site_id', siteId).limit(1)),
+            REFERRAL_HAS_DATA_TABLES.map((table) => client.from(table).select('traffic_date').eq('site_id', siteId).limit(1)),
           );
         } catch (err) {
           ctx.log.error(`Referral traffic has-data PostgREST error: ${err.message} (siteId=${siteId})`);
@@ -820,12 +824,12 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
 
         for (const [i, result] of results.entries()) {
           if (result.error) {
-            ctx.log.error(`Referral traffic has-data ${TRAFFIC_INSIGHTS_TABLES[i]} PostgREST error: ${result.error.message} (siteId=${siteId})`);
+            ctx.log.error(`Referral traffic has-data ${REFERRAL_HAS_DATA_TABLES[i]} PostgREST error: ${result.error.message} (siteId=${siteId})`);
             return internalServerError('Failed to check referral traffic data');
           }
         }
 
-        const availableSources = TRAFFIC_INSIGHTS_SOURCES.filter(
+        const availableSources = REFERRAL_HAS_DATA_SOURCES.filter(
           (_, i) => (results[i].data || []).length > 0,
         );
         return cachedOk({ hasData: availableSources.length > 0, availableSources });

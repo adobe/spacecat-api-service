@@ -26,6 +26,8 @@ import {
   createReferralTrafficWeeksHandler,
   createReferralTrafficByDeviceHandler,
   createReferralTrafficHasDataHandler,
+  REFERRAL_HAS_DATA_SOURCES,
+  REFERRAL_HAS_DATA_TABLES,
 } from '../../../src/controllers/llmo/llmo-referral-traffic.js';
 
 use(sinonChai);
@@ -59,12 +61,16 @@ function makeWeeksChainClient(
 }
 
 /**
- * The two Traffic Insights tables checked by the has-data handler.
- * Must stay in sync with TRAFFIC_INSIGHTS_TABLES in llmo-referral-traffic.js.
+ * All referral tables checked by the has-data handler, in resolution-priority
+ * order. Must stay in sync with REFERRAL_HAS_DATA_TABLES in
+ * llmo-referral-traffic.js.
  */
 const HAS_DATA_TABLES = [
-  'referral_traffic_optel',
+  'referral_traffic_adobe_analytics',
+  'referral_traffic_cja',
+  'referral_traffic_ga4',
   'referral_traffic_cdn',
+  'referral_traffic_optel',
 ];
 
 /**
@@ -1056,12 +1062,23 @@ describe('llmo-referral-traffic', () => {
   });
 
   // ── /has-data ─────────────────────────────────────────────────────────────
-  // Checks only Traffic Insights sources (optel, cdn). Business Impact sources
-  // (adobe_analytics, ga4) are gated separately via the DRS provider endpoint.
+  // Checks ALL referral sources and returns availableSources in
+  // resolution-priority order (adobe_analytics > cja > ga4 > cdn > optel).
 
   const ROW = { traffic_date: '2026-01-05' };
 
   describe('has-data', () => {
+    it('keeps the test table list in sync with the controller and maps every source to a table (drift guard)', () => {
+      // The local HAS_DATA_TABLES mirrors REFERRAL_HAS_DATA_TABLES; asserting
+      // equality makes adding/removing/reordering a source in the controller
+      // fail the build here instead of silently drifting.
+      expect(HAS_DATA_TABLES).to.deep.equal(REFERRAL_HAS_DATA_TABLES);
+      // Guards REFERRAL_HAS_DATA_SOURCES ⊆ SOURCE_TO_TABLE keys: a typo'd or
+      // newly-added source with no table mapping would surface as undefined.
+      expect(REFERRAL_HAS_DATA_TABLES).to.have.lengthOf(REFERRAL_HAS_DATA_SOURCES.length);
+      expect(REFERRAL_HAS_DATA_TABLES.every((t) => typeof t === 'string' && t.length > 0)).to.equal(true);
+    });
+
     it('returns hasData:true and availableSources:["optel"] when only optel has records', async () => {
       const client = makeHasDataChainClient({
         referral_traffic_optel: { data: [ROW], error: null },
@@ -1088,7 +1105,7 @@ describe('llmo-referral-traffic', () => {
       expect(body.availableSources).to.deep.equal(['cdn']);
     });
 
-    it('returns hasData:true and availableSources:["optel","cdn"] when both have records', async () => {
+    it('returns availableSources:["cdn","optel"] (cdn before optel) when both Traffic Insights sources have records', async () => {
       const client = makeHasDataChainClient({
         referral_traffic_optel: { data: [ROW], error: null },
         referral_traffic_cdn: { data: [ROW], error: null },
@@ -1099,7 +1116,91 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.hasData).to.equal(true);
-      expect(body.availableSources).to.deep.equal(['optel', 'cdn']);
+      expect(body.availableSources).to.deep.equal(['cdn', 'optel']);
+    });
+
+    it('returns hasData:true and availableSources:["adobe_analytics"] when only adobe_analytics has records', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_adobe_analytics: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['adobe_analytics']);
+    });
+
+    it('ranks Business Impact sources above Traffic Insights (adobe_analytics before cdn)', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_adobe_analytics: { data: [ROW], error: null },
+        referral_traffic_cdn: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['adobe_analytics', 'cdn']);
+    });
+
+    it('preserves full priority order (adobe_analytics > cja > ga4 > cdn > optel) when all sources have records', async () => {
+      const client = makeHasDataChainClient(
+        Object.fromEntries(HAS_DATA_TABLES.map((t) => [t, { data: [ROW], error: null }])),
+      );
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel']);
+    });
+
+    it('orders non-adjacent combos correctly (ga4 before optel)', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_ga4: { data: [ROW], error: null },
+        referral_traffic_optel: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['ga4', 'optel']);
+    });
+
+    it('orders non-adjacent combos correctly (cja before cdn)', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_cja: { data: [ROW], error: null },
+        referral_traffic_cdn: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['cja', 'cdn']);
+    });
+
+    it('returns availableSources:["cja"] when only cja has records', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_cja: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['cja']);
+    });
+
+    it('returns availableSources:["ga4"] when only ga4 has records', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_ga4: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['ga4']);
     });
 
     it('returns hasData:false and availableSources:[] when both tables are empty', async () => {
@@ -1138,6 +1239,17 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(500);
     });
 
+    it('fails closed (500) and logs the table when a Business Impact source is the sole errorer', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_ga4: { data: null, error: { message: 'ga4-fail' } },
+        referral_traffic_cdn: { data: [ROW], error: null },
+      });
+      const ctx = makeContext({ client });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(500);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/referral_traffic_ga4/);
+    });
+
     it('returns 500 when both sources error simultaneously', async () => {
       const errorResults = Object.fromEntries(
         HAS_DATA_TABLES.map((t) => [t, { data: null, error: { message: `${t}-fail` } }]),
@@ -1171,7 +1283,7 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('queries only optel and cdn tables with the site id', async () => {
+    it('queries all five referral source tables with the site id, once each', async () => {
       const client = makeHasDataChainClient();
       await createReferralTrafficHasDataHandler(stubbedValidateAccess)(makeContext({ client }));
       for (const table of HAS_DATA_TABLES) {
@@ -1179,8 +1291,8 @@ describe('llmo-referral-traffic', () => {
         expect(client.chains[table].eq).to.have.been.calledWith('site_id', SITE_ID);
         expect(client.chains[table].limit).to.have.been.calledWith(1);
       }
-      expect(client.from).not.to.have.been.calledWith('referral_traffic_adobe_analytics');
-      expect(client.from).not.to.have.been.calledWith('referral_traffic_ga4');
+      // Exactly one probe per source — no extra or duplicate table reads.
+      expect(client.from.callCount).to.equal(HAS_DATA_TABLES.length);
     });
 
     it('returns 400 when Site.postgrestService is missing', async () => {

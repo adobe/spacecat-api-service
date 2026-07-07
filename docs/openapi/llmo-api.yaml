@@ -5089,8 +5089,10 @@ llmo-referral-traffic-has-data:
     description: |
       Returns whether the site has any referral traffic data and which sources
       are available. Uses a direct table existence check (no RPC). Ignores the
-      `source` query param. Response is cacheable. `availableSources` items are
-      `optel` or `cdn` only, in priority order (optel first).
+      `source` query param. Response is cacheable. `availableSources` lists all
+      sources with data in resolution-priority order
+      (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`); callers use the
+      first entry as the active source.
     operationId: getReferralTrafficHasData
     responses:
       '200':
