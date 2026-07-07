@@ -47,7 +47,10 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 // Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
 // values that could have been stored before the server-side derivation fix, closing
 // the residual PII exfiltration path for pre-fix data.
-const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{24})$/;
+// The auth source (after `@`) is a named source (AdobeID/AdobeOrg/Email/AdobeServices)
+// or a hex org id that may carry a single-letter account-type suffix, e.g.
+// `...495fcd.e` for reference/trial orgs — plain emails and system markers stay rejected.
+const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{16,}(?:\.[a-z])?)$/;
 const IMS_ENRICH_BATCH_SIZE = 5;
 
 /**
