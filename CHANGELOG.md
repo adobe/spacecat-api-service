@@ -1,3 +1,24 @@
+## [1.628.1](https://github.com/adobe/spacecat-api-service/compare/v1.628.0...v1.628.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* migrate prompt handling and IVE DRS schedule creation ([#2742](https://github.com/adobe/spacecat-api-service/issues/2742)) ([f8f5f3b](https://github.com/adobe/spacecat-api-service/commit/f8f5f3b1473dd689c50247371e5c0dde8a06b64c))
+
+# [1.628.0](https://github.com/adobe/spacecat-api-service/compare/v1.627.0...v1.628.0) (2026-07-07)
+
+
+### Features
+
+* add support for promise token for semrush api authentication ([#2753](https://github.com/adobe/spacecat-api-service/issues/2753)) ([2a46cf3](https://github.com/adobe/spacecat-api-service/commit/2a46cf343646a5f1df7c76fa946e849aa2a39a6a))
+
+# [1.627.0](https://github.com/adobe/spacecat-api-service/compare/v1.626.0...v1.627.0) (2026-07-06)
+
+
+### Features
+
+* **serenity:** maintain mapping rows + cut over to semrushSubWorkspaceId ([#2739](https://github.com/adobe/spacecat-api-service/issues/2739)) ([01ff865](https://github.com/adobe/spacecat-api-service/commit/01ff86541fdc7cca5488718e769b7b28b7aa6073)), closes [Hi#level](https://github.com/Hi/issues/level) [mysticat-data-service#765](https://github.com/mysticat-data-service/issues/765)
+
 # [1.626.0](https://github.com/adobe/spacecat-api-service/compare/v1.625.0...v1.626.0) (2026-07-06)
 
 

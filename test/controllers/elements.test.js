@@ -15,6 +15,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -45,6 +46,35 @@ function fakeLog() {
   };
 }
 
+// Faithful re-implementation of support/utils.js#resolveSemrushImsToken, wired to
+// a controllable exchange stub. The controller now delegates the promise-token
+// decode/exchange to that shared helper, so exercising it here (rather than
+// stubbing the whole thing away) keeps this suite's fallback-path assertions
+// (IMS-type gate, hint message) exercising the REAL `fallback` the controller
+// passes in, while still allowing the promise-token exchange itself to be
+// controlled per-test. The authoritative unit tests for the decode/error-wrap
+// behavior itself live in test/support/utils.test.js.
+function makeResolveSemrushImsTokenStub(exchangeStub) {
+  return async (ctx, log, logLabel, fallback) => {
+    const promiseTokenHeader = ctx?.pathInfo?.headers?.['x-promise-token'];
+    if (promiseTokenHeader) {
+      let decoded = promiseTokenHeader;
+      try {
+        decoded = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use as-is.
+      }
+      try {
+        return await exchangeStub(ctx, decoded);
+      } catch (e) {
+        log.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
+        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+      }
+    }
+    return fallback(ctx);
+  };
+}
+
 function makeBrandSemrushProject(overrides = {}) {
   return {
     getBrandId: () => BRAND_ID,
@@ -64,6 +94,7 @@ function fakeContext({
   spacecatBrands = [{ id: 'brand-1', name: 'Adobe' }],
   brandSemrushProjects = [],
   withBrandSemrushProject = false,
+  promiseToken = undefined,
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
@@ -72,7 +103,10 @@ function fakeContext({
     params: { spaceCatId: ORG_ID, ...params },
     request: { url },
     pathInfo: {
-      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+      headers: {
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+      },
     },
     attributes: {
       authInfo: { getType: () => authType },
@@ -110,6 +144,7 @@ describe('ElementsController', () => {
   let serviceStub;
   let createElementsServiceStub;
   let createElementsTransportStub;
+  let exchangePromiseTokenStub;
   let MockElementsTransportError;
   let ElementsController;
 
@@ -126,6 +161,7 @@ describe('ElementsController', () => {
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
+    exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
 
     MockElementsTransportError = class ElementsTransportError extends Error {
       constructor(status, message, body) {
@@ -161,6 +197,11 @@ describe('ElementsController', () => {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
+      '../../src/support/utils.js': {
+        resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
+          (...args) => exchangePromiseTokenStub(...args),
+        ),
+      },
     })).default;
   });
 
@@ -235,6 +276,82 @@ describe('ElementsController', () => {
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(404);
     });
+
+    it('hints at the x-promise-token header when a non-IMS caller sends none', async () => {
+      const ctx = fakeContext({ authType: 'jwt' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(401);
+      const body = await readBody(res);
+      expect(body.error).to.equal('promiseTokenRequired');
+      expect(body.message).to.match(/x-promise-token/);
+    });
+  });
+
+  // ─── x-promise-token support ──────────────────────────────────────────────
+
+  describe('x-promise-token support', () => {
+    it('exchanges x-promise-token for an IMS token and forwards it upstream, bypassing the IMS-type gate', async () => {
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: 'spacecat-jwt-abc', promiseToken: 'promise-token-xyz',
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise-token-xyz');
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ imsToken: 'exchanged-ims-token' }),
+      );
+    });
+
+    it('decodes a URI-encoded x-promise-token header before exchanging', async () => {
+      const ctx = fakeContext({ promiseToken: 'promise%20token%20xyz' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise token xyz');
+    });
+
+    it('falls back to the raw header value when it is not valid percent-encoding', async () => {
+      const ctx = fakeContext({ promiseToken: 'promise%zztoken' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise%zztoken');
+    });
+
+    it('401s with a generic message (no leaked exchange detail) when the promise token exchange fails', async () => {
+      exchangePromiseTokenStub.rejects(new Error('upstream IMS exchange failed: secret detail'));
+      const log = fakeLog();
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: 'spacecat-jwt-abc', promiseToken: 'promise-token-xyz',
+      });
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(401);
+      const body = await readBody(res);
+      expect(body.message).to.equal('Invalid or expired promise token');
+      expect(log.error).to.have.been.calledWithMatch('elements: promise token exchange failed');
+    });
+
+    it('falls back to the Authorization bearer when x-promise-token is absent (existing behavior unchanged)', async () => {
+      const ctx = fakeContext({ bearer: 'ims-token-123' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ imsToken: 'ims-token-123' }),
+      );
+    });
+
+    it('still 401s a non-IMS caller with no x-promise-token (existing IMS-type gate unaffected)', async () => {
+      const ctx = fakeContext({ authType: 'jwt' });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(401);
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
+    });
   });
 
   // ─── mapError ─────────────────────────────────────────────────────────────
@@ -303,7 +420,6 @@ describe('ElementsController', () => {
     });
 
     it('maps ErrorWithStatusCode with a code property to that code token', async () => {
-      const { ErrorWithStatusCode } = await import('../../src/support/utils.js');
       const err = new ErrorWithStatusCode('config error', 503);
       err.code = 'configurationError';
       serviceStub.getUrlInspectorFilterDimensions.rejects(err);
