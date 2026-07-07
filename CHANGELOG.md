@@ -1,3 +1,10 @@
+# [1.631.0](https://github.com/adobe/spacecat-api-service/compare/v1.630.0...v1.631.0) (2026-07-07)
+
+
+### Features
+
+* **serenity:** server-compute branded/non-branded prompt type on every write path ([#2772](https://github.com/adobe/spacecat-api-service/issues/2772)) ([734eaa8](https://github.com/adobe/spacecat-api-service/commit/734eaa8cf281d06dafaaff9b35959b458be8f520)), closes [serenity-docs#31](https://github.com/serenity-docs/issues/31) [Hi#level](https://github.com/Hi/issues/level) [serenity-docs#31](https://github.com/serenity-docs/issues/31)
+
 # [1.630.0](https://github.com/adobe/spacecat-api-service/compare/v1.629.0...v1.630.0) (2026-07-07)
 
 
