@@ -188,10 +188,11 @@ function requireImsBearer(ctx) {
  * @param {object} env - Environment variables.
  */
 /**
- * Validates org access and resolves the Semrush workspace ID.
- * Returns `{ workspaceId }` on success or `{ error: Response }` on failure.
+ * Resolves the organization and verifies the caller has access to it.
+ * Shared pre-flight for the org- and brand-scoped authorizers.
+ * Returns `{ organization }` on success or `{ error: Response }` on failure.
  */
-async function authorizeOrg(ctx) {
+async function authorizeOrgAccess(ctx) {
   const spaceCatId = ctx?.params?.spaceCatId;
   const Organization = ctx?.dataAccess?.Organization;
   if (!Organization || typeof Organization.findById !== 'function') {
@@ -205,7 +206,19 @@ async function authorizeOrg(ctx) {
   if (!await accessControl.hasAccess(organization)) {
     return { error: forbidden('User does not have access to this organization') };
   }
-  const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+  return { organization };
+}
+
+/**
+ * Validates org access and resolves the Semrush workspace ID.
+ * Returns `{ workspaceId }` on success or `{ error: Response }` on failure.
+ */
+async function authorizeOrg(ctx) {
+  const access = await authorizeOrgAccess(ctx);
+  if (access.error) {
+    return access;
+  }
+  const workspaceId = await resolveWorkspaceId(ctx, ctx?.params?.spaceCatId);
   if (!hasText(workspaceId)) {
     return { error: notFound('Organization has no semrush_workspace_id') };
   }
@@ -234,17 +247,9 @@ async function authorizeBrandSubWorkspace(ctx, log) {
   if (!isValidUUID(brandId)) {
     return { error: createResponse({ error: 'invalidRequest', message: 'brandId must be a UUID' }, 400) };
   }
-  const Organization = ctx?.dataAccess?.Organization;
-  if (!Organization || typeof Organization.findById !== 'function') {
-    return { error: internalServerError('Organization data-access not available') };
-  }
-  const organization = await Organization.findById(spaceCatId);
-  if (!organization) {
-    return { error: notFound(`Organization not found: ${spaceCatId}`) };
-  }
-  const accessControl = AccessControlUtil.fromContext(ctx);
-  if (!await accessControl.hasAccess(organization)) {
-    return { error: forbidden('User does not have access to this organization') };
+  const access = await authorizeOrgAccess(ctx);
+  if (access.error) {
+    return access;
   }
   const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
   if (!postgrestClient?.from) {
