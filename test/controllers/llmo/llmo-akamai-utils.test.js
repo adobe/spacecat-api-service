@@ -21,7 +21,6 @@ import {
   buildFragments,
   mergeIntoTree,
   managedRuleNames,
-  failoverEnabled,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
 const HOSTNAME = 'www.example.com';
@@ -38,27 +37,13 @@ describe('llmo-akamai-utils', () => {
       expect(cfg.match.userAgents).to.deep.equal(EDGE_OPTIMIZE_DEFAULTS.userAgents);
       expect(cfg.incomingRequestHeaders['x-edgeoptimize-api-key']).to.equal(API_KEY);
       expect(cfg.failover.alternateHostname).to.equal(HOSTNAME);
-      expect(cfg.failover.enabled).to.equal(false);
       expect(cfg.origin.hostname).to.equal('live.edgeoptimize.net');
-    });
-
-    it('opts into the advanced failover tag when requested', () => {
-      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, enableFailoverTag: true });
-      expect(cfg.failover.enabled).to.equal(true);
     });
 
     it('does not mutate the frozen defaults', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       cfg.match.userAgents.push('EvilBot');
       expect(EDGE_OPTIMIZE_DEFAULTS.userAgents).to.not.include('EvilBot');
-    });
-  });
-
-  describe('failoverEnabled', () => {
-    it('is false by default and true only when explicitly enabled', () => {
-      expect(failoverEnabled({})).to.equal(false);
-      expect(failoverEnabled({ failover: {} })).to.equal(false);
-      expect(failoverEnabled({ failover: { enabled: true } })).to.equal(true);
     });
   });
 
@@ -129,19 +114,14 @@ describe('llmo-akamai-utils', () => {
   });
 
   describe('buildSiteFailoverRule', () => {
-    it('omits the advanced XML tag by default', () => {
+    it('uses only the GA alternate-hostname behavior (no advanced metadata)', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       const rule = buildSiteFailoverRule(cfg);
-      expect(findBehavior(rule, 'advanced')).to.equal(undefined);
       expect(rule.criteriaMustSatisfy).to.equal('any');
-    });
-
-    it('includes the advanced fail-action2 tag when the failover tag is enabled', () => {
-      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, enableFailoverTag: true });
-      const rule = buildSiteFailoverRule(cfg);
-      const advanced = findBehavior(rule, 'advanced');
-      expect(advanced).to.not.equal(undefined);
-      expect(advanced.options.xml).to.contain('fail-action2');
+      expect(findBehavior(rule, 'advanced')).to.equal(undefined);
+      const failAction = findBehavior(rule, 'failAction');
+      expect(failAction.options.contentHostname).to.equal(HOSTNAME);
+      expect(rule.behaviors).to.have.length(1);
     });
   });
 

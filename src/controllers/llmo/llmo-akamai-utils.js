@@ -32,23 +32,10 @@
 // anyway — no advanced XML or dedicated marker required.
 const LOOP_GUARD_HEADER = 'x-edgeoptimize-api-key';
 
-// Marker Akamai's internal failover retry pass carries once the routing rule's origin fetch has
-// failed once. Purely for the OPTIONAL sibling "Failover Test" rule's reporting; NOT used for
-// loop prevention (see LOOP_GUARD_HEADER above).
+// A header we never set. The routing rule's loop guard requires it to be ABSENT, and the
+// failover-test rule keys on its absence too. Kept as a named constant so both rules reference the
+// same header name.
 const FAILOVER_MARKER_HEADER = 'x-edgeoptimize-request';
-const FAILOVER_MARKER_VALUE = 'fo';
-
-// Advanced XML injected (only when failover.enabled) so a failed origin fetch tags the request
-// with the marker above, for the reporting rule.
-const FAILOVER_FAIL_ACTION_XML = [
-  '<forward:availability.fail-action2>',
-  '  <add-header>',
-  '    <status>on</status>',
-  `    <name>${FAILOVER_MARKER_HEADER}</name>`,
-  `    <value>${FAILOVER_MARKER_VALUE}</value>`,
-  '  </add-header>',
-  '</forward:availability.fail-action2>',
-].join('\n');
 
 // Stable defaults for the managed rule config. These mirror the doc 1:1 and are service-owned
 // (not caller-supplied); only the per-site hostname and the LLMO API key are injected at runtime
@@ -199,11 +186,6 @@ const behaviorCacheId = (variableName) => ({
   options: { rule: 'INCLUDE_VARIABLE', variableName },
 });
 
-const behaviorAdvanced = (description, xml) => ({
-  name: 'advanced',
-  options: { description, xml },
-});
-
 // Every request-header criterion we emit is a presence check (EXISTS / DOES_NOT_EXIST): PAPI
 // ignores value/match flags for those, and including them wouldn't match what PAPI itself emits.
 const criterionRequestHeader = (header, matchOperator) => ({
@@ -238,40 +220,18 @@ const behaviorFailActionAlternateHostname = (hostname) => ({
 // ---------------------------------------------------------------------------
 
 /**
- * The failover *tag* (used by the sibling test rule) relies on an "advanced" (raw XML metadata)
- * behavior. PAPI rejects NEW advanced behaviors from customer credentials with a 403 lock-error
- * ("Only Akamai representatives can change read-only...") unless Akamai has already provisioned
- * Advanced Metadata access for the property. Defaults to false; set config.failover.enabled=true
- * once that access is granted. The Site Failover behavior itself does NOT depend on this — it's GA.
- * @param {object} cfg
- * @returns {boolean}
- */
-export function failoverEnabled(cfg) {
-  return cfg.failover?.enabled === true;
-}
-
-/**
  * Nested child rule of the routing rule ("Site Failover Behavior"): on a 4xx/5xx from
  * live.edgeoptimize.net or an origin timeout, fail over to the property's normal origin via the
  * alternate-hostname mechanism — standard GA behavior, no Advanced Metadata access needed.
- * Optionally (if failoverEnabled) also tags the request via the advanced fail-action2 XML so the
- * sibling "Failover Test" rule can report it happened.
  * @param {object} cfg
  * @returns {object}
  */
 export function buildSiteFailoverRule(cfg) {
-  const behaviors = [behaviorFailActionAlternateHostname(cfg.failover.alternateHostname)];
-  if (failoverEnabled(cfg)) {
-    behaviors.push(behaviorAdvanced(
-      `Edge Optimize: tag request with ${FAILOVER_MARKER_HEADER}=${FAILOVER_MARKER_VALUE} on origin failure`,
-      FAILOVER_FAIL_ACTION_XML,
-    ));
-  }
   return {
     name: 'Site Failover Behavior',
     criteria: [criterionMatchResponseCode(400, 599), criterionOriginTimeout()],
     criteriaMustSatisfy: 'any',
-    behaviors,
+    behaviors: [behaviorFailActionAlternateHostname(cfg.failover.alternateHostname)],
     children: [],
     comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). On origin failure, fails over '
       + "to the property's normal origin so the end user still gets a response.",
@@ -324,8 +284,9 @@ export function buildRoutingRule(cfg) {
   if (guardHeader) {
     criteria.push(criterionRequestHeader(guardHeader, 'DOES_NOT_EXIST'));
   }
-  // Belt-and-suspenders: also exclude the official failover marker header, in case the advanced
-  // fail-action2 tag (optional, see failoverEnabled) is active — redundant but harmless.
+  // Belt-and-suspenders: also require the failover marker header to be absent. We never set it, so
+  // this is always true today, but it keeps the routing rule symmetric with the failover-test rule
+  // and future-proofs against a marker being introduced.
   criteria.push(criterionRequestHeader(FAILOVER_MARKER_HEADER, 'DOES_NOT_EXIST'));
 
   return {
@@ -476,11 +437,9 @@ export function managedRuleNames(cfg) {
  * @param {object} params
  * @param {string} params.hostname - the site's (normalized) hostname
  * @param {string} params.apiKey - the site's LLMO API key
- * @param {boolean} [params.enableFailoverTag=false] - opt into the advanced fail-action2 XML tag
- *   (only when Akamai has provisioned Advanced Metadata access on the property)
  * @returns {object} config consumable by buildParentRule/mergeIntoTree
  */
-export function buildRuleConfig({ hostname, apiKey, enableFailoverTag = false }) {
+export function buildRuleConfig({ hostname, apiKey }) {
   const d = EDGE_OPTIMIZE_DEFAULTS;
   return {
     match: {
@@ -497,6 +456,6 @@ export function buildRuleConfig({ hostname, apiKey, enableFailoverTag = false })
     outgoingRequestHeaders: { ...d.outgoingRequestHeaders },
     removeIncomingResponseHeaders: [...d.removeIncomingResponseHeaders],
     ruleNames: { ...d.ruleNames },
-    failover: { enabled: enableFailoverTag, alternateHostname: hostname },
+    failover: { alternateHostname: hostname },
   };
 }
