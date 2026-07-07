@@ -47,13 +47,9 @@ const MAX_ACTIVE_RULES_PER_SITE = 20;
 // Defensive cap on the active-rule scans (list + cross-rule dedup).
 const MAX_ACTIVE_RULES_SCAN = 1000;
 
-// A sample URL entry is valid when it is either a full http(s) URL
-// ("https://example.com/en/home") or an absolute path ("/en/home") — the two
-// shapes the derivation pipeline (extractPath) actually understands. Anything
-// else (bare words, "a sdf a;sdf a", protocol-relative "//host") is rejected so
-// junk can't be persisted and turned into a meaningless regex.
-// Whitespace and control chars are never valid in a URL/path — new URL() would
-// silently percent-encode them rather than throw, so screen them explicitly.
+// Valid entry: a full http(s) URL or a path ("/en/home", "en/home"). Resolving
+// against a base accepts both. Whitespace/control chars are screened first (URL
+// parsing would percent-encode them); "//host" and non-http schemes are rejected.
 function isValidSampleUrl(u) {
   if (!hasText(u) || u.length > MAX_URL_LEN) {
     return false;
@@ -62,12 +58,13 @@ function isValidSampleUrl(u) {
   if (/[\s\u0000-\u001f\u007f]/.test(u)) {
     return false;
   }
-  if (u.startsWith('/')) {
-    // Absolute path, but not a protocol-relative "//host" reference.
-    return !u.startsWith('//');
+  // Protocol-relative "//host" would resolve to a foreign host against the base.
+  if (u.startsWith('//')) {
+    return false;
   }
   try {
-    return ['http:', 'https:'].includes(new URL(u).protocol);
+    const { protocol } = new URL(u, 'https://example.com');
+    return protocol === 'http:' || protocol === 'https:';
   } catch {
     return false;
   }

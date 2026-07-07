@@ -289,11 +289,9 @@ describe('AgenticCategoriesController', () => {
   });
 
   // ───── create: sample-URL validity (LLMO-6014) ─────
-  // The endpoint used to accept any non-empty string, so garbage like
-  // "a sdf a;sdf a" was persisted and turned into a meaningless regex.
   [
-    ['bare word (no scheme, no leading slash)', 'a sdf a;sdf a'],
-    ['free text with spaces', 'this is not a url'],
+    ['free text with spaces', 'a sdf a;sdf a'],
+    ['bare text with spaces', 'this is not a url'],
     ['absolute path with a space', '/en/home page'],
     ['absolute path with a tab', '/en/\thome'],
     ['protocol-relative reference', '//evil.example.com/x'],
@@ -315,10 +313,10 @@ describe('AgenticCategoriesController', () => {
     expect(res.status).to.equal(400);
   });
 
-  // Both accepted shapes must still create successfully: absolute paths
-  // (e.g. localized "/en/home") and full http(s) URLs.
+  // Accepted shapes: absolute paths, bare paths, localized paths, full URLs.
   [
     ['absolute path', ['/en/home', '/en/products']],
+    ['bare path without leading slash', ['products/photoshop', 'products/lightroom']],
     ['localized path with locale + hyphen', ['/en-us/home', '/en-us/products']],
     ['full https url', ['https://example.com/en/home', 'https://example.com/en/products']],
   ].forEach(([label, urls]) => {
