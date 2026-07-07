@@ -2393,6 +2393,25 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
     });
 
+    it('builds a working type classifier from the brand name + aliases and passes it to the handler (serenity-docs#31)', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      // Brand name 'Test Brand' + a US-clamped alias 'Acme'.
+      getBrandAliasesStub.resolves([{ name: 'Acme', regions: ['us'] }]);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createPrompts(fakeContext({
+        data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(getBrandAliasesStub).to.have.been.calledOnce;
+      // The 7th positional arg to handleCreatePrompts is the classifier closure.
+      const classify = handlers.handleCreatePrompts.firstCall.args[6];
+      expect(classify).to.be.a('function');
+      // US market (geoTargetId 2840): brand name and the US alias both classify.
+      expect(classify('do you sell Test Brand shoes?', 2840)).to.equal('type:branded');
+      expect(classify('is Acme any good?', 2840)).to.equal('type:branded');
+      expect(classify('best running shoes?', 2840)).to.equal('type:non-branded');
+    });
+
     // Line 382: updatePrompt — `ctx?.params || {}` fallback. When ctx.params is
     // null the destructure yields `semrushPromptId = undefined`, which fails the
     // hasText check and throws a 400 before authorize() is reached. The `|| {}`
