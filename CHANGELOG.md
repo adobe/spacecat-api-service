@@ -1,3 +1,10 @@
+## [1.632.1](https://github.com/adobe/spacecat-api-service/compare/v1.632.0...v1.632.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **SITES-44243:** accept account-type suffix in IMS ID regex for executedByUser enrichment ([#2778](https://github.com/adobe/spacecat-api-service/issues/2778)) ([3983dc2](https://github.com/adobe/spacecat-api-service/commit/3983dc2497d289c9c45564a3fb9d05cf124dd84d))
+
 # [1.632.0](https://github.com/adobe/spacecat-api-service/compare/v1.631.1...v1.632.0) (2026-07-07)
 
 
