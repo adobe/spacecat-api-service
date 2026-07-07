@@ -2339,6 +2339,659 @@ describe('TaskManagementController', () => {
       expect(conn.save).to.have.been.called;
       expect(ctx.log.warn).to.have.been.called;
     });
+
+    // ── Lines 518-522: attachments.length > 1 → 400 ─────────────────────────────
+    it('returns 400 when more than one attachment is provided', async () => {
+      const content = Buffer.from('hello').toString('base64');
+      const att = { content, mimeType: 'image/png', filename: 'file.png' };
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          attachments: [att, att],
+        },
+      }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('at most 1 item');
+    });
+
+    // ── Lines 641-642: Suggestion not found in grouped mode → 404 ───────────────
+    it('grouped mode: returns 404 when Suggestion.findById returns null for suggestionId', async () => {
+      const conn = makeConnection();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(null) },
+        },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped ticket',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(404);
+      const body = await res.json();
+      expect(body.message).to.include('not found');
+    });
+
+    // ── Lines 750-761: dedup lock duplicate conflict → 409 IN_FLIGHT ─────────────
+    it('returns 409 IN_FLIGHT when dedup lock insert hits unique constraint (second insert)', async () => {
+      const conn = makeConnection();
+      let insertCallCount = 0;
+      const pgClient = {
+        from: sinon.stub().callsFake(() => ({
+          select: sinon.stub().returns({
+            eq: sinon.stub().returns({
+              eq: sinon.stub().returns({
+                gte: sinon.stub().returns({
+                  limit: sinon.stub().resolves({ data: [], error: null }),
+                }),
+              }),
+            }),
+          }),
+          insert: sinon.stub().callsFake(() => {
+            insertCallCount += 1;
+            if (insertCallCount === 1) {
+              // First insert: idempotency key — succeeds
+              return {
+                select: sinon.stub().returns({
+                  single: sinon.stub().resolves({ data: { id: 'idem-id-dedup-1' }, error: null }),
+                }),
+              };
+            }
+            // Second insert: dedup lock — fails with unique constraint
+            return {
+              select: sinon.stub().returns({
+                single: sinon.stub().resolves({
+                  data: null,
+                  error: { code: '23505', message: 'duplicate key value violates unique constraint' },
+                }),
+              }),
+            };
+          }),
+          update: sinon.stub().returns({
+            eq: sinon.stub().resolves({ data: null, error: null }),
+          }),
+          delete: sinon.stub().callsFake(() => {
+            const p = Promise.resolve({ data: null, error: null });
+            return Object.assign(p, {
+              eq: sinon.stub().callsFake(() => {
+                const p2 = Promise.resolve({ data: null, error: null });
+                return Object.assign(p2, {
+                  eq: sinon.stub().callsFake(() => {
+                    const p3 = Promise.resolve({ data: null, error: null });
+                    return Object.assign(p3, {
+                      eq: sinon.stub().callsFake(() => {
+                        const p4 = Promise.resolve({ data: null, error: null });
+                        return Object.assign(p4, {
+                          lt: sinon.stub().resolves({ data: null, error: null }),
+                        });
+                      }),
+                    });
+                  }),
+                });
+              }),
+            });
+          }),
+        })),
+      };
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          services: { postgrestClient: pgClient },
+        },
+      });
+
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Dedup conflict ticket',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.code).to.equal('IN_FLIGHT');
+      expect(body.message).to.include('already in progress');
+    });
+
+    // ── Lines 820-823: Suggestion.findById throws in individual batch mode → 500 in results
+    it('individual batch: records 500 when Suggestion.findById throws mid-loop', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection();
+      const ticket1 = makeTicket();
+
+      const suggestionFindById = sinon.stub();
+      suggestionFindById.withArgs(SUGGESTION_ID).resolves(makeSuggestion());
+      suggestionFindById.withArgs(sid2).rejects(new Error('DB timeout in batch'));
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: sinon.stub().resolves(ticket1) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: suggestionFindById },
+        },
+      });
+
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch suggestion throw',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      const failedItem = body.results.find((r) => r.suggestionId === sid2);
+      expect(failedItem.status).to.equal(500);
+      expect(failedItem.error).to.equal('Failed to validate suggestion');
+    });
+
+    // ── Lines 862-864: Non-reauth batch Jira error → 500 in results ─────────────
+    it('individual batch: records 500 when ticketClient.createTicket throws generic error', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection();
+      const ticket1 = makeTicket();
+
+      const suggestionFindById = sinon.stub();
+      suggestionFindById.withArgs(SUGGESTION_ID).resolves(makeSuggestion());
+      suggestionFindById.withArgs(sid2).resolves(makeSuggestion({ getId: () => sid2 }));
+
+      const ticketCreate = sinon.stub().resolves(ticket1);
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: ticketCreate },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: suggestionFindById },
+        },
+      });
+
+      const genericErr = new Error('Jira service unavailable');
+      const jiraCreateTicket = sinon.stub();
+      jiraCreateTicket.onFirstCall().resolves({
+        ticketId: 'PROJ-1', ticketKey: 'PROJ-1', ticketUrl: 'https://x.net/PROJ-1', ticketStatus: 'To Do',
+      });
+      jiraCreateTicket.onSecondCall().rejects(genericErr);
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch generic jira error',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      const failedItem = body.results.find((r) => r.suggestionId === sid2);
+      expect(failedItem.status).to.equal(500);
+      expect(failedItem.error).to.equal('Failed to create ticket');
+    });
+
+    // ── Lines 883-884, 887-888: Ticket.create throws in individual batch → 500 ───
+    it('individual batch: records 500 when Ticket.create throws after Jira succeeds', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection();
+      const ticket1 = makeTicket();
+
+      const suggestionFindById = sinon.stub();
+      suggestionFindById.withArgs(SUGGESTION_ID).resolves(makeSuggestion());
+      suggestionFindById.withArgs(sid2).resolves(makeSuggestion({ getId: () => sid2 }));
+
+      const ticketCreate = sinon.stub();
+      ticketCreate.onFirstCall().resolves(ticket1);
+      ticketCreate.onSecondCall().rejects(new Error('DB write failed'));
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: ticketCreate },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: suggestionFindById },
+        },
+      });
+
+      const jiraCreateTicket = sinon.stub().resolves({
+        ticketId: 'PROJ-1', ticketKey: 'PROJ-1', ticketUrl: 'https://x.net/PROJ-1', ticketStatus: 'To Do',
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch ticket persist fail',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      const failedItem = body.results.find((r) => r.suggestionId === sid2);
+      expect(failedItem.status).to.equal(500);
+      expect(failedItem.error).to.equal('Ticket created but could not be saved');
+    });
+
+    // ── Lines 918-925: TicketSuggestion.create throws 23505 in batch → 409 ───────
+    it('individual batch: records 409 when TicketSuggestion.create hits unique constraint', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection();
+      const ticket1 = makeTicket();
+      const ticket2 = makeTicket({ getId: () => 'ffffffff-aaaa-bbbb-cccc-dddddddddddd' });
+
+      const suggestionFindById = sinon.stub();
+      suggestionFindById.withArgs(SUGGESTION_ID).resolves(makeSuggestion());
+      suggestionFindById.withArgs(sid2).resolves(makeSuggestion({ getId: () => sid2 }));
+
+      const ticketCreate = sinon.stub();
+      ticketCreate.onFirstCall().resolves(ticket1);
+      ticketCreate.onSecondCall().resolves(ticket2);
+
+      const dupErr = Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+      const bridgeCreate = sinon.stub();
+      bridgeCreate.onFirstCall().resolves();
+      bridgeCreate.onSecondCall().rejects(dupErr);
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: ticketCreate },
+          TicketSuggestion: { create: bridgeCreate },
+          Suggestion: { findById: suggestionFindById },
+        },
+      });
+
+      const jiraCreateTicket = sinon.stub().resolves({
+        ticketId: 'PROJ-1', ticketKey: 'PROJ-1', ticketUrl: 'https://x.net/PROJ-1', ticketStatus: 'To Do',
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch bridge dup',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      const dupItem = body.results.find((r) => r.suggestionId === sid2);
+      expect(dupItem.status).to.equal(409);
+      expect(dupItem.error).to.include('already been ticketed');
+    });
+
+    // ── Lines 918-925 (Case B): TicketSuggestion.create throws generic error in batch → 500
+    it('individual batch: records 500 when TicketSuggestion.create throws non-unique error', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection();
+      const ticket1 = makeTicket();
+      const ticket2 = makeTicket({ getId: () => 'ffffffff-aaaa-bbbb-cccc-dddddddddddd' });
+
+      const suggestionFindById = sinon.stub();
+      suggestionFindById.withArgs(SUGGESTION_ID).resolves(makeSuggestion());
+      suggestionFindById.withArgs(sid2).resolves(makeSuggestion({ getId: () => sid2 }));
+
+      const ticketCreate = sinon.stub();
+      ticketCreate.onFirstCall().resolves(ticket1);
+      ticketCreate.onSecondCall().resolves(ticket2);
+
+      const bridgeCreate = sinon.stub();
+      bridgeCreate.onFirstCall().resolves();
+      bridgeCreate.onSecondCall().rejects(new Error('DB connection lost'));
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: ticketCreate },
+          TicketSuggestion: { create: bridgeCreate },
+          Suggestion: { findById: suggestionFindById },
+        },
+      });
+
+      const jiraCreateTicket = sinon.stub().resolves({
+        ticketId: 'PROJ-1', ticketKey: 'PROJ-1', ticketUrl: 'https://x.net/PROJ-1', ticketStatus: 'To Do',
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch bridge generic error',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      const failedItem = body.results.find((r) => r.suggestionId === sid2);
+      expect(failedItem.status).to.equal(500);
+      expect(failedItem.error).to.equal('Ticket created but suggestion link could not be saved');
+    });
+
+    // ── Line 937: connection.save() rejects in batch (no success) → still 207 ───
+    it('individual batch: logs warn and still returns 207 when connection.save rejects', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const conn = makeConnection({
+        setLastUsedAt: sinon.stub().returnsThis(),
+        setErrorMessage: sinon.stub().returnsThis(),
+        save: sinon.stub().rejects(new Error('save failed')),
+      });
+
+      const suggestionFindById = sinon.stub();
+      suggestionFindById.withArgs(SUGGESTION_ID).resolves(makeSuggestion());
+      suggestionFindById.withArgs(sid2).resolves(null);
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: sinon.stub().resolves(makeTicket()) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: suggestionFindById },
+        },
+      });
+
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch save fail',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      expect(conn.save).to.have.been.called;
+      expect(ctx.log.warn).to.have.been.called;
+    });
+
+    // ── Lines 967-972: Grouped mode reauth → 409 ─────────────────────────────────
+    it('grouped mode: returns 409 when ticketClient.createTicket throws 401', async () => {
+      const conn = makeConnection();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const reauthErr = Object.assign(new Error('Unauthorized'), { status: 401 });
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ createTicket: sinon.stub().rejects(reauthErr) }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped reauth',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.message).to.include('reconnect');
+    });
+
+    // ── Lines 999-1009: Grouped mode Ticket.create throws → 500 ─────────────────
+    it('grouped mode: returns 500 when Ticket.create throws after Jira createTicket succeeds', async () => {
+      const conn = makeConnection();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: sinon.stub().rejects(new Error('DB write failed')) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().resolves({
+                ticketId: 'PROJ-99', ticketKey: 'PROJ-99', ticketUrl: 'https://x.net/PROJ-99', ticketStatus: 'To Do',
+              }),
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped ticket persist fail',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(500);
+      const body = await res.json();
+      expect(body.message).to.equal('Ticket created but could not be saved');
+    });
+
+    // ── Lines 1046-1048: Grouped bridge non-duplicate error → 201 + linkWarnings ─
+    it('grouped mode: returns 201 with linkWarnings when TicketSuggestion.create throws generic error', async () => {
+      const conn = makeConnection();
+      const ticket = makeTicket();
+      const genericErr = new Error('DB connection lost');
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: sinon.stub().resolves(ticket) },
+          TicketSuggestion: { create: sinon.stub().rejects(genericErr) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped generic bridge error',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body.linkWarnings).to.be.an('array').with.lengthOf(1);
+      expect(body.linkWarnings[0]).to.include('Failed to link suggestion');
+    });
+
+    // ── Lines 1055-1064: Attachment upload fails in grouped mode → 201 + warning ─
+    it('grouped mode: returns 201 with attachmentWarning when uploadAttachment throws', async () => {
+      const conn = makeConnection();
+      const ticket = makeTicket();
+      const content = Buffer.from('hello world').toString('base64');
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Ticket: { create: sinon.stub().resolves(ticket) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().resolves({
+                ticketId: 'PROJ-55', ticketKey: 'PROJ-55', ticketUrl: 'https://x.net/PROJ-55', ticketStatus: 'To Do',
+              }),
+              uploadAttachment: sinon.stub().rejects(new Error('S3 upload failed')),
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped with attachment',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+          attachments: [{ content, mimeType: 'text/plain', filename: 'note.txt' }],
+        },
+      }));
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body).to.have.property('attachmentWarning');
+      expect(body.attachmentWarning).to.include('attachment upload failed');
+    });
+
+    // ── Line 1109: Single mode generic Jira error + connection.save rejects → 500 + warn
+    it('single mode: logs warn and returns 500 when Jira throws generic error and connection.save rejects', async () => {
+      const conn = makeConnection({
+        setErrorMessage: sinon.stub().returnsThis(),
+        save: sinon.stub().rejects(new Error('save failed')),
+      });
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().rejects(new Error('Jira internal error')),
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Single save fail on error',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(500);
+      expect(conn.save).to.have.been.called;
+      expect(ctx.log.warn).to.have.been.called;
+    });
   });
 
   // ─── listProjects ────────────────────────────────────────────────────────────
