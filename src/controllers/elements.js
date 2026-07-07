@@ -320,7 +320,9 @@ export default function ElementsController(context, log, env) {
       // has no brand picker, so it cross-maps its selected site → brandId before calling.
       const { spaceCatId, brandId } = ctx?.params ?? {};
       const query = extractQuery(ctx);
-      const service = buildService(ctx);
+      // buildService is async: it resolves the IMS token via the x-promise-token flow
+      // (falling back to Authorization IMS) before constructing the transport (LLMO-5990).
+      const service = await buildService(ctx);
 
       // Confirm the brand belongs to this org before resolving its workspace (prevents
       // reading another tenant's sub-workspace). Reused for region resolution below.
