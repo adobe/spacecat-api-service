@@ -1077,4 +1077,45 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
     });
   });
+
+  describe('resolveTypeTagInjection (serenity-docs#31)', () => {
+    let handler;
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    it('resolves the wanted type value id + all type ids from the project roots (no create)', async () => {
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().resolves({
+          page: 1,
+          total: 3,
+          items: [
+            { id: 'cat-1', name: 'category:Footwear' },
+            { id: 'tb', name: 'type:branded' },
+            { id: 'tnb', name: 'type:non-branded' },
+          ],
+        }),
+      });
+
+      const res = await handler.resolveTypeTagInjection(transport, WORKSPACE, 'proj-1', 'type:branded', fakeLog());
+
+      expect(res.computedId).to.equal('tb');
+      expect(res.typeTagIds).to.have.members(['tb', 'tnb']);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('creates the type value on-demand when a legacy project lacks it', async () => {
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
+        createProjectTags: sinon.stub().resolves([{ id: 'new-tb', name: 'type:branded' }]),
+      });
+
+      const res = await handler.resolveTypeTagInjection(transport, WORKSPACE, 'proj-1', 'type:branded', fakeLog());
+
+      expect(res.computedId).to.equal('new-tb');
+      expect(res.typeTagIds).to.deep.equal(['new-tb']);
+      expect(transport.createProjectTags)
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['type:branded']);
+    });
+  });
 });

@@ -21,7 +21,7 @@ import {
 } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
-  tagFor, CREATABLE_TAG_DIMENSIONS, CLOSED_TAG_DIMENSIONS, PROJECT_STANDARD_TAGS,
+  tagFor, TAG_DIMENSION, CREATABLE_TAG_DIMENSIONS, CLOSED_TAG_DIMENSIONS, PROJECT_STANDARD_TAGS,
 } from '../prompt-tags.js';
 import { listProjectTagTree } from './markets.js';
 
@@ -285,6 +285,46 @@ async function resolveOrCreateClosedTag(transport, semrushWorkspaceId, projectId
   const createdList = await transport.createProjectTags(semrushWorkspaceId, projectId, [tag]);
   const { id } = pickTagIds(createdList, undefined);
   return { id, created: true };
+}
+
+/**
+ * Resolves the id-based injection of a server-computed `type:*` tag into a
+ * prompt write (serenity-docs#31). Lists the project's ROOT tags ONCE and:
+ *   - collects the ids of ALL existing `type:` roots, so the caller can strip
+ *     any caller-supplied `type:*` tag id (the client must never set the value);
+ *   - ensures the WANTED `type:<value>` has an upstream id, creating it on-demand
+ *     for older projects that predate the standard taxonomy (idempotent — new
+ *     projects already carry both values from {@link PROJECT_STANDARD_TAGS}).
+ * Both `type:branded` and `type:non-branded` are roots (closed dims never nest).
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} wantTag - the computed `type:<value>` wire name.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string | undefined, typeTagIds: string[] }>}
+ *   `computedId` is the wanted value's id; `typeTagIds` is every `type:` root id
+ *   present after resolution (the strip set).
+ */
+export async function resolveTypeTagInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  wantTag,
+  log,
+) {
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  const typeRoots = roots.items.filter(
+    (t) => typeof t.name === 'string' && t.name.startsWith(`${TAG_DIMENSION.TYPE}:`),
+  );
+  const typeTagIds = typeRoots.map((t) => t.id).filter(Boolean);
+  const existing = typeRoots.find((t) => t.name === wantTag);
+  if (existing) {
+    return { computedId: existing.id, typeTagIds };
+  }
+  const createdList = await transport.createProjectTags(semrushWorkspaceId, projectId, [wantTag]);
+  const { id } = pickTagIds(createdList, undefined);
+  return { computedId: id, typeTagIds: id ? [...typeTagIds, id] : typeTagIds };
 }
 
 /**

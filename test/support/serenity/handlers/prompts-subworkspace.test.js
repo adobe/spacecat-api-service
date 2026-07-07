@@ -146,6 +146,22 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.createTaggedPrompts).to.not.have.been.called;
     });
 
+    it('injects the computed type tag from the classifier (serenity-docs#31, twin of the flat-mode layer)', async () => {
+      const transport = makeTransport();
+      const classify = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'is Acme good?', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, classify);
+      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        { 'is Acme good?': ['topic:X', 'type:branded'] },
+      );
+    });
+
     it('skips inputs whose slice has no project (one listing, no per-input lookup)', async () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {

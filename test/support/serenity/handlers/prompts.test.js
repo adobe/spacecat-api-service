@@ -1738,3 +1738,111 @@ describe('handlers/prompts.js — defensive branch coverage', () => {
     expect(result.total).to.equal(10);
   });
 });
+
+describe('handlers/prompts.js — unified type classification (serenity-docs#31)', () => {
+  const project = () => makeProject({
+    semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+  });
+  // A classifier that marks any text mentioning "acme" (whole word) branded.
+  const classify = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
+
+  describe('name-based create', () => {
+    it('injects the computed type tag and strips a caller-supplied one', async () => {
+      const dataAccess = makeDataAccess([project()]);
+      const transport = {
+        createTaggedPrompts: sinon.stub().resolves({ ids: ['new-id'] }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'is Acme good?',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tags: ['topic:X', 'type:non-branded'],
+        }],
+      }, fakeLog(), classify);
+
+      expect(result.created).to.have.lengthOf(1);
+      // caller's type:non-branded stripped; computed type:branded appended.
+      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-us-en',
+        { 'is Acme good?': ['topic:X', 'type:branded'] },
+      );
+    });
+
+    it('classifies non-branded when the brand is not mentioned', async () => {
+      const dataAccess = makeDataAccess([project()]);
+      const transport = {
+        createTaggedPrompts: sinon.stub().resolves({ ids: ['new-id'] }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'best running shoes', geoTargetId: 2840, languageCode: 'en', tags: ['topic:X'],
+        }],
+      }, fakeLog(), classify);
+
+      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:non-branded']);
+    });
+  });
+
+  describe('id-based create', () => {
+    it('resolves the computed type to a tag id and strips a caller-supplied type id', async () => {
+      const dataAccess = makeDataAccess([project()]);
+      const transport = {
+        listProjectTags: sinon.stub().resolves({
+          page: 1,
+          total: 2,
+          items: [
+            { id: 'tb', name: 'type:branded' },
+            { id: 'tnb', name: 'type:non-branded' },
+          ],
+        }),
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
+        }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'is Acme good?',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tagIds: ['tag-cat-1', 'tnb'],
+        }],
+      }, fakeLog(), classify);
+
+      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tb']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-us-en',
+        ['is Acme good?'],
+        ['tag-cat-1', 'tb'],
+      );
+    });
+  });
+
+  describe('update recomputes from the new text', () => {
+    it('recomputes the type tag on edit (name path)', async () => {
+      const dataAccess = makeDataAccess([]);
+      dataAccess.BrandSemrushProject.findBySlice.resolves(project());
+      const transport = {
+        deletePromptsByIds: sinon.stub().resolves(),
+        createTaggedPrompts: sinon.stub().resolves({ ids: ['re-id'] }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleUpdatePrompt(transport, dataAccess, BRAND, WORKSPACE, 'old-id', {
+        text: 'now mentions Acme', geoTargetId: 2840, languageCode: 'en', tags: ['topic:X'],
+      }, fakeLog(), classify);
+
+      expect(result.status).to.equal(200);
+      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded']);
+    });
+  });
+});

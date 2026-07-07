@@ -22,6 +22,7 @@ import {
   buildPromptDto,
   normalizePromptInput,
   createOnePrompt,
+  makeTypeInjector,
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
@@ -116,7 +117,13 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * project from ONE live listing (buildSliceProjectMap) instead of the DB
  * mapping, then reuses the shared per-slice create + publish-once fan-out.
  */
-export async function handleCreatePromptsSubworkspace(transport, workspaceId, body, log) {
+export async function handleCreatePromptsSubworkspace(
+  transport,
+  workspaceId,
+  body,
+  log,
+  classifyPromptType,
+) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
@@ -129,6 +136,7 @@ export async function handleCreatePromptsSubworkspace(transport, workspaceId, bo
   }
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
+  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const input = normalizePromptInput(raw);
@@ -151,15 +159,17 @@ export async function handleCreatePromptsSubworkspace(transport, workspaceId, bo
     }
     const projectId = String(project.id);
     try {
-      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, input);
+      // Unified layer: strip any caller-supplied type + inject the computed one.
+      const typed = await injectComputedType(projectId, input);
+      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
       return {
         created: {
           semrushPromptId,
-          geoTargetId: input.geoTargetId,
+          geoTargetId: typed.geoTargetId,
           languageCode: input.languageCode,
-          text: input.text,
-          tags: input.tags,
-          ...(input.tagIds !== undefined ? { tagIds: input.tagIds } : {}),
+          text: typed.text,
+          tags: typed.tags,
+          ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
         },
         affectedProjectId: projectId,
       };
@@ -216,6 +226,7 @@ export async function handleUpdatePromptSubworkspace(
   semrushPromptId,
   body,
   log,
+  classifyPromptType,
 ) {
   const parsedBody = parseUpdatePromptBody(body);
   if (!parsedBody.ok) {
@@ -246,6 +257,13 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
+  // Recompute the type tag from the NEW text BEFORE the delete (see the flat-mode
+  // twin): the unified layer must not run between delete and create.
+  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
+  const typed = await injectComputedType(projectId, {
+    text: nextText, geoTargetId, tags: nextTags, tagIds: nextTagIds,
+  });
+
   try {
     await transport.deletePromptsByIds(workspaceId, projectId, [semrushPromptId]);
   } catch (e) {
@@ -268,9 +286,7 @@ export async function handleUpdatePromptSubworkspace(
 
   let newSemrushPromptId;
   try {
-    newSemrushPromptId = await createOnePrompt(transport, workspaceId, projectId, {
-      text: nextText, tags: nextTags, tagIds: nextTagIds,
-    });
+    newSemrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
   } catch (e) {
     // The DELETE above already succeeded, so the old prompt is gone upstream —
     // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
@@ -296,8 +312,8 @@ export async function handleUpdatePromptSubworkspace(
       geoTargetId,
       languageCode,
       text: nextText,
-      tags: nextTags,
-      ...(nextTagIds !== undefined ? { tagIds: nextTagIds } : {}),
+      tags: typed.tags,
+      ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
     },
   };
 }
