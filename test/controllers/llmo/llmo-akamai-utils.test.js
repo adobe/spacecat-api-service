@@ -1,0 +1,278 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { expect } from 'chai';
+import {
+  EDGE_OPTIMIZE_DEFAULTS,
+  buildRuleConfig,
+  buildParentRule,
+  buildRoutingRule,
+  buildSiteFailoverRule,
+  buildFailoverTestRule,
+  buildFragments,
+  mergeIntoTree,
+  managedRuleNames,
+  failoverEnabled,
+  hostInSiteDomain,
+} from '../../../src/controllers/llmo/llmo-akamai-utils.js';
+
+const HOSTNAME = 'www.example.com';
+const API_KEY = 'llmo-api-key-xyz';
+
+const findBehavior = (rule, name) => rule.behaviors.find((b) => b.name === name);
+const findCriterion = (rule, name) => rule.criteria.find((c) => c.name === name);
+
+describe('llmo-akamai-utils', () => {
+  describe('buildRuleConfig', () => {
+    it('injects the site hostname and API key into a defaults-based config', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      expect(cfg.match.hostnames).to.deep.equal([HOSTNAME]);
+      expect(cfg.match.userAgents).to.deep.equal(EDGE_OPTIMIZE_DEFAULTS.userAgents);
+      expect(cfg.incomingRequestHeaders['x-edgeoptimize-api-key']).to.equal(API_KEY);
+      expect(cfg.failover.alternateHostname).to.equal(HOSTNAME);
+      expect(cfg.failover.enabled).to.equal(false);
+      expect(cfg.origin.hostname).to.equal('live.edgeoptimize.net');
+    });
+
+    it('opts into the advanced failover tag when requested', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, enableFailoverTag: true });
+      expect(cfg.failover.enabled).to.equal(true);
+    });
+
+    it('does not mutate the frozen defaults', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      cfg.match.userAgents.push('EvilBot');
+      expect(EDGE_OPTIMIZE_DEFAULTS.userAgents).to.not.include('EvilBot');
+    });
+  });
+
+  describe('failoverEnabled', () => {
+    it('is false by default and true only when explicitly enabled', () => {
+      expect(failoverEnabled({})).to.equal(false);
+      expect(failoverEnabled({ failover: {} })).to.equal(false);
+      expect(failoverEnabled({ failover: { enabled: true } })).to.equal(true);
+    });
+  });
+
+  describe('buildRoutingRule', () => {
+    let cfg;
+    let routing;
+    beforeEach(() => {
+      cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      routing = buildRoutingRule(cfg);
+    });
+
+    it('is named from the config and scoped to the site hostname', () => {
+      expect(routing.name).to.equal(cfg.ruleNames.routing);
+      const host = findCriterion(routing, 'hostname');
+      expect(host.options.values).to.deep.equal([HOSTNAME]);
+      expect(host.options.matchOperator).to.equal('IS_ONE_OF');
+    });
+
+    it('matches AI-bot user agents and HTML/extensionless files', () => {
+      expect(findCriterion(routing, 'userAgent').options.matchWildcard).to.equal(true);
+      const ext = findCriterion(routing, 'fileExtension');
+      expect(ext.options.values).to.include('EMPTY_STRING');
+      expect(ext.options.values).to.include('html');
+    });
+
+    it('sets the Edge Optimize origin with custom SAN and both CA sets', () => {
+      const origin = findBehavior(routing, 'origin');
+      expect(origin.options.hostname).to.equal('live.edgeoptimize.net');
+      expect(origin.options.customValidCnValues).to.include('*.edgeoptimize.net');
+      expect(origin.options.standardCertificateAuthorities).to.include('THIRD_PARTY_AMAZON');
+      expect(origin.options.trueClientIpClientSetting).to.equal(true);
+    });
+
+    it('injects the api key header and folds the cache-key variable into the cache id', () => {
+      const apiKeyHeader = routing.behaviors.find(
+        (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === 'x-edgeoptimize-api-key',
+      );
+      expect(apiKeyHeader.options.headerValue).to.equal(API_KEY);
+      const cacheId = findBehavior(routing, 'cacheId');
+      expect(cacheId.options.variableName).to.equal(cfg.cacheKeyVariable.name);
+    });
+
+    it('guards against re-routing an already-failed-over request', () => {
+      const guards = routing.criteria.filter(
+        (c) => c.name === 'requestHeader' && c.options.matchOperator === 'DOES_NOT_EXIST',
+      );
+      const guardedHeaders = guards.map((g) => g.options.headerName);
+      expect(guardedHeaders).to.include('x-edgeoptimize-api-key');
+      expect(guardedHeaders).to.include('x-edgeoptimize-request');
+    });
+
+    it('nests a Site Failover child rule pointing back at the site hostname', () => {
+      expect(routing.children).to.have.length(1);
+      const failover = routing.children[0];
+      expect(failover.name).to.equal('Site Failover Behavior');
+      expect(findBehavior(failover, 'failAction').options.contentHostname).to.equal(HOSTNAME);
+    });
+
+    it('adds the WAF-bypass header only when enabled', () => {
+      const cfgWaf = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      cfgWaf.wafBypass = { enabled: true, headerName: 'x-edgeoptimize-fetcher-key', value: 'secret' };
+      const rule = buildRoutingRule(cfgWaf);
+      const waf = rule.behaviors.find(
+        (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === 'x-edgeoptimize-fetcher-key',
+      );
+      expect(waf).to.not.equal(undefined);
+    });
+  });
+
+  describe('buildSiteFailoverRule', () => {
+    it('omits the advanced XML tag by default', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const rule = buildSiteFailoverRule(cfg);
+      expect(findBehavior(rule, 'advanced')).to.equal(undefined);
+      expect(rule.criteriaMustSatisfy).to.equal('any');
+    });
+
+    it('includes the advanced fail-action2 tag when the failover tag is enabled', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, enableFailoverTag: true });
+      const rule = buildSiteFailoverRule(cfg);
+      const advanced = findBehavior(rule, 'advanced');
+      expect(advanced).to.not.equal(undefined);
+      expect(advanced.options.xml).to.contain('fail-action2');
+    });
+  });
+
+  describe('buildFailoverTestRule', () => {
+    it('matches the failover marker and surfaces the x-edgeoptimize-fo response header', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const rule = buildFailoverTestRule(cfg);
+      expect(findCriterion(rule, 'requestHeader').options.headerName).to.equal('x-edgeoptimize-request');
+      const resp = findBehavior(rule, 'modifyOutgoingResponseHeader');
+      expect(resp.options.customHeaderName).to.equal('x-edgeoptimize-fo');
+    });
+  });
+
+  describe('buildParentRule / buildFragments', () => {
+    it('wraps the routing rule and its failover-test sibling under one parent', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const parent = buildParentRule(cfg);
+      expect(parent.name).to.equal(cfg.ruleNames.parent);
+      expect(parent.children.map((c) => c.name)).to.deep.equal([
+        cfg.ruleNames.routing,
+        cfg.ruleNames.failoverTest,
+      ]);
+      expect(buildFragments(cfg).parentRule.name).to.equal(cfg.ruleNames.parent);
+    });
+  });
+
+  describe('managedRuleNames', () => {
+    it('returns the parent, routing, and failover-test rule names', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      expect(managedRuleNames(cfg)).to.deep.equal([
+        cfg.ruleNames.parent,
+        cfg.ruleNames.routing,
+        cfg.ruleNames.failoverTest,
+      ]);
+    });
+  });
+
+  describe('mergeIntoTree', () => {
+    let cfg;
+    let baseTree;
+    beforeEach(() => {
+      cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      baseTree = {
+        rules: {
+          name: 'default',
+          children: [{ name: 'Existing Rule', children: [] }],
+          variables: [],
+        },
+      };
+    });
+
+    it('inserts the managed wrapper as the first child by default and declares the cache variable', () => {
+      const merged = mergeIntoTree(baseTree, cfg);
+      expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
+      expect(merged.rules.children.map((c) => c.name)).to.include('Existing Rule');
+      const declared = merged.rules.variables.some((v) => v.name === cfg.cacheKeyVariable.name);
+      expect(declared).to.equal(true);
+    });
+
+    it('does not mutate the input tree', () => {
+      mergeIntoTree(baseTree, cfg);
+      expect(baseTree.rules.children.map((c) => c.name)).to.deep.equal(['Existing Rule']);
+    });
+
+    it('is idempotent — re-merging replaces rather than duplicating the managed rule', () => {
+      const once = mergeIntoTree(baseTree, cfg);
+      const twice = mergeIntoTree(once, cfg);
+      const parents = twice.rules.children.filter((c) => c.name === cfg.ruleNames.parent);
+      expect(parents).to.have.length(1);
+    });
+
+    it('strips leftover flat routing/failover-test rules from the older layout', () => {
+      const flatTree = {
+        rules: {
+          name: 'default',
+          children: [
+            { name: cfg.ruleNames.routing, children: [] },
+            { name: cfg.ruleNames.failoverTest, children: [] },
+            { name: 'Existing Rule', children: [] },
+          ],
+          variables: [],
+        },
+      };
+      const merged = mergeIntoTree(flatTree, cfg);
+      const names = merged.rules.children.map((c) => c.name);
+      expect(names).to.deep.equal([cfg.ruleNames.parent, 'Existing Rule']);
+    });
+
+    it('honors insertIndex, clamped to the existing children length', () => {
+      const merged = mergeIntoTree(baseTree, cfg, 99);
+      expect(merged.rules.children[merged.rules.children.length - 1].name)
+        .to.equal(cfg.ruleNames.parent);
+    });
+
+    it('does not duplicate an already-declared cache variable', () => {
+      baseTree.rules.variables.push({ name: cfg.cacheKeyVariable.name, value: '' });
+      const merged = mergeIntoTree(baseTree, cfg);
+      const count = merged.rules.variables.filter(
+        (v) => v.name === cfg.cacheKeyVariable.name,
+      ).length;
+      expect(count).to.equal(1);
+    });
+
+    it('creates a variables array when the tree has none', () => {
+      const treeNoVars = { rules: { name: 'default', children: [] } };
+      const merged = mergeIntoTree(treeNoVars, cfg);
+      expect(merged.rules.variables).to.be.an('array').with.length(1);
+    });
+
+    it('throws when the tree has no top-level rules object', () => {
+      expect(() => mergeIntoTree({}, cfg)).to.throw("missing a top-level 'rules' object");
+    });
+  });
+
+  describe('hostInSiteDomain', () => {
+    const base = 'https://www.example.com';
+    it('accepts the apex, www, and subdomains of the site domain', () => {
+      expect(hostInSiteDomain('example.com', base)).to.equal(true);
+      expect(hostInSiteDomain('www.example.com', base)).to.equal(true);
+      expect(hostInSiteDomain('shop.example.com', base)).to.equal(true);
+    });
+
+    it('rejects unrelated and look-alike domains', () => {
+      expect(hostInSiteDomain('evil.com', base)).to.equal(false);
+      expect(hostInSiteDomain('example.com.evil.com', base)).to.equal(false);
+    });
+
+    it('returns false for empty or unparseable inputs', () => {
+      expect(hostInSiteDomain('', base)).to.equal(false);
+      expect(hostInSiteDomain('example.com', 'not a url')).to.equal(false);
+    });
+  });
+});

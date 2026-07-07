@@ -75,6 +75,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} llmoController - The LLMO controller.
  * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
  * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
+ * @param {Object} llmoAkamaiController - The LLMO Akamai onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -140,6 +141,7 @@ export default function getRouteHandlers(
   llmoController,
   llmoCloudflareController,
   llmoCloudFrontController,
+  llmoAkamaiController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -549,6 +551,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': llmoCloudflareController.addRoute,
+
+    // LLMO Akamai Onboarding Routes
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': llmoAkamaiController.getConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': llmoAkamaiController.listProperties,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': llmoAkamaiController.plan,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': llmoAkamaiController.deploy,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': llmoAkamaiController.activate,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': llmoAkamaiController.activationStatus,
 
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,

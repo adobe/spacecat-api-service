@@ -368,6 +368,15 @@ describe('getRouteHandlers', () => {
     getPermissions: () => null,
   };
 
+  const mockLlmoAkamaiController = {
+    getConfig: () => null,
+    listProperties: () => null,
+    plan: () => null,
+    deploy: () => null,
+    activate: () => null,
+    activationStatus: () => null,
+  };
+
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
   };
@@ -626,6 +635,7 @@ describe('getRouteHandlers', () => {
       mockLlmoController,
       mockLlmoCloudflareController,
       mockLlmoCloudFrontController,
+      mockLlmoAkamaiController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -1174,6 +1184,12 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
