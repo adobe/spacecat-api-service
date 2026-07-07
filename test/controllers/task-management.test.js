@@ -1808,11 +1808,11 @@ describe('TaskManagementController', () => {
           summary: 'Bad base64',
           projectKey: 'PROJ',
           connectionId: CONN_ID,
-          // Valid base64 that decodes to zero bytes
-          attachments: [{ content: '', mimeType: 'image/png', filename: 'x.png' }],
+          // '====' is 4 padding chars with no data — decodes to 0 bytes, passes hasText
+          attachments: [{ content: '====', mimeType: 'image/png', filename: 'x.png' }],
         },
       }));
-      // empty content fails hasText() check — returns 400 for missing fields
+      // decoded.length === 0 branch (line 540-542)
       expect(res.status).to.equal(400);
     });
 
@@ -2991,6 +2991,161 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(500);
       expect(conn.save).to.have.been.called;
       expect(ctx.log.warn).to.have.been.called;
+    });
+
+    // ── releaseDedupLock early return (line 771-772): dedupKeyId is null ─────────
+    it('grouped mode: releaseDedupLock exits early when dedup insert failed non-dup', async () => {
+      const conn = makeConnection();
+      let insertCount = 0;
+      function makeDelChain() {
+        const p = Promise.resolve({ data: null, error: null });
+        return Object.assign(p, {
+          eq: sinon.stub().callsFake(() => makeDelChain()),
+          lt: sinon.stub().resolves({ data: null, error: null }),
+        });
+      }
+      const pgClient = {
+        from: sinon.stub().returns({
+          select: sinon.stub().returns({
+            eq: sinon.stub().returns({
+              eq: sinon.stub().returns({
+                gte: sinon.stub().returns({
+                  limit: sinon.stub().resolves({ data: [], error: null }),
+                }),
+              }),
+            }),
+          }),
+          insert: sinon.stub().callsFake(() => {
+            insertCount += 1;
+            if (insertCount === 1) {
+              return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: { id: 'idem-r1' }, error: null }) }) };
+            }
+            // dedup lock insert — non-duplicate error → dedupKeyId stays null
+            return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: null, error: { code: '42P01', message: 'relation missing' } }) }) };
+          }),
+          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
+          delete: sinon.stub().callsFake(() => makeDelChain()),
+        }),
+      };
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          services: { postgrestClient: pgClient },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().rejects(new Error('network error')),
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Dedup null release',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      // releaseDedupLock() early-returns (dedupKeyId=null); grouped generic error → 500
+      expect(res.status).to.equal(500);
+      expect(ctx.log.warn).to.have.been.called; // non-dup dedup warn
+    });
+
+    // ── completeDedupLock early return (line 782-783): dedupKeyId is null ────────
+    it('grouped mode: completeDedupLock exits early when dedup insert failed non-dup', async () => {
+      const conn = makeConnection();
+      const ticket = makeTicket();
+      let insertCount2 = 0;
+      function makeDelChain2() {
+        const p = Promise.resolve({ data: null, error: null });
+        return Object.assign(p, {
+          eq: sinon.stub().callsFake(() => makeDelChain2()),
+          lt: sinon.stub().resolves({ data: null, error: null }),
+        });
+      }
+      const pgClient2 = {
+        from: sinon.stub().returns({
+          select: sinon.stub().returns({
+            eq: sinon.stub().returns({
+              eq: sinon.stub().returns({
+                gte: sinon.stub().returns({
+                  limit: sinon.stub().resolves({ data: [], error: null }),
+                }),
+              }),
+            }),
+          }),
+          insert: sinon.stub().callsFake(() => {
+            insertCount2 += 1;
+            if (insertCount2 === 1) {
+              return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: { id: 'idem-c1' }, error: null }) }) };
+            }
+            // dedup lock insert — non-duplicate error → dedupKeyId stays null
+            return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: null, error: { code: '42P01', message: 'relation missing' } }) }) };
+          }),
+          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
+          delete: sinon.stub().callsFake(() => makeDelChain2()),
+        }),
+      };
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          Ticket: { create: sinon.stub().resolves(ticket) },
+          TicketSuggestion: { create: sinon.stub().resolves() },
+          services: { postgrestClient: pgClient2 },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().resolves({
+                ticketId: 'PROJ-99', ticketKey: 'PROJ-99', ticketUrl: 'https://x.net/PROJ-99', ticketStatus: 'To Do',
+              }),
+            }),
+          },
+        },
+      }, {}, { isModuleNotFoundError: false })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Dedup null complete',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      // completeDedupLock() early-returns (dedupKeyId=null); grouped succeeds → 201
+      expect(res.status).to.equal(201);
+      expect(ctx.log.warn).to.have.been.called; // non-dup dedup warn
     });
   });
 
