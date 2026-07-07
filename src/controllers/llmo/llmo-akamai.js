@@ -348,7 +348,7 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex } = context.data || {};
+    const { insertIndex } = context.data;
 
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);
@@ -367,8 +367,10 @@ function LlmoAkamaiController(ctx) {
         latestVersion: version,
         ruleFormat,
         managedRules: managedRuleNames(cfg),
-        currentChildRules: (ruleTree.rules?.children || []).map((c) => c.name),
-        mergedChildRules: (merged.rules?.children || []).map((c) => c.name),
+        // ruleTree.rules is guaranteed present here (mergeIntoTree throws otherwise, caught below);
+        // only its children may be absent. merge always writes a children array.
+        currentChildRules: (ruleTree.rules.children || []).map((c) => c.name),
+        mergedChildRules: merged.rules.children.map((c) => c.name),
         merged,
       });
     } catch (e) {
@@ -407,7 +409,7 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex } = context.data || {};
+    const { insertIndex } = context.data;
     const siteId = site.getId();
 
     const guard = await assertPropertyServesSite(client, ref, site, context, 'deploy');
@@ -487,7 +489,7 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { network: rawNetwork, version: rawVersion } = context.data || {};
+    const { network: rawNetwork, version: rawVersion } = context.data;
     const siteId = site.getId();
 
     const network = hasText(rawNetwork) ? rawNetwork.toUpperCase() : 'STAGING';
@@ -575,7 +577,7 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { network: rawNetwork, activationId } = context.data || {};
+    const { network: rawNetwork, activationId } = context.data;
     const siteId = site.getId();
 
     let network;

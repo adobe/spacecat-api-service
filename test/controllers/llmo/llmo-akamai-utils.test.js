@@ -274,5 +274,62 @@ describe('llmo-akamai-utils', () => {
       expect(hostInSiteDomain('', base)).to.equal(false);
       expect(hostInSiteDomain('example.com', 'not a url')).to.equal(false);
     });
+
+    it('matches against a site base URL that has no www', () => {
+      expect(hostInSiteDomain('example.com', 'https://example.com')).to.equal(true);
+      expect(hostInSiteDomain('shop.example.com', 'https://example.com')).to.equal(true);
+    });
+
+    it('returns false when the site base URL has an empty hostname', () => {
+      expect(hostInSiteDomain('example.com', 'mailto:someone@example.com')).to.equal(false);
+    });
+  });
+
+  describe('branch coverage — edge configs', () => {
+    const base = () => buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+
+    it('converts an empty-string file extension to EMPTY_STRING', () => {
+      const cfg = base();
+      cfg.match.fileExtensions = ['html', ''];
+      const rule = buildRoutingRule(cfg);
+      expect(findCriterion(rule, 'fileExtension').options.values).to.include('EMPTY_STRING');
+    });
+
+    it('omits the hostname criterion when hostnames are absent', () => {
+      const cfg = base();
+      delete cfg.match.hostnames;
+      const rule = buildRoutingRule(cfg);
+      expect(findCriterion(rule, 'hostname')).to.equal(undefined);
+    });
+
+    it('tolerates a config without removeIncomingResponseHeaders', () => {
+      const cfg = base();
+      delete cfg.removeIncomingResponseHeaders;
+      const rule = buildRoutingRule(cfg);
+      expect(rule.behaviors.some((b) => b.name === 'modifyIncomingResponseHeader')).to.equal(false);
+    });
+
+    it('falls back to the first incoming header for the loop guard when the api-key header is absent', () => {
+      const cfg = base();
+      cfg.incomingRequestHeaders = { 'x-custom-first': 'v', 'x-edgeoptimize-config': 'c' };
+      const rule = buildRoutingRule(cfg);
+      const guards = rule.criteria.filter(
+        (c) => c.name === 'requestHeader' && c.options.matchOperator === 'DOES_NOT_EXIST',
+      );
+      expect(guards.map((g) => g.options.headerName)).to.include('x-custom-first');
+    });
+
+    it('merges into a tree whose default rule has no children array', () => {
+      const cfg = base();
+      const merged = mergeIntoTree({ rules: { name: 'default', variables: [] } }, cfg);
+      expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
+    });
+
+    it('clamps a negative insertIndex to 0', () => {
+      const cfg = base();
+      const tree = { rules: { name: 'default', children: [{ name: 'A' }], variables: [] } };
+      const merged = mergeIntoTree(tree, cfg, -5);
+      expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
+    });
   });
 });

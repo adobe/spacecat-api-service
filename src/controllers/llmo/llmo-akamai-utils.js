@@ -206,13 +206,14 @@ const behaviorAdvanced = (description, xml) => ({
   options: { description, xml },
 });
 
-const criterionRequestHeader = (header, values = null, matchOperator = 'IS_ONE_OF') => {
+const criterionRequestHeader = (header, values = [], matchOperator = 'IS_ONE_OF') => {
   const options = { headerName: header, matchOperator };
   // EXISTS / DOES_NOT_EXIST are presence-only checks — no values or match flags apply, and
-  // including them doesn't match what PAPI itself emits.
+  // including them doesn't match what PAPI itself emits. Value-based operators always receive an
+  // array from their callers (defaulting to [] when omitted).
   if (matchOperator === 'IS_ONE_OF' || matchOperator === 'IS_NOT_ONE_OF') {
     Object.assign(options, {
-      values: [...(values || [])],
+      values: [...values],
       matchCaseSensitive: false,
       matchWildcardName: false,
       matchWildcardValue: false,
@@ -316,7 +317,7 @@ export function buildRoutingRule(cfg) {
   }
 
   const criteria = [];
-  const hostnames = cfg.match?.hostnames || [];
+  const hostnames = cfg.match.hostnames || [];
   if (hostnames.length > 0) {
     criteria.push(criterionHostname(hostnames));
   }
