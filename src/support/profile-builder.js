@@ -222,6 +222,50 @@ const OPPORTUNITY_KEYWORD_MAP = [
   { types: ['a11y-assistive', 'a11y-color-contrast'], keywords: ['accessibility', 'a11y', 'color contrast', 'wcag', 'assistive'] },
 ];
 
+// ---------------------------------------------------------------------------
+// Workflow registry and keyword constants
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_REGISTRY = [
+  { id: 'createJiraTicket', description: 'Open a Jira issue pre-filled with opportunity details and suggestions.' },
+  { id: 'createGitHubPR', description: 'Generate a pull request with automated fixes for the selected items.' },
+  { id: 'deployAndPublish', description: 'Deploy fixes to AEM author environment and publish affected pages.' },
+];
+
+const KNOWN_SCOPE_TYPES = [
+  'broken-backlinks', 'broken-internal-links', 'meta-tags', 'alt-text', 'cwv',
+  'canonical', 'structured-data', 'sitemap', 'consent-banner',
+  'high-organic-low-ctr', 'security', 'all',
+];
+
+const VALID_WORKFLOW_IDS = new Set(WORKFLOW_REGISTRY.map((w) => w.id));
+
+const WORKFLOW_DEFAULT_NAMES = {
+  createJiraTicket: 'Jira ticket workflow',
+  createGitHubPR: 'GitHub PR workflow',
+  deployAndPublish: 'Deploy and publish workflow',
+};
+
+const WORKFLOW_KEYWORD_MAP = [
+  { id: 'createJiraTicket', keywords: ['jira', 'ticket', 'jira ticket', 'jira issue'] },
+  { id: 'createGitHubPR', keywords: ['github pr', 'pull request', ' pr ', 'github pull'] },
+  { id: 'deployAndPublish', keywords: ['deploy', 'publish', 'deployment'] },
+];
+
+const SCOPE_KEYWORD_MAP = [
+  { scope: 'cwv', keywords: ['cwv', 'core web vitals', 'web vitals'] },
+  { scope: 'broken-backlinks', keywords: ['backlink', 'broken backlink'] },
+  { scope: 'broken-internal-links', keywords: ['internal link', 'broken link', 'internal links'] },
+  { scope: 'meta-tags', keywords: ['meta tag', 'meta tags'] },
+  { scope: 'alt-text', keywords: ['alt text', 'alt-text', 'alttext'] },
+  { scope: 'canonical', keywords: ['canonical'] },
+  { scope: 'structured-data', keywords: ['structured data', 'schema markup', 'schema.org'] },
+  { scope: 'sitemap', keywords: ['sitemap'] },
+  { scope: 'consent-banner', keywords: ['consent', 'cookie banner', 'gdpr'] },
+  { scope: 'high-organic-low-ctr', keywords: ['ctr', 'organic ctr', 'low ctr'] },
+  { scope: 'security', keywords: ['security'] },
+];
+
 /**
  * Keyword-based opportunity selector used as a fallback when the LLM is
  * unavailable. Matches the user message against known opportunity type keywords
@@ -309,6 +353,157 @@ export async function selectComponentsWithClaude({
   // LLM unavailable — fall back to keyword matching so common requests
   // ("add alt-text opportunity") always resolve.
   return selectOpportunitiesFromKeywords(message, opportunities);
+}
+
+// ---------------------------------------------------------------------------
+// Unified add-intent detection (call 1 of 2 for the add-to-existing path)
+//
+// Sends only lightweight opportunity stubs (id, type, title — no full data)
+// plus the workflow registry so a single LLM call can identify both which
+// opportunities the user wants to add AND which workflows they want to schedule.
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the unified intent-detection prompt used for the add-to-existing path.
+ * @returns {string}
+ */
+function buildAddIntentPrompt() {
+  const workflows = WORKFLOW_REGISTRY
+    .map((w) => `- "${w.id}": ${w.description}`)
+    .join('\n');
+  const scopes = KNOWN_SCOPE_TYPES.join(', ');
+
+  return `You are an assistant for a website optimisation profile tool.
+The user has an existing profile and is sending a chat message.
+Determine:
+1. Which opportunities (if any) they want to ADD — from the provided list.
+2. Which workflows (if any) they want to SCHEDULE — from the provided registry.
+
+Available workflows:
+${workflows}
+
+Valid scope values (pick the closest match or "all"): ${scopes}
+
+Rules:
+- opportunityIds must only contain ids from the provided opportunities list.
+- workflows must only contain workflowIds from the available workflows list.
+- A message can contain BOTH opportunities and workflows at the same time.
+- If nothing matches, return empty arrays — never invent ids.
+- name must be a 2-5 word business-oriented label reflecting all opportunities
+  now in the profile (existing ones plus newly added). Never concatenate titles.
+- If no opportunities are being added, omit "name" or set it to null.
+
+Respond with ONLY valid JSON (no prose, no markdown):
+{
+  "opportunityIds": ["<id from the provided list>"],
+  "workflows": [
+    { "workflowId": "<id from registry>", "scope": "<scope value or 'all'>", "name": "<short label>" }
+  ],
+  "name": "<revised profile name or null>",
+  "reply": "<one short sentence summarising what was done>"
+}`;
+}
+
+/**
+ * Keyword-based fallback for the unified add-intent detection.
+ * Finds ALL matching opportunity ids AND ALL matching workflows from the message.
+ *
+ * @param {string} message
+ * @param {Array<{id,type}>} opportunities lightweight stubs
+ * @returns {{ opportunityIds: string[], workflows: Array }}
+ */
+function detectAddIntentFromKeywords(message, opportunities) {
+  const lower = ` ${message.toLowerCase()} `;
+
+  // --- opportunities ---
+  const matchedTypes = new Set();
+  for (const entry of OPPORTUNITY_KEYWORD_MAP) {
+    if (entry.keywords.some((kw) => lower.includes(kw))) {
+      entry.types.forEach((t) => matchedTypes.add(t));
+    }
+  }
+  const opportunityIds = opportunities
+    .filter((o) => matchedTypes.has(o.type))
+    .map((o) => o.id);
+
+  // --- workflows ---
+  // "workflow" alone (e.g. "add a jira ticket workflow") counts as a scheduling intent.
+  const hasScheduleVerb = /\b(schedule|automate|automation|set up|setup|trigger|run workflow|workflow)\b/.test(lower);
+  const workflows = [];
+  if (hasScheduleVerb) {
+    for (const w of WORKFLOW_KEYWORD_MAP) {
+      if (w.keywords.some((kw) => lower.includes(kw))) {
+        const scopeMatch = SCOPE_KEYWORD_MAP
+          .find((s) => s.keywords.some((kw) => lower.includes(kw)));
+        const scope = scopeMatch?.scope ?? 'all';
+        const baseName = WORKFLOW_DEFAULT_NAMES[w.id];
+        workflows.push({
+          workflowId: w.id,
+          scope,
+          name: scope === 'all' ? baseName : `${baseName} for ${scope}`,
+        });
+      }
+    }
+  }
+
+  return { opportunityIds, workflows };
+}
+
+/**
+ * Calls Claude to detect which opportunities and workflows the user wants to
+ * add/schedule in a single LLM call. Falls back to keyword matching when the
+ * LLM is unavailable.
+ *
+ * @param {object} params
+ * @param {string} params.message
+ * @param {Array<{id,type,title}>} params.opportunities lightweight stubs (no full data)
+ * @param {string} params.currentProfileName
+ * @param {object} params.env
+ * @param {object} params.log
+ * @returns {Promise<{ opportunityIds: string[], workflows: Array, name: string|null,
+ *   reply: string|null }>}
+ */
+export async function detectAddIntent({
+  message, opportunities, currentProfileName, env, log,
+}) {
+  const userPayload = {
+    request: message,
+    currentProfileName: currentProfileName ?? 'Custom profile',
+    opportunities: opportunities.map((o) => ({ id: o.id, type: o.type, title: o.title })),
+  };
+
+  const result = await callBedrock({
+    env, log, systemPrompt: buildAddIntentPrompt(), userPayload,
+  });
+
+  if (result !== null) {
+    const validIds = new Set(opportunities.map((o) => o.id));
+    const opportunityIds = Array.isArray(result.opportunityIds)
+      ? result.opportunityIds.filter((id) => validIds.has(id))
+      : [];
+
+    const workflows = Array.isArray(result.workflows)
+      ? result.workflows.filter((w) => VALID_WORKFLOW_IDS.has(w?.workflowId))
+        .map((w) => ({
+          workflowId: w.workflowId,
+          scope: hasText(w.scope) ? w.scope : 'all',
+          name: hasText(w.name)
+            ? w.name
+            : (WORKFLOW_DEFAULT_NAMES[w.workflowId] ?? w.workflowId),
+        }))
+      : [];
+
+    return {
+      opportunityIds,
+      workflows,
+      name: hasText(result.name) ? result.name : null,
+      reply: hasText(result.reply) ? result.reply : null,
+    };
+  }
+
+  // LLM unavailable — keyword fallback
+  const fallback = detectAddIntentFromKeywords(message, opportunities);
+  return { ...fallback, name: null, reply: null };
 }
 
 /**
@@ -415,51 +610,6 @@ export function validateProfileSpec(raw, validOpportunityIds) {
     reply: hasText(raw.reply) ? raw.reply : 'I created a profile from your request.',
   };
 }
-
-// ---------------------------------------------------------------------------
-// Workflow intent detection
-// ---------------------------------------------------------------------------
-
-const WORKFLOW_REGISTRY = [
-  { id: 'createJiraTicket', description: 'Open a Jira issue pre-filled with opportunity details and suggestions.' },
-  { id: 'createGitHubPR', description: 'Generate a pull request with automated fixes for the selected items.' },
-  { id: 'deployAndPublish', description: 'Deploy fixes to AEM author environment and publish affected pages.' },
-];
-
-const KNOWN_SCOPE_TYPES = [
-  'broken-backlinks', 'broken-internal-links', 'meta-tags', 'alt-text', 'cwv',
-  'canonical', 'structured-data', 'sitemap', 'consent-banner',
-  'high-organic-low-ctr', 'security', 'all',
-];
-
-const VALID_WORKFLOW_IDS = new Set(WORKFLOW_REGISTRY.map((w) => w.id));
-
-const WORKFLOW_DEFAULT_NAMES = {
-  createJiraTicket: 'Jira ticket workflow',
-  createGitHubPR: 'GitHub PR workflow',
-  deployAndPublish: 'Deploy and publish workflow',
-};
-
-// Keyword maps used as a fallback when the LLM is unavailable.
-const WORKFLOW_KEYWORD_MAP = [
-  { id: 'createJiraTicket', keywords: ['jira', 'ticket', 'jira ticket', 'jira issue'] },
-  { id: 'createGitHubPR', keywords: ['github pr', 'pull request', ' pr ', 'github pull'] },
-  { id: 'deployAndPublish', keywords: ['deploy', 'publish', 'deployment'] },
-];
-
-const SCOPE_KEYWORD_MAP = [
-  { scope: 'cwv', keywords: ['cwv', 'core web vitals', 'web vitals'] },
-  { scope: 'broken-backlinks', keywords: ['backlink', 'broken backlink'] },
-  { scope: 'broken-internal-links', keywords: ['internal link', 'broken link', 'internal links'] },
-  { scope: 'meta-tags', keywords: ['meta tag', 'meta tags'] },
-  { scope: 'alt-text', keywords: ['alt text', 'alt-text', 'alttext'] },
-  { scope: 'canonical', keywords: ['canonical'] },
-  { scope: 'structured-data', keywords: ['structured data', 'schema markup', 'schema.org'] },
-  { scope: 'sitemap', keywords: ['sitemap'] },
-  { scope: 'consent-banner', keywords: ['consent', 'cookie banner', 'gdpr'] },
-  { scope: 'high-organic-low-ctr', keywords: ['ctr', 'organic ctr', 'low ctr'] },
-  { scope: 'security', keywords: ['security'] },
-];
 
 /**
  * Lightweight keyword-based workflow intent detector used as a fallback when

@@ -24,8 +24,7 @@ import {
   buildComponentsForOpportunity,
   validateProfileSpec,
   validateComponents,
-  detectWorkflowIntent,
-  normalizeWorkflowIntent,
+  detectAddIntent,
 } from '../support/profile-builder.js';
 import { createWorkflow } from '../support/workflows-storage.js';
 import {
@@ -78,31 +77,6 @@ function ProfilesController(ctx, log, env) {
 
     // ── ADD-TO-EXISTING branch ────────────────────────────────────────────────
     if (hasText(profileId)) {
-      // First, ask Claude whether this is a workflow-scheduling request.
-      const rawIntent = await detectWorkflowIntent({ message, env, log });
-      const workflowIntent = normalizeWorkflowIntent(rawIntent);
-      if (workflowIntent) {
-        try {
-          const postgrestClient = getPostgrestClient();
-          const workflow = await createWorkflow({
-            postgrestClient,
-            profileId,
-            siteId,
-            name: workflowIntent.name,
-            workflowId: workflowIntent.workflowId,
-            scope: workflowIntent.scope,
-          });
-          return ok({
-            type: 'workflow',
-            ...workflow,
-            reply: workflowIntent.reply,
-          });
-        } catch (error) {
-          log.error(`Workflow creation from chat error: ${error.message}`);
-          return internalServerError('Failed to schedule the workflow.');
-        }
-      }
-
       try {
         const postgrestClient = getPostgrestClient();
         const profile = await getProfileById({ postgrestClient, siteId, profileId });
@@ -115,84 +89,116 @@ function ProfilesController(ctx, log, env) {
           return notFound('This site has no opportunities to add.');
         }
 
-        const candidates = opportunities.map((o) => ({
+        // Lightweight stubs — no full data payload needed for intent detection.
+        const stubs = opportunities.map((o) => ({
           id: o.getId(),
           type: o.getType(),
           title: o.getTitle(),
-          data: o.getData(),
         }));
 
-        const selection = await selectComponentsWithClaude({
-          message, opportunities: candidates, env, log,
+        // Call 1: single LLM call detects both opportunity ids and workflows.
+        const intent = await detectAddIntent({
+          message,
+          opportunities: stubs,
+          currentProfileName: profile.name,
+          env,
+          log,
         });
-        if (!selection) {
-          return createResponse(
-            { message: 'The profile builder is unavailable right now. Please try again.' },
-            503,
-          );
+
+        const { opportunityIds: rawIds, workflows: rawWorkflows } = intent;
+
+        if (rawIds.length === 0 && rawWorkflows.length === 0) {
+          return notFound('No matching opportunities or workflows found for your request.');
         }
 
-        const validIds = new Set(candidates.map((c) => c.id));
-        const matchedIds = [...new Set(selection.opportunityIds || [])]
-          .filter((id) => validIds.has(id));
-        if (matchedIds.length === 0) {
-          return notFound('No matching opportunity found for your request on this site.');
-        }
-
+        // ── Opportunities ─────────────────────────────────────────────────────
         const newComponents = [];
         const addedIds = [];
-        const alreadyPresent = [];
-        let revisedName = null;
-        for (const id of matchedIds) {
-          if (profile.opportunityIds.includes(id)) {
-            alreadyPresent.push(id);
-            // eslint-disable-next-line no-continue
-            continue;
-          }
-          const matched = candidates.find((c) => c.id === id);
-          // eslint-disable-next-line no-await-in-loop
-          const built = await buildComponentsForOpportunity({
-            message,
-            opportunity: matched,
-            currentProfileName: profile.name,
-            env,
-            log,
-          });
-          const validated = validateComponents(built);
-          if (validated) {
-            newComponents.push(...validated.components);
-            addedIds.push(id);
-            // Use the last non-null name the LLM returned across all added opps.
-            if (validated.name) {
-              revisedName = validated.name;
+        let revisedName = intent.name ?? null;
+
+        const newIds = rawIds.filter((id) => !profile.opportunityIds.includes(id));
+
+        if (newIds.length > 0) {
+          // Build a full-data candidate map for component building (call 2).
+          const candidateMap = new Map(
+            opportunities.map((o) => [o.getId(), {
+              id: o.getId(),
+              type: o.getType(),
+              title: o.getTitle(),
+              data: o.getData(),
+            }]),
+          );
+
+          // Call 2: one Bedrock call per new opportunity (component building).
+          const built = await Promise.all(
+            newIds.map((id) => buildComponentsForOpportunity({
+              message,
+              opportunity: candidateMap.get(id),
+              currentProfileName: profile.name,
+              env,
+              log,
+            })),
+          );
+
+          built.forEach((result, i) => {
+            const validated = validateComponents(result);
+            if (validated) {
+              newComponents.push(...validated.components);
+              addedIds.push(newIds[i]);
+              if (validated.name) {
+                revisedName = validated.name;
+              }
             }
+          });
+        }
+
+        // ── Workflows ─────────────────────────────────────────────────────────
+        const createdWorkflows = rawWorkflows.length > 0
+          ? await Promise.all(
+            rawWorkflows.map((w) => createWorkflow({
+              postgrestClient,
+              profileId,
+              siteId,
+              name: w.name,
+              workflowId: w.workflowId,
+              scope: w.scope,
+            })),
+          )
+          : [];
+
+        // ── Persist profile changes ───────────────────────────────────────────
+        let updated = profile;
+        if (addedIds.length > 0 || revisedName) {
+          const patch = {
+            components: [...profile.components, ...newComponents],
+            opportunityIds: [...profile.opportunityIds, ...addedIds],
+          };
+          if (revisedName) {
+            patch.name = revisedName;
           }
+          updated = await updateProfile({
+            postgrestClient, siteId, profileId, patch,
+          });
         }
 
-        if (addedIds.length === 0) {
-          const reply = alreadyPresent.length > 0
-            ? 'Those opportunities are already in this profile.'
-            : 'Could not build a component for that opportunity.';
-          return ok({ ...profile, reply });
+        // Embed the latest workflows (including newly created ones) into the
+        // profile so the UI gets a consistent full-profile response shape.
+        const withWorkflows = await embedWorkflows(postgrestClient, updated);
+
+        const parts = [];
+        if (addedIds.length > 0) {
+          parts.push(`added ${addedIds.length} opportunit${addedIds.length === 1 ? 'y' : 'ies'}`);
         }
-
-        const patch = {
-          components: [...profile.components, ...newComponents],
-          opportunityIds: [...profile.opportunityIds, ...addedIds],
-        };
-        if (revisedName) {
-          patch.name = revisedName;
+        if (createdWorkflows.length > 0) {
+          parts.push(`scheduled ${createdWorkflows.length} workflow${createdWorkflows.length === 1 ? '' : 's'}`);
         }
+        const reply = intent.reply
+          ?? (parts.length > 0 ? `I ${parts.join(' and ')}.` : 'Done.');
 
-        const updated = await updateProfile({
-          postgrestClient, siteId, profileId, patch,
-        });
-
-        const reply = `Added ${addedIds.length} opportunit${addedIds.length === 1 ? 'y' : 'ies'} to your profile.`;
-        return ok({ ...updated, reply });
+        return ok({ ...withWorkflows, reply });
       } catch (error) {
-        log.error(`Profile add-opportunity error: ${error.message}`);
-        return internalServerError('Failed to add opportunity.');
+        log.error(`Profile add error: ${error.message}`);
+        return internalServerError('Failed to update profile.');
       }
     }
 

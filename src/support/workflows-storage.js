@@ -32,6 +32,7 @@ export function rowToWorkflow(row) {
     workflowId: row.workflow_id,
     scope: row.scope,
     status: row.status,
+    result: row.result ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -100,6 +101,43 @@ export async function updateWorkflowStatus({
 
   if (error) {
     throw new Error(`Failed to update workflow status: ${error.message}`);
+  }
+
+  return data ? rowToWorkflow(data) : null;
+}
+
+/**
+ * Updates a workflow's status and optional result payload, scoped to a site.
+ * @param {object} params
+ * @param {object} params.postgrestClient
+ * @param {string} params.siteId
+ * @param {string} params.workflowId  DB id (uuid)
+ * @param {string} params.status
+ * @param {object} [params.result]  optional JSON result (e.g. { ticketKey, ticketUrl })
+ * @returns {Promise<object|null>}
+ */
+export async function updateWorkflowResult({
+  postgrestClient, siteId, workflowId, status, result,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required for workflows');
+  }
+
+  const patch = { status };
+  if (result !== undefined) {
+    patch.result = result;
+  }
+
+  const { data, error } = await postgrestClient
+    .from(TABLE)
+    .update(patch)
+    .eq('id', workflowId)
+    .eq('site_id', siteId)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update workflow result: ${error.message}`);
   }
 
   return data ? rowToWorkflow(data) : null;

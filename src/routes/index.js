@@ -194,6 +194,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/profiles/:profileId/workflows': workflowsController.create,
     'PATCH /sites/:siteId/profiles/:profileId/workflows/:workflowId': workflowsController.updateStatus,
     'DELETE /sites/:siteId/profiles/:profileId/workflows/:workflowId': workflowsController.deleteById,
+    'POST /sites/:siteId/profiles/:profileId/workflows/:workflowId/run': workflowsController.run,
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
