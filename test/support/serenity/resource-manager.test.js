@@ -304,6 +304,18 @@ describe('resource-manager — releaseAiSurplus', () => {
     expect(transfer).to.have.callCount(4); // 1 initial + NOT_READY_RETRIES(3)
   });
 
+  it('release path maps a terminal pool-exhausted 422 to a swallowed best-effort failure', async () => {
+    // The release transfer can 422 "insufficient units" if the parent can't (yet) reabsorb the
+    // surplus; transferAndSettle maps it to orgPoolExhausted, which releaseAiSurplus swallows
+    // (best-effort — a reconciler converges it later).
+    const warn = sinon.spy();
+    const transfer = sinon.stub().rejects(poolFull());
+    const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
+    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
+    expect(r).to.deep.equal({ released: false });
+    expect(warn).to.have.been.calledWithMatch('SERENITY_ALLOC org pool exhausted on transfer');
+  });
+
   it('release path maps a poll timeout to a swallowed best-effort failure', async () => {
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)) });
     t.getWorkspaceStatus = sinon.stub().resolves({ status: 'not ready' });
