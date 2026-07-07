@@ -663,11 +663,18 @@ site-opportunity-suggestions-edge-deploy:
                       enum: [GENERATING_BASELINE]
                     geoExperimentPhase:
                       type: string
-                      enum: [pre_analysis_submitted]
+                      enum: [initiated]
+                      description: >-
+                        Initial phase of the newly created experiment. The
+                        experimentation engine advances it through prompt
+                        generation, pre-analysis, deployment, and post-analysis.
                     prePhaseScheduleId:
-                      type: string
+                      type: [string, 'null']
                       format: uuid
-                      description: DRS schedule ID for the pre-analysis phase
+                      description: >-
+                        Always null from this endpoint. The DRS pre-analysis
+                        schedule is created later by the experimentation engine,
+                        not at edge-deploy time.
       '400':
         $ref: './responses.yaml#/400'
       '401':
