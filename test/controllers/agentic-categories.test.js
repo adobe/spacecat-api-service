@@ -288,6 +288,50 @@ describe('AgenticCategoriesController', () => {
     expect(res.status).to.equal(400);
   });
 
+  // ───── create: sample-URL validity (LLMO-6014) ─────
+  // The endpoint used to accept any non-empty string, so garbage like
+  // "a sdf a;sdf a" was persisted and turned into a meaningless regex.
+  [
+    ['bare word (no scheme, no leading slash)', 'a sdf a;sdf a'],
+    ['free text with spaces', 'this is not a url'],
+    ['absolute path with a space', '/en/home page'],
+    ['absolute path with a tab', '/en/\thome'],
+    ['protocol-relative reference', '//evil.example.com/x'],
+    ['unparseable pseudo-url', 'http://'],
+    ['non-http scheme', 'ftp://example.com/x'],
+  ].forEach(([label, bad]) => {
+    it(`create returns 400 when a url is invalid (${label})`, async () => {
+      const { controller } = loadController();
+      const res = await controller.create(buildContext({ data: { name: 'x', urls: [bad] } }));
+      expect(res.status).to.equal(400);
+    });
+  });
+
+  it('create rejects the list when only one of several urls is invalid', async () => {
+    const { controller } = loadController();
+    const res = await controller.create(buildContext({
+      data: { name: 'x', urls: ['/en/home', 'a sdf a;sdf a'] },
+    }));
+    expect(res.status).to.equal(400);
+  });
+
+  // Both accepted shapes must still create successfully: absolute paths
+  // (e.g. localized "/en/home") and full http(s) URLs.
+  [
+    ['absolute path', ['/en/home', '/en/products']],
+    ['localized path with locale + hyphen', ['/en-us/home', '/en-us/products']],
+    ['full https url', ['https://example.com/en/home', 'https://example.com/en/products']],
+  ].forEach(([label, urls]) => {
+    it(`create accepts valid urls (${label})`, async () => {
+      const client = buildClient({
+        resolveWith: { data: { name: 'x', source: 'human' }, error: null },
+      });
+      const { controller } = loadController();
+      const res = await controller.create(buildContext({ client, data: { name: 'x', urls } }));
+      expect(res.status).to.equal(201);
+    });
+  });
+
   it('list bounds the scan with a limit of 1000', async () => {
     const client = buildClient({ resolveWith: { data: [], error: null } });
     const { controller } = loadController();
@@ -402,6 +446,15 @@ describe('AgenticCategoriesController', () => {
     const longUrl = `/${'a'.repeat(2048)}`;
     const res = await controller.update(buildContext({
       client, params: { name: 'foo' }, data: { urls: [longUrl] },
+    }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('update returns 400 when a url is invalid (LLMO-6014)', async () => {
+    const client = buildClient({ resolveWith: { data: { name: 'foo', source: 'human' }, error: null } });
+    const { controller } = loadController();
+    const res = await controller.update(buildContext({
+      client, params: { name: 'foo' }, data: { urls: ['a sdf a;sdf a'] },
     }));
     expect(res.status).to.equal(400);
   });

@@ -47,14 +47,40 @@ const MAX_ACTIVE_RULES_PER_SITE = 20;
 // Defensive cap on the active-rule scans (list + cross-rule dedup).
 const MAX_ACTIVE_RULES_SCAN = 1000;
 
+// A sample URL entry is valid when it is either a full http(s) URL
+// ("https://example.com/en/home") or an absolute path ("/en/home") — the two
+// shapes the derivation pipeline (extractPath) actually understands. Anything
+// else (bare words, "a sdf a;sdf a", protocol-relative "//host") is rejected so
+// junk can't be persisted and turned into a meaningless regex.
+// Whitespace and control chars are never valid in a URL/path — new URL() would
+// silently percent-encode them rather than throw, so screen them explicitly.
+function isValidSampleUrl(u) {
+  if (!hasText(u) || u.length > MAX_URL_LEN) {
+    return false;
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001f\u007f]/.test(u)) {
+    return false;
+  }
+  if (u.startsWith('/')) {
+    // Absolute path, but not a protocol-relative "//host" reference.
+    return !u.startsWith('//');
+  }
+  try {
+    return ['http:', 'https:'].includes(new URL(u).protocol);
+  } catch {
+    return false;
+  }
+}
+
 function isValidUrlListBody(urls) {
   return isArray(urls)
     && urls.length > 0
     && urls.length <= MAX_SAMPLE_URLS
-    && urls.every((u) => hasText(u) && u.length <= MAX_URL_LEN);
+    && urls.every(isValidSampleUrl);
 }
 
-const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} strings, each at most ${MAX_URL_LEN} characters`;
+const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} entries, each a full http(s) URL or an absolute path (e.g. "/en/home"), at most ${MAX_URL_LEN} characters`;
 
 // The router stores path segments raw (route-utils.js leaves them URL-encoded),
 // so a rule name with spaces/special chars arrives as e.g. 'Blog%20Posts'.
