@@ -15,6 +15,7 @@ import {
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
+import { TicketClientFactory } from '@adobe/spacecat-shared-ticket-client';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import {
@@ -25,31 +26,6 @@ import {
   STATUS_OK,
 } from '../utils/constants.js';
 import { getHeader } from '../support/http-headers.js';
-
-// @adobe/spacecat-shared-ticket-client ships with PR #1701 (unmerged at time of writing).
-// Dynamic import + ERR_MODULE_NOT_FOUND guard lets src/index.js load in test/utils.js
-// (bare import chain) when the package is not yet installed locally. esmock intercepts
-// the import in individual test setups via its ESM loader hook.
-// Deployment: esbuild fails the bundle if the package is absent at build time, so
-// "fail fast" is enforced at the CI build step. Any code path that reaches this fallback
-// in a running Lambda throws a clear error rather than a silent NPE.
-let TicketClientFactory;
-try {
-  // eslint-disable-next-line import/no-unresolved
-  ({ TicketClientFactory } = await import('@adobe/spacecat-shared-ticket-client'));
-} catch (err) {
-  if (err.code !== 'ERR_MODULE_NOT_FOUND') {
-    // Package is installed but failed to load — propagate for fail-fast behaviour.
-    throw err;
-  }
-  // Package not installed (dev / test env without PR #1701 applied).
-  // Shape as an object that throws clearly on first use rather than a silent NPE.
-  TicketClientFactory = {
-    create() {
-      throw new Error('@adobe/spacecat-shared-ticket-client is not installed');
-    },
-  };
-}
 
 const STATUS_CONFLICT = 409;
 
@@ -531,12 +507,7 @@ function TaskManagementController(context) {
           STATUS_BAD_REQUEST,
         );
       }
-      let decoded;
-      try {
-        decoded = Buffer.from(att.content, 'base64');
-      } catch {
-        return createResponse({ message: 'attachment content must be valid base64' }, STATUS_BAD_REQUEST);
-      }
+      const decoded = Buffer.from(att.content, 'base64');
       if (decoded.length === 0) {
         return createResponse({ message: 'attachment content must not be empty' }, STATUS_BAD_REQUEST);
       }

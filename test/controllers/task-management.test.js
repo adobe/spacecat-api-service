@@ -175,8 +175,6 @@ describe('TaskManagementController', () => {
   beforeEach(async () => {
     mockSmSend = sinon.stub().resolves({});
 
-    // @adobe/spacecat-shared-ticket-client is not yet published (unmerged PR #1701);
-    // use isModuleNotFoundError:false so esmock provides the mock without needing the real package.
     TaskManagementController = (await esmock('../../src/controllers/task-management.js', {
       '@aws-sdk/client-secrets-manager': {
         SecretsManagerClient: class {
@@ -197,7 +195,7 @@ describe('TaskManagementController', () => {
           }),
         },
       },
-    }, {}, { isModuleNotFoundError: false })).default;
+    })).default;
   });
 
   afterEach(() => {
@@ -756,7 +754,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns(ticketClientStub) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx());
@@ -787,7 +785,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns(ticketClientStub) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx());
@@ -818,7 +816,7 @@ describe('TaskManagementController', () => {
             },
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const ctx = makeContext({
         dataAccess: {
@@ -848,7 +846,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const ctx = makeContext({
         dataAccess: {
@@ -897,7 +895,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const ctx = makeContext({
         dataAccess: {
@@ -948,7 +946,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: createTicketStub }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const ctx = makeContext({
         dataAccess: {
@@ -993,7 +991,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: sinon.stub().rejects(err) }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const ctx = makeContext({
         dataAccess: {
@@ -1037,7 +1035,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx());
@@ -1081,7 +1079,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -1128,7 +1126,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -1173,7 +1171,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -1215,7 +1213,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx());
@@ -1555,7 +1553,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic bytes
       const { createTicket } = Ctrl(ctx);
@@ -1608,7 +1606,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
       const { createTicket } = Ctrl(ctx);
@@ -1662,7 +1660,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ createTicket: createTicketStub }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -1738,7 +1736,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ createTicket: jiraCreateTicket }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -1789,11 +1787,9 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(201);
     });
 
-    // ── Branch 4: Buffer.from(base64) throws — returns 400 ─────────────────────
+    // ── Branch 4: attachment content decodes to empty buffer — returns 400 ──────
     // Node's Buffer.from does NOT throw on invalid base64 — it silently skips bad
-    // chars and may return an empty buffer.  The "throws" branch (line 537 catch)
-    // is therefore unreachable via normal input, but we can reach the adjacent
-    // "decoded.length === 0" guard (line 540) with a string that decodes to empty.
+    // chars and may return an empty buffer. '====' (padding only) decodes to 0 bytes.
     it('returns 400 when attachment content decodes to empty buffer', async () => {
       const conn = makeConnection();
       const ctx = makeContext({
@@ -2114,7 +2110,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2169,7 +2165,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ createTicket: sinon.stub().rejects(reauthErr) }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       // markRequiresReauth is awaited without a surrounding try/catch in the batch
@@ -2220,7 +2216,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2543,7 +2539,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2599,7 +2595,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2661,7 +2657,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2722,7 +2718,7 @@ describe('TaskManagementController', () => {
         '@adobe/spacecat-shared-ticket-client': {
           TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2801,7 +2797,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ createTicket: sinon.stub().rejects(reauthErr) }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2847,7 +2843,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2928,7 +2924,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -2976,7 +2972,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -3050,7 +3046,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -3130,7 +3126,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
@@ -3210,7 +3206,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { listProjects } = Ctrl(ctx);
       const res = await listProjects(makeReqCtx());
@@ -3243,7 +3239,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ listProjects: sinon.stub().rejects(err) }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { listProjects } = Ctrl(ctx);
       const res = await listProjects(makeReqCtx());
@@ -3274,7 +3270,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ listProjects: sinon.stub().rejects(new Error('timeout')) }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { listProjects } = Ctrl(ctx);
       const res = await listProjects(makeReqCtx());
@@ -3349,7 +3345,7 @@ describe('TaskManagementController', () => {
             }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { listIssueTypes } = Ctrl(ctx);
       const res = await listIssueTypes(makeReqCtx());
@@ -3381,7 +3377,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ listIssueTypes: sinon.stub().rejects(err) }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { listIssueTypes } = Ctrl(ctx);
       const res = await listIssueTypes(makeReqCtx());
@@ -3411,7 +3407,7 @@ describe('TaskManagementController', () => {
             create: sinon.stub().returns({ listIssueTypes: sinon.stub().rejects(new Error('timeout')) }),
           },
         },
-      }, {}, { isModuleNotFoundError: false })).default;
+      })).default;
 
       const { listIssueTypes } = Ctrl(ctx);
       const res = await listIssueTypes(makeReqCtx());
