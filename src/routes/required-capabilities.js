@@ -287,6 +287,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
   'GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/filter-dimensions': 'organization:read',
   'GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/weeks': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',

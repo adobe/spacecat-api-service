@@ -23,6 +23,7 @@ use(sinonChai);
 const ORG_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const BRAND_ID = '11111111-2222-3333-4444-555555555555';
 const WORKSPACE_ID = 'ws-uuid-123';
+const SUB_WORKSPACE_ID = 'sub-ws-uuid-456';
 const IMS_TOKEN = 'test-ims-token';
 const ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' };
 
@@ -35,6 +36,15 @@ const URL_INSPECTOR_RESULT = {
   categories: [],
   page_intents: [],
   origins: [],
+};
+const PROMPTS_RESULT = {
+  count: 1,
+  prompts: [{
+    prompt: 'can i make ai influencer for free',
+    prompt_topic: 'AI Instagram Influencers',
+    primary_intent: 'informational',
+    volume: 2119,
+  }],
 };
 
 function fakeLog() {
@@ -95,6 +105,7 @@ function fakeContext({
   brandSemrushProjects = [],
   withBrandSemrushProject = false,
   promiseToken = undefined,
+  postgrestClient = { from: sinon.stub() },
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
@@ -113,7 +124,7 @@ function fakeContext({
     },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves(org) },
-      services: { postgrestClient: {} },
+      services: { postgrestClient },
       ...(BrandSemrushProject && { BrandSemrushProject }),
     },
     _spacecatBrands: spacecatBrands,
@@ -143,17 +154,22 @@ describe('ElementsController', () => {
   let createElementsServiceStub;
   let createElementsTransportStub;
   let exchangePromiseTokenStub;
+  let resolveBrandUuidStub;
   let MockElementsTransportError;
   let ElementsController;
 
   beforeEach(async () => {
-    resolveBrandWorkspaceStub = sinon.stub().resolves({ mode: 'subworkspace', workspaceId: WORKSPACE_ID });
+    resolveBrandUuidStub = sinon.stub().resolves(BRAND_ID);
+    resolveBrandWorkspaceStub = sinon.stub().resolves({
+      mode: 'subworkspace', workspaceId: SUB_WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
+    });
     accessControlHasAccessStub = sinon.stub().resolves(true);
 
     getBrandByIdStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
 
     serviceStub = {
       getUrlInspectorFilterDimensions: sinon.stub().resolves(URL_INSPECTOR_RESULT),
+      getPrompts: sinon.stub().resolves(PROMPTS_RESULT),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -186,6 +202,9 @@ describe('ElementsController', () => {
       },
       '../../src/support/brands-storage.js': {
         getBrandById: getBrandByIdStub,
+      },
+      '../../src/support/prompts-storage.js': {
+        resolveBrandUuid: resolveBrandUuidStub,
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
@@ -443,7 +462,7 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(serviceStub.getUrlInspectorFilterDimensions).to.have.been.calledWith(
-        WORKSPACE_ID,
+        SUB_WORKSPACE_ID,
         sinon.match.object,
         sinon.match.array,
         sinon.match.array,
@@ -559,6 +578,167 @@ describe('ElementsController', () => {
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       const [workspaceId] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
       expect(workspaceId).to.equal(WORKSPACE_ID);
+    });
+  });
+
+  // ─── listPrompts ──────────────────────────────────────────────────────────
+
+  describe('listPrompts', () => {
+    const promptsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/prompts${qs}`;
+
+    it('returns 200 with the { count, prompts } result', async () => {
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal(PROMPTS_RESULT);
+    });
+
+    it('calls getPrompts with the brand SUB-workspace ID and parsed filters', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?model=perplexity&tag=type:branded,category:Brand&projectId=proj-a,proj-b'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listPrompts(ctx);
+      expect(serviceStub.getPrompts).to.have.been.calledWith(SUB_WORKSPACE_ID, {
+        model: 'perplexity',
+        platform: undefined,
+        tags: ['type:branded', 'category:Brand'],
+        projectIds: ['proj-a', 'proj-b'],
+      });
+    });
+
+    it('resolves the brand uuid via resolveBrandUuid before querying', async () => {
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listPrompts(ctx);
+      expect(resolveBrandUuidStub).to.have.been.calledWith(ORG_ID, BRAND_ID, sinon.match.object);
+      expect(resolveBrandWorkspaceStub)
+        .to.have.been.calledWith(sinon.match.object, ORG_ID, BRAND_ID);
+    });
+
+    it('defaults tags and projectIds to empty arrays when absent', async () => {
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listPrompts(ctx);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.tags).to.deep.equal([]);
+      expect(params.projectIds).to.deep.equal([]);
+    });
+
+    it('accepts the project_id snake_case alias for projectId', async () => {
+      const ctx = fakeContext({ url: promptsUrl('?project_id=proj-x') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listPrompts(ctx);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-x']);
+    });
+
+    it('trims blank CSV entries', async () => {
+      const ctx = fakeContext({ url: promptsUrl('?tag=type:branded,%20,category:Brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listPrompts(ctx);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.tags).to.deep.equal(['type:branded', 'category:Brand']);
+    });
+
+    // ── sub-workspace validation ──
+    it('400s when brandId is not a UUID', async () => {
+      const ctx = fakeContext({ url: promptsUrl(), params: { brandId: 'not-a-uuid' } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('404s when the brand does not resolve for the org', async () => {
+      resolveBrandUuidStub.resolves(null);
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(404);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('503s when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: promptsUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('404s (subWorkspaceRequired) when the brand is in flat mode (no sub-workspace)', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'flat', workspaceId: WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
+      });
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.error).to.equal('subWorkspaceRequired');
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('409s when the brand sub-workspace equals the org parent workspace', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
+      });
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(409);
+      const body = await readBody(res);
+      expect(body.error).to.equal('workspaceMisconfigured');
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('403s when access control denies org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(403);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('exchanges x-promise-token and reaches getPrompts for a non-IMS caller', async () => {
+      const ctx = fakeContext({
+        authType: 'jwt',
+        bearer: 'spacecat-jwt-abc',
+        promiseToken: 'promise-token-xyz',
+        url: promptsUrl(),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getPrompts).to.have.been.calledOnce;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ imsToken: 'exchanged-ims-token' }),
+      );
+    });
+
+    it('401s a non-IMS caller with no x-promise-token, without calling getPrompts', async () => {
+      const ctx = fakeContext({ authType: 'jwt', url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(401);
+      const body = await readBody(res);
+      expect(body.error).to.equal('promiseTokenRequired');
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('propagates upstream errors through mapError', async () => {
+      serviceStub.getPrompts.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(502);
     });
   });
 

@@ -407,10 +407,11 @@ Follow these steps in order. Steps 1–4 are contained within `src/support/eleme
 
 Source: `src/support/elements/element-ids.js`
 
-> **Surfaced endpoints:** `BRANDS`/`MARKETS`/`TOPICS` (rows 1–3) back the [URL Inspector Filter Dimensions](../llmo-semrush-apis/filter-dimensions-apis.md#1-list-url-inspector-filter-dimensions) endpoint; `WEEKS` (row 5) backs the [Weeks](../llmo-semrush-apis/filter-dimensions-apis.md#2-list-weeks) endpoint.
+> **Surfaced endpoints:** `BRANDS`/`MARKETS`/`TOPICS` (rows 1–3) back the [URL Inspector Filter Dimensions](../llmo-semrush-apis/filter-dimensions-apis.md#1-list-url-inspector-filter-dimensions) endpoint; `WEEKS` (row 5) backs the [Weeks](../llmo-semrush-apis/filter-dimensions-apis.md#2-list-weeks) endpoint; `PROMPTS` backs the [Prompts (count)](../llmo-semrush-apis/filter-dimensions-apis.md#3-list-prompts) endpoint.
 
 | Constant | UUID | Section | Row(s) |
 |---|---|---|---|
+| `PROMPTS` | `406ba6e0-0de2-475e-80d9-42fab8616032` | Prompts (count) | — |
 | `BRANDS` | `b178ce4e-6471-4430-9a32-8228ce72b2e6` | Filter Dimensions | 1 |
 | `MARKETS` | `478968a7-8851-4daf-83f7-2e8fb6185ddc` | Filter Dimensions | 2 |
 | `TOPICS` | `ba3b19c1-22d4-460a-8dc3-1ff05c360852` | Filter Dimensions | 3 |
