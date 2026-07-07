@@ -417,6 +417,20 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
   });
 
+  it('rejects task-management connection route with invalid connectionId', async () => {
+    const orgId = 'e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
+    context.pathInfo.suffix = `/organizations/${orgId}/task-management/connections/not-a-uuid`;
+
+    request = new Request(`${baseUrl}/organizations/${orgId}/task-management/connections/not-a-uuid`, {
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Connection Id is invalid. Please provide a valid UUID.');
+  });
+
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
 
