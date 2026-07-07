@@ -1,3 +1,10 @@
+# [1.629.0](https://github.com/adobe/spacecat-api-service/compare/v1.628.1...v1.629.0) (2026-07-07)
+
+
+### Features
+
+* Semrush Elements prompts (count) endpoint for prompt healthcheck ([#2770](https://github.com/adobe/spacecat-api-service/issues/2770)) ([2aace8a](https://github.com/adobe/spacecat-api-service/commit/2aace8affb4a3a81cb35c46ebec3b9e34882c797)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.628.1](https://github.com/adobe/spacecat-api-service/compare/v1.628.0...v1.628.1) (2026-07-07)
 
 
