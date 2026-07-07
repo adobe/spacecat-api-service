@@ -757,7 +757,7 @@ describe('Sites Controller', () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
     getBrandBySiteStub.reset();
-    getBrandBySiteStub.resolves({ semrushWorkspaceId: 'sub-ws-123' });
+    getBrandBySiteStub.resolves({ semrushSubWorkspaceId: 'sub-ws-123' });
     const postgrestClient = { from: () => {} };
 
     const response = await sitesController.updateSite({
