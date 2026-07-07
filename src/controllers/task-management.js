@@ -581,7 +581,16 @@ function TaskManagementController(context) {
     let connection;
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
-      if (!conn || conn.getProvider() !== provider || conn.getStatus() !== 'active') {
+      if (!conn || conn.getProvider() !== provider) {
+        return createResponse(
+          { message: `Active ${provider} connection ${connectionId} not found for organization ${organizationId}` },
+          STATUS_NOT_FOUND,
+        );
+      }
+      if (conn.getStatus() === 'requires_reauth') {
+        return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
+      }
+      if (conn.getStatus() !== 'active') {
         return createResponse(
           { message: `Active ${provider} connection ${connectionId} not found for organization ${organizationId}` },
           STATUS_NOT_FOUND,
@@ -1221,7 +1230,16 @@ function TaskManagementController(context) {
     let connection;
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
-      if (!conn || conn.getStatus() !== 'active') {
+      if (!conn) {
+        return createResponse(
+          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
+          STATUS_NOT_FOUND,
+        );
+      }
+      if (conn.getStatus() === 'requires_reauth') {
+        return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
+      }
+      if (conn.getStatus() !== 'active') {
         return createResponse(
           { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
           STATUS_NOT_FOUND,
@@ -1292,7 +1310,16 @@ function TaskManagementController(context) {
     let connection;
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
-      if (!conn || conn.getStatus() !== 'active') {
+      if (!conn) {
+        return createResponse(
+          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
+          STATUS_NOT_FOUND,
+        );
+      }
+      if (conn.getStatus() === 'requires_reauth') {
+        return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
+      }
+      if (conn.getStatus() !== 'active') {
         return createResponse(
           { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
           STATUS_NOT_FOUND,
