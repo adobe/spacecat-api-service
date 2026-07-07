@@ -24,7 +24,7 @@ SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence
 
 ## 1. List URL Inspector Filter Dimensions
 
-**`GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/filter-dimensions`**
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions`**
 
 Returns all filter dimensions needed to initialise the URL Inspector dashboard in a single call, scoped to a single brand. Makes **three upstream Elements API calls in parallel** (Brands, Topics, Markets) and merges the results.
 
@@ -104,7 +104,7 @@ A single object with six dimension arrays, each shaped for direct use as filter 
 
 ## 2. List Weeks
 
-**`GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/weeks`**
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks`**
 
 Returns the weeks that have Brand Presence data, for the week/date filter dropdown, scoped to a single brand. **Drop-in compatible with the legacy Brand Presence `weeks` contract**, so the URL Inspector filter consumes it unchanged.
 

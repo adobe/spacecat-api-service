@@ -266,8 +266,8 @@ The endpoints below use `authorizeOrg`, which resolves `:brandId` to that brand'
 
 | Method | Path | Controller | Description |
 |---|---|---|---|
-| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | Filter dimensions for the URL Inspector dashboard, scoped to that brand |
-| GET | `/v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/weeks` | `listWeeks` | Weeks with Brand Presence data, scoped to that brand |
+| GET | `/v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | Filter dimensions for the URL Inspector dashboard, scoped to that brand |
+| GET | `/v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks` | `listWeeks` | Weeks with Brand Presence data, scoped to that brand |
 
 > **Note:** The brand-, market-, and tag-selector data (formerly served by dedicated `/serenity/brands`, `/serenity/*/markets`, and `/serenity/*/tags` endpoints) is now provided by the existing Serenity APIs. Only the aggregated URL Inspector filter-dimensions endpoint is served by this Elements wrapper.
 

@@ -230,7 +230,7 @@ async function authorizeOrg(ctx) {
   const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
   const brand = await getBrandById(spaceCatId, brandIdParam, postgrestClient);
   if (!brand) {
-    return { error: forbidden('Brand not found or not accessible for this organization') };
+    return { error: notFound('Brand not found for this organization') };
   }
   const { workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandIdParam);
   if (!hasText(workspaceId)) {
@@ -342,7 +342,8 @@ export default function ElementsController(context, log, env) {
   }
 
   /**
-   * GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/filter-dimensions
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
+   *     /url-inspector/filter-dimensions
    * Returns filter dimensions for the URL Inspector dashboard
    * (brands, regions, topics, categories, page_intents, origins), scoped to
    * that single brand.
@@ -376,11 +377,10 @@ export default function ElementsController(context, log, env) {
   };
 
   /**
-   * GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/weeks
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks
    * Returns the list of weeks that have Brand Presence data (week filter
    * dropdown), scoped to that brand. An unrelated siteId filter is rejected.
    */
-  /* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
   const listWeeks = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
@@ -413,7 +413,6 @@ export default function ElementsController(context, log, env) {
       return mapError(e, log);
     }
   };
-  /* c8 ignore stop */
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts
