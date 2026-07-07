@@ -1,3 +1,10 @@
+# [1.632.0](https://github.com/adobe/spacecat-api-service/compare/v1.631.1...v1.632.0) (2026-07-07)
+
+
+### Features
+
+* pass specific brandId in the serenity apis ([#2771](https://github.com/adobe/spacecat-api-service/issues/2771)) ([b4a1540](https://github.com/adobe/spacecat-api-service/commit/b4a1540b7fd7cf5a557eda39e6ac84dd5f131de1))
+
 ## [1.631.1](https://github.com/adobe/spacecat-api-service/compare/v1.631.0...v1.631.1) (2026-07-07)
 
 
