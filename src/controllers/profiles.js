@@ -24,13 +24,17 @@ import {
   buildComponentsForOpportunity,
   validateProfileSpec,
   validateComponents,
+  detectWorkflowIntent,
+  normalizeWorkflowIntent,
 } from '../support/profile-builder.js';
+import { createWorkflow } from '../support/workflows-storage.js';
 import {
   createProfile,
   updateProfile,
   getProfileById,
   deleteProfile,
   listProfilesBySite,
+  embedWorkflows,
 } from '../support/profiles-storage.js';
 
 /**
@@ -74,6 +78,31 @@ function ProfilesController(ctx, log, env) {
 
     // ── ADD-TO-EXISTING branch ────────────────────────────────────────────────
     if (hasText(profileId)) {
+      // First, ask Claude whether this is a workflow-scheduling request.
+      const rawIntent = await detectWorkflowIntent({ message, env, log });
+      const workflowIntent = normalizeWorkflowIntent(rawIntent);
+      if (workflowIntent) {
+        try {
+          const postgrestClient = getPostgrestClient();
+          const workflow = await createWorkflow({
+            postgrestClient,
+            profileId,
+            siteId,
+            name: workflowIntent.name,
+            workflowId: workflowIntent.workflowId,
+            scope: workflowIntent.scope,
+          });
+          return ok({
+            type: 'workflow',
+            ...workflow,
+            reply: workflowIntent.reply,
+          });
+        } catch (error) {
+          log.error(`Workflow creation from chat error: ${error.message}`);
+          return internalServerError('Failed to schedule the workflow.');
+        }
+      }
+
       try {
         const postgrestClient = getPostgrestClient();
         const profile = await getProfileById({ postgrestClient, siteId, profileId });
@@ -241,14 +270,23 @@ function ProfilesController(ctx, log, env) {
       const name = hasText(context?.data?.name)
         ? context.data.name
         : 'Custom profile';
+      const rationale = hasText(context?.data?.rationale)
+        ? context.data.rationale
+        : '';
+      const components = Array.isArray(context?.data?.components)
+        ? context.data.components
+        : [];
+      const opportunityIds = Array.isArray(context?.data?.opportunityIds)
+        ? context.data.opportunityIds
+        : [];
 
       const profile = await createProfile({
         postgrestClient: getPostgrestClient(),
         siteId,
         name,
-        rationale: '',
-        components: [],
-        opportunityIds: [],
+        rationale,
+        components,
+        opportunityIds,
       });
 
       return createResponse(profile, 201);
@@ -264,11 +302,12 @@ function ProfilesController(ctx, log, env) {
   const list = async (context) => {
     const siteId = context.params?.siteId;
     try {
-      const profiles = await listProfilesBySite({
-        postgrestClient: getPostgrestClient(),
-        siteId,
-      });
-      return ok(profiles);
+      const postgrestClient = getPostgrestClient();
+      const profiles = await listProfilesBySite({ postgrestClient, siteId });
+      const withWorkflows = await Promise.all(
+        profiles.map((p) => embedWorkflows(postgrestClient, p)),
+      );
+      return ok(withWorkflows);
     } catch (error) {
       log.error(`Profile list error: ${error.message}`);
       return internalServerError('Failed to list profiles.');
@@ -285,18 +324,46 @@ function ProfilesController(ctx, log, env) {
       return badRequest('Profile ID is required.');
     }
     try {
-      const profile = await getProfileById({
-        postgrestClient: getPostgrestClient(),
-        siteId,
-        profileId,
-      });
+      const postgrestClient = getPostgrestClient();
+      const profile = await getProfileById({ postgrestClient, siteId, profileId });
       if (!profile) {
         return notFound('Profile not found.');
       }
-      return ok(profile);
+      return ok(await embedWorkflows(postgrestClient, profile));
     } catch (error) {
       log.error(`Profile get error: ${error.message}`);
       return internalServerError('Failed to fetch profile.');
+    }
+  };
+
+  /**
+   * POST /sites/:siteId/profiles/:profileId/copy
+   * Creates a new profile that is a copy of the source, appending " (Custom)" to the name.
+   */
+  const copyById = async (context) => {
+    const siteId = context.params?.siteId;
+    const profileId = context.params?.profileId;
+    if (!hasText(profileId)) {
+      return badRequest('Profile ID is required.');
+    }
+    try {
+      const postgrestClient = getPostgrestClient();
+      const source = await getProfileById({ postgrestClient, siteId, profileId });
+      if (!source) {
+        return notFound('Profile not found.');
+      }
+      const copy = await createProfile({
+        postgrestClient,
+        siteId,
+        name: `${source.name} (Custom)`,
+        rationale: source.rationale ?? '',
+        components: source.components ?? [],
+        opportunityIds: source.opportunityIds ?? [],
+      });
+      return createResponse(copy, 201);
+    } catch (error) {
+      log.error(`Profile copy error: ${error.message}`);
+      return internalServerError('Failed to copy profile.');
     }
   };
 
@@ -324,7 +391,7 @@ function ProfilesController(ctx, log, env) {
   };
 
   return {
-    createFromChat, createEmpty, list, getById, deleteById,
+    createFromChat, createEmpty, list, getById, copyById, deleteById,
   };
 }
 
