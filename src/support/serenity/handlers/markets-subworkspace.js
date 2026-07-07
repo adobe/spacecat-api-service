@@ -34,10 +34,12 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
-import { TYPE_TAG, topicTag } from '../prompt-tags.js';
+import { topicTag } from '../prompt-tags.js';
+import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
+import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -165,17 +167,6 @@ function validateCreateBody(body) {
 }
 
 /**
- * Classifies a generated prompt as `type:branded` when its text mentions the
- * brand — i.e. (lower-cased) prompt text contains any of the brand-name/alias
- * `needles` (already lower-cased + trimmed) as a substring — else
- * `type:non-branded`. Empty `needles` ⇒ everything is non-branded.
- */
-function brandedTypeTag(promptText, needles) {
-  const hay = String(promptText).toLowerCase();
-  return needles.some((n) => hay.includes(n)) ? TYPE_TAG.BRANDED : TYPE_TAG.NON_BRANDED;
-}
-
-/**
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
@@ -196,7 +187,8 @@ function brandedTypeTag(promptText, needles) {
  * @param {number} [options.topicCap=0] - keep the top N topics by volume (0 = all).
  * @param {string[]} [options.standardTags=[]] - tags added to every generated prompt.
  * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
- *   classification (substring match, case-insensitive).
+ *   classification via the shared {@link classifyBrandedTag} (whole-word match,
+ *   diacritic-folded, case-insensitive).
  * @param {object} log - logger.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
@@ -214,18 +206,18 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     .sort((a, b) => (Number(b?.volume) || 0) - (Number(a?.volume) || 0));
   const selected = topicCap > 0 ? ranked.slice(0, topicCap) : ranked;
 
-  // Brand-name + alias needles for branded classification: lower-cased + trimmed
-  // so the substring match is case-insensitive and whitespace-tolerant.
-  const brandNeedles = (Array.isArray(brandNames) ? brandNames : [])
-    .map((s) => String(s || '').trim().toLowerCase())
-    .filter((s) => s.length > 0);
+  // Brand-name + alias needles for branded classification. The shared classifier
+  // (branded-classifier.js) folds diacritics, lower-cases, and matches on whole
+  // word boundaries — the SAME implementation the manual create/edit paths use,
+  // so a prompt is classified identically no matter how it is written.
+  const needles = needlesFromNames(Array.isArray(brandNames) ? brandNames : []);
 
   const promptsByText = {};
   selected.forEach((t) => {
     const topic = topicTag(t.topic);
     (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
       if (hasText(p)) {
-        promptsByText[p] = [topic, ...standardTags, brandedTypeTag(p, brandNeedles)];
+        promptsByText[p] = [topic, ...standardTags, classifyBrandedTag(p, needles)];
       }
     });
   });
@@ -244,9 +236,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
 /**
  * POST /serenity/markets (subworkspace, design flow 3) — ensure the subworkspace
  * (lazy-create / re-grant), then create-or-adopt the slice's draft, publish
- * once, and confirm. No mapping write, no rollback: a leftover draft is a
- * resumable state, not an orphan (design §7). The duplicate-create race is
- * accepted (oldest-wins reads + alert).
+ * once, and confirm. No rollback: a leftover draft is a resumable state, not
+ * an orphan (design §7). The duplicate-create race is accepted (oldest-wins
+ * reads + alert). When `options.dataAccess` is supplied, upserts the
+ * `brand_to_semrush_projects` mapping row best-effort after the project is
+ * created/adopted (serenity-docs brand-semrush-mapping-maintenance.md §4.1) —
+ * omit it for callers whose `brand` is not yet a persisted row (see
+ * `mapping-rows.js` `upsertMappingRow` doc).
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {object} brand - brand record/stub being provisioned.
@@ -275,7 +271,8 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   The market-applicable names are added to the project's `brand_names`
  *   (alongside the primary name) so the project carries them, and — together with
  *   the brand name(s) — used to classify each generated prompt as `type:branded`
- *   (text contains a name/alias, case-insensitive) or `type:non-branded`.
+ *   (text mentions a name/alias as a whole word, diacritic-folded) or
+ *   `type:non-branded`.
  * @param {string[]} [options.projectTags=[]] - project-level tag taxonomy to
  *   register on the project (via createProjectTags) independent of any prompt.
  * @param {object} [options.brandUrlSources=null] - the brand's URL sources
@@ -293,6 +290,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   to publish: `require` throws on failure (the default markets endpoint);
  *   `best-effort` swallows a quota 405 (empty-units publish, workspace doc §5)
  *   and leaves the project a draft; `skip` does not publish at all.
+ * @param {any} [options.dataAccess] - when supplied, upserts the
+ *   `brand_to_semrush_projects` mapping row for this project (best-effort,
+ *   never fails the create). Omit for a `brand` that is not yet a persisted
+ *   row — see `mapping-rows.js` `upsertMappingRow` doc.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -312,6 +313,7 @@ export async function handleCreateMarketSubworkspace(
     brandUrlSources = null,
     competitors = [],
     publishMode = 'require',
+    dataAccess = null,
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -495,6 +497,15 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
+  if (dataAccess) {
+    await upsertMappingRow(dataAccess, {
+      brandId: brand.getId(),
+      semrushProjectId: projectId,
+      geoTargetId: location.geoTargetId,
+      languageCode,
+    }, log);
+  }
+
   return {
     status: 201,
     body: {
@@ -515,6 +526,23 @@ export async function handleCreateMarketSubworkspace(
  * DELETE /serenity/markets/:geo/:lang (subworkspace, design flow 4) — resolve from the
  * listing, delete the project (404-as-success). NO floor check: removing the
  * last market is allowed; the empty subworkspace is kept.
+ *
+ * When `dataAccess` is supplied, best-effort tombstones the mapping row
+ * (`deletedAt` set — spec §4.2) once the project is confirmed gone. Only
+ * covers the two paths where a project id is actually resolved (deleted here,
+ * or already gone upstream via 404-as-success): when the project is not found
+ * in the listing at all (early return below), there is no project id or brand
+ * id in scope to tombstone with, so a live mapping row for an
+ * already-vanished project is left un-tombstoned — accepted,
+ * reconcile-recoverable drift (implementation plan §3.2/§11).
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
+ * @param {string|number|null} geoTargetId - the market's Google Ads Geo Target id.
+ * @param {string|null} languageCode - the market's BCP-47 language code.
+ * @param {object} log - logger.
+ * @param {object} [options]
+ * @param {any} [options.dataAccess]
  */
 export async function handleDeleteMarketSubworkspace(
   transport,
@@ -522,6 +550,7 @@ export async function handleDeleteMarketSubworkspace(
   geoTargetId,
   languageCode,
   log,
+  { dataAccess = null } = {},
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
@@ -535,6 +564,9 @@ export async function handleDeleteMarketSubworkspace(
     if (!isUpstreamGone(e)) {
       throw e;
     }
+  }
+  if (dataAccess) {
+    await tombstoneMappingRow(dataAccess, project.id, log);
   }
   return { status: 204 };
 }

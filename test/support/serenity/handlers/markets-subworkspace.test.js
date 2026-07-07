@@ -64,6 +64,12 @@ function makeTransport(overrides = {}) {
     deleteAiModelsByIds: sinon.stub().resolves(null),
     createProjectTags: sinon.stub().resolves(null),
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
+    // Identity url/resolve: echoes its input as a valid canonical value, so the
+    // handler's brand-URL attach behaves as before for these tests (the www→apex
+    // normalization itself is unit-tested in brand-urls.test.js).
+    resolveUrl: sinon.stub().callsFake(
+      (url) => Promise.resolve({ domain: url, primary_url: url, is_valid: true }),
+    ),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
     createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
     deleteBenchmarks: sinon.stub().resolves(null),
@@ -76,8 +82,8 @@ function makeBrand({ workspaceId = WS } = {}) {
   return {
     getId: () => BRAND,
     getName: () => 'Adobe Express',
-    getSemrushWorkspaceId: () => ws,
-    setSemrushWorkspaceId: (v) => { ws = v; },
+    getSemrushSubWorkspaceId: () => ws,
+    setSemrushSubWorkspaceId: (v) => { ws = v; },
     save: sinon.stub().resolves(),
   };
 }
@@ -165,6 +171,64 @@ describe('markets-subworkspace handlers', () => {
       });
       expect(transport.createProject).to.have.been.calledOnce;
       expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('upserts the mapping row when options.dataAccess is supplied', async () => {
+      const transport = makeTransport();
+      const create = sinon.stub().resolves({});
+      const dataAccess = { BrandSemrushProject: { create } };
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { dataAccess },
+      );
+      expect(res.status).to.equal(201);
+      expect(create).to.have.been.calledOnce;
+      const [payload] = create.firstCall.args;
+      expect(payload).to.deep.equal({
+        brandId: BRAND,
+        semrushProjectId: 'new-proj',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        deletedAt: null,
+      });
+    });
+
+    it('does not touch the mapping row when options.dataAccess is omitted', async () => {
+      const transport = makeTransport();
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+      );
+      expect(res.status).to.equal(201);
+      // No dataAccess passed in at all — nothing to assert a call on beyond the
+      // absence of a thrown error; the "no DB write" case above already covers
+      // this via its exact-body deep.equal.
+    });
+
+    it('does not fail the create when the mapping-row upsert fails (best-effort)', async () => {
+      const transport = makeTransport();
+      const create = sinon.stub().rejects(new Error('postgrest unavailable'));
+      const dataAccess = { BrandSemrushProject: { create } };
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { dataAccess },
+      );
+      expect(res.status).to.equal(201);
     });
 
     it('defaults the project brand_names to just the primary brand name when no aliases', async () => {
@@ -361,7 +425,7 @@ describe('markets-subworkspace handlers', () => {
         transport,
         makeBrand(),
         PARENT,
-        createBody,
+        { ...createBody, brandNames: ['Trail'] },
         log,
         null,
         null,
@@ -381,13 +445,15 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-2');
       // only the top-1 topic by volume was attached, tagged topic:<name> +
-      // source:ai + a branded type: tag. Brand name is 'B' (needle 'b'):
-      // 'best running shoes' contains 'b' => branded; 'top trail shoes' => not.
+      // source:ai + a branded type: tag. Brand name is 'Trail' (needle 'trail'):
+      // the shared classifier now matches on WORD boundaries, so 'top trail
+      // shoes' contains the whole word 'trail' => branded, while 'best running
+      // shoes' does not => non-branded (serenity-docs#31).
       expect(transport.createTaggedPrompts).to.have.been.calledOnce;
       const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
       expect(promptsByText).to.deep.equal({
-        'best running shoes': ['topic:Running Shoes', 'source:ai', 'type:branded'],
-        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'type:non-branded'],
+        'best running shoes': ['topic:Running Shoes', 'source:ai', 'type:non-branded'],
+        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'type:branded'],
       });
       expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
       // Models are STAGED (no inner publish) — only the single final publish runs,
@@ -651,6 +717,34 @@ describe('markets-subworkspace handlers', () => {
         deleteProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
       await expect(handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log)).to.be.rejectedWith(SerenityTransportError);
+    });
+
+    it('tombstones the mapping row by project id when options.dataAccess is supplied', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ id: 'gone-me' })] }) });
+      const row = { setDeletedAt: sinon.stub(), save: sinon.stub().resolves() };
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      const dataAccess = { BrandSemrushProject: { findBySemrushProjectId } };
+      const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log, { dataAccess });
+      expect(res.status).to.equal(204);
+      expect(findBySemrushProjectId).to.have.been.calledOnceWith('gone-me');
+      expect(row.setDeletedAt).to.have.been.calledOnce;
+      expect(row.save).to.have.been.calledOnce;
+    });
+
+    it('does not tombstone when the project is not found in the listing at all (accepted, reconcile-recoverable drift)', async () => {
+      const findBySemrushProjectId = sinon.stub().resolves(null);
+      const dataAccess = { BrandSemrushProject: { findBySemrushProjectId } };
+      const res = await handleDeleteMarketSubworkspace(makeTransport(), WS, 2840, 'en', log, { dataAccess });
+      expect(res.status).to.equal(204);
+      expect(findBySemrushProjectId).to.not.have.been.called;
+    });
+
+    it('does not fail the delete when the tombstone write fails (best-effort)', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ id: 'gone-me' })] }) });
+      const findBySemrushProjectId = sinon.stub().rejects(new Error('postgrest unavailable'));
+      const dataAccess = { BrandSemrushProject: { findBySemrushProjectId } };
+      const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log, { dataAccess });
+      expect(res.status).to.equal(204);
     });
   });
 

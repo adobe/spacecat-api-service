@@ -60,6 +60,7 @@ import {
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
 
 /**
@@ -862,7 +863,7 @@ function SitesController(ctx, log, env) {
             postgrestClient,
             log,
           );
-          attachedToSemrushBrand = hasText(attachedBrand?.semrushWorkspaceId)
+          attachedToSemrushBrand = hasText(attachedBrand?.semrushSubWorkspaceId)
             || await isSemrushMarketMirrorSite(
               site.getOrganizationId(),
               site.getId(),
@@ -1680,16 +1681,23 @@ function SitesController(ctx, log, env) {
     // org-wide federal view capability — no state-layer filter needed.
     const hasFACSCapability = facs?.enabled
       && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    // Whether the per-site state-layer filter applies. Cross-product bypass:
+    // only filter when the current product ReBAC-scopes `site` (ASO). Under
+    // LLMO, `site` is not a ReBAC resource (LLMO scopes `brand`), so the state
+    // layer holds no per-site grants and filtering would wrongly hide sites.
+    const facsSiteFilterActive = facs?.enabled
+      && !hasFACSCapability
+      && isFacsRebacResource(facs.product, 'site');
 
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
-    //           OrganizationDto, SiteDto, facs, hasFACSCapability, Site — all in enclosing scope.
+    //           OrganizationDto, SiteDto, facs, facsSiteFilterActive — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
       const args = [org, productCode, context, ctx, accessControlUtil];
 
       // FACS path: state-layer filter active — find first site the caller can actually view.
-      if (facs?.enabled && !hasFACSCapability) {
+      if (facsSiteFilterActive) {
         const unavailable = requirePostgrestForFacsMappings(context);
         if (unavailable) {
           return unavailable;
@@ -1840,7 +1848,7 @@ function SitesController(ctx, log, env) {
                 return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
               }
 
-              if (facs?.enabled && !hasFACSCapability) {
+              if (facsSiteFilterActive) {
                 const unavailable = requirePostgrestForFacsMappings(context);
                 if (unavailable) {
                   return unavailable;

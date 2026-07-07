@@ -433,7 +433,11 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(created.status).to.equal(200);
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
-      expect(created.body.created[0].tagIds).to.deep.equal([category.body.id, child.body.id]);
+      // The write path now server-computes a branded/non-branded `type:` tag and
+      // appends it to the supplied tagIds, so the created prompt carries the two
+      // supplied tags plus one computed type tag.
+      expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
+      expect(created.body.created[0].tagIds).to.have.lengthOf(3);
       expect(created.body.failed).to.deep.equal([]);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list

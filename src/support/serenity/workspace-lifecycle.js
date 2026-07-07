@@ -256,7 +256,7 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  * @param {object} log
  * @param {object} [timing] - injectable poll timing for tests.
  * @param {function|null} [reloadPointer] - optional async () => string|null that
- *   re-reads the brand's CURRENT semrush_workspace_id from the data layer.
+ *   re-reads the brand's CURRENT semrush_sub_workspace_id from the data layer.
  *   When supplied, the create path uses it as a last-update concurrency guard
  *   (see below) so a parallel activation cannot orphan a resourced workspace.
  * @returns {Promise<string>} the subworkspace id.
@@ -276,7 +276,7 @@ export async function ensureSubworkspace(
     sleep: timing.sleep ?? defaultSleep,
   };
 
-  const existing = brand.getSemrushWorkspaceId?.();
+  const existing = brand.getSemrushSubWorkspaceId?.();
   if (hasText(existing)) {
     // Defense-in-depth: a sub-workspace must never BE the org parent (else a
     // re-grant/transfer would mutate the shared pool). The controller's
@@ -376,7 +376,7 @@ export async function ensureSubworkspace(
   }
 
   // Persist AFTER the workspace reads back `created` — flips the brand to subworkspace mode.
-  brand.setSemrushWorkspaceId(workspaceId);
+  brand.setSemrushSubWorkspaceId(workspaceId);
   await brand.save();
   // Invalidate the resolver's brand cache so the next request sees subworkspace mode
   // without waiting out the negative TTL.
@@ -396,9 +396,9 @@ export async function ensureSubworkspace(
  *      a listMembers transport method not added in this phase)
  *
  * This touches only the upstream workspace. Clearing the brand's
- * `semrush_workspace_id` pointer (the disconnect) is the CALLER's job — the
- * deactivate handler does it after this resolves, leaving the sub-workspace
- * empty and unowned.
+ * `semrush_sub_workspace_id` pointer (the disconnect) is the CALLER's job —
+ * the deactivate handler does it after this resolves, leaving the
+ * sub-workspace empty and unowned.
  *
  * @param {object} transport
  * @param {string} subworkspaceId
