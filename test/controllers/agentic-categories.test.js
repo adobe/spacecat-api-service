@@ -300,6 +300,10 @@ describe('AgenticCategoriesController', () => {
     ['non-http scheme (ftp)', 'ftp://example.com/x'],
     ['javascript scheme', 'javascript'.concat(':alert(1)')],
     ['data scheme', 'data:text/html,<script>1</script>'],
+    ['backslash host-injection', '/'.concat(String.fromCharCode(92), 'evil.com/x')],
+    ['bare token without leading slash', 'a;b;c'],
+    ['bare path without leading slash', 'products/lightroom'],
+    ['host-only without scheme or slash', 'example.com/foo'],
   ].forEach(([label, bad]) => {
     it(`create returns 400 when a url is invalid (${label})`, async () => {
       const { controller } = loadController();
@@ -316,12 +320,12 @@ describe('AgenticCategoriesController', () => {
     expect(res.status).to.equal(400);
   });
 
-  // Accepted shapes: absolute paths, bare paths, localized paths, full URLs.
+  // Accepted shapes: absolute paths (incl. localized), and full http(s) URLs.
   [
     ['absolute path', ['/en/home', '/en/products']],
-    ['bare path without leading slash', ['products/photoshop', 'products/lightroom']],
     ['localized path with locale + hyphen', ['/en-us/home', '/en-us/products']],
     ['full https url', ['https://example.com/en/home', 'https://example.com/en/products']],
+    ['full http url', ['http://example.com/en/home', 'http://example.com/en/products']],
   ].forEach(([label, urls]) => {
     it(`create accepts valid urls (${label})`, async () => {
       const client = buildClient({

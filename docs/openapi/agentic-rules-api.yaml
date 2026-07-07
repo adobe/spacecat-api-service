@@ -346,8 +346,8 @@ AgenticRuleCreateRequest:
         type: string
         maxLength: 2048
         description: >-
-          A full http(s) URL or a URL path (e.g. `/en/home`, `products/lightroom`).
-          Whitespace, control characters, protocol-relative references (`//host`),
+          An absolute path (e.g. `/en/home`) or a full http(s) URL. Whitespace,
+          control characters, backslashes, protocol-relative references (`//host`),
           and non-http schemes are rejected with a 400.
 
 AgenticRuleUpdateRequest:
@@ -365,7 +365,7 @@ AgenticRuleUpdateRequest:
         type: string
         maxLength: 2048
         description: >-
-          A full http(s) URL or a URL path (e.g. `/en/home`, `products/lightroom`).
-          Whitespace, control characters, protocol-relative references (`//host`),
+          An absolute path (e.g. `/en/home`) or a full http(s) URL. Whitespace,
+          control characters, backslashes, protocol-relative references (`//host`),
           and non-http schemes are rejected with a 400.
     newRegex: { type: string }

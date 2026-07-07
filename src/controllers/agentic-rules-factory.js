@@ -47,9 +47,10 @@ const MAX_ACTIVE_RULES_PER_SITE = 20;
 // Defensive cap on the active-rule scans (list + cross-rule dedup).
 const MAX_ACTIVE_RULES_SCAN = 1000;
 
-// Valid entry: a full http(s) URL or a path ("/en/home", "en/home"). Resolving
-// against a base accepts both. Whitespace/control chars are screened first (URL
-// parsing would percent-encode them); "//host" and non-http schemes are rejected.
+// Valid entry: an absolute path ("/en/home") or a self-contained http(s) URL
+// ("https://example.com/en/home"). Whitespace/control chars and backslashes are
+// screened first (URL parsing would silently percent-encode or rewrite them);
+// protocol-relative "//host" and non-http schemes are rejected.
 function isValidSampleUrl(u) {
   if (!hasText(u) || u.length > MAX_URL_LEN) {
     return false;
@@ -58,12 +59,20 @@ function isValidSampleUrl(u) {
   if (/[\s\u0000-\u001f\u007f]/.test(u)) {
     return false;
   }
-  // Protocol-relative "//host" would resolve to a foreign host against the base.
-  if (u.startsWith('//')) {
+  // A backslash (char 92) has no place in these values; the URL parser would
+  // rewrite it to a slash, letting "/\host" masquerade as a path.
+  if (u.includes(String.fromCharCode(92))) {
     return false;
   }
+  if (u.startsWith('/')) {
+    // Absolute path, but not a protocol-relative "//host" reference.
+    return !u.startsWith('//');
+  }
+  // Not a path — require a self-contained http(s) URL. No base here on purpose:
+  // bare tokens ("a;b;c", "products/x") throw and are rejected rather than being
+  // silently reinterpreted as a path.
   try {
-    const { protocol } = new URL(u, 'https://example.com');
+    const { protocol } = new URL(u);
     return protocol === 'http:' || protocol === 'https:';
   } catch {
     return false;
@@ -77,7 +86,7 @@ function isValidUrlListBody(urls) {
     && urls.every(isValidSampleUrl);
 }
 
-const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} entries, each a full http(s) URL or a path (e.g. "/en/home", "products/lightroom"), at most ${MAX_URL_LEN} characters`;
+const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} entries, each an absolute path (e.g. "/en/home") or a full http(s) URL, at most ${MAX_URL_LEN} characters`;
 
 // The router stores path segments raw (route-utils.js leaves them URL-encoded),
 // so a rule name with spaces/special chars arrives as e.g. 'Blog%20Posts'.
