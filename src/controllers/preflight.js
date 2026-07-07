@@ -347,15 +347,12 @@ function PreflightController(ctx, log, env) {
 
       log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
 
-      const result = job.getResult();
-      const status = job.getStatus();
-
       // Emit the terminal-state observability log (shared with the Mystique path).
       logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, jobId, job);
 
       return ok({
         jobId: job.getId(),
-        status,
+        status: job.getStatus(),
         createdAt: job.getCreatedAt(),
         updatedAt: job.getUpdatedAt(),
         startedAt: job.getStartedAt(),
@@ -363,7 +360,7 @@ function PreflightController(ctx, log, env) {
         recordExpiresAt: job.getRecordExpiresAt(),
         resultLocation: job.getResultLocation(),
         resultType: job.getResultType(),
-        result,
+        result: job.getResult(),
         error: job.getError(),
         metadata: job.getMetadata(),
       });
