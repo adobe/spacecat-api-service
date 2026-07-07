@@ -1,3 +1,10 @@
+## [1.628.1](https://github.com/adobe/spacecat-api-service/compare/v1.628.0...v1.628.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* migrate prompt handling and IVE DRS schedule creation ([#2742](https://github.com/adobe/spacecat-api-service/issues/2742)) ([f8f5f3b](https://github.com/adobe/spacecat-api-service/commit/f8f5f3b1473dd689c50247371e5c0dde8a06b64c))
+
 # [1.628.0](https://github.com/adobe/spacecat-api-service/compare/v1.627.0...v1.628.0) (2026-07-07)
 
 
