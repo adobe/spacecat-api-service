@@ -50,7 +50,9 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 // The auth source (after `@`) is a named source (AdobeID/AdobeOrg/Email/AdobeServices)
 // or a hex org id that may carry a single-letter account-type suffix, e.g.
 // `...495fcd.e` for reference/trial orgs — plain emails and system markers stay rejected.
-const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{16,}(?:\.[a-z])?)$/;
+// The hex run is bounded (16-40) to keep this security guard tight: it is the sole
+// gate preventing arbitrary stored values from reaching getImsAdminProfile.
+const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{16,40}(?:\.[a-z])?)$/;
 const IMS_ENRICH_BATCH_SIZE = 5;
 
 /**
