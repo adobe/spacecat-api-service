@@ -77,7 +77,7 @@ function isValidUrlListBody(urls) {
     && urls.every(isValidSampleUrl);
 }
 
-const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} entries, each a full http(s) URL or an absolute path (e.g. "/en/home"), at most ${MAX_URL_LEN} characters`;
+const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} entries, each a full http(s) URL or a path (e.g. "/en/home", "products/lightroom"), at most ${MAX_URL_LEN} characters`;
 
 // The router stores path segments raw (route-utils.js leaves them URL-encoded),
 // so a rule name with spaces/special chars arrives as e.g. 'Blog%20Posts'.

@@ -294,9 +294,12 @@ describe('AgenticCategoriesController', () => {
     ['bare text with spaces', 'this is not a url'],
     ['absolute path with a space', '/en/home page'],
     ['absolute path with a tab', '/en/\thome'],
+    ['DEL control char (U+007F)', `/en/${String.fromCharCode(0x7f)}home`],
     ['protocol-relative reference', '//evil.example.com/x'],
     ['unparseable pseudo-url', 'http://'],
-    ['non-http scheme', 'ftp://example.com/x'],
+    ['non-http scheme (ftp)', 'ftp://example.com/x'],
+    ['javascript scheme', 'javascript'.concat(':alert(1)')],
+    ['data scheme', 'data:text/html,<script>1</script>'],
   ].forEach(([label, bad]) => {
     it(`create returns 400 when a url is invalid (${label})`, async () => {
       const { controller } = loadController();
