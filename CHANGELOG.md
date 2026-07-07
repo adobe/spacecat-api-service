@@ -1,3 +1,10 @@
+# [1.628.0](https://github.com/adobe/spacecat-api-service/compare/v1.627.0...v1.628.0) (2026-07-07)
+
+
+### Features
+
+* add support for promise token for semrush api authentication ([#2753](https://github.com/adobe/spacecat-api-service/issues/2753)) ([2a46cf3](https://github.com/adobe/spacecat-api-service/commit/2a46cf343646a5f1df7c76fa946e849aa2a39a6a))
+
 # [1.627.0](https://github.com/adobe/spacecat-api-service/compare/v1.626.0...v1.627.0) (2026-07-06)
 
 
