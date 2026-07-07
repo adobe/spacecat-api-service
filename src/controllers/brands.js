@@ -32,7 +32,7 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserToken, getImsUserTokenStrict } from '../support/utils.js';
+import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import {
   STATUS_BAD_REQUEST,
@@ -1892,7 +1892,7 @@ function BrandsController(ctx, log, env) {
         if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
-          const imsToken = getImsUserTokenStrict(context);
+          const imsToken = await resolveSemrushImsToken(context, log, 'brands');
           const transport = createSerenityTransport({ env: context.env, imsToken });
           prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
           reservedDomains = buildReservedDomains(
@@ -1947,8 +1947,9 @@ function BrandsController(ctx, log, env) {
         && hasText(updated.semrushSubWorkspaceId)) {
         // Forward only an IMS user token upstream (matches the create path +
         // the rest of /serenity/*): PATCH /brands is organization:write and thus
-        // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
-        const imsToken = getImsUserTokenStrict(context);
+        // S2S-reachable, so prefer an x-promise-token exchange and otherwise
+        // refuse a non-IMS bearer rather than proxy it.
+        const imsToken = await resolveSemrushImsToken(context, log, 'brands');
         const transport = createSerenityTransport({ env: context.env, imsToken });
         try {
           // List the sub-workspace's projects ONCE and share the result across the

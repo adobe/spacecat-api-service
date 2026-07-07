@@ -5659,6 +5659,10 @@ describe('Brands Controller', () => {
       // Serenity active by default so a sync-field edit reaches the re-sync block.
       // The inactive case overrides this to assert the gate rejects.
       isSerenityActiveForOrg = sinon.stub().resolves(true),
+      // Only override when a test supplies one; otherwise the real
+      // support/utils.js#resolveSemrushImsToken runs (its own decode/exchange
+      // logic is covered directly in test/support/utils.test.js).
+      resolveSemrushImsToken,
     }) {
       // Only override getBrandById when a test supplies one; otherwise leave the
       // real export in place (partial esmock keeps the rest of the module real).
@@ -5666,7 +5670,7 @@ describe('Brands Controller', () => {
       if (getBrandById) {
         brandsStorageMock.getBrandById = getBrandById;
       }
-      const Mocked = await esmock('../../src/controllers/brands.js', {
+      const overrides = {
         '../../src/support/brands-storage.js': brandsStorageMock,
         '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
         '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
@@ -5675,7 +5679,11 @@ describe('Brands Controller', () => {
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
-      });
+      };
+      if (resolveSemrushImsToken) {
+        overrides['../../src/support/utils.js'] = { resolveSemrushImsToken };
+      }
+      const Mocked = await esmock('../../src/controllers/brands.js', overrides);
       return Mocked.default(context, loggerStub, mockEnv);
     }
 
@@ -5714,6 +5722,48 @@ describe('Brands Controller', () => {
         { urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [] },
         'ws-9',
       );
+    });
+
+    it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
+      const updated = {
+        id: BRAND_UUID,
+        name: 'Updated Brand',
+        semrushSubWorkspaceId: 'ws-9',
+        urls: [{ value: 'https://acme.com' }],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const syncStub = sinon.stub().resolves({ markets: 1, created: 1, deleted: 0 });
+      const transport = { name: 't', listProjects: sinon.stub().resolves({ items: [] }) };
+      const createTransportStub = sinon.stub().returns(transport);
+      const resolveSemrushImsTokenStub = sinon.stub().resolves('exchanged-ims-token');
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: createTransportStub,
+        resolveSemrushImsToken: resolveSemrushImsTokenStub,
+      });
+      const requestContext = {
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { socialAccounts: [{ url: 'https://x.com/acme', regions: ['us'] }] },
+        dataAccess: mockDataAccess,
+        // Non-IMS bearer: only resolveSemrushImsToken's x-promise-token path can
+        // produce an upstream token for this caller.
+        pathInfo: { headers: { 'x-promise-token': 'raw-promise-token' } },
+        attributes: { authInfo: { getType: () => 'jwt' } },
+      };
+
+      const response = await controller.updateBrandForOrg(requestContext);
+
+      expect(response.status).to.equal(200);
+      expect(resolveSemrushImsTokenStub).to.have.been.calledWith(
+        requestContext,
+        sinon.match.any,
+        'brands',
+      );
+      expect(createTransportStub).to.have.been.calledWithMatch({ imsToken: 'exchanged-ims-token' });
     });
 
     it('rejects a sync-field edit with 403 when serenity is inactive and the brand has a sub-workspace (no row write, no re-sync)', async () => {

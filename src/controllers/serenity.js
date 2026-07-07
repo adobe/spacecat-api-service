@@ -70,9 +70,10 @@ import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors,
 } from '../support/brands-storage.js';
-import { ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
+import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
 import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 
 const MAX_ERR_MSG_LEN = 500;
@@ -189,6 +190,13 @@ function mapError(e, log) {
  * upstream gateway only understands IMS user tokens; we refuse to forward
  * anything else.
  *
+ * NOTE — this is NOT the only path into the handlers below: `x-promise-token`
+ * (see `resolveSemrushImsToken`) is a SECOND, always-on (including production)
+ * way to reach them without passing this function's IMS-type check, by
+ * exchanging the promise token for an IMS token instead of forwarding
+ * `Authorization` directly. This function's gate — and the test-only escape
+ * hatch below — only govern the plain-bearer fallback path.
+ *
  * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
  * we forward is validated AGAIN by the real Semrush gateway on every upstream
  * call (it rejects an invalid/expired/forged token with 401/403, which the
@@ -218,10 +226,16 @@ function requireImsBearer(ctx) {
   const isProd = ctx?.env?.AWS_ENV === 'prod' || ctx?.env?.ENV === 'prod';
   const allowNonIms = !isProd && ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
   if (!allowNonIms && authInfo?.getType && authInfo.getType() !== 'ims') {
-    throw new ErrorWithStatusCode(
-      'Serenity proxy requires IMS authentication',
+    // Reached only when x-promise-token was absent (resolveSemrushImsToken checks
+    // that header first and never falls through to here when it's present) — a
+    // non-IMS caller has no other way to authenticate to Semrush, so point them
+    // at the promise-token flow instead of a bare "not authenticated" message.
+    const err = new ErrorWithStatusCode(
+      `Serenity proxy requires IMS authentication; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
       401,
     );
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
+    throw err;
   }
   const header = ctx?.pathInfo?.headers?.authorization;
   if (!hasText(header) || !header.startsWith(BEARER_PREFIX)) {
@@ -265,6 +279,33 @@ function SerenityController(context, log, env) {
   if (!warnedNonImsAuth && (context?.env || env)?.SERENITY_ALLOW_NON_IMS_AUTH === 'true') {
     warnedNonImsAuth = true;
     log.warn('[serenity] SERENITY_ALLOW_NON_IMS_AUTH is enabled — the IMS-type auth gate is bypassed. This is test-only and must never be set in a deployed environment.');
+  }
+
+  /**
+   * Resolves the IMS access token to forward to the Semrush gateway.
+   *
+   * Preferred path: the caller sends `x-promise-token` (minted by
+   * POST /auth/v2/promise). This lets a caller authenticate to spacecat itself
+   * with a NON-IMS credential (e.g. a spacecat JWT on `Authorization`) while
+   * still supplying an IMS-exchangeable token for the upstream Semrush call —
+   * mirrors the existing pattern in edge-routing-auth.js / fixes.js. The promise
+   * token is checked FIRST and, when present, `requireImsBearer` (and its
+   * `authInfo.getType() === 'ims'` gate) is never invoked, since `Authorization`
+   * is not expected to carry an IMS token in that case. This is a SECOND,
+   * always-on (including production) bypass of that gate, distinct from the
+   * SERENITY_ALLOW_NON_IMS_AUTH test-only escape hatch above.
+   *
+   * Fallback path: no `x-promise-token` — behaves exactly as before, requiring
+   * IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+   *
+   * Delegates the promise-token decode/exchange to the shared
+   * `resolveSemrushImsToken` helper in support/utils.js (also used by
+   * elements.js and the brand create/edit/provisioning re-sync paths),
+   * passing this controller's own `requireImsBearer` as the fallback since it
+   * additionally supports the SERENITY_ALLOW_NON_IMS_AUTH test-only escape hatch.
+   */
+  async function resolveSemrushImsToken(ctx) {
+    return resolveImsTokenViaPromise(ctx, log, 'serenity', requireImsBearer);
   }
 
   /**
@@ -393,7 +434,7 @@ function SerenityController(context, log, env) {
 
   const listPrompts = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -416,7 +457,7 @@ function SerenityController(context, log, env) {
 
   const createPrompts = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -440,7 +481,7 @@ function SerenityController(context, log, env) {
 
   const updatePrompt = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const { semrushPromptId } = ctx?.params || {};
       if (!hasText(semrushPromptId)) {
         throw new ErrorWithStatusCode('Missing semrushPromptId', 400);
@@ -475,7 +516,7 @@ function SerenityController(context, log, env) {
 
   const bulkDeletePrompts = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -504,7 +545,7 @@ function SerenityController(context, log, env) {
 
   const listMarkets = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -529,7 +570,7 @@ function SerenityController(context, log, env) {
       // IMS bearer is required on the whole surface. Flat mode is a pure DB
       // read (no upstream), but subworkspace mode reads the live listing, so the token
       // is captured here and a transport built only when needed.
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -557,7 +598,7 @@ function SerenityController(context, log, env) {
 
   const createMarket = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -646,7 +687,7 @@ function SerenityController(context, log, env) {
 
   const deleteMarket = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -690,7 +731,7 @@ function SerenityController(context, log, env) {
 
   const listTags = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -722,7 +763,7 @@ function SerenityController(context, log, env) {
    */
   const createTag = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -761,7 +802,7 @@ function SerenityController(context, log, env) {
    */
   const updateTag = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const { tagId } = ctx?.params || {};
       if (!hasText(tagId)) {
         throw new ErrorWithStatusCode('Missing tagId', 400);
@@ -796,7 +837,7 @@ function SerenityController(context, log, env) {
 
   const listModels = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -826,7 +867,7 @@ function SerenityController(context, log, env) {
    */
   const listOrgModels = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const spaceCatId = ctx?.params?.spaceCatId;
       if (!isValidUUID(spaceCatId)) {
         return createResponse(
@@ -862,7 +903,7 @@ function SerenityController(context, log, env) {
    */
   const listOrgLanguages = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const spaceCatId = ctx?.params?.spaceCatId;
       if (!isValidUUID(spaceCatId)) {
         return createResponse(
@@ -892,7 +933,7 @@ function SerenityController(context, log, env) {
 
   const updateModels = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -924,7 +965,7 @@ function SerenityController(context, log, env) {
    */
   const activate = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -1312,7 +1353,7 @@ function SerenityController(context, log, env) {
    */
   const deactivate = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
