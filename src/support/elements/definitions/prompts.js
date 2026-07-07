@@ -78,10 +78,17 @@ export function buildPromptsPayload({
 
 /**
  * @typedef {object} PromptRow
- * @property {string} prompt - The prompt text.
- * @property {string} prompt_topic - The topic Semrush assigned to the prompt.
- * @property {string} primary_intent - The prompt's primary intent (e.g. `informational`).
- * @property {number} volume - Search volume for the prompt.
+ * @property {string} prompt - The prompt text (the question a user asked the LLM).
+ * @property {string} prompt_topic - The topic the prompt belongs to. Assigned by a
+ *   Semrush-developed model that groups together prompts which ask similar things and
+ *   receive similar replies. This is NOT a tag — it is a derived grouping, one topic
+ *   per prompt.
+ * @property {string} primary_intent - The primary intent of the `prompt_topic` (e.g.
+ *   `informational`), i.e. the intent is a property of the topic, not the individual
+ *   prompt. This is the field the healthcheck's intent-coverage metric groups on.
+ * @property {number} volume - Estimated number of times per month a user asked the LLM
+ *   a question about this topic. A per-topic estimate, so prompts sharing a topic carry
+ *   the same volume.
  */
 
 /**
