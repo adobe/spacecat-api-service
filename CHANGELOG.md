@@ -1,3 +1,10 @@
+## [1.631.1](https://github.com/adobe/spacecat-api-service/compare/v1.631.0...v1.631.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* stop fabricating domain & metrics in top-brands | LLMO-6012 ([#2756](https://github.com/adobe/spacecat-api-service/issues/2756)) ([4da3b18](https://github.com/adobe/spacecat-api-service/commit/4da3b18d35cf91a03e4916bf9c25bdc4fcd96506))
+
 # [1.631.0](https://github.com/adobe/spacecat-api-service/compare/v1.630.0...v1.631.0) (2026-07-07)
 
 
