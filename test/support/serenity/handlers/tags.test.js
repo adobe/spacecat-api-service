@@ -1117,5 +1117,31 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.createProjectTags)
         .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['type:branded']);
     });
+
+    it('propagates a transport failure while listing the project tag tree', async () => {
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().rejects(new Error('listProjectTags 502')),
+      });
+
+      await expect(
+        handler.resolveTypeTagInjection(transport, WORKSPACE, 'proj-1', 'type:branded', fakeLog()),
+      ).to.be.rejectedWith(/listProjectTags 502/);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('yields computedId undefined (skips injection) when the create response carries no id', async () => {
+      // pickTagIds returns { id: undefined } for an empty/malformed create
+      // response; the injector then keeps the input tagIds untouched rather than
+      // appending a bogus id.
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
+        createProjectTags: sinon.stub().resolves([{}]),
+      });
+
+      const res = await handler.resolveTypeTagInjection(transport, WORKSPACE, 'proj-1', 'type:branded', fakeLog());
+
+      expect(res.computedId).to.equal(undefined);
+      expect(res.typeTagIds).to.deep.equal([]);
+    });
   });
 });

@@ -324,7 +324,7 @@ export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptTy
         .filter((t) => !String(t).startsWith(`${TAG_DIMENSION.TYPE}:`));
       return { ...input, tags: [...stripped, typeTag] };
     }
-    const key = `${projectId} ${typeTag}`;
+    const key = `${projectId} ${typeTag}`;
     let pending = cache.get(key);
     if (!pending) {
       pending = resolveTypeTagInjection(transport, semrushWorkspaceId, projectId, typeTag, log);

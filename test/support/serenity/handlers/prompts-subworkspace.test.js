@@ -333,6 +333,24 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.body.error).to.equal('invalidRequest');
     });
 
+    it('recomputes the type tag from the NEW text on edit (serenity-docs#31, twin of the flat-mode layer)', async () => {
+      // Guards the subworkspace UPDATE injection wiring: without the classifier
+      // arg the defensive `typeof !== function` bypass fires silently, so a
+      // regression in delete-then-create injection would go uncaught here.
+      const transport = makeTransport();
+      const classify = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'now mentions Acme', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
+      }, log, classify);
+      expect(result.status).to.equal(200);
+      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        { 'now mentions Acme': ['topic:X', 'type:branded'] },
+      );
+    });
+
     it('re-throws a non-404 delete failure (never creates after a failed delete)', async () => {
       const transport = makeTransport({
         deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),

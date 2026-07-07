@@ -311,7 +311,7 @@ export async function handleUpdatePromptSubworkspace(
       semrushPromptId: newSemrushPromptId,
       geoTargetId,
       languageCode,
-      text: nextText,
+      text: typed.text,
       tags: typed.tags,
       ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
     },

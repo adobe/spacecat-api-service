@@ -20,6 +20,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
+  makeTypeInjector,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -1843,6 +1844,37 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.status).to.equal(200);
       expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded']);
+    });
+  });
+
+  describe('makeTypeInjector cache (serenity-docs#31)', () => {
+    it('resolves each (project, type) once across a batch, re-resolving only on a new key', async () => {
+      const transport = {
+        listProjectTags: sinon.stub().resolves({
+          page: 1,
+          total: 2,
+          items: [
+            { id: 'tb', name: 'type:branded' },
+            { id: 'tnb', name: 'type:non-branded' },
+          ],
+        }),
+        createProjectTags: sinon.stub(),
+      };
+      const classifyType = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
+      const inject = makeTypeInjector(transport, WORKSPACE, classifyType, fakeLog());
+
+      const a = await inject('proj-1', { text: 'love Acme', geoTargetId: 2840, tagIds: ['x'] });
+      const b = await inject('proj-1', { text: 'Acme rocks', geoTargetId: 2840, tagIds: ['y'] });
+      // Same project + same computed type => resolved once (the cache hit).
+      expect(transport.listProjectTags).to.have.been.calledOnce;
+      expect(a.tagIds).to.deep.equal(['x', 'tb']);
+      expect(b.tagIds).to.deep.equal(['y', 'tb']);
+
+      // A different computed type is a new cache key => one more resolution.
+      const c = await inject('proj-1', { text: 'best running shoes', geoTargetId: 2840, tagIds: ['z'] });
+      expect(transport.listProjectTags).to.have.been.calledTwice;
+      expect(c.tagIds).to.deep.equal(['z', 'tnb']);
+      expect(transport.createProjectTags).to.not.have.been.called;
     });
   });
 });

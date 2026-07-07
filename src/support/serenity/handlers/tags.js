@@ -322,6 +322,11 @@ export async function resolveTypeTagInjection(
   if (existing) {
     return { computedId: existing.id, typeTagIds };
   }
+  // Create-on-demand for the wanted `type:` root. We only reach here when the
+  // list above had no matching root, so this is safe against duplicates for a
+  // single request; concurrent writers racing the same missing tag rely on the
+  // upstream tag resolver being idempotent by (project, name) — the same
+  // resolve-or-create assumption `resolveOrCreateClosedTag` makes.
   const createdList = await transport.createProjectTags(semrushWorkspaceId, projectId, [wantTag]);
   const { id } = pickTagIds(createdList, undefined);
   return { computedId: id, typeTagIds: id ? [...typeTagIds, id] : typeTagIds };
