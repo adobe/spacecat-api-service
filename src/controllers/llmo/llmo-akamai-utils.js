@@ -204,21 +204,12 @@ const behaviorAdvanced = (description, xml) => ({
   options: { description, xml },
 });
 
-const criterionRequestHeader = (header, values = [], matchOperator = 'IS_ONE_OF') => {
-  const options = { headerName: header, matchOperator };
-  // EXISTS / DOES_NOT_EXIST are presence-only checks — no values or match flags apply, and
-  // including them doesn't match what PAPI itself emits. Value-based operators always receive an
-  // array from their callers (defaulting to [] when omitted).
-  if (matchOperator === 'IS_ONE_OF' || matchOperator === 'IS_NOT_ONE_OF') {
-    Object.assign(options, {
-      values: [...values],
-      matchCaseSensitive: false,
-      matchWildcardName: false,
-      matchWildcardValue: false,
-    });
-  }
-  return { name: 'requestHeader', options };
-};
+// Every request-header criterion we emit is a presence check (EXISTS / DOES_NOT_EXIST): PAPI
+// ignores value/match flags for those, and including them wouldn't match what PAPI itself emits.
+const criterionRequestHeader = (header, matchOperator) => ({
+  name: 'requestHeader',
+  options: { headerName: header, matchOperator },
+});
 
 const criterionMatchResponseCode = (lower, upper) => ({
   name: 'matchResponseCode',
@@ -331,11 +322,11 @@ export function buildRoutingRule(cfg) {
     ? LOOP_GUARD_HEADER
     : Object.keys(incomingHeaders)[0];
   if (guardHeader) {
-    criteria.push(criterionRequestHeader(guardHeader, null, 'DOES_NOT_EXIST'));
+    criteria.push(criterionRequestHeader(guardHeader, 'DOES_NOT_EXIST'));
   }
   // Belt-and-suspenders: also exclude the official failover marker header, in case the advanced
   // fail-action2 tag (optional, see failoverEnabled) is active — redundant but harmless.
-  criteria.push(criterionRequestHeader(FAILOVER_MARKER_HEADER, null, 'DOES_NOT_EXIST'));
+  criteria.push(criterionRequestHeader(FAILOVER_MARKER_HEADER, 'DOES_NOT_EXIST'));
 
   return {
     name: cfg.ruleNames.routing,
@@ -349,20 +340,28 @@ export function buildRoutingRule(cfg) {
 
 /**
  * The sibling "EdgeOptimize Failover - Test Header" rule. Must be a SIBLING of the routing rule
- * (same hierarchy level), not nested, so it is evaluated after the routing rule's failover header
- * is set.
+ * (same hierarchy level) so it is evaluated on the failover-recreated request.
+ *
+ * Detection is XML-free / no Advanced Metadata: the routing rule injects the
+ * `x-edgeoptimize-api-key` request header on the first pass and it PERSISTS into Akamai's internal
+ * failover recreate, whereas the advanced fail-action2 marker (`x-edgeoptimize-request`) is not
+ * used. So "api-key header EXISTS AND the failover marker DOES_NOT_EXIST" identifies the
+ * recreated request, and we surface it as the `x-edgeoptimize-fo` response header.
  * @param {object} cfg
  * @returns {object}
  */
 export function buildFailoverTestRule(cfg) {
   return {
     name: cfg.ruleNames.failoverTest,
-    criteria: [criterionRequestHeader(FAILOVER_MARKER_HEADER, [FAILOVER_MARKER_VALUE])],
+    criteria: [
+      criterionRequestHeader(LOOP_GUARD_HEADER, 'EXISTS'),
+      criterionRequestHeader(FAILOVER_MARKER_HEADER, 'DOES_NOT_EXIST'),
+    ],
     criteriaMustSatisfy: 'all',
     behaviors: [behaviorModifyOutgoingResponseHeader('x-edgeoptimize-fo', 'true')],
     children: [],
     comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). Surfaces failover as the '
-      + 'x-edgeoptimize-fo response header.',
+      + 'x-edgeoptimize-fo response header, detected without advanced metadata.',
   };
 }
 

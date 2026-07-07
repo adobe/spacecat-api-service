@@ -146,12 +146,20 @@ describe('llmo-akamai-utils', () => {
   });
 
   describe('buildFailoverTestRule', () => {
-    it('matches the failover marker and surfaces the x-edgeoptimize-fo response header', () => {
+    it('detects the failover recreate via persisted api-key + absent marker (no advanced metadata)', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       const rule = buildFailoverTestRule(cfg);
-      expect(findCriterion(rule, 'requestHeader').options.headerName).to.equal('x-edgeoptimize-request');
+      expect(rule.criteriaMustSatisfy).to.equal('all');
+      const ops = Object.fromEntries(
+        rule.criteria
+          .filter((c) => c.name === 'requestHeader')
+          .map((c) => [c.options.headerName, c.options.matchOperator]),
+      );
+      expect(ops['x-edgeoptimize-api-key']).to.equal('EXISTS');
+      expect(ops['x-edgeoptimize-request']).to.equal('DOES_NOT_EXIST');
       const resp = findBehavior(rule, 'modifyOutgoingResponseHeader');
       expect(resp.options.customHeaderName).to.equal('x-edgeoptimize-fo');
+      expect(resp.options.headerValue).to.equal('true');
     });
   });
 
