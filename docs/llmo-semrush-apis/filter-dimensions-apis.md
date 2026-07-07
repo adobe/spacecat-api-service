@@ -148,7 +148,7 @@ The daily rows are rolled up into ISO weeks spanning the earliest→latest day p
 
 ## 3. List Cited Domains
 
-**`GET /v2/orgs/:spaceCatId/serenity/:brandId/brand-presence/url-inspector/cited-domains`**
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains`**
 
 Returns the domains most frequently cited alongside owned URLs, for the URL Inspector **Cited Domains** panel. **Drop-in compatible with the legacy `url-inspector/cited-domains` contract** — same JSON shape, so the panel consumes it unchanged.
 
