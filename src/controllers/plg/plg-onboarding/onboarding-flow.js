@@ -16,7 +16,8 @@ import { cleanupPlgSiteSuggestionsAndFixes } from '../plg-onboarding-cleanup.js'
 import { updateRumConfig } from '../../../support/rum-config-service.js';
 import { hasActiveSuggestions } from './displacement.js';
 import {
-  AEM_CS_AUTHOR_URL_PATTERN, EDS_HOST_PATTERN, isSafeDomain, isValidDomain, prepareDomain,
+  AEM_CS_AUTHOR_URL_PATTERN, AEM_CS_PUBLISH_HOST_PATTERN, EDS_HOST_PATTERN,
+  isSafeDomain, isValidDomain, prepareDomain,
 } from './validation.js';
 import {
   getReviewerIdentity, isFromAsoUI, isInternalOrg, isInternalOrgDemoSite,
@@ -638,43 +639,6 @@ export async function performAsoPlgOnboarding({
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
 
-    // Step 5a: Alert when detected delivery type differs from the stored one.
-    // Skip for newly created sites — delivery type was just set from findDeliveryType in Step 5.
-    // We alert instead of auto-correcting because findDeliveryType is not 100% reliable.
-    if (!presetDeliveryType && !steps.siteCreated) {
-      const existingDeliveryType = site.getDeliveryType();
-      let detectedDeliveryType;
-      try {
-        detectedDeliveryType = await findDeliveryType(baseURL);
-      } catch (e) {
-        log.warn(`Failed to detect delivery type for ${baseURL}: ${e.message}`);
-      }
-      if (
-        detectedDeliveryType
-        && detectedDeliveryType !== SiteModel.DELIVERY_TYPES.OTHER
-        && detectedDeliveryType !== existingDeliveryType
-      ) {
-        log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${existingDeliveryType} detected=${detectedDeliveryType}`);
-        const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
-        const token = env.SLACK_BOT_TOKEN;
-        /* c8 ignore next */
-        if (channelId && token) {
-          const message = ':warning: *PLG Onboarding — Delivery Type Mismatch*\n\n'
-            + `• *Site ID:* \`${site.getId()}\`\n`
-            + `• *Domain:* \`${baseURL}\`\n`
-            + `• *Org ID:* \`${organizationId}\`\n`
-            + `• *Org:* ${organization.getName()} (\`${imsOrgId}\`)\n`
-            + `• *Stored delivery type:* \`${existingDeliveryType}\`\n`
-            + `• *Detected delivery type:* \`${detectedDeliveryType}\``;
-          try {
-            await context.postSlackMessage(channelId, message, token);
-          } catch (err) {
-            log.error(`Failed to post delivery type mismatch alert: ${err.message}`);
-          }
-        }
-      }
-    }
-
     // Step 5b: Resolve canonical URL early so the RUM lookup uses the correct hostname
     const siteConfig = site.getConfig();
     const currentFetchConfig = siteConfig.getFetchConfig() || {};
@@ -727,6 +691,53 @@ export async function performAsoPlgOnboarding({
         site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_EDGE);
         log.info(`Set hlxConfig for site ${site.getId()}: ${ref}--${repo}--${owner}.${tld}`);
         steps.hlxConfigSet = true;
+      }
+    }
+
+    // Step 5f: Alert if delivery type still mismatches after all auto-correction steps.
+    // Skip for newly created sites and preset-delivery-type flows — no prior type to compare.
+    // Detection order: rumHost (EDS pattern → AEM_EDGE, CS publish pattern → AEM_CS),
+    // falling back to findDeliveryType(baseURL) only when rumHost is absent or unrecognised.
+    if (!presetDeliveryType && !steps.siteCreated) {
+      let detectedDeliveryType;
+      if (rumHost) {
+        if (rumHost.match(EDS_HOST_PATTERN)) {
+          detectedDeliveryType = SiteModel.DELIVERY_TYPES.AEM_EDGE;
+        } else if (rumHost.match(AEM_CS_PUBLISH_HOST_PATTERN)) {
+          detectedDeliveryType = SiteModel.DELIVERY_TYPES.AEM_CS;
+        }
+      }
+      if (!detectedDeliveryType) {
+        try {
+          detectedDeliveryType = await findDeliveryType(baseURL);
+        } catch (e) {
+          log.warn(`Failed to detect delivery type for ${baseURL}: ${e.message}`);
+        }
+      }
+      const currentDeliveryType = site.getDeliveryType();
+      if (
+        detectedDeliveryType
+        && detectedDeliveryType !== SiteModel.DELIVERY_TYPES.OTHER
+        && detectedDeliveryType !== currentDeliveryType
+      ) {
+        log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${currentDeliveryType} detected=${detectedDeliveryType}`);
+        const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+        const token = env.SLACK_BOT_TOKEN;
+        /* c8 ignore next */
+        if (channelId && token) {
+          const message = ':warning: *PLG Onboarding — Delivery Type Mismatch*\n\n'
+            + `• *Site ID:* \`${site.getId()}\`\n`
+            + `• *Domain:* \`${baseURL}\`\n`
+            + `• *Org ID:* \`${organizationId}\`\n`
+            + `• *Org:* ${organization.getName()} (\`${imsOrgId}\`)\n`
+            + `• *Stored delivery type:* \`${currentDeliveryType}\`\n`
+            + `• *Detected delivery type:* \`${detectedDeliveryType}\``;
+          try {
+            await context.postSlackMessage(channelId, message, token);
+          } catch (err) {
+            log.error(`Failed to post delivery type mismatch alert: ${err.message}`);
+          }
+        }
       }
     }
 
