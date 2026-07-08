@@ -1,3 +1,31 @@
+# [1.634.0](https://github.com/adobe/spacecat-api-service/compare/v1.633.0...v1.634.0) (2026-07-08)
+
+
+### Features
+
+* **llmo:** read-time rotation of frozen demo-site traffic data ([#2752](https://github.com/adobe/spacecat-api-service/issues/2752)) ([a28fc51](https://github.com/adobe/spacecat-api-service/commit/a28fc512c97c5b1aaace9231c9b35d766634e1bf))
+
+# [1.633.0](https://github.com/adobe/spacecat-api-service/compare/v1.632.2...v1.633.0) (2026-07-08)
+
+
+### Features
+
+* Semrush Elements cited-domains endpoint for URL Inspector | LLMO-6020 ([#2765](https://github.com/adobe/spacecat-api-service/issues/2765)) ([b1366fa](https://github.com/adobe/spacecat-api-service/commit/b1366fa09c8db317eef8d314bc2cb89484579700))
+
+## [1.632.2](https://github.com/adobe/spacecat-api-service/compare/v1.632.1...v1.632.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* updated delivery type mismatch ([#2707](https://github.com/adobe/spacecat-api-service/issues/2707)) ([6e2582a](https://github.com/adobe/spacecat-api-service/commit/6e2582adfbaeeb4ebf4d54d32cacadeafcda5a85))
+
+## [1.632.1](https://github.com/adobe/spacecat-api-service/compare/v1.632.0...v1.632.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **SITES-44243:** accept account-type suffix in IMS ID regex for executedByUser enrichment ([#2778](https://github.com/adobe/spacecat-api-service/issues/2778)) ([3983dc2](https://github.com/adobe/spacecat-api-service/commit/3983dc2497d289c9c45564a3fb9d05cf124dd84d))
+
 # [1.632.0](https://github.com/adobe/spacecat-api-service/compare/v1.631.1...v1.632.0) (2026-07-07)
 
 

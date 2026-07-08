@@ -21,3 +21,4 @@ export {
 } from './topics.js';
 export { buildWeeksPayload, transformWeeksResponse } from './weeks.js';
 export { buildPromptsPayload, transformPromptsResponse } from './prompts.js';
+export { buildCitedDomainsPayload, transformCitedDomainsResponse } from './cited-domains.js';
