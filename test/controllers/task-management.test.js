@@ -734,6 +734,16 @@ describe('TaskManagementController', () => {
       expect(body.message).to.equal('connection_reauth_required');
     });
 
+    it('returns 404 when connection is disabled (non-active, non-reauth status)', async () => {
+      const conn = makeConnection({ getStatus: () => 'disabled' });
+      const ctx = makeContext({
+        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx());
+      expect(res.status).to.equal(404);
+    });
+
     it('returns 500 on connection load error', async () => {
       const ctx = makeContext();
       ctx.dataAccess.TaskManagementConnection.findById.rejects(new Error('db'));
@@ -3196,6 +3206,16 @@ describe('TaskManagementController', () => {
       expect(body.message).to.equal('connection_reauth_required');
     });
 
+    it('returns 404 when connection is disabled (non-active, non-reauth status)', async () => {
+      const conn = makeConnection({ getStatus: () => 'disabled' });
+      const ctx = makeContext({
+        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
+      });
+      const { listProjects } = TaskManagementController(ctx);
+      const res = await listProjects(makeReqCtx());
+      expect(res.status).to.equal(404);
+    });
+
     it('returns 500 on connection load error', async () => {
       const ctx = makeContext();
       ctx.dataAccess.TaskManagementConnection.findById.rejects(new Error('db'));
@@ -3346,6 +3366,16 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(409);
       const body = await res.json();
       expect(body.message).to.equal('connection_reauth_required');
+    });
+
+    it('returns 404 when connection is disabled (non-active, non-reauth status)', async () => {
+      const conn = makeConnection({ getStatus: () => 'disabled' });
+      const ctx = makeContext({
+        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(conn) } },
+      });
+      const { listIssueTypes } = TaskManagementController(ctx);
+      const res = await listIssueTypes(makeReqCtx());
+      expect(res.status).to.equal(404);
     });
 
     it('returns 500 on connection load error', async () => {
