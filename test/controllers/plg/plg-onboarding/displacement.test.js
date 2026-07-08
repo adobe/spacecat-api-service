@@ -205,9 +205,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
       const refreshedSite = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
-      // first call: initial fetch for fast-track; second call: re-fetch after reassignment
+      // first call: demo-site check; second call: initial fetch for fast-track;
+      // third call: re-fetch after reassignment
       mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(refreshedSite);
+        .onSecondCall().resolves(siteInInternalOrg)
+        .onThirdCall()
+        .resolves(refreshedSite);
 
       stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
       stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
