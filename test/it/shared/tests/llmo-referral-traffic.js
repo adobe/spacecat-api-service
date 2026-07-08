@@ -42,6 +42,11 @@ import { SITE_1_ID } from '../seed-ids.js';
 export default function llmoReferralTrafficTests(getHttpClient, resetData, seedReferralPresence) {
   describe('LLMO Referral Traffic — has-data handler (LLMO-5599)', () => {
     before(() => resetData());
+    // Baseline clearData() doesn't touch the partitioned referral_traffic_*
+    // tables, so a crashed prior run could leave presence rows behind and turn
+    // the empty-data assertion red. Clear them up front so the suite is
+    // self-contained regardless of prior state.
+    before(() => seedReferralPresence(SITE_1_ID, []));
 
     const hasDataPath = (siteId) => `/sites/${siteId}/referral-traffic/has-data`;
 
@@ -56,16 +61,21 @@ export default function llmoReferralTrafficTests(getHttpClient, resetData, seedR
     it('rejects an unknown site with a non-2xx (access validation runs before the probe)', async () => {
       const http = getHttpClient();
       const res = await http.admin.get(hasDataPath('99999999-9999-4999-8999-999999999999'));
-      expect(res.status).to.be.oneOf([400, 403, 404, 500]);
+      // Access validation runs before the probe: a bad/unknown site is a client
+      // error (400/403/404). 500 is intentionally excluded so an internal crash
+      // can't masquerade as access validation.
+      expect(res.status).to.be.oneOf([400, 403, 404]);
     });
 
     describe('source presence + priority ordering', () => {
       // Clear the referral tables after each case so presence rows don't leak.
       afterEach(() => seedReferralPresence(SITE_1_ID, []));
 
-      it('returns availableSources in resolution-priority order (adobe_analytics before cdn), not insertion order', async () => {
-        // Seed cdn first to prove the ordering comes from the backend, not the
-        // order rows were written.
+      it('returns only sources that have rows, in backend priority order (excludes absent sources)', async () => {
+        // Seed a 2-source subset (cdn written first) with the other three
+        // absent: the response must drop the absent sources and order the
+        // present pair by backend priority (adobe_analytics before cdn),
+        // independent of the order rows were written.
         seedReferralPresence(SITE_1_ID, ['cdn', 'adobe_analytics']);
         const http = getHttpClient();
         const res = await http.admin.get(hasDataPath(SITE_1_ID));
@@ -79,6 +89,7 @@ export default function llmoReferralTrafficTests(getHttpClient, resetData, seedR
         const http = getHttpClient();
         const res = await http.admin.get(hasDataPath(SITE_1_ID));
         expect(res.status).to.equal(200);
+        expect(res.body.hasData).to.equal(true);
         expect(res.body.availableSources).to.deep.equal(['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel']);
       });
     });
