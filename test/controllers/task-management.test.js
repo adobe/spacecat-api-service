@@ -101,7 +101,8 @@ function makePostgrestClient({
   const gteStub = sinon.stub().returns({ limit: limitStub });
   const eq2Stub = sinon.stub().returns({ gte: gteStub });
   const eq1Stub = sinon.stub().returns({ eq: eq2Stub });
-  const selectStub = sinon.stub().returns({ eq: eq1Stub });
+  const inStub = sinon.stub().resolves({ data: [], error: null });
+  const selectStub = sinon.stub().returns({ eq: eq1Stub, in: inStub });
 
   const singleStub = sinon.stub().resolves({ data: insertData, error: insertError });
   const insertSelectStub = sinon.stub().returns({ single: singleStub });
@@ -153,6 +154,10 @@ function makeDataAccess(overrides = {}) {
     },
     Suggestion: {
       findById: sinon.stub().resolves(null),
+      batchGetByKeys: sinon.stub().callsFake((keys) => Promise.resolve({
+        data: keys.map((k) => makeSuggestion({ getId: () => k.suggestionId })),
+        unprocessed: [],
+      })),
       ...overrides.Suggestion,
     },
     Organization: {
@@ -477,11 +482,23 @@ describe('TaskManagementController', () => {
 
     it('returns tickets with suggestions bridge', async () => {
       const ticket = makeTicket();
-      const bridge = makeBridge();
+      const bridgeRow = {
+        ticket_id: TICKET_ID,
+        suggestion_id: SUGGESTION_ID,
+        opportunity_id: OPPORTUNITY_ID,
+      };
+      const pgClient = makePostgrestClient();
+      pgClient.from.returns({
+        ...pgClient.from(),
+        select: sinon.stub().returns({
+          ...pgClient.from().select(),
+          in: sinon.stub().resolves({ data: [bridgeRow], error: null }),
+        }),
+      });
       const ctx = makeContext({
         dataAccess: {
           Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
-          TicketSuggestion: { allByTicketId: sinon.stub().resolves([bridge]) },
+          services: { postgrestClient: pgClient },
         },
       });
       const { listTickets } = TaskManagementController(ctx);
@@ -489,15 +506,29 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(200);
       const [t] = await res.json();
       expect(t.id).to.equal(TICKET_ID);
-      expect(t.suggestions).to.deep.equal([{ suggestionId: SUGGESTION_ID, opportunityId: OPPORTUNITY_ID }]);
+      expect(t.suggestions).to.deep.equal([{
+        suggestionId: SUGGESTION_ID,
+        opportunityId: OPPORTUNITY_ID,
+      }]);
     });
 
     it('returns tickets with empty suggestions when bridge load fails', async () => {
       const ticket = makeTicket();
+      const pgClient = makePostgrestClient();
+      pgClient.from.returns({
+        ...pgClient.from(),
+        select: sinon.stub().returns({
+          ...pgClient.from().select(),
+          in: sinon.stub().resolves({
+            data: null,
+            error: { message: 'bridge error' },
+          }),
+        }),
+      });
       const ctx = makeContext({
         dataAccess: {
           Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
-          TicketSuggestion: { allByTicketId: sinon.stub().rejects(new Error('bridge error')) },
+          services: { postgrestClient: pgClient },
         },
       });
       const { listTickets } = TaskManagementController(ctx);
@@ -683,7 +714,7 @@ describe('TaskManagementController', () => {
       return {
         params: { organizationId: ORG_ID, provider: PROVIDER, ...(overrides.params ?? {}) },
         data,
-        pathInfo: { headers: { 'idempotency-key': 'test-idem-key-1' }, ...(overrides.pathInfo ?? {}) },
+        pathInfo: { headers: {}, ...(overrides.pathInfo ?? {}) },
         attributes: {
           authInfo: {
             getProfile: () => ({ email: 'ims-user-1@example.com' }),
@@ -787,9 +818,9 @@ describe('TaskManagementController', () => {
       expect(body.message).to.include("'individual'");
     });
 
-    it('returns 400 when suggestionIds exceeds max for grouped mode (>400)', async () => {
+    it('returns 400 when suggestionIds exceeds max for grouped mode (>1500)', async () => {
       const { createTicket } = TaskManagementController(makeContext());
-      const suggestionIds = Array.from({ length: 401 }, (_, i) => `aaaaaaaa-bbbb-cccc-dddd-${String(i).padStart(12, '0')}`);
+      const suggestionIds = Array.from({ length: 1501 }, (_, i) => `aaaaaaaa-bbbb-cccc-dddd-${String(i).padStart(12, '0')}`);
       const res = await createTicket(makeReqCtx({
         data: {
           summary: 'Fix', projectKey: 'P', mode: 'grouped', connectionId: CONN_ID, suggestionIds,
@@ -797,7 +828,7 @@ describe('TaskManagementController', () => {
       }));
       expect(res.status).to.equal(400);
       const body = await res.json();
-      expect(body.message).to.include('at most 400');
+      expect(body.message).to.include('at most 1500');
       expect(body.message).to.include("'grouped'");
     });
 
@@ -834,6 +865,73 @@ describe('TaskManagementController', () => {
       ctx.dataAccess.TaskManagementConnection.findById.rejects(new Error('db'));
       const { createTicket } = TaskManagementController(ctx);
       const res = await createTicket(makeReqCtx());
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns 409 when any suggestionId is already ticketed', async () => {
+      const conn = makeConnection();
+      const pgClient = makePostgrestClient();
+      // Override .in() on the select chain to return a matching bridge row
+      const bridgeInStub = sinon.stub()
+        .resolves({ data: [{ suggestion_id: SUGGESTION_ID }], error: null });
+      const origFrom = pgClient.from;
+      pgClient.from = sinon.stub().callsFake((table) => {
+        const base = origFrom(table);
+        if (table === 'ticket_suggestions') {
+          return {
+            ...base,
+            select: sinon.stub().returns({ in: bridgeInStub }),
+          };
+        }
+        return base;
+      });
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          services: { postgrestClient: pgClient },
+        },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, suggestionIds: [SUGGESTION_ID],
+        },
+      }));
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.message).to.include('already ticketed');
+    });
+
+    it('returns 500 when TicketSuggestion bridge lookup throws', async () => {
+      const conn = makeConnection();
+      const pgClient = makePostgrestClient();
+      const bridgeInStub = sinon.stub()
+        .resolves({ data: null, error: { message: 'db error' } });
+      const origFrom = pgClient.from;
+      pgClient.from = sinon.stub().callsFake((table) => {
+        const base = origFrom(table);
+        if (table === 'ticket_suggestions') {
+          return {
+            ...base,
+            select: sinon.stub().returns({ in: bridgeInStub }),
+          };
+        }
+        return base;
+      });
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+          services: { postgrestClient: pgClient },
+        },
+      });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix', projectKey: 'PROJ', connectionId: CONN_ID, suggestionIds: [SUGGESTION_ID],
+        },
+      }));
       expect(res.status).to.equal(500);
     });
 
@@ -1329,14 +1427,6 @@ describe('TaskManagementController', () => {
     });
 
     // ── Idempotency-Key enforcement ─────────────────────────────────────────
-
-    it('returns 400 when Idempotency-Key header is missing', async () => {
-      const { createTicket } = TaskManagementController(makeContext());
-      const res = await createTicket(makeReqCtx({ pathInfo: { headers: {} } }));
-      expect(res.status).to.equal(400);
-      const body = await res.json();
-      expect(body.message).to.include('Idempotency-Key');
-    });
 
     it('returns 500 when postgrestClient unavailable', async () => {
       const ctx = makeContext({ dataAccess: { services: { postgrestClient: null } } });
@@ -1919,13 +2009,16 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(400);
     });
 
-    // ── Branch 5: Suggestion.findById throws in grouped mode ────────────────────
-    it('returns 500 when Suggestion.findById throws in grouped mode', async () => {
+    // ── Branch 5: Suggestion.batchGetByKeys throws in grouped mode ─────────────
+    it('returns 500 when Suggestion.batchGetByKeys throws in grouped mode', async () => {
       const conn = makeConnection();
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().rejects(new Error('DB timeout')) },
+          Suggestion: {
+            findById: sinon.stub().resolves(makeSuggestion()),
+            batchGetByKeys: sinon.stub().rejects(new Error('DB timeout')),
+          },
         },
       });
       const { createTicket } = TaskManagementController(ctx);
@@ -1944,22 +2037,12 @@ describe('TaskManagementController', () => {
       expect(body.message).to.equal('Failed to validate suggestion');
     });
 
-    // ── Branch 6: markIdempotencyDone update fails — only warns, does not throw ─
-    it('logs warn but still returns 201 when idempotency done-update fails', async () => {
+    // ── Branch 6: markIdempotencyDone delete fails — only warns, does not throw ─
+    it('logs warn but still returns 201 when idempotency done-delete fails', async () => {
       const conn = makeConnection();
 
-      // Build a postgrestClient whose update chain rejects
-      const updateEqStub = sinon.stub().rejects(new Error('PG write error'));
-      const updateStub = sinon.stub().returns({ eq: updateEqStub });
-
-      function makeDeleteChain() {
-        const p = Promise.resolve({ data: null, error: null });
-        return Object.assign(p, {
-          eq: sinon.stub().callsFake(() => makeDeleteChain()),
-          lt: sinon.stub().callsFake(() => Promise.resolve({ data: null, error: null })),
-        });
-      }
-
+      // Build a postgrestClient whose delete chain rejects on the first eq() call
+      // (the markIdempotencyDone path: .delete().eq(id).catch(warn))
       const pgClient = {
         from: sinon.stub().callsFake(() => ({
           select: sinon.stub().returns({
@@ -1970,14 +2053,17 @@ describe('TaskManagementController', () => {
                 }),
               }),
             }),
+            in: sinon.stub().resolves({ data: [], error: null }),
           }),
           insert: sinon.stub().returns({
             select: sinon.stub().returns({
               single: sinon.stub().resolves({ data: { id: 'idem-id-999' }, error: null }),
             }),
           }),
-          update: updateStub,
-          delete: sinon.stub().callsFake(() => makeDeleteChain()),
+          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
+          delete: sinon.stub().returns({
+            eq: sinon.stub().callsFake(() => Promise.reject(new Error('PG delete error'))),
+          }),
         })),
       };
 
@@ -2008,8 +2094,8 @@ describe('TaskManagementController', () => {
         const depth3 = {
           lt: sinon.stub().callsFake(() => Promise.reject(new Error('delete lt failed'))),
         };
-        const depth2 = { eq: sinon.stub().returns(depth3) };
-        const depth1 = { eq: sinon.stub().returns(depth2) };
+        const depth2 = { eq: sinon.stub().returns(depth3), catch: sinon.stub().resolves() };
+        const depth1 = { eq: sinon.stub().returns(depth2), catch: sinon.stub().resolves() };
         const depth0 = { eq: sinon.stub().returns(depth1) };
         return depth0;
       }
@@ -2024,6 +2110,7 @@ describe('TaskManagementController', () => {
                 }),
               }),
             }),
+            in: sinon.stub().resolves({ data: [], error: null }),
           }),
           insert: sinon.stub().returns({
             select: sinon.stub().returns({
@@ -2077,6 +2164,7 @@ describe('TaskManagementController', () => {
                 }),
               }),
             }),
+            in: sinon.stub().resolves({ data: [], error: null }),
           }),
           insert: sinon.stub().callsFake(() => {
             insertCallCount += 1;
@@ -2462,12 +2550,15 @@ describe('TaskManagementController', () => {
     });
 
     // ── Lines 641-642: Suggestion not found in grouped mode → 404 ───────────────
-    it('grouped mode: returns 404 when Suggestion.findById returns null for suggestionId', async () => {
+    it('grouped mode: returns 404 when batchGetByKeys returns empty for suggestionId', async () => {
       const conn = makeConnection();
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().resolves(null) },
+          Suggestion: {
+            findById: sinon.stub().resolves(null),
+            batchGetByKeys: sinon.stub().resolves({ data: [], unprocessed: [] }),
+          },
         },
       });
       const { createTicket } = TaskManagementController(ctx);
@@ -2500,6 +2591,7 @@ describe('TaskManagementController', () => {
                 }),
               }),
             }),
+            in: sinon.stub().resolves({ data: [], error: null }),
           }),
           insert: sinon.stub().callsFake(() => {
             insertCallCount += 1;
@@ -3117,6 +3209,7 @@ describe('TaskManagementController', () => {
                 }),
               }),
             }),
+            in: sinon.stub().resolves({ data: [], error: null }),
           }),
           insert: sinon.stub().callsFake(() => {
             insertCount += 1;
@@ -3193,6 +3286,7 @@ describe('TaskManagementController', () => {
                 }),
               }),
             }),
+            in: sinon.stub().resolves({ data: [], error: null }),
           }),
           insert: sinon.stub().callsFake(() => {
             insertCount2 += 1;

@@ -39,10 +39,10 @@ const TICKET_MODE_INDIVIDUAL = 'individual';
 const TICKET_MODE_GROUPED = 'grouped';
 // individual: one ticket per suggestion (N→N), grouped: all suggestions into one ticket (M→1)
 // INDIVIDUAL cap is Jira-bound: 15 × ~800ms/ticket ≈ 12s < 15s Lambda timeout.
-// GROUPED cap is DynamoDB-bound: suggestions validated in parallel (Promise.allSettled),
-// so 400 reads complete in ~30ms regardless of count. Jira creates 1 ticket — well within budget.
+// GROUPED cap: suggestions validated and bridge rows created in chunked parallel (20 at a time),
+// then Jira creates 1 ticket — well within Lambda timeout budget.
 const SUGGESTION_IDS_MAX_INDIVIDUAL = 15;
-const SUGGESTION_IDS_MAX_GROUPED = 400;
+const SUGGESTION_IDS_MAX_GROUPED = 1500;
 const ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024; // 3 MB per spec §30
 
 /**
@@ -318,22 +318,40 @@ function TaskManagementController(context) {
       return createResponse({ message: 'Failed to list tickets' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    // Load bridge rows in parallel — one allByTicketId call per ticket.
-    const ticketsWithSuggestions = await Promise.all(
-      tickets.map(async (ticket) => {
-        let suggestions = [];
-        try {
-          const bridges = await TicketSuggestion.allByTicketId(ticket.getId());
-          suggestions = bridges.map((b) => ({
-            suggestionId: b.getSuggestionId(),
-            opportunityId: b.getOpportunityId(),
-          }));
-        } catch (bridgeErr) {
-          // Bridge load failure does not fail the list — return empty array.
-          log.warn({ ticketId: ticket.getId(), err: bridgeErr }, 'Failed to load bridge rows for ticket');
+    // Bulk-load all bridge rows for the org's tickets in one query (chunked at 50
+    // to stay under PostgREST URI limits), then group in-memory by ticket ID.
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    const bridgeMap = new Map();
+    if (tickets.length > 0 && postgrestClient) {
+      const ticketIds = tickets.map((t) => t.getId());
+      const BRIDGE_LOAD_CHUNK = 50;
+      try {
+        for (let i = 0; i < ticketIds.length; i += BRIDGE_LOAD_CHUNK) {
+          const chunk = ticketIds.slice(i, i + BRIDGE_LOAD_CHUNK);
+          // eslint-disable-next-line no-await-in-loop
+          const { data, error } = await postgrestClient
+            .from('ticket_suggestions')
+            .select('ticket_id,suggestion_id,opportunity_id')
+            .in('ticket_id', chunk);
+          if (error) {
+            throw error;
+          }
+          (data || []).forEach((row) => {
+            if (!bridgeMap.has(row.ticket_id)) {
+              bridgeMap.set(row.ticket_id, []);
+            }
+            bridgeMap.get(row.ticket_id).push({
+              suggestionId: row.suggestion_id,
+              opportunityId: row.opportunity_id,
+            });
+          });
         }
-        return serializeTicket(ticket, suggestions);
-      }),
+      } catch (err) {
+        log.warn({ err }, 'Failed to bulk-load bridge rows; response will omit suggestion links');
+      }
+    }
+    const ticketsWithSuggestions = tickets.map(
+      (t) => serializeTicket(t, bridgeMap.get(t.getId()) || []),
     );
 
     return createResponse(ticketsWithSuggestions, STATUS_OK);
@@ -484,9 +502,7 @@ function TaskManagementController(context) {
    * Deduplication is enforced via the `idempotency_keys` table with a 24-hour window.
    */
   async function createTicket(requestContext) {
-    const {
-      params, data, attributes, pathInfo,
-    } = requestContext;
+    const { params, data, attributes } = requestContext;
 
     const callerProfile = attributes?.authInfo?.getProfile?.();
     const createdBy = callerProfile?.user_id ?? callerProfile?.sub ?? 'unknown';
@@ -500,10 +516,6 @@ function TaskManagementController(context) {
 
     if (!hasText(provider)) {
       return createResponse({ message: 'provider is required' }, STATUS_BAD_REQUEST);
-    }
-
-    if (!hasText(pathInfo?.headers?.['idempotency-key'])) {
-      return createResponse({ message: 'Idempotency-Key header is required' }, STATUS_BAD_REQUEST);
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -652,9 +664,9 @@ function TaskManagementController(context) {
     let connection;
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
-      if (!conn || conn.getProvider() !== provider) {
+      if (!conn) {
         return createResponse(
-          { message: `Active ${provider} connection ${connectionId} not found for organization ${organizationId}` },
+          { message: `Connection ${connectionId} not found for organization ${organizationId}` },
           STATUS_NOT_FOUND,
         );
       }
@@ -679,18 +691,23 @@ function TaskManagementController(context) {
     //   remaining suggestions as it goes (best-effort per item).
 
     if (mode === TICKET_MODE_GROUPED) {
-      const suggestionResults = await Promise.allSettled(
-        suggestionIds.map((suggId) => Suggestion.findById(suggId)),
-      );
-      for (let i = 0; i < suggestionResults.length; i += 1) {
-        const { status, value, reason } = suggestionResults[i];
-        if (status === 'rejected') {
-          log.error({ suggId: suggestionIds[i], err: reason }, 'Failed to look up suggestion');
-          return createResponse({ message: 'Failed to validate suggestion' }, STATUS_INTERNAL_SERVER_ERROR);
+      try {
+        const keys = suggestionIds.map((id) => ({ suggestionId: id }));
+        const { data: found } = await Suggestion.batchGetByKeys(keys);
+        const foundIds = new Set(found.map((s) => s.getId()));
+        const missing = suggestionIds.find((id) => !foundIds.has(id));
+        if (missing) {
+          return createResponse(
+            { message: `Suggestion ${missing} not found` },
+            STATUS_NOT_FOUND,
+          );
         }
-        if (!value) {
-          return createResponse({ message: `Suggestion ${suggestionIds[i]} not found` }, STATUS_NOT_FOUND);
-        }
+      } catch (err) {
+        log.error({ err }, 'Failed to validate suggestions');
+        return createResponse(
+          { message: 'Failed to validate suggestion' },
+          STATUS_INTERNAL_SERVER_ERROR,
+        );
       }
     } else if (primarySuggestionId) {
       let suggestion;
@@ -708,10 +725,52 @@ function TaskManagementController(context) {
       }
     }
 
+    // --- Pre-flight: verify none of the suggestions already have a ticket -------
+    // Bulk-query the bridge table with PostgREST .in() (chunks of 50) instead of
+    // N individual findBySuggestionId calls. Early-exit on first chunk with matches.
+
+    if (suggestionIds.length > 0) {
+      const BRIDGE_CHECK_CHUNK = 50;
+      const alreadyTicketed = [];
+      try {
+        for (let i = 0; i < suggestionIds.length; i += BRIDGE_CHECK_CHUNK) {
+          const chunk = suggestionIds.slice(i, i + BRIDGE_CHECK_CHUNK);
+          // eslint-disable-next-line no-await-in-loop
+          const { data: bridgeRows, error: bridgeErr } = await postgrestClient
+            .from('ticket_suggestions')
+            .select('suggestion_id')
+            .in('suggestion_id', chunk);
+          if (bridgeErr) {
+            throw bridgeErr;
+          }
+          alreadyTicketed.push(
+            ...(bridgeRows || []).map((r) => r.suggestion_id),
+          );
+          if (alreadyTicketed.length > 0) {
+            break;
+          }
+        }
+      } catch (err) {
+        log.error({ err }, 'Failed to check existing ticket bridges');
+        return createResponse(
+          { message: 'Failed to validate suggestion ticket status' },
+          STATUS_INTERNAL_SERVER_ERROR,
+        );
+      }
+      if (alreadyTicketed.length > 0) {
+        return createResponse(
+          {
+            message: `Suggestion${alreadyTicketed.length > 1 ? 's' : ''} already ticketed: ${alreadyTicketed.join(', ')}`,
+          },
+          STATUS_CONFLICT,
+        );
+      }
+    }
+
     // --- Insert idempotency processing record ---------------------------------
     // Connection and suggestion are validated — now commit to processing this request.
 
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 3 * 60 * 1000).toISOString();
     const { data: newEntry, error: insertError } = await postgrestClient
       .from('idempotency_keys')
       .insert({
@@ -737,20 +796,20 @@ function TaskManagementController(context) {
 
     const idempotencyKeyId = newEntry.id;
 
-    async function markIdempotencyDone(statusCode, body) {
+    async function markIdempotencyDone() {
       await postgrestClient
         .from('idempotency_keys')
-        .update({ status: 'completed', response: { statusCode, body } })
+        .delete()
         .eq('id', idempotencyKeyId)
-        .catch((err) => log.warn({ err }, 'Failed to mark idempotency key completed'));
+        .catch((err) => log.warn({ err }, 'Failed to delete idempotency key after completion'));
     }
 
-    async function markIdempotencyFailed(statusCode, body) {
+    async function markIdempotencyFailed() {
       await postgrestClient
         .from('idempotency_keys')
-        .update({ status: 'failed', response: { statusCode, body } })
+        .delete()
         .eq('id', idempotencyKeyId)
-        .catch((err) => log.warn({ err }, 'Failed to mark idempotency key failed'));
+        .catch((err) => log.warn({ err }, 'Failed to delete idempotency key after failure'));
     }
 
     // --- Deterministic dedup lock (prevents cross-user duplicate tickets) -----
@@ -768,7 +827,7 @@ function TaskManagementController(context) {
         .digest('hex'); // 64 chars — well within the 128-char column limit
 
       const dedupEndpoint = `dedup:POST /task-management/${provider}/tickets`;
-      const dedupExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      const dedupExpiresAt = new Date(Date.now() + 3 * 60 * 1000).toISOString();
 
       // Remove any expired row with this key so the unique constraint
       // does not block a fresh insert (expired rows are not auto-deleted).
@@ -807,7 +866,7 @@ function TaskManagementController(context) {
             code: 'IN_FLIGHT',
             retryAfter: 2,
           };
-          await markIdempotencyFailed(STATUS_CONFLICT, body);
+          await markIdempotencyFailed();
           return createResponse(body, STATUS_CONFLICT);
         }
         // Non-duplicate DB error — proceed without dedup lock rather than blocking.
@@ -828,15 +887,8 @@ function TaskManagementController(context) {
         .catch((err) => log.warn({ err }, 'Failed to release dedup lock'));
     }
 
-    async function completeDedupLock(statusCode, body) {
-      if (!dedupKeyId) {
-        return;
-      }
-      await postgrestClient
-        .from('idempotency_keys')
-        .update({ status: 'completed', response: { statusCode, body } })
-        .eq('id', dedupKeyId)
-        .catch((err) => log.warn({ err }, 'Failed to complete dedup lock'));
+    async function completeDedupLock() {
+      await releaseDedupLock();
     }
 
     // --- Create the ticket via the provider client ----------------------------
@@ -897,6 +949,9 @@ function TaskManagementController(context) {
 
           if (batchTicketErr) {
             const isReauthNeeded = batchTicketErr.status === 401
+              || batchTicketErr.code === 'TOKEN_REFRESH_REQUIRED'
+              || batchTicketErr.code === 'REQUIRES_REAUTH'
+              || batchTicketErr.code === 'GRANT_REVOKED'
               || batchTicketErr.message?.includes('requires re-authorization');
             if (isReauthNeeded) {
               // eslint-disable-next-line no-await-in-loop
@@ -990,9 +1045,9 @@ function TaskManagementController(context) {
 
       const batchResponseBody = { results };
       if (hasSuccess) {
-        await markIdempotencyDone(207, batchResponseBody);
+        await markIdempotencyDone();
       } else {
-        await markIdempotencyFailed(207, batchResponseBody);
+        await markIdempotencyFailed();
       }
       return createResponse(batchResponseBody, 207);
     }
@@ -1013,12 +1068,16 @@ function TaskManagementController(context) {
           parent: data.parent,
         });
       } catch (err) {
-        const isReauthNeeded = err.status === 401 || err.message?.includes('requires re-authorization');
+        const isReauthNeeded = err.status === 401
+          || err.code === 'TOKEN_REFRESH_REQUIRED'
+          || err.code === 'REQUIRES_REAUTH'
+          || err.code === 'GRANT_REVOKED'
+          || err.message?.includes('requires re-authorization');
         if (isReauthNeeded) {
           await connection.markRequiresReauth();
           const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
           await releaseDedupLock();
-          await markIdempotencyFailed(STATUS_CONFLICT, body);
+          await markIdempotencyFailed();
           return createResponse(body, STATUS_CONFLICT);
         }
         connection.setErrorMessage(err.message ?? 'Unknown grouped ticket creation error');
@@ -1029,7 +1088,7 @@ function TaskManagementController(context) {
         log.error({ organizationId, provider, err }, 'Failed to create grouped ticket');
         const body = { message: 'Failed to create ticket' };
         await releaseDedupLock();
-        await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+        await markIdempotencyFailed();
         return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
       }
 
@@ -1055,7 +1114,7 @@ function TaskManagementController(context) {
         );
         const body = { message: 'Ticket created but could not be saved' };
         await releaseDedupLock();
-        await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+        await markIdempotencyFailed();
         return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
       }
 
@@ -1078,26 +1137,33 @@ function TaskManagementController(context) {
         log.warn({ saveErr }, 'Failed to update lastUsedAt on connection');
       });
 
-      // Link all suggestions to the single ticket — non-fatal on individual bridge failure.
+      // Link all suggestions to the single ticket — chunked at 50 concurrent, non-fatal per item.
+      const BRIDGE_CREATE_CONCURRENCY = 50;
       const linkWarnings = [];
-      for (const suggId of suggestionIds) {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          await TicketSuggestion.create({
-            ticketId: groupedTicket.getId(),
-            suggestionId: suggId,
-            opportunityId: data.opportunityId,
-            createdBy,
-          });
-        } catch (err) {
-          const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
-          if (isDuplicate) {
-            linkWarnings.push(`Suggestion ${suggId} has already been linked to another ticket`);
-          } else {
-            log.error({ ticketId: groupedTicket.getId(), suggId, err }, 'Failed to create TicketSuggestion bridge record in grouped mode');
-            linkWarnings.push(`Failed to link suggestion ${suggId} to ticket`);
-          }
-        }
+      for (let i = 0; i < suggestionIds.length; i += BRIDGE_CREATE_CONCURRENCY) {
+        const chunk = suggestionIds.slice(i, i + BRIDGE_CREATE_CONCURRENCY);
+        // eslint-disable-next-line no-await-in-loop
+        const chunkWarnings = await Promise.all(
+          chunk.map(async (suggId) => {
+            try {
+              await TicketSuggestion.create({
+                ticketId: groupedTicket.getId(),
+                suggestionId: suggId,
+                opportunityId: data.opportunityId,
+                createdBy,
+              });
+              return null;
+            } catch (err) {
+              const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
+              if (isDuplicate) {
+                return `Suggestion ${suggId} has already been linked to another ticket`;
+              }
+              log.error({ ticketId: groupedTicket.getId(), suggId, err }, 'Failed to create TicketSuggestion bridge record in grouped mode');
+              return `Failed to link suggestion ${suggId} to ticket`;
+            }
+          }),
+        );
+        linkWarnings.push(...chunkWarnings.filter(Boolean));
       }
 
       // Upload attachment if provided — one attachment on the single grouped ticket.
@@ -1120,8 +1186,8 @@ function TaskManagementController(context) {
         ...(linkWarnings.length > 0 ? { linkWarnings } : {}),
         ...(groupedAttachmentWarning ? { attachmentWarning: groupedAttachmentWarning } : {}),
       };
-      await completeDedupLock(STATUS_CREATED, groupedResponseBody);
-      await markIdempotencyDone(STATUS_CREATED, groupedResponseBody);
+      await completeDedupLock();
+      await markIdempotencyDone();
       return createResponse(groupedResponseBody, STATUS_CREATED);
     }
 
@@ -1146,12 +1212,15 @@ function TaskManagementController(context) {
       // specific message). Both require marking the connection for re-auth and
       // surfacing a 409 so the UI can prompt the user to reconnect.
       const isReauthNeeded = err.status === 401
+        || err.code === 'TOKEN_REFRESH_REQUIRED'
+        || err.code === 'REQUIRES_REAUTH'
+        || err.code === 'GRANT_REVOKED'
         || err.message?.includes('requires re-authorization');
 
       if (isReauthNeeded) {
         await connection.markRequiresReauth();
         const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
-        await markIdempotencyFailed(STATUS_CONFLICT, body);
+        await markIdempotencyFailed();
         return createResponse(body, STATUS_CONFLICT);
       }
 
@@ -1162,7 +1231,7 @@ function TaskManagementController(context) {
 
       log.error({ organizationId, provider, err }, 'Failed to create ticket');
       const body = { message: 'Failed to create ticket' };
-      await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+      await markIdempotencyFailed();
       return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
     }
 
@@ -1198,7 +1267,7 @@ function TaskManagementController(context) {
         ticketKey: ticketResult.ticketKey,
         ticketUrl: ticketResult.ticketUrl,
       };
-      await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+      await markIdempotencyFailed();
       return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
     }
 
@@ -1236,7 +1305,7 @@ function TaskManagementController(context) {
         const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
         if (isDuplicate) {
           const body = { message: `Suggestion ${primarySuggestionId} has already been ticketed` };
-          await markIdempotencyFailed(STATUS_CONFLICT, body);
+          await markIdempotencyFailed();
           return createResponse(body, STATUS_CONFLICT);
         }
         log.error(
@@ -1244,7 +1313,7 @@ function TaskManagementController(context) {
           'Failed to create TicketSuggestion bridge record',
         );
         const body = { message: 'Ticket created but suggestion link could not be saved' };
-        await markIdempotencyFailed(STATUS_INTERNAL_SERVER_ERROR, body);
+        await markIdempotencyFailed();
         return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
       }
     }
@@ -1274,7 +1343,7 @@ function TaskManagementController(context) {
       suggestionId: primarySuggestionId ?? undefined,
       ...(attachmentWarning ? { attachmentWarning } : {}),
     };
-    await markIdempotencyDone(STATUS_CREATED, responseBody);
+    await markIdempotencyDone();
     return createResponse(responseBody, STATUS_CREATED);
   }
 
@@ -1340,6 +1409,9 @@ function TaskManagementController(context) {
       projects = await ticketClient.listProjects();
     } catch (err) {
       const isReauthNeeded = err.status === 401
+        || err.code === 'TOKEN_REFRESH_REQUIRED'
+        || err.code === 'REQUIRES_REAUTH'
+        || err.code === 'GRANT_REVOKED'
         || err.message?.includes('requires re-authorization');
 
       if (isReauthNeeded) {
@@ -1425,6 +1497,9 @@ function TaskManagementController(context) {
       issueTypes = await ticketClient.listIssueTypes(projectId);
     } catch (err) {
       const isReauthNeeded = err.status === 401
+        || err.code === 'TOKEN_REFRESH_REQUIRED'
+        || err.code === 'REQUIRES_REAUTH'
+        || err.code === 'GRANT_REVOKED'
         || err.message?.includes('requires re-authorization');
 
       if (isReauthNeeded) {
