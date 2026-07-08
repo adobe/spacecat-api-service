@@ -484,7 +484,9 @@ function TaskManagementController(context) {
    * Deduplication is enforced via the `idempotency_keys` table with a 24-hour window.
    */
   async function createTicket(requestContext) {
-    const { params, data, attributes } = requestContext;
+    const {
+      params, data, attributes, pathInfo,
+    } = requestContext;
 
     const callerProfile = attributes?.authInfo?.getProfile?.();
     const createdBy = callerProfile?.user_id ?? callerProfile?.sub ?? 'unknown';
@@ -498,6 +500,10 @@ function TaskManagementController(context) {
 
     if (!hasText(provider)) {
       return createResponse({ message: 'provider is required' }, STATUS_BAD_REQUEST);
+    }
+
+    if (!hasText(pathInfo?.headers?.['idempotency-key'])) {
+      return createResponse({ message: 'Idempotency-Key header is required' }, STATUS_BAD_REQUEST);
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
