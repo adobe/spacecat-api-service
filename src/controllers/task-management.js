@@ -797,19 +797,25 @@ function TaskManagementController(context) {
     const idempotencyKeyId = newEntry.id;
 
     async function markIdempotencyDone() {
-      await postgrestClient
-        .from('idempotency_keys')
-        .delete()
-        .eq('id', idempotencyKeyId)
-        .catch((err) => log.warn({ err }, 'Failed to delete idempotency key after completion'));
+      try {
+        await postgrestClient
+          .from('idempotency_keys')
+          .delete()
+          .eq('id', idempotencyKeyId);
+      } catch (err) {
+        log.warn({ err }, 'Failed to delete idempotency key after completion');
+      }
     }
 
     async function markIdempotencyFailed() {
-      await postgrestClient
-        .from('idempotency_keys')
-        .delete()
-        .eq('id', idempotencyKeyId)
-        .catch((err) => log.warn({ err }, 'Failed to delete idempotency key after failure'));
+      try {
+        await postgrestClient
+          .from('idempotency_keys')
+          .delete()
+          .eq('id', idempotencyKeyId);
+      } catch (err) {
+        log.warn({ err }, 'Failed to delete idempotency key after failure');
+      }
     }
 
     // --- Deterministic dedup lock (prevents cross-user duplicate tickets) -----
@@ -831,14 +837,17 @@ function TaskManagementController(context) {
 
       // Remove any expired row with this key so the unique constraint
       // does not block a fresh insert (expired rows are not auto-deleted).
-      await postgrestClient
-        .from('idempotency_keys')
-        .delete()
-        .eq('key', dedupKey)
-        .eq('organization_id', organizationId)
-        .eq('endpoint', dedupEndpoint)
-        .lt('expires_at', new Date().toISOString())
-        .catch((err) => log.warn({ err }, 'Failed to delete expired dedup lock — proceeding'));
+      try {
+        await postgrestClient
+          .from('idempotency_keys')
+          .delete()
+          .eq('key', dedupKey)
+          .eq('organization_id', organizationId)
+          .eq('endpoint', dedupEndpoint)
+          .lt('expires_at', new Date().toISOString());
+      } catch (err) {
+        log.warn({ err }, 'Failed to delete expired dedup lock — proceeding');
+      }
 
       const { data: dedupEntry, error: dedupInsertError } = await postgrestClient
         .from('idempotency_keys')
@@ -880,11 +889,14 @@ function TaskManagementController(context) {
       if (!dedupKeyId) {
         return;
       }
-      await postgrestClient
-        .from('idempotency_keys')
-        .delete()
-        .eq('id', dedupKeyId)
-        .catch((err) => log.warn({ err }, 'Failed to release dedup lock'));
+      try {
+        await postgrestClient
+          .from('idempotency_keys')
+          .delete()
+          .eq('id', dedupKeyId);
+      } catch (err) {
+        log.warn({ err }, 'Failed to release dedup lock');
+      }
     }
 
     async function completeDedupLock() {
