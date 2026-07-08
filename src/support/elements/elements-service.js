@@ -27,6 +27,9 @@ import {
   transformPromptsResponse,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
+  buildOwnedUrlsStatsPayload,
+  buildOwnedUrlsTrendPayload,
+  transformOwnedUrlsResponse,
 } from './definitions/index.js';
 
 /**
@@ -157,6 +160,73 @@ export function createElementsService(transport) {
       // Prefer the site's brand when it owns a project for this region; else first match.
       const preferred = matches.find((r) => r.spacecat_brand_id === brandId);
       return (preferred ?? matches[0]).semrush_project_id;
+    },
+
+    /**
+     * Resolves every (region, projectId) pair for the workspace, used to fan the
+     * owned-urls query out per-project. Per-project scoping keeps each element
+     * call under the Semrush 50k-row cap (a workspace-wide call hit it) and lets
+     * the transform tag each URL with the region it was cited in. Reuses the
+     * Markets element + transform (same as resolveRegionProjectId).
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} [opts]
+     * @param {object[]} [opts.brandSemrushProjects] - Flattened BrandSemrushProject
+     *   rows, to enrich/match the Markets response.
+     * @returns {Promise<Array<{region: string, projectId: string}>>}
+     */
+    async getOwnedUrlProjects(workspaceId, { brandSemrushProjects = [] } = {}) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.MARKETS,
+        buildMarketsPayload({}),
+      );
+      return transformMarketsToFilterDimensions(raw, brandSemrushProjects)
+        .filter((r) => r.semrush_project_id)
+        .map((r) => ({ region: r.id, projectId: r.semrush_project_id }));
+    },
+
+    /**
+     * Fetches the URL Inspector Owned URLs table (citations + weekly trends) from
+     * Semrush, backed by Stats-per-URL (9af5ed83) + URL trend (afb2e5d3). Fans out
+     * per project (region) — each project stays under the 50k-row cap and carries
+     * its region — fetching both elements in parallel, then merges to the legacy
+     * shape. Returns the FULL owned list sorted by citations desc; the controller
+     * paginates client-side and joins agentic/referral traffic for the page.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {Array<{region?: string, projectId?: string}>} [params.projects] -
+     *   Projects to query. Empty → one unscoped (workspace-wide) fetch.
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD.
+     * @param {string} [params.category] - Category tag filter.
+     * @returns {Promise<object[]>} Full owned-URL list (no traffic, no slice).
+     */
+    async getOwnedUrls(workspaceId, {
+      projects = [], model, platform, startDate, endDate, category,
+    }) {
+      const scopes = projects.length > 0 ? projects : [{}];
+      const projectResults = await Promise.all(scopes.map(async ({ region, projectId }) => {
+        const [stats, trend] = await Promise.all([
+          transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.STATS_PER_URL,
+            buildOwnedUrlsStatsPayload({
+              model, platform, startDate, endDate, category, projectId,
+            }),
+          ),
+          transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.URL_TRENDS,
+            buildOwnedUrlsTrendPayload({
+              model, platform, startDate, endDate, projectId,
+            }),
+          ),
+        ]);
+        return { region, stats, trend };
+      }));
+      return transformOwnedUrlsResponse(projectResults);
     },
     /* c8 ignore stop */
   };
