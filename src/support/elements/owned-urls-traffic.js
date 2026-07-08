@@ -23,6 +23,11 @@
 
 /* c8 ignore start -- LLMO-6086 POC endpoint; unit tests intentionally deferred */
 
+// The referral source tables the RPC knows about. An unrecognized value makes the
+// RPC RAISE (→ caught below → silent empty), so we drop unknown values and let the
+// RPC apply its documented default ('optel') instead.
+const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'ga4', 'adobe_analytics', 'cja']);
+
 /**
  * Maps an RPC weekly-trend array ([{ week_start, value }]) to the legacy JS shape
  * ([{ weekStart, value }]), mirroring the legacy owned-urls handler.
@@ -81,7 +86,7 @@ export async function fetchOwnedUrlsTraffic(postgrestService, {
   if (agentTypes) {
     rpcParams.p_agent_types = agentTypes;
   }
-  if (referralSource) {
+  if (referralSource && VALID_REFERRAL_SOURCES.has(referralSource)) {
     rpcParams.p_referral_source = referralSource;
   }
 

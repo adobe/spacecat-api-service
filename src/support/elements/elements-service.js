@@ -11,6 +11,7 @@
  */
 
 import { ELEMENT_IDS } from './element-ids.js';
+import { mapWithConcurrency } from './concurrency.js';
 import {
   buildBrandsPayload,
   transformBrandsToFilterDimensions,
@@ -207,25 +208,34 @@ export function createElementsService(transport) {
       projects = [], model, platform, startDate, endDate, category,
     }) {
       const scopes = projects.length > 0 ? projects : [{}];
-      const projectResults = await Promise.all(scopes.map(async ({ region, projectId }) => {
-        const [stats, trend] = await Promise.all([
-          transport.fetchElement(
-            workspaceId,
-            ELEMENT_IDS.STATS_PER_URL,
-            buildOwnedUrlsStatsPayload({
-              model, platform, startDate, endDate, category, projectId,
-            }),
-          ),
-          transport.fetchElement(
-            workspaceId,
-            ELEMENT_IDS.URL_TRENDS,
-            buildOwnedUrlsTrendPayload({
-              model, platform, startDate, endDate, projectId,
-            }),
-          ),
-        ]);
-        return { region, stats, trend };
-      }));
+      // Bound the per-project fan-out (2 element calls each) so a brand with many
+      // markets can't spawn unbounded parallel Semrush requests (429 / pool risk).
+      const OWNED_URLS_PROJECT_CONCURRENCY = 8;
+      const projectResults = await mapWithConcurrency(
+        scopes,
+        OWNED_URLS_PROJECT_CONCURRENCY,
+        async ({ region, projectId }) => {
+          const [stats, trend] = await Promise.all([
+            transport.fetchElement(
+              workspaceId,
+              ELEMENT_IDS.STATS_PER_URL,
+              buildOwnedUrlsStatsPayload({
+                model, platform, startDate, endDate, category, projectId,
+              }),
+            ),
+            transport.fetchElement(
+              workspaceId,
+              ELEMENT_IDS.URL_TRENDS,
+              // category applied here too (mirrors stats) so weekly sparklines and
+              // aggregate totals share the same filter set.
+              buildOwnedUrlsTrendPayload({
+                model, platform, startDate, endDate, category, projectId,
+              }),
+            ),
+          ]);
+          return { region, stats, trend };
+        },
+      );
       return transformOwnedUrlsResponse(projectResults);
     },
     /* c8 ignore stop */

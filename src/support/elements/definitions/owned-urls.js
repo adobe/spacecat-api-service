@@ -59,26 +59,30 @@ export function buildOwnedUrlsStatsPayload({
  * Builds the payload for the URL trend element (afb2e5d3, `line`). Verified to
  * return ALL URLs' weekly trends in ONE call when scoped by `project_id` + date
  * + model (no per-URL filter — the wiki's "one call per URL" claim is wrong).
- * Category is intentionally omitted (the line element's tag support is
- * unverified; date+model+project is the confirmed-working scope).
+ *
+ * `category` is applied here identically to {@link buildOwnedUrlsStatsPayload} so
+ * the weekly sparklines and the aggregate totals share the same filter set — if
+ * only stats were category-filtered, a category-filtered view's weekly values
+ * could exceed its totals.
  */
 export function buildOwnedUrlsTrendPayload({
-  model, platform, startDate, endDate, projectId,
+  model, platform, startDate, endDate, category, projectId,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
+  const advancedFilters = [
+    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
+    { op: 'gte', val: startDate, col: 'CBF_date__start' },
+    { op: 'lte', val: endDate, col: 'CBF_date__end' },
+  ];
+  if (category) {
+    advancedFilters.push({ op: 'eq', val: `category:${category}`, col: 'CBF_tags' });
+  }
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
     filters: {
       simple: { CBF_date__start: startDate, CBF_date__end: endDate },
-      advanced: {
-        op: 'and',
-        filters: [
-          { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
-          { op: 'gte', val: startDate, col: 'CBF_date__start' },
-          { op: 'lte', val: endDate, col: 'CBF_date__end' },
-        ],
-      },
+      advanced: { op: 'and', filters: advancedFilters },
     },
   };
 }

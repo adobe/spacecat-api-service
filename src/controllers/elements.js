@@ -22,6 +22,7 @@ import { createElementsTransport } from '../support/elements/elements-transport.
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
+import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -31,30 +32,8 @@ import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../ut
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
 // Caps concurrent DB queries / upstream POSTs when fanning out across brands or projects.
+// mapWithConcurrency itself lives in support/elements/concurrency.js (shared with the service).
 const FANOUT_CONCURRENCY = 8;
-
-/**
- * Runs `mapper` over `items` with at most `limit` concurrent invocations,
- * preserving input order in the returned array. Bounds fan-out so a workspace
- * with many brands/projects can't spawn an unbounded number of parallel calls.
- */
-async function mapWithConcurrency(items, limit, mapper) {
-  const out = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(limit, items.length)) },
-    async () => {
-      while (cursor < items.length) {
-        const idx = cursor;
-        cursor += 1;
-        // eslint-disable-next-line no-await-in-loop
-        out[idx] = await mapper(items[idx], idx);
-      }
-    },
-  );
-  await Promise.all(workers);
-  return out;
-}
 
 /**
  * Maps a BrandSemrushProject model instance to the plain object shape the
@@ -584,6 +563,14 @@ export default function ElementsController(context, log, env) {
       }
       if (startDate > endDate) {
         return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (defense-in-depth alongside the traffic RPC's p_urls cap): a
+      // multi-year range fanned across every project is needlessly expensive upstream.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
       }
 
       // siteId is OPTIONAL here (unlike the legacy site-scoped RPC): citations come
