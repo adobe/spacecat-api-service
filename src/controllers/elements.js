@@ -135,6 +135,20 @@ function extractQuery(context) {
 }
 
 /**
+ * True when `value` is a real `YYYY-MM-DD` calendar date. Rejects malformed shapes
+ * and impossible dates (e.g. `2026-13-45`) by round-tripping through Date so a bad
+ * value never reaches Semrush. (shared-utils `isIsoDate` requires a full datetime,
+ * not the date-only form the URL Inspector sends.)
+ */
+function isYmdDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/**
  * Splits a comma-separated query value into a trimmed, non-empty string array.
  * `extractQuery` collapses repeated params (last value wins), so multi-valued
  * filters (topics, project ids) are passed as a single CSV value.
@@ -454,9 +468,94 @@ export default function ElementsController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/cited-domains
+   * Returns domains most frequently cited alongside owned URLs (Cited Domains panel).
+   */
+  /* c8 ignore start -- LLMO-6020 POC endpoint; unit tests intentionally deferred */
+  const listCitedDomains = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      // authorizeOrg validated `:brandId`, confirmed the brand belongs to the org, and
+      // resolved the brand's Semrush **sub-workspace** — every element is scoped by that
+      // workspace, not the org's (LLMO-5990/6029). The URL Inspector UI has no brand picker,
+      // so it cross-maps its selected site → brandId before calling.
+      const { brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is required (the UI always sends it) and must be a valid YYYY-MM-DD —
+      // fail fast rather than silently defaulting to a rolling window or forwarding a
+      // malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+
+      // buildService is async: it resolves the IMS token via the x-promise-token flow
+      // (falling back to Authorization IMS) before constructing the transport (LLMO-5990).
+      const service = await buildService(ctx);
+
+      // Region scoping: a Semrush project == one (brand, market). Resolve the UI's region
+      // code to that project's id (via the Markets element) and pass it as top-level
+      // `project_id`. region=all/absent → all of the brand's markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          [brand],
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        // Don't silently fall back to all-region data when the caller asked for a specific
+        // region we can't resolve to a market — that would return a superset of what was
+        // requested. Fail explicitly, mirroring the brandId/workspaceId guards above.
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      }
+
+      // Explicitly pick the params the service needs (normalizing the aliases the UI may send
+      // under either casing/key) rather than spreading all raw query keys through. `category`
+      // (sent as `categoryId`) becomes a Semrush tag; `channel` is a client-side content-type
+      // filter in the transform; `region` was resolved to `projectId` above; page/pageSize
+      // drive the client-side slice.
+      const params = {
+        projectId,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        category: query.categoryId || query.category,
+        channel: query.channel || query.selectedChannel,
+        page: query.page,
+        pageSize: query.pageSize,
+      };
+
+      const result = await service.getCitedDomains(workspaceId, params);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
     listPrompts,
+    listCitedDomains,
   };
 }
