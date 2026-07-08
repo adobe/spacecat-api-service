@@ -258,20 +258,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('rejects PRE_ONBOARDING for internal org demo sites', async () => {
+    it('returns 400 for internal org demo sites', async () => {
       const INTERNAL_ORG_ID = 'internal-org-123';
       const DEMO_SITE_ID = 'demo-site-456';
 
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: DEMO_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
-        .resolves(preonboardedOnboarding);
-
       const demoSite = createMockSite({ id: DEMO_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findById.resolves(demoSite);
+      mockDataAccess.Site.findByBaseURL.resolves(demoSite);
 
       stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
       stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = DEMO_SITE_ID;
@@ -279,8 +271,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
 
-      expect(response.status).to.equal(200);
-      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('REJECTED');
+      expect(response.status).to.equal(400);
       expect(demoSite.setOrganizationId).to.not.have.been.called;
     });
 
