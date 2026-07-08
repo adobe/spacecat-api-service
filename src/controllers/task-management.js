@@ -487,7 +487,8 @@ function TaskManagementController(context) {
   async function createTicket(requestContext) {
     const { params, data, attributes } = requestContext;
 
-    const createdBy = attributes?.authInfo?.getProfile()?.email ?? 'unknown';
+    const callerProfile = attributes?.authInfo?.getProfile?.();
+    const createdBy = callerProfile?.user_id ?? callerProfile?.sub ?? 'unknown';
     const { organizationId, provider } = params;
 
     // --- Input validation ---------------------------------------------------
