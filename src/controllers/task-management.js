@@ -27,7 +27,6 @@ import {
   STATUS_NOT_FOUND,
   STATUS_OK,
 } from '../utils/constants.js';
-import { getHeader } from '../support/http-headers.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 const STATUS_CONFLICT = 409;
@@ -596,11 +595,12 @@ function TaskManagementController(context) {
     }
 
     // --- Idempotency-Key enforcement (spec §Idempotent Ticket Creation) --------
+    // Derived server-side from the request payload so duplicate requests for the
+    // same suggestions are deduplicated regardless of which client sends them.
 
-    const idempotencyKey = getHeader(requestContext, 'idempotency-key');
-    if (!idempotencyKey) {
-      return createResponse({ message: 'Idempotency-Key header is required' }, STATUS_BAD_REQUEST);
-    }
+    const idempotencyKey = createHash('sha256')
+      .update(`${data.opportunityId ?? organizationId}:${[...suggestionIds].sort().join(',')}`)
+      .digest('hex');
 
     const postgrestClient = dataAccess.services?.postgrestClient;
     if (!postgrestClient) {
