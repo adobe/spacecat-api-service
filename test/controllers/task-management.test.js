@@ -688,9 +688,9 @@ describe('TaskManagementController', () => {
       expect(body.message).to.include('individual batch mode');
     });
 
-    it('returns 400 when suggestionIds exceeds max for individual mode (>10)', async () => {
+    it('returns 400 when suggestionIds exceeds max for individual mode (>15)', async () => {
       const { createTicket } = TaskManagementController(makeContext());
-      const suggestionIds = Array.from({ length: 11 }, (_, i) => `id-${i}`);
+      const suggestionIds = Array.from({ length: 16 }, (_, i) => `id-${i}`);
       const res = await createTicket(makeReqCtx({
         data: {
           summary: 'Fix', projectKey: 'P', mode: 'individual', connectionId: CONN_ID, suggestionIds,
@@ -698,7 +698,7 @@ describe('TaskManagementController', () => {
       }));
       expect(res.status).to.equal(400);
       const body = await res.json();
-      expect(body.message).to.include('at most 10');
+      expect(body.message).to.include('at most 15');
       expect(body.message).to.include("'individual'");
     });
 

@@ -35,7 +35,10 @@ const STATUS_CONFLICT = 409;
 const TICKET_MODE_INDIVIDUAL = 'individual';
 const TICKET_MODE_GROUPED = 'grouped';
 // individual: one ticket per suggestion (N→N), grouped: all suggestions into one ticket (M→1)
-const SUGGESTION_IDS_MAX_INDIVIDUAL = 10;
+// INDIVIDUAL cap is Jira-bound: 15 × ~800ms/ticket ≈ 12s < 15s Lambda timeout.
+// GROUPED cap is DynamoDB-bound: suggestions validated in parallel (Promise.allSettled),
+// so 400 reads complete in ~30ms regardless of count. Jira creates 1 ticket — well within budget.
+const SUGGESTION_IDS_MAX_INDIVIDUAL = 15;
 const SUGGESTION_IDS_MAX_GROUPED = 400;
 const ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024; // 3 MB per spec §30
 
@@ -608,17 +611,17 @@ function TaskManagementController(context) {
     //   remaining suggestions as it goes (best-effort per item).
 
     if (mode === TICKET_MODE_GROUPED) {
-      for (const suggId of suggestionIds) {
-        let sugg;
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          sugg = await Suggestion.findById(suggId);
-        } catch (err) {
-          log.error({ suggId, err }, 'Failed to look up suggestion');
+      const suggestionResults = await Promise.allSettled(
+        suggestionIds.map((suggId) => Suggestion.findById(suggId)),
+      );
+      for (let i = 0; i < suggestionResults.length; i += 1) {
+        const { status, value, reason } = suggestionResults[i];
+        if (status === 'rejected') {
+          log.error({ suggId: suggestionIds[i], err: reason }, 'Failed to look up suggestion');
           return createResponse({ message: 'Failed to validate suggestion' }, STATUS_INTERNAL_SERVER_ERROR);
         }
-        if (!sugg) {
-          return createResponse({ message: `Suggestion ${suggId} not found` }, STATUS_NOT_FOUND);
+        if (!value) {
+          return createResponse({ message: `Suggestion ${suggestionIds[i]} not found` }, STATUS_NOT_FOUND);
         }
       }
     } else if (primarySuggestionId) {
