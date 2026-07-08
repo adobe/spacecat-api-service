@@ -238,8 +238,12 @@ export default function getRouteHandlers(
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
     'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
     // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
-    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
-    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks': elementsController.listWeeks,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': elementsController.listWeeks,
+    // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,

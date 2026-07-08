@@ -173,6 +173,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
         }],
       },
       log,
+      undefined, // classifyPromptType (tag-dimension path — not under test here)
       { dynamicAllocation: true, masterId: MASTER },
     );
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
@@ -190,6 +191,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
         }],
       },
       log,
+      undefined, // classifyPromptType
       { dynamicAllocation: false, masterId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
@@ -295,6 +297,7 @@ describe('dynamic-allocation — enforcement choke point', () => {
           }],
         },
         log,
+        undefined, // classifyPromptType
         { dynamicAllocation: true, masterId: MASTER },
       ),
     },
