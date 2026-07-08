@@ -1001,10 +1001,10 @@ describe('Organizations Controller', () => {
 
     it('filters own sites to the ReBAC-viewable set when facs flag is set', async () => {
       setupBothSitesPass();
-      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
       context.dataAccess.services = {
         postgrestClient: fakeFacsPostgrest([
-          { resource_id: 'site1', granted_capabilities: ['abcd/can_view'] },
+          { resource_id: 'site1', granted_capabilities: ['aso/can_view'] },
         ]),
       };
       const result = await organizationsController.getSitesForOrganization({
@@ -1020,7 +1020,7 @@ describe('Organizations Controller', () => {
 
     it('returns 503 when the facs flag is set but PostgREST is unavailable', async () => {
       setupBothSitesPass();
-      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
       // No context.dataAccess.services → postgrest guard trips.
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
@@ -1031,14 +1031,30 @@ describe('Organizations Controller', () => {
 
     it('skips filter when JWT carries the federal can_view grant', async () => {
       setupBothSitesPass();
-      context.attributes.facs = { enabled: true, product: 'ABCD', subjectId: 'user@AdobeID' };
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
       // Keep is_admin: true so hasAccess passes; add facs_permissions to trigger the bypass.
       context.attributes.authInfo.withProfile({
         email: 'test@example.com',
         is_admin: true,
-        facs_permissions: ['abcd/can_view'],
+        facs_permissions: ['aso/can_view'],
       });
       // No postgrestClient needed — the bypass should skip the state-layer query entirely.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(200);
+      const resultSites = await result.json();
+      expect(resultSites).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('skips the site filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
+      setupBothSitesPass();
+      // LLMO ReBAC-scopes `brand`, not `site` — listing sites must NOT be
+      // filtered even though a resource-scoped facs session is active.
+      context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
+      // No postgrestClient: if the filter wrongly engaged it would 503; the
+      // cross-product bypass must skip the state-layer query entirely.
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
         ...context,

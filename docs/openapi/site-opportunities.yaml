@@ -663,11 +663,18 @@ site-opportunity-suggestions-edge-deploy:
                       enum: [GENERATING_BASELINE]
                     geoExperimentPhase:
                       type: string
-                      enum: [pre_analysis_submitted]
+                      enum: [initiated]
+                      description: >-
+                        Initial phase of the newly created experiment. The
+                        experimentation engine advances it through prompt
+                        generation, pre-analysis, deployment, and post-analysis.
                     prePhaseScheduleId:
-                      type: string
+                      type: [string, 'null']
                       format: uuid
-                      description: DRS schedule ID for the pre-analysis phase
+                      description: >-
+                        Always null from this endpoint. The DRS pre-analysis
+                        schedule is created later by the experimentation engine,
+                        not at edge-deploy time.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -728,8 +735,22 @@ site-geo-experiment:
     summary: Get geo experiment details
     description: |
       Returns the full details of a geo experiment, including prompts (fetched from S3).
+      When called with `includeInsights=true`, the impact-measurement insights JSON is
+      also fetched from S3 and returned in the `insights` field.
     tags:
       - geo-experiments
+    parameters:
+      - name: includeInsights
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+            - 'true'
+            - 'false'
+        description: |
+          When `true`, include the impact-measurement insights (ExperimentInsights)
+          fetched from S3. Omitted from the response otherwise.
     responses:
       '200':
         description: Geo experiment details
@@ -761,6 +782,14 @@ site-geo-experiment:
                             items:
                               type: string
                       description: Prompts from S3, or null if not yet available
+                    insights:
+                      type:
+                        - object
+                        - 'null'
+                      description: |
+                        Impact-measurement insights (ExperimentInsights) fetched from S3.
+                        Only present when the request sets `includeInsights=true`; null when
+                        insights do not exist yet or the S3 fetch fails.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -802,6 +831,8 @@ GeoExperiment:
         - deployment_completed
         - post_analysis_submitted
         - post_analysis_done
+        - impact_measurement_started
+        - impact_measurement_done
     siteId:
       type: string
       format: uuid
@@ -830,6 +861,13 @@ GeoExperiment:
         - string
         - 'null'
       description: S3 key of the uploaded prompts JSON file
+    insightsLocation:
+      type:
+        - string
+        - 'null'
+      description: |
+        S3 key of the impact-measurement insights JSON (ExperimentInsights). Null until
+        impact measurement completes. Fetch the object via `includeInsights=true`.
     metadata:
       type:
         - object

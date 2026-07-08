@@ -641,6 +641,23 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * GET /v1/url/resolve — canonicalize a raw URL to the form Semrush stores as
+     * a brand URL. Returns `{ domain, primary_url, is_valid }`: `primary_url`
+     * strips the scheme and a leading `www.` (subdomain + path preserved),
+     * `domain` is the registrable apex. Unresolvable/garbage input comes back
+     * `{ domain: '', primary_url: '', is_valid: false }` at HTTP 200 (NOT an
+     * error), so callers MUST check `is_valid` and never write the empty value.
+     * Used to normalize brand URLs before writing them so the value matches the
+     * canonical benchmark Semrush already holds (avoids www-vs-apex duplicates).
+     */
+    async resolveUrl(primaryUrl) {
+      return unwrap('GET', await projects.GET(
+        '/v1/url/resolve',
+        { params: { query: { primary_url: primaryUrl } } },
+      ));
+    },
+
+    /**
      * GET /v1/languages — returns Semrush's language catalog. Used to resolve
      * the language_id UUID from an ISO 639-1 code (e.g. 'en' → UUID). The
      * caller is expected to cache the result (catalog is stable).
