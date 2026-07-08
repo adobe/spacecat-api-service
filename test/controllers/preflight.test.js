@@ -2285,7 +2285,7 @@ describe('Preflight Controller', () => {
           && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=COMPLETED'));
       expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
-      const logged = JSON.parse(infoCall.args[0].split('results=')[1].split(' process=')[0]);
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
       expect(logged).to.deep.equal([
         {
           pageUrl: 'https://main--example-site.aem.page/test.html',
@@ -2337,7 +2337,7 @@ describe('Preflight Controller', () => {
           && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=COMPLETED'));
       expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
-      const logged = JSON.parse(infoCall.args[0].split('results=')[1].split(' process=')[0]);
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
       expect(logged).to.deep.equal([
         { pageUrl: 'https://main--example-site.aem.page/a.html', step: 'identify', audits: [] },
         {
@@ -2374,9 +2374,9 @@ describe('Preflight Controller', () => {
       expect(infoCall, 'expected no [Preflight] jobId info log while IN_PROGRESS').to.be.undefined;
     });
 
-    it('logs an error with the stringified error payload when the job is FAILED', async () => {
-      loggerStub.error.resetHistory();
-      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' };
+    it('warns with code + message (not the full error object) when the job is FAILED', async () => {
+      loggerStub.warn.resetHistory();
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
       const failedJob = {
         ...mockJob,
         getStatus: () => 'FAILED',
@@ -2388,18 +2388,22 @@ describe('Preflight Controller', () => {
       const response = await preflightController.getPreflightJobStatusAndResult(context);
       expect(response.status).to.equal(200);
 
-      const errorCall = loggerStub.error.getCalls()
+      const warnCall = loggerStub.warn.getCalls()
         .find((c) => typeof c.args[0] === 'string'
           && c.args[0].includes('[Preflight] Run failed.')
           && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
           && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=FAILED'));
-      expect(errorCall, 'expected a [Preflight] Run failed error log').to.not.be.undefined;
-      expect(errorCall.args[0]).to.include(`error=${JSON.stringify(failedError)}`);
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      // details must NOT be logged (never log secrets / freeform worker content)
+      expect(warnCall.args[0]).to.not.include('details');
+      expect(warnCall.args[0]).to.not.include('tok');
     });
 
-    it('logs error=null when the job is FAILED without a structured error', async () => {
-      loggerStub.error.resetHistory();
+    it('warns with errorCode=none when the job is FAILED without a structured error', async () => {
+      loggerStub.warn.resetHistory();
       const failedJob = {
         ...mockJob,
         getStatus: () => 'FAILED',
@@ -2411,18 +2415,55 @@ describe('Preflight Controller', () => {
       const response = await preflightController.getPreflightJobStatusAndResult(context);
       expect(response.status).to.equal(200);
 
-      const errorCall = loggerStub.error.getCalls()
+      const warnCall = loggerStub.warn.getCalls()
         .find((c) => typeof c.args[0] === 'string'
           && c.args[0].includes('[Preflight] Run failed.')
           && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
           && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=FAILED'));
-      expect(errorCall, 'expected a [Preflight] Run failed error log').to.not.be.undefined;
-      expect(errorCall.args[0]).to.include('error=null');
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=none');
+      expect(warnCall.args[0]).to.include('errorMessage=none');
+    });
+
+    it('logs FAILED at warn level, not error', async () => {
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      await preflightController.getPreflightJobStatusAndResult({ params: { jobId } });
+
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
+    });
+
+    it('re-logs the terminal outcome on every poll (stateless — one warn per poll)', async () => {
+      loggerStub.warn.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+
+      const runFailedWarns = loggerStub.warn.getCalls()
+        .filter((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(runFailedWarns).to.have.lengthOf(3);
     });
 
     it('does not log a failure for a COMPLETED job', async () => {
-      loggerStub.error.resetHistory();
+      loggerStub.warn.resetHistory();
       const completedJob = {
         ...mockJob,
         getStatus: () => 'COMPLETED',
@@ -2434,9 +2475,9 @@ describe('Preflight Controller', () => {
       const response = await preflightController.getPreflightJobStatusAndResult(context);
       expect(response.status).to.equal(200);
 
-      const errorCall = loggerStub.error.getCalls()
+      const warnCall = loggerStub.warn.getCalls()
         .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
-      expect(errorCall, 'expected no [Preflight] Run failed error log for a COMPLETED job').to.be.undefined;
+      expect(warnCall, 'expected no [Preflight] Run failed warn log for a COMPLETED job').to.be.undefined;
     });
 
     it('returns 400 Bad Request for invalid job ID', async () => {
@@ -2819,9 +2860,10 @@ describe('Preflight Controller', () => {
       expect(infoCall, 'expected a myst-process [Preflight] Run complete info log').to.not.be.undefined;
     });
 
-    it('logs a run-failed error tagged with the myst process', async () => {
+    it('warns (not errors) with code + message tagged with the myst process when FAILED', async () => {
+      loggerStub.warn.resetHistory();
       loggerStub.error.resetHistory();
-      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' };
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
       const failedJob = {
         ...mockJob,
         getStatus: () => 'FAILED',
@@ -2834,18 +2876,24 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(200);
 
-      const errorCall = loggerStub.error.getCalls()
+      const warnCall = loggerStub.warn.getCalls()
         .find((c) => typeof c.args[0] === 'string'
           && c.args[0].includes('[Preflight] Run failed.')
           && c.args[0].includes(`process=${PREFLIGHT_PROCESS_MYST}`)
           && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=FAILED'));
-      expect(errorCall, 'expected a myst-process [Preflight] Run failed error log').to.not.be.undefined;
-      expect(errorCall.args[0]).to.include(`error=${JSON.stringify(failedError)}`);
+      expect(warnCall, 'expected a myst-process [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      expect(warnCall.args[0]).to.not.include('tok');
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
     });
 
     it('does not emit an outcome log when no AsyncJob is linked yet (null job)', async () => {
       loggerStub.info.resetHistory();
+      loggerStub.warn.resetHistory();
       loggerStub.error.resetHistory();
       mockPreflight.getAsyncJob = sandbox.stub().resolves(null);
 
@@ -2854,8 +2902,11 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(200);
 
-      const outcomeLog = [...loggerStub.info.getCalls(), ...loggerStub.error.getCalls()]
-        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run'));
+      const outcomeLog = [
+        ...loggerStub.info.getCalls(),
+        ...loggerStub.warn.getCalls(),
+        ...loggerStub.error.getCalls(),
+      ].find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run'));
       expect(outcomeLog, 'expected no outcome log when AsyncJob is null').to.be.undefined;
     });
   });

@@ -76,10 +76,10 @@ export const PREFLIGHT_PROCESS_MYST = 'myst';
  * path) and getPreflightById (Mystique path) — so the two appear the same.
  * @param {Object} log - The logger instance
  * @param {string} processName - PREFLIGHT_PROCESS_AUDW | PREFLIGHT_PROCESS_MYST
- * @param {string} jobId - The AsyncJob id
- * @param {Object} job - The AsyncJob entity
+ * @param {Object} job - The AsyncJob entity (its getId() is the logged jobId)
  */
-export function logPreflightOutcome(log, processName, jobId, job) {
+export function logPreflightOutcome(log, processName, job) {
+  const jobId = job.getId();
   const status = job.getStatus();
   const result = job.getResult();
   if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
@@ -93,9 +93,10 @@ export function logPreflightOutcome(log, processName, jobId, job) {
         issues: countIssuesForAudit(a),
       })),
     }));
-    log.info(`[Preflight] Run complete. jobId=${jobId} status=${status} results=${JSON.stringify(summary)} process=${processName}`);
+    log.info(`[Preflight] Run complete. jobId=${jobId} process=${processName} status=${status} results=${JSON.stringify(summary)}`);
   } else if (status === AsyncJob.Status.FAILED) {
-    log.error(`[Preflight] Run failed. jobId=${jobId} status=${status} error=${JSON.stringify(job.getError())} process=${processName}`);
+    const err = job.getError();
+    log.warn(`[Preflight] Run failed. jobId=${jobId} process=${processName} status=${status} errorCode=${err?.code ?? 'none'} errorMessage=${err?.message ?? 'none'}`);
   }
 }
 
@@ -348,7 +349,7 @@ function PreflightController(ctx, log, env) {
       log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
 
       // Emit the terminal-state observability log (shared with the Mystique path).
-      logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, jobId, job);
+      logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, job);
 
       return ok({
         jobId: job.getId(),
@@ -793,9 +794,8 @@ function PreflightController(ctx, log, env) {
         return preflightError('PREFLIGHT_LIFECYCLE_UNAVAILABLE', 'Failed to load preflight lifecycle data', 503);
       }
 
-      // Log terminal state if asyncJob exists
       if (asyncJob) {
-        logPreflightOutcome(log, PREFLIGHT_PROCESS_MYST, asyncJob.getId(), asyncJob);
+        logPreflightOutcome(log, PREFLIGHT_PROCESS_MYST, asyncJob);
       }
 
       return ok(PreflightDto.toDetailJSON(preflight, asyncJob));
