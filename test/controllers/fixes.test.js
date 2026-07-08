@@ -925,10 +925,7 @@ describe('Fixes Controller', () => {
     const opportunityId2 = 'b4e3f2fa-6f5c-4e6b-8c7d-0c7b5a2f1a2f';
 
     beforeEach(() => {
-      // allByOpportunityIds is not yet part of the published @adobe/spacecat-shared-data-access
-      // (pending release of the companion PR); assign directly rather than sandbox.stub(),
-      // which requires the property to already exist on the prototype.
-      fixEntityCollection.allByOpportunityIds = sandbox.stub();
+      sandbox.stub(fixEntityCollection, 'allByOpportunityIds');
       sandbox.stub(dataAccess.Opportunity, 'allBySiteId');
       requestContext = { params: { siteId } };
     });
