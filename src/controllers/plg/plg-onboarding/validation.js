@@ -16,6 +16,9 @@ import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/pl
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 export const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
 
+// AEM CS publish host pattern: publish-p{programId}-e{environmentId}.adobeaemcloud.com
+export const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.(com|net)$/i;
+
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 export const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
