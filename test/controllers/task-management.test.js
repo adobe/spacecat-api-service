@@ -83,6 +83,14 @@ function makeSuggestion(overrides = {}) {
   };
 }
 
+function makeOrg(overrides = {}) {
+  return {
+    getId: () => ORG_ID,
+    getImsOrgId: () => 'test-ims-org-id',
+    ...overrides,
+  };
+}
+
 function makePostgrestClient({
   lookupData = [],
   lookupError = null,
@@ -147,6 +155,10 @@ function makeDataAccess(overrides = {}) {
       findById: sinon.stub().resolves(null),
       ...overrides.Suggestion,
     },
+    Organization: {
+      findById: sinon.stub().resolves(makeOrg()),
+      ...overrides.Organization,
+    },
     services: {
       postgrestClient: makePostgrestClient(),
       ...(overrides.services ?? {}),
@@ -164,6 +176,10 @@ function makeContext(overrides = {}) {
       warn: sinon.stub(),
       error: sinon.stub(),
     },
+    // AccessControlUtil.fromContext() requires pathInfo.headers and attributes.authInfo.
+    // Default to an admin identity so hasAccess() returns true without any DB lookups.
+    pathInfo: { method: 'GET', suffix: '/', headers: {} },
+    attributes: { authInfo: { isAdmin: () => true, getType: () => 'api_key' } },
     ...rest,
   };
 }
@@ -242,6 +258,13 @@ describe('TaskManagementController', () => {
         .to.throw('Suggestion collection not available');
     });
 
+    it('throws when Organization missing', () => {
+      const ctx = makeContext();
+      delete ctx.dataAccess.Organization;
+      expect(() => TaskManagementController(ctx))
+        .to.throw('Organization collection not available');
+    });
+
     it('returns controller with all methods', () => {
       const ctrl = TaskManagementController(makeContext());
       expect(ctrl).to.have.all.keys(
@@ -264,6 +287,33 @@ describe('TaskManagementController', () => {
       const { listConnections } = TaskManagementController(makeContext());
       const res = await listConnections({ params: { organizationId: 'bad-uuid' }, queryStringParameters: {} });
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { listConnections } = TaskManagementController(ctx);
+      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: {} });
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 when caller lacks access to organization', async () => {
+      const ForbiddenCtrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': { TicketClientFactory: { create: sinon.stub() } },
+        '../../src/support/access-control-util.js': {
+          default: {
+            fromContext: sinon.stub().returns({ hasAccess: sinon.stub().resolves(false) }),
+          },
+        },
+      })).default;
+      const { listConnections } = ForbiddenCtrl(makeContext());
+      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: {} });
+      expect(res.status).to.equal(403);
     });
 
     it('returns 500 on collection error', async () => {
