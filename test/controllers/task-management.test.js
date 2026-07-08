@@ -686,7 +686,7 @@ describe('TaskManagementController', () => {
         pathInfo: { headers: { 'idempotency-key': 'test-idem-key-1' }, ...(overrides.pathInfo ?? {}) },
         attributes: {
           authInfo: {
-            getProfile: () => ({ getImsUserId: () => 'ims-user-1' }),
+            getProfile: () => ({ email: 'ims-user-1@example.com' }),
           },
           ...(overrides.attributes ?? {}),
         },
