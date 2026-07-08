@@ -2294,13 +2294,17 @@ describe('TaskManagementController', () => {
           summary: 'Dedup release fail',
           projectKey: 'PROJ',
           connectionId: CONN_ID,
+          mode: 'grouped',
           suggestionIds: [SUGGESTION_ID],
           opportunityId: OPPORTUNITY_ID,
         },
       }));
       // releaseDedupLock error is swallowed — ticket still created
       expect(res.status).to.equal(201);
-      expect(ctx.log.warn).to.have.been.called;
+      expect(ctx.log.warn).to.have.been.calledWithMatch(
+        sinon.match.object,
+        'Failed to release dedup lock',
+      );
     });
 
     // ── Branch 8: dedup insert DB error that is NOT a duplicate — proceed ───────
