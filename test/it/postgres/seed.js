@@ -39,6 +39,9 @@ import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
 import { brands } from './seed-data/brands.js';
 import { brandSites } from './seed-data/brand-sites.js';
 import { projectionAudits } from './seed-data/projection-audits.js';
+import { featureFlags } from './seed-data/feature-flags.js';
+import { prompts } from './seed-data/prompts.js';
+import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -131,6 +134,9 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
+    // feature_flags grants INSERT to postgrest_writer only (SELECT to anon), so
+    // seed it with the writer JWT — same as the append-only audit tables.
+    insertRows('feature_flags', featureFlags, { asWriter: true }),
   ]);
 
   // Level 1b: depend on projects
@@ -163,6 +169,18 @@ async function seed() {
 
   // Level 4: depend on fix_entities + suggestions
   await insertRows('fix_entity_suggestions', fixEntitySuggestions);
+}
+
+/**
+ * Optional per-test fixture: a prompt carrying an `intent` plus a
+ * brand_presence_executions row referencing it. NOT part of the baseline seed —
+ * other suites (e.g. categories-prompts) count prompts under ORG_1/BRAND_1 and
+ * assume an empty baseline, so this is seeded only by the topic-prompts IT after
+ * resetPostgres(). Cleared by the next suite's clearData (organizations CASCADE).
+ */
+export async function seedBrandPresenceIntentFixture() {
+  await insertRows('prompts', prompts); // FK: BPE.prompt_id → prompts.id
+  await insertRows('brand_presence_executions', brandPresenceExecutions);
 }
 
 /**

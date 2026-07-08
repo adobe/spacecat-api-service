@@ -74,6 +74,7 @@ function isStaticRoute(routePattern) {
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
  * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
+ * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -105,6 +106,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
+ * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -137,6 +139,7 @@ export default function getRouteHandlers(
   fixesController,
   llmoController,
   llmoCloudflareController,
+  llmoCloudFrontController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -169,6 +172,7 @@ export default function getRouteHandlers(
   agenticCategoriesController,
   agenticPageTypesController,
   serenityController,
+  elementsController,
   proxyController,
   redirectsController,
 ) {
@@ -217,6 +221,7 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': brandsController.transitionBrandStatusForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': brandsController.activateBrandForOrg,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
@@ -226,10 +231,19 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
     'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
+    // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': elementsController.listWeeks,
+    // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
@@ -327,6 +341,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': suggestionsController.getSuggestionFixes,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': suggestionsController.createBackofficeReview,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
@@ -430,6 +445,7 @@ export default function getRouteHandlers(
     'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
     'POST /state/access-mappings': stateAccessMappingsController.createMapping,
     'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
+    'DELETE /state/access-mappings/:id': stateAccessMappingsController.deleteMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
     'GET /user/capabilities/:resourceId': stateAccessMappingsController.getUserCapabilities,
     'GET /organizations/:organizationId/permission/audit-logs': stateAccessMappingsController.getAuditLogs,
@@ -506,6 +522,22 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url': llmoCloudFrontController.createBootstrapUrl,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect': llmoCloudFrontController.connect,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions': llmoCloudFrontController.listDistributions,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites': llmoCloudFrontController.checkPrerequisites,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins': llmoCloudFrontController.fetchOrigins,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors': llmoCloudFrontController.fetchBehaviors,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin': llmoCloudFrontController.createOrigin,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function': llmoCloudFrontController.createRoutingFunction,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache': llmoCloudFrontController.applyCache,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda': llmoCloudFrontController.createLambda,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status': llmoCloudFrontController.fetchLambdaStatus,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations': llmoCloudFrontController.applyAssociations,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify': llmoCloudFrontController.verifyRouting,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': llmoCloudFrontController.deploy,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': llmoCloudFrontController.plan,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': llmoCloudFrontController.getPermissions,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,

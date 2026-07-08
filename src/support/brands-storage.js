@@ -241,10 +241,18 @@ function mapDbBrandToV2(row) {
     name: row.name,
     baseSiteId: row.base_site?.id || row.site_id || null,
     baseUrl: row.base_site?.base_url || null,
-    // Read-only: the brand's own Semrush sub-workspace (dual-mode). Null for
-    // brands still in flat mode (no sub-workspace minted yet). Consumers use it
-    // to scope per-brand Semrush views to the sub-workspace.
+    // DEPRECATED (serenity-docs brand-semrush-mapping-maintenance.md §10
+    // rename, write-of-record cutover): read-only BC mirror of
+    // semrushSubWorkspaceId below, maintained by the mysticat-data-service
+    // brands_sync_semrush_workspace_id trigger. Kept for any consumer still
+    // reading this field directly; new/updated consumers should read
+    // semrushSubWorkspaceId instead.
     semrushWorkspaceId: row.semrush_workspace_id || null,
+    // Read-only: the brand's own Semrush sub-workspace (dual-mode) — the
+    // write-of-record column. Null for brands still in flat mode (no
+    // sub-workspace minted yet). Consumers use it to scope per-brand Semrush
+    // views to the sub-workspace.
+    semrushSubWorkspaceId: row.semrush_sub_workspace_id || null,
     // Read-only: deferred Semrush provisioning data for a pending (draft) brand
     // (serenity dual-mode). Object { primaryUrl, markets: [{ market,
     // languageCode }] } the wizard collected before provisioning; null once
@@ -591,6 +599,38 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
+ * Lightweight brand/org-membership + display-name lookup. Selects only `id, name`
+ * — unlike {@link getBrandById}, which pays for a wide 8-table join
+ * (`BRAND_SELECT`: aliases, social accounts, earned sources, competitors, sites,
+ * urls) to build the full brand DTO. Callers that only need to confirm a brand
+ * belongs to an org and want its display name (e.g. auth guards enriching a
+ * filter-dimensions response) should use this instead.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{id: string, name: string} | null>} the brand's id + name,
+ *   or null if it doesn't exist / doesn't belong to the org.
+ */
+export async function getBrandIdentity(organizationId, brandId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to get brand identity: ${error.message}`);
+  }
+  return data ?? null;
+}
+
+/**
  * Reads a brand's aliases (the `brand_aliases` rows) — the extra names the brand
  * is known by, beyond its display name — each with its `regions`. Returned as
  * `{ name, regions }[]` (empty when the brand has none), the shape the Semrush
@@ -806,7 +846,7 @@ export async function isSemrushMarketMirrorSite(organizationId, siteId, postgres
  * @param {object} [params.log] - Logger (defaults to console).
  * @param {string|null} [params.forceBrandId] - Pre-generated brand id to persist
  *   (serenity-first provisioning); null lets the DB generate it.
- * @param {string|null} [params.semrushWorkspaceId] - Provisioned sub-workspace
+ * @param {string|null} [params.semrushSubWorkspaceId] - Provisioned sub-workspace
  *   pointer to persist atomically with the row; null keeps the brand in flat mode.
  * @returns {Promise<object>} Created/updated brand in V2 config shape
  */
@@ -824,7 +864,7 @@ export async function upsertBrand({
   // stays in flat mode). These are explicit params, NOT read from `brand`, so a
   // client-supplied id can never force a row id.
   forceBrandId = null,
-  semrushWorkspaceId = null,
+  semrushSubWorkspaceId = null,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -836,14 +876,17 @@ export async function upsertBrand({
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
-  // Check if the brand already exists with a base site set.
-  // This prevents silently downgrading an active brand to pending when a caller
-  // re-upserts by name without passing baseSiteId.
+  // Check if a non-deleted brand already exists with this name. Soft-deleted
+  // brands are excluded (.neq('status', 'deleted')) so that creating a brand
+  // whose name matches a deleted record is treated as a fresh create — the
+  // caller gets the expected new brand instead of a resurrected row that
+  // inherits the deleted brand's site_id and anchoring state (LLMO-5919).
   const { data: existing, error: existingError } = await postgrestClient
     .from('brands')
     .select('id, site_id, status')
     .eq('organization_id', organizationId)
     .eq('name', brand.name)
+    .neq('status', 'deleted')
     .maybeSingle();
 
   // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a query
@@ -857,12 +900,12 @@ export async function upsertBrand({
 
   // An active brand must be anchored by either a SpaceCat base site OR a Semrush
   // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
-  // its sub-workspace (semrush_workspace_id, set on the serenity-first create
+  // its sub-workspace (semrush_sub_workspace_id, set on the serenity-first create
   // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
   // DB constraint. Respect persisted site_id on the update path.
   const hasAnchor = hasText(brand.baseSiteId)
     || hasText(existing?.site_id)
-    || hasText(semrushWorkspaceId);
+    || hasText(semrushSubWorkspaceId);
   const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
@@ -901,8 +944,8 @@ export async function upsertBrand({
   if (hasText(forceBrandId)) {
     row.id = forceBrandId;
   }
-  if (hasText(semrushWorkspaceId)) {
-    row.semrush_workspace_id = semrushWorkspaceId;
+  if (hasText(semrushSubWorkspaceId)) {
+    row.semrush_sub_workspace_id = semrushSubWorkspaceId;
   }
 
   const brandContext = normalizeNullableText(brand.brandContext, 'brandContext');
@@ -929,28 +972,36 @@ export async function upsertBrand({
     row.pending_semrush_provisioning = pendingSemrushProvisioning;
   }
 
-  // A Semrush-anchored create (serenity-first, semrushWorkspaceId set) is NEVER
-  // anchored by a SpaceCat site: its primary URL is the Semrush project domain,
-  // which may coincidentally match an onboarded site. Setting site_id from that
-  // match would collide with the site's existing primary brand (409
+  // A Semrush-anchored create (serenity-first, semrushSubWorkspaceId set) is
+  // NEVER anchored by a SpaceCat site: its primary URL is the Semrush project
+  // domain, which may coincidentally match an onboarded site. Setting site_id
+  // from that match would collide with the site's existing primary brand (409
   // brands_base_site_unique) — so ignore baseSiteId entirely on this path.
-  const anchoredBySemrush = hasText(semrushWorkspaceId);
+  const anchoredBySemrush = hasText(semrushSubWorkspaceId);
 
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
   // overwrote mongodb.com -> learn.mongodb.com and merck.com -> keytruda.com).
-  if (!anchoredBySemrush && hasText(brand.baseSiteId) && !hasText(existing?.site_id)) {
-    row.site_id = brand.baseSiteId;
-  } else if (
-    !anchoredBySemrush
-    && hasText(brand.baseSiteId)
-    && hasText(existing?.site_id)
-    && existing.site_id !== brand.baseSiteId
-  ) {
-    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
-      + `(org ${organizationId}) — primary site is immutable `
-      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+  // LLMO-5919: soft-deleted brands are now excluded from `existing` (see filter
+  // above), so `existing === null` covers both fresh creates and resurrections.
+  // In both cases we always write an explicit site_id — or null to clear the
+  // deleted brand's stale anchor so it cannot survive the ON CONFLICT UPDATE
+  // and collide with whichever brand now owns that site.
+  if (!anchoredBySemrush) {
+    if (existing === null) {
+      row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
+    } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
+      row.site_id = brand.baseSiteId;
+    } else if (
+      hasText(brand.baseSiteId)
+      && hasText(existing.site_id)
+      && existing.site_id !== brand.baseSiteId
+    ) {
+      log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+        + `(org ${organizationId}) — primary site is immutable `
+        + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+    }
   }
 
   const { data: upserted, error } = await postgrestClient

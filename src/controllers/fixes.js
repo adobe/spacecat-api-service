@@ -47,7 +47,12 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 // Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
 // values that could have been stored before the server-side derivation fix, closing
 // the residual PII exfiltration path for pre-fix data.
-const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{24})$/;
+// The auth source (after `@`) is a named source (AdobeID/AdobeOrg/Email/AdobeServices)
+// or a hex org id that may carry a single-letter account-type suffix, e.g.
+// `...495fcd.e` for reference/trial orgs — plain emails and system markers stay rejected.
+// The hex run is bounded (16-40) to keep this security guard tight: it is the sole
+// gate preventing arbitrary stored values from reaching getImsAdminProfile.
+const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{16,40}(?:\.[a-z])?)$/;
 const IMS_ENRICH_BATCH_SIZE = 5;
 
 /**
@@ -406,7 +411,15 @@ export class FixesController {
       if (!site || !opportunity) {
         return null;
       }
-      const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      const headerToken = this.#ctx.pathInfo?.headers?.['x-promise-token'];
+      let promiseTokenResponse;
+      if (hasText(headerToken)) {
+        log.info('[document-path-enrichment] using promise token from x-promise-token header');
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        log.info('[document-path-enrichment] no x-promise-token header, creating promise token via IMS');
+        promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      }
       const imsAccessToken = await exchangePromiseToken(
         this.#ctx,
         promiseTokenResponse.promise_token,

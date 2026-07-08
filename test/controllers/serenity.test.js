@@ -35,6 +35,35 @@ function fakeLog() {
   };
 }
 
+// Faithful re-implementation of support/utils.js#resolveSemrushImsToken, wired to
+// a controllable exchange stub. The controller now delegates the promise-token
+// decode/exchange to that shared helper, so exercising it here (rather than
+// stubbing the whole thing away) keeps this suite's fallback-path assertions
+// (IMS-type gate, hint message) exercising the REAL `fallback` the controller
+// passes in, while still allowing the promise-token exchange itself to be
+// controlled per-test. The authoritative unit tests for the decode/error-wrap
+// behavior itself live in test/support/utils.test.js.
+function makeResolveSemrushImsTokenStub(exchangeStub) {
+  return async (ctx, log, logLabel, fallback) => {
+    const promiseTokenHeader = ctx?.pathInfo?.headers?.['x-promise-token'];
+    if (promiseTokenHeader) {
+      let decoded = promiseTokenHeader;
+      try {
+        decoded = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use as-is.
+      }
+      try {
+        return await exchangeStub(ctx, decoded);
+      } catch (e) {
+        log.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
+        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+      }
+    }
+    return fallback(ctx);
+  };
+}
+
 function makeBrandModel(overrides = {}) {
   return {
     getId: () => BRAND,
@@ -44,8 +73,8 @@ function makeBrandModel(overrides = {}) {
     // all-or-nothing path keys off this status (a non-pending brand is never
     // downgraded on a partial failure).
     getStatus: () => 'pending',
-    getSemrushWorkspaceId: () => 'subworkspace-ws-1',
-    setSemrushWorkspaceId: sinon.stub(),
+    getSemrushSubWorkspaceId: () => 'subworkspace-ws-1',
+    setSemrushSubWorkspaceId: sinon.stub(),
     setStatus: sinon.stub(),
     save: sinon.stub().resolves(),
     ...overrides,
@@ -60,11 +89,15 @@ function fakeContext({
   brandId = BRAND,
   brand = makeBrandModel(),
   env = {},
+  promiseToken = undefined,
 } = {}) {
   return {
     env,
     pathInfo: {
-      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+      headers: {
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+      },
     },
     attributes: {
       authInfo: { getType: () => authType },
@@ -120,12 +153,17 @@ describe('SerenityController', () => {
     handleCreatePromptsSubworkspace: sinon.stub(),
     handleUpdatePromptSubworkspace: sinon.stub(),
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
+    handleCreateTag: sinon.stub(),
+    handleCreateTagSubworkspace: sinon.stub(),
+    handleUpdateTag: sinon.stub(),
+    handleUpdateTagSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
   let clearBrandWorkspaceCacheStub;
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
+  let isSerenityActiveStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
@@ -133,6 +171,9 @@ describe('SerenityController', () => {
   let getBrandCompetitorsStub;
   let accessControlHasAccessStub;
   let ensureMarketSiteStub;
+  let exchangePromiseTokenStub;
+  let linkSiteToLiveRowsStub;
+  let tombstoneAllForBrandStub;
   let MockTransportError;
   let SerenityController;
 
@@ -144,6 +185,10 @@ describe('SerenityController', () => {
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
     });
+    // Default: serenity active (org-wide LLMO/serenity flag ON) so every
+    // existing assertion that drives a brand-level route reaches its handler.
+    // The "serenity inactive" describe overrides this to false.
+    isSerenityActiveStub = sinon.stub().resolves(true);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -155,6 +200,9 @@ describe('SerenityController', () => {
     getBrandCompetitorsStub = sinon.stub().resolves([]);
     accessControlHasAccessStub = sinon.stub().resolves(true);
     ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
+    exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    linkSiteToLiveRowsStub = sinon.stub().resolves();
+    tombstoneAllForBrandStub = sinon.stub().resolves();
     MockTransportError = class extends Error {
       constructor(status, message, body) {
         super(message);
@@ -212,9 +260,18 @@ describe('SerenityController', () => {
         handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
       },
+      '../../src/support/serenity/handlers/tags.js': {
+        handleCreateTag: handlers.handleCreateTag,
+        handleCreateTagSubworkspace: handlers.handleCreateTagSubworkspace,
+        handleUpdateTag: handlers.handleUpdateTag,
+        handleUpdateTagSubworkspace: handlers.handleUpdateTagSubworkspace,
+      },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
         decommissionBrandWorkspace: decommissionStub,
+      },
+      '../../src/support/serenity/serenity-active.js': {
+        isSerenityActiveForOrg: isSerenityActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -228,6 +285,15 @@ describe('SerenityController', () => {
       '../../src/support/serenity/site-linkage.js': {
         ensureMarketSite: ensureMarketSiteStub,
       },
+      '../../src/support/utils.js': {
+        resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
+          (...args) => exchangePromiseTokenStub(...args),
+        ),
+      },
+      '../../src/support/serenity/mapping-rows.js': {
+        linkSiteToLiveRows: linkSiteToLiveRowsStub,
+        tombstoneAllForBrand: tombstoneAllForBrandStub,
+      },
     })).default;
   });
 
@@ -240,6 +306,26 @@ describe('SerenityController', () => {
 
     it('requires a log', () => {
       expect(() => SerenityController({ env: {} }, null, {})).to.throw('Log required');
+    });
+
+    // The warn-once latch is module-scoped, but `beforeEach` re-esmocks
+    // serenity.js fresh for every test, so each test gets its OWN latch — this
+    // test is self-contained, not order-dependent. The two constructions below
+    // share THIS test's module instance (first warns, second is already latched),
+    // and a future test that wants to see the warning gets a fresh module where it
+    // fires again. It reads the flag through the third `env` arg (context has no
+    // `env`), exercising the `context?.env || env` fallback branch — the
+    // context.env side is already covered by every other constructor here.
+    it('warns at most once when SERENITY_ALLOW_NON_IMS_AUTH is enabled', () => {
+      const log = fakeLog();
+      SerenityController({ region: 'x' }, log, { SERENITY_ALLOW_NON_IMS_AUTH: 'true' });
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/SERENITY_ALLOW_NON_IMS_AUTH is enabled/);
+
+      // A second construction with the flag still set does not warn again.
+      const log2 = fakeLog();
+      SerenityController({ env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } }, log2, {});
+      expect(log2.warn).to.not.have.been.called;
     });
   });
 
@@ -256,6 +342,127 @@ describe('SerenityController', () => {
       const ctx = fakeContext({ authType: 'jwt' });
       const response = await controller.listPrompts(ctx);
       expect(response.status).to.equal(401);
+    });
+
+    // Test-only escape hatch (SERENITY_ALLOW_NON_IMS_AUTH). The integration-test
+    // harness mints a non-IMS (JWT) token; with the flag set, the IMS-type gate
+    // is skipped so the handler runs (the Semrush mock ignores the forwarded
+    // bearer). The Authorization header is still required (asserted below).
+    it('lets a non-IMS caller through when SERENITY_ALLOW_NON_IMS_AUTH is set (reaches the handler, not 401)', async () => {
+      handlers.handleListPrompts.resolves({ items: [], total: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
+    });
+
+    it('still 401s a non-IMS caller with the flag set but NO Authorization header', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: null, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    // The escape hatch is hard-disabled in production (AWS_ENV or ENV === 'prod'),
+    // mirroring getImsUserTokenStrict — a non-IMS caller must never slip through
+    // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env.
+    it('401s a non-IMS caller with the flag set when AWS_ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', AWS_ENV: 'prod' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    it('401s a non-IMS caller with the flag set when ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', ENV: 'prod' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    describe('x-promise-token support', () => {
+      it('exchanges x-promise-token for an IMS token and forwards it upstream, bypassing the IMS-type gate', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        // Authorization carries a spacecat JWT (not IMS) — would 401 via
+        // requireImsBearer alone, but the promise-token path never calls it.
+        const ctx = fakeContext({
+          authType: 'jwt',
+          bearer: 'spacecat-jwt-abc',
+          promiseToken: 'promise-token-xyz',
+        });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise-token-xyz');
+        expect(createTransportStub).to.have.been.calledWithMatch({ imsToken: 'exchanged-ims-token' });
+      });
+
+      it('decodes a URI-encoded x-promise-token header before exchanging', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ promiseToken: 'promise%20token%20xyz' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise token xyz');
+      });
+
+      it('falls back to the raw header value when it is not valid percent-encoding', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ promiseToken: 'promise%zztoken' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise%zztoken');
+      });
+
+      it('401s with a generic message (no leaked exchange detail) when the promise token exchange fails', async () => {
+        exchangePromiseTokenStub.rejects(new Error('upstream IMS exchange failed: secret detail'));
+        const log = fakeLog();
+        const controller = SerenityController({ env: {} }, log, {});
+        const ctx = fakeContext({
+          authType: 'jwt', bearer: 'spacecat-jwt-abc', promiseToken: 'promise-token-xyz',
+        });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        const body = await readBody(response);
+        expect(body.message).to.equal('Invalid or expired promise token');
+        expect(log.error).to.have.been.calledWithMatch('serenity: promise token exchange failed');
+      });
+
+      it('falls back to the Authorization bearer when x-promise-token is absent (existing behavior unchanged)', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ bearer: 'ims-token-123' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+        expect(createTransportStub).to.have.been.calledWithMatch({ imsToken: 'ims-token-123' });
+      });
+
+      it('still 401s a non-IMS caller with no x-promise-token (existing IMS-type gate unaffected)', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ authType: 'jwt' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+      });
+
+      it('hints at the x-promise-token header when a non-IMS caller sends none', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ authType: 'jwt' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        const body = await readBody(response);
+        expect(body.error).to.equal('promiseTokenRequired');
+        expect(body.message).to.match(/x-promise-token/);
+      });
     });
 
     it('400s when :brandId is not a UUID (the new guard)', async () => {
@@ -290,6 +497,32 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listPrompts(fakeContext());
       expect(response.status).to.equal(404);
+    });
+
+    it('404s when serenity is not active for the org (rollout flag OFF), before brand resolution', async () => {
+      // Org-wide LLMO/serenity flag OFF → the serenity surface is inactive and
+      // the UI falls back to the normal backend. The gate fires BEFORE brand
+      // resolution, so an inactive org never leaks brand existence.
+      isSerenityActiveStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(404);
+      const body = await readBody(response);
+      expect(body.message).to.match(/serenity is not active/i);
+      expect(isSerenityActiveStub).to.have.been.calledWith(sinon.match.any, ORG);
+      expect(resolveBrandUuidStub).to.not.have.been.called;
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+    });
+
+    it('reaches the handler when serenity is active (flag ON) and a workspace resolves', async () => {
+      // The happy-path composition: flag ON (default stub) + a resolved
+      // workspace ⇒ the route is served.
+      handlers.handleListPrompts.resolves({ items: [], total: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(isSerenityActiveStub).to.have.been.calledOnce;
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
     });
   });
 
@@ -813,6 +1046,86 @@ describe('SerenityController', () => {
       expect(handlers.handleBulkDeletePrompts).to.have.been.calledOnce;
       expect(handlers.handleBulkDeletePromptsSubworkspace).to.not.have.been.called;
     });
+
+    it('createTag routes to the flat handler in flat mode and returns its status', async () => {
+      handlers.handleCreateTag.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
+      expect(response.status).to.equal(201);
+      const body = await readBody(response);
+      expect(body.tag).to.equal('category:Footwear');
+      expect(handlers.handleCreateTag).to.have.been.calledOnce;
+      expect(handlers.handleCreateTag.firstCall.args[4]).to.deep.equal({});
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag returns the authorize() error (403) and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: {
+          type: 'category', name: 'Footwear', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleCreateTag).to.not.have.been.called;
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag maps a handler 400 (bad body) through mapError', async () => {
+      handlers.handleCreateTag.rejects(new ErrorWithStatusCode('name is required', 400));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: { type: 'category', geoTargetId: 2840, languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const body = await readBody(response);
+      expect(body.message).to.match(/name is required/);
+    });
+
+    it('updateTag requires the :tagId path param', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: {} }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+    });
+
+    it('updateTag forwards tagId + body to the flat handler and returns its status', async () => {
+      handlers.handleUpdateTag.resolves({
+        status: 200,
+        body: {
+          brandId: BRAND, tagId: 'tag-1', tag: 'category:Footwear', parentId: 'root-1',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({
+        params: { tagId: 'tag-1' },
+        data: {
+          name: 'category:Footwear', parentId: 'root-1', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body).to.include({ tagId: 'tag-1', parentId: 'root-1' });
+      expect(handlers.handleUpdateTag).to.have.been.calledOnce;
+      expect(handlers.handleUpdateTag.firstCall.args[4]).to.equal('tag-1');
+      expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('updateTag returns the authorize error without throwing (auth.error short-circuit)', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+      expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
   });
 
   describe('controller surface', () => {
@@ -827,6 +1140,7 @@ describe('SerenityController', () => {
       expect(controller.createMarket).to.be.a('function');
       expect(controller.deleteMarket).to.be.a('function');
       expect(controller.listTags).to.be.a('function');
+      expect(controller.createTag).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
 
@@ -897,6 +1211,20 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
+    it('createMarket links the mirrored site onto the mapping row on 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      ensureMarketSiteStub.resolves('site-uuid-1');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      expect(linkSiteToLiveRowsStub).to.have.been.calledOnceWith(ctx.dataAccess, BRAND, 'site-uuid-1');
+    });
+
     it('createMarket does NOT mirror a Site when the upstream create did not return 201', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -913,15 +1241,18 @@ describe('SerenityController', () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
       getBrandAliasesStub.resolves(['Acme Inc', 'ACME']);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.createMarket(fakeContext({
+      const ctx = fakeContext({
         data: {
           market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
         },
-      }));
+      });
+      const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(201);
       expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // options object is the 8th arg (index 7). generatePrompts was not supplied,
-      // so topic generation defaults off (today's behavior is unchanged).
+      // so topic generation defaults off (today's behavior is unchanged). brandUuid
+      // is already a persisted row (loadBrand), so dataAccess is threaded through
+      // for the mapping-row upsert (mapping-rows.js).
       expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7])
         .to.deep.equal({
           generateTopics: false,
@@ -931,6 +1262,7 @@ describe('SerenityController', () => {
           brandAliases: ['Acme Inc', 'ACME'],
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
+          dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
         });
     });
 
@@ -1072,6 +1404,39 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleUpdatePromptSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleUpdatePrompt).to.not.have.been.called;
+    });
+
+    it('createTag routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleCreateTagSubworkspace.resolves({
+        status: 201,
+        body: {
+          geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
+      expect(response.status).to.equal(201);
+      expect(handlers.handleCreateTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[2]).to.deep.equal({});
+      expect(handlers.handleCreateTag).to.not.have.been.called;
+    });
+
+    it('updateTag routes to the subworkspace handler with the brand workspace + tagId', async () => {
+      handlers.handleUpdateTagSubworkspace.resolves({
+        status: 200,
+        body: {
+          geoTargetId: 2840, languageCode: 'en', tagId: 'tag-1', tag: 'category:Footwear', parentId: null,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdateTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[2]).to.equal('tag-1');
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
     });
 
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
@@ -1474,15 +1839,18 @@ describe('SerenityController', () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       getBrandAliasesStub.resolves(['Acme Inc']);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({
+      const ctx = fakeContext({
         brand: makeBrandModel(),
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
-      }));
+      });
+      const response = await controller.activate(ctx);
       expect(response.status).to.equal(200);
       // Read once for the whole batch, not per market.
       expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // Both market creates receive the same aliases in their options arg (index 7).
-      // No modelIds + no generatePrompts → empty units → best-effort publish.
+      // No modelIds + no generatePrompts → empty units → best-effort publish. The
+      // loaded brand is already persisted, so dataAccess is threaded through for
+      // the mapping-row upsert (mapping-rows.js).
       const expectedOpts = {
         modelIds: [],
         generateTopics: false,
@@ -1493,6 +1861,7 @@ describe('SerenityController', () => {
         brandAliases: ['Acme Inc'],
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
+        dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       expect(firstCall.args[7]).to.deep.equal(expectedOpts);
@@ -1795,7 +2164,7 @@ describe('SerenityController', () => {
     });
 
     it('deactivate decommissions the subworkspace, clears the pointer, and sets the brand pending', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
@@ -1807,13 +2176,30 @@ describe('SerenityController', () => {
         { enforceLinkedGuard: false },
       );
       // The pointer is cleared (disconnect) — never the workspace deleted.
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
       expect(brand.save).to.have.been.called;
     });
 
+    it('deactivate tombstones the brand\'s mapping rows after decommission', async () => {
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ brand });
+      const response = await controller.deactivate(ctx);
+      expect(response.status).to.equal(200);
+      expect(tombstoneAllForBrandStub).to.have.been.calledOnceWith(ctx.dataAccess, BRAND);
+    });
+
+    it('deactivate does NOT tombstone when the brand has no subworkspace (no-op decommission)', async () => {
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(200);
+      expect(tombstoneAllForBrandStub).to.not.have.been.called;
+    });
+
     it('deactivate enables the linked-sub-workspace guard when the env flag is set', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({
         brand,
@@ -1830,13 +2216,13 @@ describe('SerenityController', () => {
     });
 
     it('deactivate is a no-op decommission for a brand with no subworkspace', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
       expect(decommissionStub).to.not.have.been.called;
       // Nothing to disconnect — the pointer is already null.
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('pending');
     });
 
@@ -1844,14 +2230,14 @@ describe('SerenityController', () => {
       // The upstream is already emptied by decommission; a failed save must not
       // leave the resolver routing to the emptied sub-workspace for the TTL, and
       // the non-atomic seam must emit a distinct, alertable marker.
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       brand.save = sinon.stub().rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(500);
       expect(decommissionStub).to.have.been.called;
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       // cache was invalidated BEFORE the save threw.
       expect(clearBrandWorkspaceCacheStub).to.have.been.called;
       // distinct, greppable token so the orphaned state is alertable.
@@ -1862,7 +2248,7 @@ describe('SerenityController', () => {
       // No subworkspace → the decommission block is skipped, but the status save
       // still runs (and here fails). The divergence log's decommissionedWorkspaceId
       // must be null (the `: null` side of hasText(subworkspaceId) ? ... : null).
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
       brand.save = sinon.stub().rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
@@ -1881,12 +2267,12 @@ describe('SerenityController', () => {
       // decommission throws mid-flow (e.g. a non-404 delete error): the brand
       // must NOT be disconnected (pointer kept) and NOT set pending, so the
       // partial-failure state is recoverable rather than silently half-applied.
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       decommissionStub.rejects(new ErrorWithStatusCode('upstream delete failed', 502));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(502);
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
     });
@@ -2005,6 +2391,25 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
+    });
+
+    it('builds a working type classifier from the brand name + aliases and passes it to the handler (serenity-docs#31)', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      // Brand name 'Test Brand' + a US-clamped alias 'Acme'.
+      getBrandAliasesStub.resolves([{ name: 'Acme', regions: ['us'] }]);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createPrompts(fakeContext({
+        data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(getBrandAliasesStub).to.have.been.calledOnce;
+      // The 7th positional arg to handleCreatePrompts is the classifier closure.
+      const classify = handlers.handleCreatePrompts.firstCall.args[6];
+      expect(classify).to.be.a('function');
+      // US market (geoTargetId 2840): brand name and the US alias both classify.
+      expect(classify('do you sell Test Brand shoes?', 2840)).to.equal('type:branded');
+      expect(classify('is Acme any good?', 2840)).to.equal('type:branded');
+      expect(classify('best running shoes?', 2840)).to.equal('type:non-branded');
     });
 
     // Line 382: updatePrompt — `ctx?.params || {}` fallback. When ctx.params is
@@ -2142,7 +2547,7 @@ describe('SerenityController', () => {
       decommissionStub.resolves();
       const controllerEnv = { SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD: 'true' };
       const controller = SerenityController({ env: {} }, fakeLog(), controllerEnv);
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'sub-ws' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'sub-ws' });
       const ctx = fakeContext({ brand });
       delete ctx.env; // forces the || env fallback at line 907
       const response = await controller.deactivate(ctx);
@@ -2161,7 +2566,7 @@ describe('SerenityController', () => {
       decommissionStub.resolves();
       const saveError = new Error('DB connection lost');
       const brand = makeBrandModel({
-        getSemrushWorkspaceId: () => 'sub-ws',
+        getSemrushSubWorkspaceId: () => 'sub-ws',
         save: sinon.stub().rejects(saveError),
       });
       const log = fakeLog();
@@ -2320,10 +2725,10 @@ describe('SerenityController', () => {
 });
 
 describe('brandPointerReloader', () => {
-  it('returns the brand current semrush_workspace_id when present', async () => {
+  it('returns the brand current semrush_sub_workspace_id when present', async () => {
     const ctx = {
       dataAccess: {
-        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => 'ws-current' }) },
+        Brand: { findById: sinon.stub().resolves({ getSemrushSubWorkspaceId: () => 'ws-current' }) },
       },
     };
     expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal('ws-current');
@@ -2332,7 +2737,7 @@ describe('brandPointerReloader', () => {
   it('returns null when the brand has no pointer', async () => {
     const ctx = {
       dataAccess: {
-        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => null }) },
+        Brand: { findById: sinon.stub().resolves({ getSemrushSubWorkspaceId: () => null }) },
       },
     };
     expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal(null);

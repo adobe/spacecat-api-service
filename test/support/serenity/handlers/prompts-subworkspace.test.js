@@ -128,6 +128,40 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
+    it('creates a prompt by id-based tagIds via aio/prompts, not the name-based endpoint (twin of the flat-mode fix)', async () => {
+      const transport = makeTransport({
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-prompt-by-id', name: 'p' }], existing_count: 0,
+        }),
+      });
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-cat-1', 'tag-child-1'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.created).to.have.length(1);
+      expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt-by-id' });
+      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tag-child-1']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-cat-1', 'tag-child-1']);
+      expect(transport.createTaggedPrompts).to.not.have.been.called;
+    });
+
+    it('injects the computed type tag from the classifier (serenity-docs#31, twin of the flat-mode layer)', async () => {
+      const transport = makeTransport();
+      const classify = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'is Acme good?', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, classify);
+      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        { 'is Acme good?': ['topic:X', 'type:branded'] },
+      );
+    });
+
     it('skips inputs whose slice has no project (one listing, no per-input lookup)', async () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
@@ -254,6 +288,37 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('400s when both tags and tagIds are present (mutually exclusive)', async () => {
+      const result = await handleUpdatePromptSubworkspace(
+        makeTransport(),
+        WS,
+        'old-id',
+        {
+          text: 'new', tags: ['t'], tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+        },
+        log,
+      );
+      expect(result.status).to.equal(400);
+      expect(result.body.error).to.equal('invalidRequest');
+    });
+
+    it('replaces text+tagIds via the id-based endpoint (twin of the flat-mode fix)', async () => {
+      const transport = makeTransport({
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-prompt-by-id', name: 'new' }], existing_count: 0,
+        }),
+      });
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: ['tag-cat-1'], geoTargetId: 2840, languageCode: 'en',
+      }, log);
+      expect(result.status).to.equal(200);
+      expect(result.body.semrushPromptId).to.equal('new-prompt-by-id');
+      expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
+      expect(transport.deletePromptsByIds).to.have.been.calledWith(WS, 'p-us-en', ['old-id']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1']);
+      expect(transport.createTaggedPrompts).to.not.have.been.called;
+    });
+
     it('400s when the slice key is invalid', async () => {
       const result = await handleUpdatePromptSubworkspace(
         makeTransport(),
@@ -268,6 +333,24 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.body.error).to.equal('invalidRequest');
     });
 
+    it('recomputes the type tag from the NEW text on edit (serenity-docs#31, twin of the flat-mode layer)', async () => {
+      // Guards the subworkspace UPDATE injection wiring: without the classifier
+      // arg the defensive `typeof !== function` bypass fires silently, so a
+      // regression in delete-then-create injection would go uncaught here.
+      const transport = makeTransport();
+      const classify = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'now mentions Acme', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
+      }, log, classify);
+      expect(result.status).to.equal(200);
+      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        { 'now mentions Acme': ['topic:X', 'type:branded'] },
+      );
+    });
+
     it('re-throws a non-404 delete failure (never creates after a failed delete)', async () => {
       const transport = makeTransport({
         deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
@@ -276,6 +359,22 @@ describe('prompts-subworkspace handlers', () => {
         text: 'new', tags: [], geoTargetId: 2840, languageCode: 'en',
       }, log)).to.be.rejected;
       expect(transport.createTaggedPrompts).to.not.have.been.called;
+    });
+
+    it('logs and re-throws when createOnePrompt fails AFTER a successful delete (data-loss window)', async () => {
+      const createErr = Object.assign(new Error('unknown tag id: bogus'), { status: 500 });
+      const transport = makeTransport({
+        createPromptsByIds: sinon.stub().rejects(createErr),
+      });
+      const errorLog = sinon.stub();
+      await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: ['bogus'], geoTargetId: 2840, languageCode: 'en',
+      }, { ...log, error: errorLog })).to.be.rejectedWith(/unknown tag id: bogus/);
+      expect(transport.deletePromptsByIds).to.have.been.calledOnce;
+      expect(errorLog).to.have.been.calledOnceWith(
+        sinon.match(/createOnePrompt failed AFTER a successful delete/),
+      );
+      expect(transport.publishProject).to.not.have.been.called;
     });
   });
 

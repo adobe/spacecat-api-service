@@ -320,6 +320,43 @@ describe('Fixes Controller', () => {
       expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(hexOrgUserId);
     });
 
+    it('hydrates executedByUser when executedBy has an account-type suffix (reference/trial org)', async () => {
+      const suffixedUserId = 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.e';
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'Sandesh',
+          last_name: 'Sinha',
+          email: 'sandsinh@adobe.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: suffixedUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[0].executedByUser).to.deep.equal({
+        firstName: 'Sandesh',
+        lastName: 'Sinha',
+        email: 'sandsinh@adobe.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(suffixedUserId);
+    });
+
     it('skips IMS lookup when executedBy is a plain email address', async () => {
       const mockImsClient = {
         getImsAdminProfile: sandbox.stub().resolves({
@@ -349,6 +386,44 @@ describe('Fixes Controller', () => {
       const result = await response.json();
       expect(result[0]).to.not.have.property('executedByUser');
       expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    [
+      { label: 'two-letter account-type suffix', id: 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.ee' },
+      { label: 'digit account-type suffix', id: 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.1' },
+      { label: 'trailing dot without suffix', id: 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.' },
+      { label: 'hex run exceeding the upper bound', id: `AE751E8367B35D520A495CD3@${'a'.repeat(41)}` },
+    ].forEach(({ label, id }) => {
+      it(`skips IMS lookup when executedBy has a ${label}`, async () => {
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({
+            first_name: 'John',
+            last_name: 'Doe',
+            email: 'john.doe@example.com',
+          }),
+        };
+        fixesController = new FixesController(
+          { dataAccess, log, imsClient: mockImsClient },
+          accessControlUtil,
+        );
+
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          executedBy: id,
+          changeDetails: { arbitrary: 'value 1' },
+        });
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result[0]).to.not.have.property('executedByUser');
+        expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
     });
 
     it('skips IMS lookup when no fix has executedBy', async () => {
@@ -1887,6 +1962,96 @@ describe('Fixes Controller', () => {
         expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
         expect(log.warn).to.have.been.calledWith(
           sinon.match(/Could not create ContentClient for AEM Edge documentPath enrichment/),
+        );
+      });
+
+      it('uses x-promise-token header directly and skips getIMSPromiseToken', async () => {
+        getIMSPromiseTokenStub.resetHistory();
+        exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
+
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { 'x-promise-token': 'header-promise-token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(getIMSPromiseTokenStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.have.been.calledWith(
+          sinon.match.any,
+          'header-promise-token',
+        );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] using promise token from x-promise-token header',
+        );
+      });
+
+      it('falls back to getIMSPromiseToken when x-promise-token header is absent', async () => {
+        getIMSPromiseTokenStub.resetHistory();
+        exchangePromiseTokenStub.resetHistory();
+        sandbox.stub(log, 'info');
+
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(getIMSPromiseTokenStub).to.have.been.calledOnce;
+        expect(exchangePromiseTokenStub).to.have.been.calledWith(
+          sinon.match.any,
+          'mock-promise-token',
+        );
+        expect(log.info).to.have.been.calledWith(
+          '[document-path-enrichment] no x-promise-token header, creating promise token via IMS',
         );
       });
     });

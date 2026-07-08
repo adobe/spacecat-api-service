@@ -32,7 +32,9 @@ import crypto from 'crypto';
 import { getDomain, parse as parseDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, {
+  calculateForwardedHost,
+} from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
@@ -46,6 +48,7 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectAemCsFastlyForDomain,
+  hasSubpath,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1601,7 +1604,12 @@ function LlmoController(ctx) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
       }
-
+      if (hasSubpath(baseURL)) {
+        log.info(`[edge-optimize-routing] ${baseURL} subpath sites not eligible for auto routing`);
+        return ok({
+          ...metaconfig,
+        });
+      }
       let cdnTypeNormalized = null;
       if (hasText(cdnType)) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
