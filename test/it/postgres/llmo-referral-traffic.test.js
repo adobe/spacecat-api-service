@@ -11,7 +11,7 @@
  */
 
 import { ctx } from './harness.js';
-import { resetPostgres } from './seed.js';
+import { resetPostgres, seedReferralPresence } from './seed.js';
 import llmoReferralTrafficTests from '../shared/tests/llmo-referral-traffic.js';
 
-llmoReferralTrafficTests(() => ctx.httpClient, resetPostgres);
+llmoReferralTrafficTests(() => ctx.httpClient, resetPostgres, seedReferralPresence);

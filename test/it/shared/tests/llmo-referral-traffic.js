@@ -29,17 +29,17 @@ import { SITE_1_ID } from '../seed-ids.js';
  * url-inspector IT is waiting on.
  *
  * NOTE on referral seeding:
- *   The baseline IT seed does not populate the partitioned
- *   referral_traffic_* tables, so the runnable cases below exercise the
- *   empty-data and access-validation paths end-to-end through PostgREST. The
- *   source-presence + priority-ordering exercises are skipped pending a
- *   referral seed helper, mirroring the deferred referral-source exercises
- *   in llmo-url-inspector.js.
+ *   The baseline IT seed does not populate the partitioned referral_traffic_*
+ *   tables, so `seedReferralPresence` inserts minimal per-source rows on demand
+ *   (see test/it/postgres/seed.js) to drive the source-presence + ordering
+ *   cases; the empty-data + access-validation cases run without it.
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
+ * @param {(siteId: string, sources: string[]) => void} seedReferralPresence -
+ *   Seeds referral source presence for a site (see seed.js).
  */
-export default function llmoReferralTrafficTests(getHttpClient, resetData) {
+export default function llmoReferralTrafficTests(getHttpClient, resetData, seedReferralPresence) {
   describe('LLMO Referral Traffic — has-data handler (LLMO-5599)', () => {
     before(() => resetData());
 
@@ -59,21 +59,27 @@ export default function llmoReferralTrafficTests(getHttpClient, resetData) {
       expect(res.status).to.be.oneOf([400, 403, 404, 500]);
     });
 
-    // ── Skipped: source presence + priority ordering (needs referral seed) ──
-    // Enable once the IT harness can seed rows into the partitioned
-    // referral_traffic_{optel,cdn,adobe_analytics,ga4,cja} tables. Mirrors the
-    // deferred referral-source exercises in llmo-url-inspector.js. With seeded
-    // rows for SITE_1_ID, assert availableSources is returned in
-    // resolution-priority order and hasData flips to true.
-    describe('source presence + priority ordering (skipped pending referral seed)', () => {
-      it.skip('returns availableSources in priority order when multiple sources have rows', async () => {
-        // Seed e.g. referral_traffic_adobe_analytics + referral_traffic_cdn rows
-        // for SITE_1_ID, then:
+    describe('source presence + priority ordering', () => {
+      // Clear the referral tables after each case so presence rows don't leak.
+      afterEach(() => seedReferralPresence(SITE_1_ID, []));
+
+      it('returns availableSources in resolution-priority order (adobe_analytics before cdn), not insertion order', async () => {
+        // Seed cdn first to prove the ordering comes from the backend, not the
+        // order rows were written.
+        seedReferralPresence(SITE_1_ID, ['cdn', 'adobe_analytics']);
         const http = getHttpClient();
         const res = await http.admin.get(hasDataPath(SITE_1_ID));
         expect(res.status).to.equal(200);
         expect(res.body.hasData).to.equal(true);
         expect(res.body.availableSources).to.deep.equal(['adobe_analytics', 'cdn']);
+      });
+
+      it('preserves full priority order (adobe_analytics > cja > ga4 > cdn > optel) when all sources have rows', async () => {
+        seedReferralPresence(SITE_1_ID, ['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']);
+        const http = getHttpClient();
+        const res = await http.admin.get(hasDataPath(SITE_1_ID));
+        expect(res.status).to.equal(200);
+        expect(res.body.availableSources).to.deep.equal(['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel']);
       });
     });
   });
