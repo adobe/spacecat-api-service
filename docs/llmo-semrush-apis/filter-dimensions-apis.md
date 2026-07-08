@@ -271,8 +271,8 @@ Returns the domains most frequently cited alongside owned URLs, for the URL Insp
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
 | `brandId` | path | ✅ | SpaceCat brand UUID. Selects the brand whose Semrush **sub-workspace** is queried (every element is brand-scoped); classified as an LLMO ReBAC `brand` resource so FACS enforces `llmo/can_view` on it, and it requires the `brand:read` S2S capability. `404` if the brand isn't in the org. The URL Inspector UI cross-maps its selected site → `brandId`. See gap 3 for sub-workspace vs flat-mode |
 | `model` / `platform` | query | ❌ | AI model filter. Accepts **either** key (`model` wins). Translated via [Supported Models](#5-supported-models) (default: `search-gpt`) |
-| `startDate` / `start_date` | query | ❌ | ISO date `YYYY-MM-DD`. Default: 28 days ago |
-| `endDate` / `end_date` | query | ❌ | ISO date `YYYY-MM-DD`. Default: today |
+| `startDate` / `start_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing, malformed, or after `endDate` |
+| `endDate` / `end_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing or malformed |
 | `categoryId` / `category` | query | ❌ | Category label (e.g. `Firefly`). Pushed to Semrush **server-side** as the tag `category:<label>` |
 | `channel` / `selectedChannel` | query | ❌ | Content-type (e.g. `Owned`, `Social`, `Earned`). Applied **client-side** on `contentType` (case-insensitive) — the element has no server-side content-type filter |
 | `region` | query | ❌ | Region code (e.g. `US`, `AU`). Resolved to the market's Semrush **project** (via the Markets element) and sent as top-level `project_id`. `all`/absent → all markets |

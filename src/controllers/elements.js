@@ -135,6 +135,20 @@ function extractQuery(context) {
 }
 
 /**
+ * True when `value` is a real `YYYY-MM-DD` calendar date. Rejects malformed shapes
+ * and impossible dates (e.g. `2026-13-45`) by round-tripping through Date so a bad
+ * value never reaches Semrush. (shared-utils `isIsoDate` requires a full datetime,
+ * not the date-only form the URL Inspector sends.)
+ */
+function isYmdDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/**
  * Splits a comma-separated query value into a trimmed, non-empty string array.
  * `extractQuery` collapses repeated params (last value wins), so multi-valued
  * filters (topics, project ids) are passed as a single CSV value.
@@ -472,6 +486,22 @@ export default function ElementsController(context, log, env) {
       const { brandId } = ctx?.params ?? {};
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
+
+      // Date range is required (the UI always sends it) and must be a valid YYYY-MM-DD —
+      // fail fast rather than silently defaulting to a rolling window or forwarding a
+      // malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+
       // buildService is async: it resolves the IMS token via the x-promise-token flow
       // (falling back to Authorization IMS) before constructing the transport (LLMO-5990).
       const service = await buildService(ctx);
@@ -506,8 +536,8 @@ export default function ElementsController(context, log, env) {
       const params = {
         projectId,
         model: query.model || query.platform,
-        startDate: query.startDate || query.start_date,
-        endDate: query.endDate || query.end_date,
+        startDate,
+        endDate,
         category: query.categoryId || query.category,
         channel: query.channel || query.selectedChannel,
         page: query.page,
