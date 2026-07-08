@@ -12,6 +12,8 @@
 
 import { createHash } from 'node:crypto';
 import {
+  GetSecretValueCommand,
+  PutSecretValueCommand,
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
@@ -170,7 +172,13 @@ function TaskManagementController(context) {
 
   // AWS SDK auto-detects region from the Lambda execution environment.
   // Constructed once per controller instance (not per request) to reuse the connection pool.
-  const smClient = new SecretsManagerClient();
+  // ticket-client's OAuthCredentialManager expects a v2-style interface (.getSecretValue /
+  // .putSecretValue); wrap the v3 client to provide that surface.
+  const rawSmClient = new SecretsManagerClient();
+  const smClient = {
+    getSecretValue: (params) => rawSmClient.send(new GetSecretValueCommand(params)),
+    putSecretValue: (params) => rawSmClient.send(new PutSecretValueCommand(params)),
+  };
 
   // Wrap global fetch so TicketClientFactory receives the expected { fetch } interface.
   // fetch is available globally in Node 18+ (Lambda runtime).
