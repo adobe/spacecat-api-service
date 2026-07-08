@@ -399,6 +399,13 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { getConnection } = TaskManagementController(ctx);
+      const res = await getConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
+      expect(res.status).to.equal(404);
+    });
+
     it('returns 404 when not found', async () => {
       const { getConnection } = TaskManagementController(makeContext());
       const res = await getConnection({ params: { organizationId: ORG_ID, connectionId: CONN_ID } });
@@ -444,6 +451,13 @@ describe('TaskManagementController', () => {
       const { listTickets } = TaskManagementController(makeContext());
       const res = await listTickets({ params: { organizationId: 'bad' } });
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { listTickets } = TaskManagementController(ctx);
+      const res = await listTickets({ params: { organizationId: ORG_ID } });
+      expect(res.status).to.equal(404);
     });
 
     it('returns 500 on collection error', async () => {
@@ -507,6 +521,13 @@ describe('TaskManagementController', () => {
       const { getTicketBySuggestion } = TaskManagementController(makeContext());
       const res = await getTicketBySuggestion({ params: { organizationId: ORG_ID, suggestionId: '' } });
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { getTicketBySuggestion } = TaskManagementController(ctx);
+      const res = await getTicketBySuggestion({ params: { organizationId: ORG_ID, suggestionId: SUGGESTION_ID } });
+      expect(res.status).to.equal(404);
     });
 
     it('returns 404 when bridge not found', async () => {
@@ -582,6 +603,13 @@ describe('TaskManagementController', () => {
       const { listTicketsByOpportunity } = TaskManagementController(makeContext());
       const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: '' } });
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { listTicketsByOpportunity } = TaskManagementController(ctx);
+      const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
+      expect(res.status).to.equal(404);
     });
 
     it('returns 500 on ticket lookup error', async () => {
@@ -675,6 +703,13 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({ params: { organizationId: ORG_ID, provider: '' } }));
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { createTicket } = TaskManagementController(ctx);
+      const res = await createTicket(makeReqCtx());
+      expect(res.status).to.equal(404);
     });
 
     it('returns 400 when connectionId is missing', async () => {
@@ -3238,6 +3273,13 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { listProjects } = TaskManagementController(ctx);
+      const res = await listProjects(makeReqCtx());
+      expect(res.status).to.equal(404);
+    });
+
     it('returns 404 when no active connection found', async () => {
       const { listProjects } = TaskManagementController(makeContext());
       const res = await listProjects(makeReqCtx());
@@ -3398,6 +3440,13 @@ describe('TaskManagementController', () => {
       const { listIssueTypes } = TaskManagementController(makeContext());
       const res = await listIssueTypes(makeReqCtx({ pathInfo: { suffix: '' } }));
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when organization not found', async () => {
+      const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
+      const { listIssueTypes } = TaskManagementController(ctx);
+      const res = await listIssueTypes(makeReqCtx());
+      expect(res.status).to.equal(404);
     });
 
     it('returns 404 when no active connection found', async () => {
