@@ -246,6 +246,8 @@ export default function getRouteHandlers(
     // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,

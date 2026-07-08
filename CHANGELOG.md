@@ -1,3 +1,10 @@
+# [1.633.0](https://github.com/adobe/spacecat-api-service/compare/v1.632.2...v1.633.0) (2026-07-08)
+
+
+### Features
+
+* Semrush Elements cited-domains endpoint for URL Inspector | LLMO-6020 ([#2765](https://github.com/adobe/spacecat-api-service/issues/2765)) ([b1366fa](https://github.com/adobe/spacecat-api-service/commit/b1366fa09c8db317eef8d314bc2cb89484579700))
+
 ## [1.632.2](https://github.com/adobe/spacecat-api-service/compare/v1.632.1...v1.632.2) (2026-07-08)
 
 
