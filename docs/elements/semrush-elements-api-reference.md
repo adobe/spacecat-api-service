@@ -260,13 +260,14 @@ No service-to-service credentials are involved — the user's own IMS token is t
 
 ## SpaceCat Routes
 
-### Org-scoped (workspace-level, implemented)
+### Brand-scoped (implemented)
 
-The endpoint below uses `authorizeOrg`.
+The endpoints below use `authorizeOrg`, which resolves `:brandId` to that brand's Semrush sub-workspace (or the org's parent workspace when the brand has none provisioned yet).
 
 | Method | Path | Controller | Description |
 |---|---|---|---|
-| GET | `/v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | All filter dimensions for the URL Inspector dashboard |
+| GET | `/v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | Filter dimensions for the URL Inspector dashboard, scoped to that brand |
+| GET | `/v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks` | `listWeeks` | Weeks with Brand Presence data, scoped to that brand |
 
 > **Note:** The brand-, market-, and tag-selector data (formerly served by dedicated `/serenity/brands`, `/serenity/*/markets`, and `/serenity/*/tags` endpoints) is now provided by the existing Serenity APIs. Only the aggregated URL Inspector filter-dimensions endpoint is served by this Elements wrapper.
 
@@ -406,10 +407,11 @@ Follow these steps in order. Steps 1–4 are contained within `src/support/eleme
 
 Source: `src/support/elements/element-ids.js`
 
-> **Surfaced endpoints:** `BRANDS`/`MARKETS`/`TOPICS` (rows 1–3) back the [URL Inspector Filter Dimensions](../llmo-semrush-apis/filter-dimensions-apis.md#1-list-url-inspector-filter-dimensions) endpoint; `WEEKS` (row 5) backs the [Weeks](../llmo-semrush-apis/filter-dimensions-apis.md#2-list-weeks) endpoint.
+> **Surfaced endpoints:** `BRANDS`/`MARKETS`/`TOPICS` (rows 1–3) back the [URL Inspector Filter Dimensions](../llmo-semrush-apis/filter-dimensions-apis.md#1-list-url-inspector-filter-dimensions) endpoint; `WEEKS` (row 5) backs the [Weeks](../llmo-semrush-apis/filter-dimensions-apis.md#2-list-weeks) endpoint; `PROMPTS` backs the [Prompts (count)](../llmo-semrush-apis/filter-dimensions-apis.md#3-list-prompts) endpoint.
 
 | Constant | UUID | Section | Row(s) |
 |---|---|---|---|
+| `PROMPTS` | `406ba6e0-0de2-475e-80d9-42fab8616032` | Prompts (count) | — |
 | `BRANDS` | `b178ce4e-6471-4430-9a32-8228ce72b2e6` | Filter Dimensions | 1 |
 | `MARKETS` | `478968a7-8851-4daf-83f7-2e8fb6185ddc` | Filter Dimensions | 2 |
 | `TOPICS` | `ba3b19c1-22d4-460a-8dc3-1ff05c360852` | Filter Dimensions | 3 |

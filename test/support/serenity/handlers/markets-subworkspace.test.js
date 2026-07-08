@@ -425,7 +425,7 @@ describe('markets-subworkspace handlers', () => {
         transport,
         makeBrand(),
         PARENT,
-        createBody,
+        { ...createBody, brandNames: ['Trail'] },
         log,
         null,
         null,
@@ -445,13 +445,15 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-2');
       // only the top-1 topic by volume was attached, tagged topic:<name> +
-      // source:ai + a branded type: tag. Brand name is 'B' (needle 'b'):
-      // 'best running shoes' contains 'b' => branded; 'top trail shoes' => not.
+      // source:ai + a branded type: tag. Brand name is 'Trail' (needle 'trail'):
+      // the shared classifier now matches on WORD boundaries, so 'top trail
+      // shoes' contains the whole word 'trail' => branded, while 'best running
+      // shoes' does not => non-branded (serenity-docs#31).
       expect(transport.createTaggedPrompts).to.have.been.calledOnce;
       const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
       expect(promptsByText).to.deep.equal({
-        'best running shoes': ['topic:Running Shoes', 'source:ai', 'type:branded'],
-        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'type:non-branded'],
+        'best running shoes': ['topic:Running Shoes', 'source:ai', 'type:non-branded'],
+        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'type:branded'],
       });
       expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
       // Models are STAGED (no inner publish) — only the single final publish runs,
