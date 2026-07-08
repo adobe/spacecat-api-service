@@ -187,6 +187,7 @@ describe('LlmoController', () => {
         }
       },
       getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+      // eslint-disable-next-line no-use-before-define
     },
   });
 
@@ -6207,6 +6208,52 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.include('not available in stage');
       });
 
+      it('skips CDN routing and returns metaconfig when site baseURL has a non-root path (subpath site)', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/subpath sites not eligible for auto routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
+      });
+
+      it('skips CDN routing when baseURL has a subpath, even with a root-level overrideBaseURL', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        mockConfig.getFetchConfig = sinon.stub().returns({
+          overrideBaseURL: 'https://override.example.com',
+        });
+        mockSite.getConfig = sinon.stub().returns(mockConfig);
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/subpath sites not eligible for auto routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
+      });
+
+      it('skips CDN routing for a subpath site even when cdnType is provided', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx({
+          data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: true },
+        }));
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/subpath sites not eligible for auto routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
+      });
+
+      it('does not reject when site baseURL has a trailing slash only', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.not.equal(400);
+        expect(callCdnRoutingApiStub).to.have.been.called;
+      });
+
       it('returns 500 when EDGE_OPTIMIZE_ROUTING_CONFIG is invalid JSON', async () => {
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ env: { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: 'not-json' } }),
@@ -7274,6 +7321,29 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('same base domain');
+    });
+
+    it('should return 400 when staging domain does not have same path as that of prod site', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('pathname scope');
+    });
+
+    it('should accept staging domain which has same path as that of prod site', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
+      stageConfigContext.data = { stagingDomains: ['https://staging.lovesac.com/docs'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('https://staging.lovesac.com/docs');
     });
 
     it('should return 403 when not LLMO administrator', async () => {

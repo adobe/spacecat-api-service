@@ -38,6 +38,7 @@ import { FixEntity as FixEntityModel } from '@adobe/spacecat-shared-data-access'
 import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { isValidLocale } from '../utils/validations.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
 import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
 
@@ -46,7 +47,12 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 // Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
 // values that could have been stored before the server-side derivation fix, closing
 // the residual PII exfiltration path for pre-fix data.
-const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{24})$/;
+// The auth source (after `@`) is a named source (AdobeID/AdobeOrg/Email/AdobeServices)
+// or a hex org id that may carry a single-letter account-type suffix, e.g.
+// `...495fcd.e` for reference/trial orgs — plain emails and system markers stay rejected.
+// The hex run is bounded (16-40) to keep this security guard tight: it is the sole
+// gate preventing arbitrary stored values from reaching getImsAdminProfile.
+const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{16,40}(?:\.[a-z])?)$/;
 const IMS_ENRICH_BATCH_SIZE = 5;
 
 /**
@@ -108,10 +114,15 @@ export class FixesController {
   async getAllForOpportunity(context) {
     const { siteId, opportunityId } = context.params;
     const { fixCreatedDate } = context.data || {};
+    const locale = context.data?.locale ?? null;
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) {
       return res;
+    }
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
     }
 
     let fixEntities = [];
@@ -161,7 +172,7 @@ export class FixesController {
       });
 
       await this.#enrichFixesWithUserNames(fixEntities);
-      fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
+      fixes = fixEntities.map((fix) => FixDto.toJSON(fix, locale));
       return ok(fixes);
     }
 
@@ -193,7 +204,7 @@ export class FixesController {
     });
 
     await this.#enrichFixesWithUserNames(fixEntities);
-    fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
+    fixes = fixEntities.map((fix) => FixDto.toJSON(fix, locale));
     return ok(fixes);
   }
 
@@ -260,10 +271,15 @@ export class FixesController {
    */
   async getAllSuggestionsForFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
+    const locale = context.data?.locale ?? null;
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
     if (res) {
       return res;
+    }
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
     }
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -278,7 +294,7 @@ export class FixesController {
     const suggestions = await fix.getSuggestions();
     const results = await Promise.all(suggestions.map(async (s) => {
       const opportunity = await s.getOpportunity();
-      return SuggestionDto.toJSON(s, 'full', opportunity);
+      return SuggestionDto.toJSON(s, 'full', opportunity, locale);
     }));
     return ok(results);
   }
@@ -395,7 +411,15 @@ export class FixesController {
       if (!site || !opportunity) {
         return null;
       }
-      const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      const headerToken = this.#ctx.pathInfo?.headers?.['x-promise-token'];
+      let promiseTokenResponse;
+      if (hasText(headerToken)) {
+        log.info('[document-path-enrichment] using promise token from x-promise-token header');
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        log.info('[document-path-enrichment] no x-promise-token header, creating promise token via IMS');
+        promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      }
       const imsAccessToken = await exchangePromiseToken(
         this.#ctx,
         promiseTokenResponse.promise_token,

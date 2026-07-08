@@ -40,30 +40,12 @@ opted-in scope is every file under `src/support/serenity/**`. Enforced in CI
 
 ### `tsconfig.json` — the load-bearing choices
 
-```jsonc
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "Node16",
-    "moduleResolution": "Node16",
-    "allowJs": true,
-    "checkJs": false,                  // see "opt-in seam" below
-    "noEmit": true,
-    "strict": true,
-    "noImplicitAny": false,            // pragmatic start; ratchet to true later
-    "useUnknownInCatchVariables": false, // pragmatic start; ratchet later
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "types": ["node"]                  // resolve `node:*` builtins
-  },
-  "include": ["src/support/serenity/**/*.js", "src/support/url-utils.js"]
-}
-```
-
-The scope has since been expanded to include `src/support/url-utils.js` — the
-first non-serenity file to opt in (per ratchet step 1 below), since the serenity
-controller paths depend on its hostname/SSRF guards.
+The authoritative config is **`tsconfig.json` at the repo root** — read it there
+rather than from a copy in this ADR. We deliberately do **not** reproduce the file
+here: the `include` list grows with every ratchet step (each newly opted-in file
+or directory is added to it), so a pasted copy would drift out of date. The
+load-bearing, non-obvious compiler choices — and why they are set the way they
+are — are explained below.
 
 **`checkJs: false`, not `true` (the opt-in seam).** This is the crux and it is
 the opposite of what a first reading suggests. With `checkJs: true`, TypeScript
@@ -135,6 +117,68 @@ upstream via overlay CR4). We hit a smaller instance of this: the published
 We chose to absorb that **locally** (narrow before calling) rather than widen the
 shared helper's published type, keeping this change self-contained to api-service.
 
+## Scope expansion: Serenity controllers
+
+The first ratchet-step-1 expansion beyond the support files: `// @ts-check` +
+`include` for `src/controllers/serenity.js` and `src/controllers/brands.js`
+(tracked by https://github.com/adobe/spacecat-api-service/issues/2678).
+`brands.js` is the **general** brands controller (not purely Serenity), so
+type-checking it benefits the whole controller surface, not just `/serenity`.
+
+The probe reported **50 errors** (serenity 26, brands 24 — matching the issue's
+~49 estimate). The notable class — another instance of "the published types are
+wrong, not our code":
+
+- **Over-narrow http-utils `ok()`.** `@adobe/spacecat-shared-http-utils`'s
+  `index.d.ts` types `ok(body?: string)`, but at runtime `ok` delegates to
+  `createResponse`, whose own JSDoc is `@param {object|string|Buffer} body` (it
+  JSON-stringifies). The controllers' dominant idiom — `ok({ ... })` — was
+  therefore flagged ~21 times as "not assignable to parameter of type `string`".
+  The proper fix is upstream (the shipped `.d.ts` is the artifact that is wrong),
+  but rather than carry a local ambient augmentation of a third-party module — or
+  cast every call site to `any` (forbidden) — we **switched the flagged object-bodied
+  `ok(x)` calls to the sibling `createResponse(x, 200)`**, which `index.d.ts`
+  already types correctly as `(body: object, …)`. `ok(x)` is literally
+  `createResponse(x, 200, {})`, so this is runtime-identical; both controllers
+  already use `createResponse` elsewhere, so it is not a foreign idiom. The
+  `any`-bodied `ok()` calls (whose argument is an untyped helper return) are left
+  as-is and will swap the same way when `noImplicitAny` ratchets on. The five
+  deliberate empty-body responses written `createResponse(null, 204)` became
+  `noContent()` (also 204), which drops the stray `"null"` JSON body — a 204 must
+  carry no body, so this is a spec-correctness improvement, not a regression. (If
+  the upstream `ok` type is ever corrected + released, these call sites can revert
+  to `ok(x)`.)
+
+The remaining errors were fixed with the idioms already established for the
+support files (no shared helper signatures widened, no blanket `any` casts):
+
+- **Null/undefined narrowing at boundaries.** `auth.parentWorkspaceId`
+  (`string | null`) → `?? ''` for callees that already treat empty like null
+  (verified: `ensureSubworkspace`/`handleCreateMarketSubworkspace` throw a 404 on
+  a falsy parent), `?? undefined` where the param is `string | undefined`;
+  `!hasText(x)` positive checks rewritten `!x || !hasText(x)` / `x && hasText(x)`;
+  `?? undefined` on `ensureMarketSite`'s nullable `brandId`/`domain`.
+- **Inferred `{}` from a dynamically-keyed object.** `parsedQuery`'s `out` was
+  inferred `{}` (so property assignment failed); annotated
+  `Record<string, string | string[] | number | null>`.
+- **`readonly` constant arrays → mutable param.** Same `[...STANDARD_PROMPT_TAGS]`
+  spread fix as the support files, at the two activate/create-market call sites.
+- **`{ error } | { brandUuid, … }` union leaves `brandUuid` `string | undefined`.**
+  `authorize()` guarantees a non-null brand (it 404s a missing one), so a single
+  local assertion (`/** @type {string} */ (auth.brandUuid)`) at the top of the
+  handler covers the typed data-access calls.
+- **Incomplete `@param` tags on `upsertPrompts` / `upsertBrand`.** Both destructure
+  params the controllers pass (`classifyIntent`, `classifyIntentBatchTimeoutMs`;
+  `log`, `forceBrandId`, `semrushWorkspaceId`) but never documented them, so TS
+  flagged them as excess properties. Completing the (doc-only) `@param` tags to
+  match the real signatures cleared the cluster — the same "complete the JSDoc"
+  fix the support-file pass relied on.
+
+The only behavioural touch is the `createResponse(null, 204)` → `noContent()`
+swap, which removes the stray `"null"` body from those 204 responses (spec-correct
+— a 204 carries no body). Everything else is types/JSDoc-only. All controller
+tests stay green.
+
 ## Consequences
 
 - The Semrush `paths` contract is now actually enforced for every `@ts-check`'d
@@ -151,7 +195,10 @@ The pragmatic floor is intentional. Tighten in steps, each its own PR, by
 removing one relaxation and fixing the surfaced errors:
 
 1. **Expand opt-in scope** — add `// @ts-check` to more directories beyond
-   serenity, one area at a time.
+   serenity, one area at a time. Done so far: `src/support/url-utils.js` and the
+   two Serenity controllers (`src/controllers/serenity.js`, `src/controllers/brands.js`
+   — see "Scope expansion: Serenity controllers"). The rest of `src/controllers/**`
+   is the natural next area.
 2. **`useUnknownInCatchVariables: true`** — narrow each `catch (e)` with
    `instanceof Error` / type guards (~24 sites today).
 3. **`noImplicitAny: true`** — add `@param` types to the implicit-`any` params

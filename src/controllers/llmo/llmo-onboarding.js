@@ -322,19 +322,31 @@ export async function ensureInitialCustomerConfigV2({
  * percent-decoded and individually sanitized: runs of non-alphanumeric characters
  * are replaced with a single `-`, leading/trailing `-` are trimmed, and the
  * result is lowercased. Segments that reduce to empty after sanitization are
- * dropped. Sanitized parts are joined with `--` as the path-segment delimiter.
+ * dropped.
  *
- * The `--` delimiter cannot appear inside a sanitized segment (any run of
- * non-alphanumeric characters collapses to a single `-`), so URLs that differ
- * in path structure produce distinct folder names. Path segments differing only
- * in punctuation (e.g. `us-kings` vs `us_kings`) produce the same sanitized
- * segment and therefore the same folder; this is an inherent limitation of
- * lossy sanitization.
+ * Helix/AEM reserves the double-dash for its `ref--repo--owner` host convention
+ * and rejects any resource path containing `--` with HTTP 400 (LLMO-5859), so the
+ * host/segment boundary cannot be a dash. Instead each sanitized part has its
+ * marker letter self-escaped (`z` -> `zz`) and the parts are joined with `zs`,
+ * a Helix-safe token marking the `/` path boundary. Because a literal `z` is
+ * always doubled, a lone `z` can only introduce a structural token, so `zs` can
+ * never appear by accident inside a part: the encoding is unambiguous and
+ * reversible by a left-to-right scanner that, on each `z`, consumes the next
+ * character to decide escape-vs-boundary (`zz` -> `z`, `zs` -> `/`). A naive
+ * `String.split('zs')` is NOT a correct decoder: a part whose content contains
+ * `zs` is stored as `zzs`, which a blind split would wrongly break apart.
+ *
+ * This keeps the path boundary distinguishable from a `.` (which sanitizes to
+ * `-`): `nba.com/com` -> `nba-comzscom` stays distinct from `nba.com.com` ->
+ * `nba-com-com`. Sanitization is still lossy *within* a single segment, so
+ * segments differing only in punctuation (e.g. `us-kings` vs `us_kings`) collapse
+ * to the same folder; that is an inherent limitation of lossy per-segment
+ * sanitization, unchanged from the prior scheme.
  *
  * Examples:
  *   https://nba.com           -> nba-com
- *   https://nba.com/kings     -> nba-com--kings
- *   https://nba.com/us/kings  -> nba-com--us--kings
+ *   https://nba.com/kings     -> nba-comzskings
+ *   https://nba.com/us/kings  -> nba-comzsuszskings
  *
  * @param {string} baseURL - The site's base URL (must be a fully-qualified URL).
  * @param {string} env - The environment ('prod' for production, anything else is
@@ -347,17 +359,22 @@ export function generateDataFolder(baseURL, env = 'dev') {
     throw new TypeError('Invalid baseURL: hostname is required');
   }
   const sanitize = (s) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
-  const host = sanitize(url.hostname);
+  // Self-escape the boundary marker letter so a lone `z` can only ever introduce
+  // the `zs` path-boundary token (see join below). Run on already-sanitized,
+  // lowercased parts.
+  const escapeZ = (s) => s.replace(/z/g, 'zz');
+  const host = escapeZ(sanitize(url.hostname));
   const segments = url.pathname.split('/').filter(Boolean)
     .map((seg) => {
       let decoded = seg;
       try {
         decoded = decodeURIComponent(seg);
       } catch { /* keep raw on percent-encoded sequences that are not valid UTF-8 */ }
-      return sanitize(decoded);
+      return escapeZ(sanitize(decoded));
     })
     .filter(Boolean);
-  const dataFolderName = segments.length > 0 ? `${host}--${segments.join('--')}` : host;
+  // Join host + path segments with `zs`, the Helix-safe marker for the `/` boundary.
+  const dataFolderName = [host, ...segments].join('zs');
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 }
 
@@ -1691,7 +1708,13 @@ export async function performLlmoOffboarding(site, config, context) {
   const baseURL = site.getBaseURL();
   const llmoConfig = config.getLlmoConfig();
 
-  // Check if site has LLMO config with data folder, if not calculate it
+  // Check if site has LLMO config with data folder, if not calculate it.
+  // NOTE: re-deriving here assumes the folder was created with the CURRENT
+  // generateDataFolder scheme. A site onboarded under an older scheme whose
+  // stored dataFolder is missing could derive a name that does not match its
+  // actual SharePoint folder (so deleteSharePointFolder below would miss it).
+  // Onboarded sites always persist dataFolder, so this fallback should not fire
+  // in practice (prod scan confirmed zero affected, LLMO-5859).
   let dataFolder = llmoConfig?.dataFolder;
   if (!dataFolder) {
     log.debug(`Data folder not found in LLMO config, calculating from base URL: ${baseURL}`);

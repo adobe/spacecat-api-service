@@ -81,6 +81,20 @@ export function getHostnameWithoutWww(url, log) {
 }
 
 /**
+ * Returns true when a site baseURL contains a non-root pathname (e.g. https://example.com/docs).
+ *
+ * @param {string} baseURL - The site base URL.
+ * @returns {boolean} True if the URL has pathname, false otherwise (including unparseable URLs).
+ */
+export function hasSubpath(baseURL) {
+  if (!isValidUrl(baseURL)) {
+    return false;
+  }
+  const { pathname } = new URL(baseURL);
+  return pathname !== '/';
+}
+
+/**
  * Probes the site URL and resolves the canonical domain for CDN API calls.
  *
  * - 2xx with x-edgeoptimize-request-id header: returns the forwarded host derived from the probe

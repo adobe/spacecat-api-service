@@ -437,6 +437,7 @@ describe('URL Inspector Handlers', () => {
     it('returns paginated owned URLs with agentic + referral fields mapped', async () => {
       const rpcData = [
         {
+          url_id: '11111111-1111-4111-8111-111111111111',
           url: 'https://example.com/page1',
           citations: 42,
           prompts_cited: 12,
@@ -505,6 +506,11 @@ describe('URL Inspector Handlers', () => {
       expect(body.totalCount).to.equal(100);
       expect(body.urls[0].url).to.equal('https://example.com/page1');
       expect(body.urls[0].citations).to.equal(42);
+      // LLMO-5992: url_id (real source_urls.id) is surfaced so the URL Details
+      // "Prompt Analysis" drilldown can key rpc_url_inspector_url_prompts on a
+      // real uuid. A row that omits url_id (older RPC build) falls back to ''.
+      expect(body.urls[0].urlId).to.equal('11111111-1111-4111-8111-111111111111');
+      expect(body.urls[2].urlId).to.equal('');
       expect(body.urls[0].weeklyCitations).to.deep.equal([{ week: '2026-W10', value: 20 }]);
       // Server-side agentic merge (LLMO-4526 M2): the dashboard reads these
       // straight off each row, so they must come through camelCased and the

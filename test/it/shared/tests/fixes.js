@@ -94,6 +94,38 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
+
+      it('returns 400 for non-underscore locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr-FR`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns fixes', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
+        res.body.forEach((f) => expectFixDto(f));
+      });
+
+      it('user: promotes locale-specific suggestion titles on embedded suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions).to.be.an('array').with.lengthOf(1);
+        expect(fix1.suggestions[0].data.title).to.equal('Mettre à jour l\'image hero');
+        expect(fix1.suggestions[0].data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English suggestion titles when locale is absent', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(BASE);
+        expect(res.status).to.equal(200);
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions[0].data.title).to.equal('Update hero image');
+      });
     });
 
     describe('GET .../fixes?fixCreatedDate (date-filtered with suggestions)', () => {
@@ -217,6 +249,35 @@ export default function fixTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${NON_EXISTENT_FIX_ID}/suggestions`);
         expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for non-underscore locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=en-US`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(SUGG_1_ID);
+      });
+
+      it('user: promotes locale-specific suggestion title when locale matches', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body[0].data.title).to.equal('Mettre à jour l\'image hero');
+        expect(res.body[0].data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English suggestion title when locale is absent', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions`);
+        expect(res.status).to.equal(200);
+        expect(res.body[0].data.title).to.equal('Update hero image');
       });
     });
 

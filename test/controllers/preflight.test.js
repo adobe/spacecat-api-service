@@ -63,6 +63,8 @@ describe('Preflight Controller', () => {
     }),
     remove: sandbox.stub().resolves(),
     setStatus: sandbox.stub(),
+    setError: sandbox.stub(),
+    setEndedAt: sandbox.stub(),
     save: sandbox.stub().resolves(),
   };
 
@@ -91,6 +93,8 @@ describe('Preflight Controller', () => {
     getCreatedAt: () => '2024-03-20T10:00:00Z',
     getCreatedBy: () => ({ email: 'user@example.com', displayName: 'Test User' }),
     getSiteId: () => 'test-site-123',
+    getAsyncJobId: () => jobId,
+    getAsyncJob: sandbox.stub().resolves(mockJob),
     getUpdatedAt: () => '2024-03-20T10:01:00Z',
     getStartedAt: () => '2024-03-20T10:00:00Z',
     getEndedAt: () => null,
@@ -168,6 +172,8 @@ describe('Preflight Controller', () => {
     mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
     mockDataAccess.Preflight.findById = sandbox.stub().resolves(mockPreflight);
     mockDataAccess.Preflight.allBySiteIdAndUrl = sandbox.stub().resolves([mockPreflight]);
+    // sandbox.restore() drops the module-level getAsyncJob stub between tests; re-attach.
+    mockPreflight.getAsyncJob = sandbox.stub().resolves(mockJob);
     mockSqs.sendMessage = sandbox.stub().resolves();
     preflightStatus = 'IN_PROGRESS';
     preflightError$ = null;
@@ -1515,19 +1521,22 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(502);
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_UPSTREAM_ERROR');
-      expect(mockPreflight.setStatus).to.have.been.calledWith('FAILED');
-      // Stored error mirrors the external 502 message — the raw upstream
-      // body could leak via GET detail and is sanitized server-side.
-      expect(mockPreflight.setError).to.have.been.calledWithMatch({
+      // SITES-47254: error lives on AsyncJob (source of truth); Preflight
+      // carries only the status + endedAt cache. The sanitized message
+      // mirrors the external 502 — the raw upstream body could leak
+      // internal hostnames/stack traces via the detail endpoint.
+      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockJob.setError).to.have.been.calledWithMatch({
         code: 'MYSTICAT_ERROR',
         message: 'Upstream analyze service failed',
       });
+      expect(mockJob.setEndedAt).to.have.been.calledOnce;
+      expect(mockJob.save).to.have.been.calledOnce;
+      // Preflight cache flipped with no error payload (error lives only on AsyncJob).
+      expect(mockPreflight.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockPreflight.setEndedAt).to.have.been.calledOnce;
+      expect(mockPreflight.setError).to.not.have.been.called;
       expect(mockPreflight.save).to.have.been.calledOnce;
-      // AsyncJob row must also be flipped to FAILED; the controller updates
-      // both records so a future refactor that drops the AsyncJob update is
-      // caught here.
-      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
-      expect(mockJob.save).to.have.been.called;
     });
 
     it('creates preflight successfully and returns 202 with Location header (prod)', async () => {
@@ -1542,6 +1551,12 @@ describe('Preflight Controller', () => {
       expect(result.preflightId).to.equal(preflightId);
       expect(result.status).to.equal('IN_PROGRESS');
       expect(result.url).to.equal('https://main--example-site.aem.page/test.html');
+      expect(result.siteId).to.equal('test-site-123');
+      expect(result.createdAt).to.equal('2024-03-20T10:00:00Z');
+      expect(result.createdBy).to.deep.equal({ email: 'user@example.com', displayName: 'Test User' });
+      // SITES-47254: just-created body omits updatedAt/endedAt (no info at creation time)
+      expect(result).to.not.have.property('updatedAt');
+      expect(result).to.not.have.property('endedAt');
 
       const locationHeader = response.headers.get('Location');
       expect(locationHeader).to.equal(
@@ -1575,7 +1590,7 @@ describe('Preflight Controller', () => {
     });
 
     it('calls Mysticat with correct parameters', async () => {
-      await preflightController.createPreflight({
+      const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
         attributes: { authInfo: mockAuthInfo },
@@ -1587,6 +1602,17 @@ describe('Preflight Controller', () => {
       expect(body.url).to.equal('https://main--example-site.aem.page/test.html');
       expect(body.mode).to.be.undefined;
       expect(body.audits).to.be.undefined;
+      // SITES-47173: wire field is `async_job_id` (the AsyncJob id spacecat
+      // owns); mystique mints its own scan_id internally. The deprecated
+      // `scan_id` body field must NOT be sent.
+      expect(body.async_job_id).to.be.a('string').and.not.empty;
+      expect(body.scan_id).to.be.undefined;
+      // The async_job_id carries the AsyncJob row id that createPreflight
+      // creates — pulled from the response's Preflight DTO via its
+      // back-reference, but easier to assert it matches what's on the wire.
+      const preflightBody = await response.json();
+      expect(body.async_job_id).to.not.be.undefined;
+      expect(preflightBody.preflightId).to.be.a('string');
     });
 
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
@@ -2450,6 +2476,15 @@ describe('Preflight Controller', () => {
       expect(result).to.be.an('array').with.lengthOf(1);
       expect(result[0].preflightId).to.equal(preflightId);
       expect(result[0].status).to.equal('IN_PROGRESS');
+      // SITES-47254: list items carry siteId, updatedAt, endedAt
+      expect(result[0].siteId).to.equal('test-site-123');
+      expect(result[0].updatedAt).to.equal('2024-03-20T10:01:00Z');
+      expect(result[0]).to.have.property('endedAt');
+      // List does not surface asyncJobId/scanId/result/error
+      expect(result[0]).to.not.have.property('asyncJobId');
+      expect(result[0]).to.not.have.property('scanId');
+      expect(result[0]).to.not.have.property('result');
+      expect(result[0]).to.not.have.property('error');
     });
 
     it('returns empty array when no preflights exist', async () => {
@@ -2585,6 +2620,81 @@ describe('Preflight Controller', () => {
       expect(result.result).to.be.null;
       expect(result.error).to.be.null;
       expect(result.updatedAt).to.equal('2024-03-20T10:01:00Z');
+      // SITES-47254: detail carries siteId; result/error join AsyncJob
+      expect(result.siteId).to.equal('test-site-123');
+      // Internal correlation fields and AsyncJob-owned timing stay off the wire
+      expect(result).to.not.have.property('asyncJobId');
+      expect(result).to.not.have.property('scanId');
+      expect(result).to.not.have.property('startedAt');
+    });
+
+    it('sources result/error from the joined AsyncJob, not from Preflight', async () => {
+      const errorPayload = { code: 'DA_FETCH_ERROR', message: 'Document Authoring 502' };
+      const completedJob = {
+        ...mockJob,
+        getResult: () => [{ pageUrl: 'https://example.com/page', audits: [] }],
+        getError: () => errorPayload,
+      };
+      mockPreflight.getAsyncJob.resolves(completedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      const result = await response.json();
+      expect(result.result).to.deep.equal([{ pageUrl: 'https://example.com/page', audits: [] }]);
+      expect(result.error).to.deep.equal(errorPayload);
+    });
+
+    it('degrades result/error to null when getAsyncJob resolves to null (no linked job yet)', async () => {
+      mockPreflight.getAsyncJob.resolves(null);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+      const nullResult = await response.json();
+      expect(nullResult.result).to.be.null;
+      expect(nullResult.error).to.be.null;
+      // Preflight-sourced fields still populated
+      expect(nullResult.preflightId).to.equal(preflightId);
+      expect(nullResult.status).to.equal('IN_PROGRESS');
+    });
+
+    it('returns 503 when getAsyncJob throws (do not silently 200 with null lifecycle)', async () => {
+      // A 200 with result: null is indistinguishable on the wire from a
+      // legitimately empty completed scan; polling clients would cache the
+      // wrong terminal answer. 503 surfaces "transient infra failure, retry."
+      mockPreflight.getAsyncJob.rejects(new Error('async_jobs unreachable'));
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(503);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_LIFECYCLE_UNAVAILABLE');
+      expect(loggerStub.warn).to.have.been.called;
+    });
+
+    it('hardens warn log against non-Error throws (e.message would be undefined)', async () => {
+      // PostgREST/transport layers can throw non-Error values; `e.message`
+      // alone would log "...preflight <id>: undefined" and lose the reason.
+      // `callsFake` + raw `Promise.reject` is required because `.rejects(x)`
+      // wraps non-Error values into Error instances — defeating the test.
+      mockPreflight.getAsyncJob = sandbox.stub().callsFake(
+        // eslint-disable-next-line prefer-promise-reject-errors
+        () => Promise.reject({ statusCode: 503 }),
+      );
+
+      await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      const asyncJobWarn = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes(`preflight ${preflightId}`));
+      expect(asyncJobWarn, 'expected an AsyncJob-fetch warn for the test preflight').to.exist;
+      // Regression guard: the warn must NOT end with "...: undefined" (which
+      // is what `e.message` alone would produce for non-Error rejections).
+      expect(asyncJobWarn.args[0]).to.not.include('undefined');
+      expect(asyncJobWarn.args[0]).to.match(/preflight \S+: \S+/);
     });
 
     it('returns 500 when Site.findById throws', async () => {

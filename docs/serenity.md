@@ -70,6 +70,66 @@ curl -X PATCH "${API_BASE}/organizations/${ORG_ID}" \
 
 The new workspace flows into the resolver cache on the next call.
 
+## Serenity activation flag (org-wide rollout switch)
+
+Binding a `semrush_workspace_id` no longer activates serenity by itself. The
+whole `/serenity/*` surface is additionally gated on an **org-wide feature flag**
+so the rollout can be decoupled from provisioning: an org (and its brands) can
+have their `semrush_workspace_id` backfilled ahead of time while the customer UI
+keeps reading the normal backend data, until the flag is flipped on per org.
+
+- **Central predicate:** `isSerenityActiveForOrg(ctx, spaceCatId, log)` in
+  `src/support/serenity/serenity-active.js` — the single source of truth, reused
+  by the controller. It reads the flag (cached, mirroring the workspace resolver:
+  5-minute positive TTL, 30-second negative TTL so an ON-flip propagates fast).
+- **Flag identity:** `feature_flags` row keyed `(organization_id, product='LLMO',
+  flag_name='serenity')`. Default **OFF** — a missing row, a `false` row, an
+  unavailable PostgREST client, or a transient read error all resolve to inactive.
+- **Effective gate = flag AND workspace.** The controller's `authorize` rejects
+  the serenity surface with `404 Serenity is not active for this organization`
+  when the flag is off (checked before brand resolution, so an inactive org never
+  leaks brand existence); the existing workspace resolution supplies the "AND a
+  Semrush workspace resolves" half. So serenity is served only when **both** the
+  flag is on **and** a workspace resolves for the brand.
+
+Flip the flag with the existing admin feature-flags endpoint:
+
+```bash
+# Activate serenity for an org
+curl -X PUT "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"value": true}'
+
+# Deactivate (org falls back to the normal backend data)
+curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
+```
+
+The org-level catalogue routes (`GET /serenity/models`, `GET /serenity/languages`,
+without `:brandId`) are intentionally **not** gated — the add-brand wizard needs
+them before a workspace (or the flag) exists.
+
+### The flag also gates the serenity-adjusted brand endpoints
+
+The same helper gates the Semrush **side-effects** on the v2 brand endpoints
+(`src/controllers/brands.js`), so an inactive org operates as plain backend CRUD:
+
+- `POST /v2/orgs/:org/brands` — a **Semrush-mode** create (`semrushMarket` /
+  `generatePrompts`, i.e. one that would provision a sub-workspace) is rejected
+  with `403 Serenity is not active for this organization` while the flag is off.
+  A plain (flat) create is unaffected.
+- `PATCH /v2/orgs/:org/brands/:brandId` — an edit that would **re-sync to
+  Semrush** (URL / competitor / alias change on a brand that has a
+  `semrush_workspace_id`) is rejected `403` while the flag is off, before the
+  row is written. The same edit on a flat brand (no workspace) is a normal
+  backend update.
+- The brand **read** DTO is deliberately left alone: `semrushWorkspaceId` /
+  `pendingSemrushProvisioning` are always returned as a faithful mirror of the
+  row (the UI decides what to surface by reading the flag itself).
+- `DELETE` and status-transition have no Semrush side-effect, so they are
+  ungated.
+
 ## Endpoint surface
 
 All endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
@@ -77,13 +137,15 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
 | GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. tagIds is repeatable (OR semantics, max 50). | `listSerenityPrompts` |
-| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode) | `createSerenityPrompts` |
-| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + new fields | `updateSerenityPrompt` |
+| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries at most one of `tags` (names) or `tagIds` (upstream ids, id-based write path) | `createSerenityPrompts` |
+| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + exactly one of `tags`/`tagIds` | `updateSerenityPrompt` |
 | POST | `/serenity/prompts/bulk-delete` | Delete prompts; body is `{ prompts: [{semrushPromptId, geoTargetId, languageCode}] }` | `bulkDeleteSerenityPrompts` |
 | GET | `/serenity/markets` | List markets configured for the brand (incl. live `status`) | `listSerenityMarkets` |
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
-| GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice | `listSerenityTags` |
+| GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice. Add `parentId` (present, even empty) to switch to the nested-tree read instead: `parentId=''` returns root categories with `childrenCount`, `parentId=<tagId>` returns that root's children with a `path` breadcrumb. | `listSerenityTags` |
+| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `type` is `category`/`topic` (open — customer-authored, `parentId` nests a 1-level bare-named child) or `source`/`intent`/`type` (closed — `name` must match the fixed enum; resolve-before-create, idempotent, `parentId` not allowed; response is `200 { ..., created }` not `201`). | `createSerenityTag` |
+| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is the full `<dimension>:<value>` string for a root, or a bare value for a child. `parentId`: an id RE-PARENTS, explicit `null` PROMOTES a child to root, omitted preserves the current parent (the proxy re-sends a child's current parent itself — omission is only safe for a root). | `updateSerenityTag` |
 | GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
 | PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
 | POST | `/serenity/activate` | Activate the brand into sub-workspace mode (ensure sub-workspace + publish supplied markets) | `activateSerenityBrand` |
