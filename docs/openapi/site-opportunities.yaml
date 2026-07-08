@@ -1415,6 +1415,47 @@ site-opportunity-suggestion-fixes:
     security:
       - ims_key: [ ]
 
+site-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
+    - name: status
+      description: Optional fix status to filter by (e.g. `PENDING`, `FAILED`).
+      in: query
+      required: false
+      schema:
+        type: string
+  get:
+    operationId: getSiteFixes
+    summary: |
+      Retrieve all fixes for a site, across every opportunity
+    description: |
+      Aggregates fixes across every opportunity belonging to the site, avoiding the need to
+      enumerate opportunities and fetch fixes per-opportunity. Optionally filtered by status.
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of fixes
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'

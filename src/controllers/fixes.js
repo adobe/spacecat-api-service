@@ -209,6 +209,48 @@ export class FixesController {
   }
 
   /**
+   * Gets all fixes for a given site, across every opportunity, by fetching the site's
+   * opportunity IDs and filtering fixes on opportunityId IN (...). Optionally filtered
+   * by status (applied in-memory, since the underlying query only supports one filter
+   * condition at a time).
+   *
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>} Array of fixes response.
+   */
+  async getAllForSite(context) {
+    const { siteId } = context.params;
+    const status = context.data?.status ?? null;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const res = await this.#checkAccess(siteId);
+    if (res) {
+      return res;
+    }
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
+    const opportunities = await this.#Opportunity.allBySiteId(siteId);
+    const opportunityIds = opportunities.map((o) => o.getId());
+
+    let fixEntities = opportunityIds.length > 0
+      ? await this.#FixEntity.allByOpportunityIds(opportunityIds)
+      : [];
+
+    if (hasText(status)) {
+      fixEntities = fixEntities.filter((fix) => fix.getStatus() === status);
+    }
+
+    await this.#enrichFixesWithUserNames(fixEntities);
+    return ok(fixEntities.map((fix) => FixDto.toJSON(fix, locale)));
+  }
+
+  /**
    * Gets all suggestions for a given site, opportunity and status.
    *
    * @param {RequestContext} context - request context
