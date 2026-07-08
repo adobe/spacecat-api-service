@@ -320,6 +320,43 @@ describe('Fixes Controller', () => {
       expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(hexOrgUserId);
     });
 
+    it('hydrates executedByUser when executedBy has an account-type suffix (reference/trial org)', async () => {
+      const suffixedUserId = 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.e';
+      const mockImsClient = {
+        getImsAdminProfile: sandbox.stub().resolves({
+          first_name: 'Sandesh',
+          last_name: 'Sinha',
+          email: 'sandsinh@adobe.com',
+        }),
+      };
+      fixesController = new FixesController(
+        { dataAccess, log, imsClient: mockImsClient },
+        accessControlUtil,
+      );
+
+      const fixEntity = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        executedBy: suffixedUserId,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+        .withArgs(opportunityId)
+        .resolves([{ fixEntity, suggestions: [] }]);
+
+      const response = await fixesController.getAllForOpportunity(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result[0]).to.have.property('executedByUser');
+      expect(result[0].executedByUser).to.deep.equal({
+        firstName: 'Sandesh',
+        lastName: 'Sinha',
+        email: 'sandsinh@adobe.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith(suffixedUserId);
+    });
+
     it('skips IMS lookup when executedBy is a plain email address', async () => {
       const mockImsClient = {
         getImsAdminProfile: sandbox.stub().resolves({
@@ -349,6 +386,44 @@ describe('Fixes Controller', () => {
       const result = await response.json();
       expect(result[0]).to.not.have.property('executedByUser');
       expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    [
+      { label: 'two-letter account-type suffix', id: 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.ee' },
+      { label: 'digit account-type suffix', id: 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.1' },
+      { label: 'trailing dot without suffix', id: 'AE751E8367B35D520A495CD3@41a2251964070a8d495fcd.' },
+      { label: 'hex run exceeding the upper bound', id: `AE751E8367B35D520A495CD3@${'a'.repeat(41)}` },
+    ].forEach(({ label, id }) => {
+      it(`skips IMS lookup when executedBy has a ${label}`, async () => {
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({
+            first_name: 'John',
+            last_name: 'Doe',
+            email: 'john.doe@example.com',
+          }),
+        };
+        fixesController = new FixesController(
+          { dataAccess, log, imsClient: mockImsClient },
+          accessControlUtil,
+        );
+
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          executedBy: id,
+          changeDetails: { arbitrary: 'value 1' },
+        });
+        fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
+          .withArgs(opportunityId)
+          .resolves([{ fixEntity, suggestions: [] }]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result[0]).to.not.have.property('executedByUser');
+        expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
     });
 
     it('skips IMS lookup when no fix has executedBy', async () => {

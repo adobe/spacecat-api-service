@@ -599,6 +599,38 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
+ * Lightweight brand/org-membership + display-name lookup. Selects only `id, name`
+ * — unlike {@link getBrandById}, which pays for a wide 8-table join
+ * (`BRAND_SELECT`: aliases, social accounts, earned sources, competitors, sites,
+ * urls) to build the full brand DTO. Callers that only need to confirm a brand
+ * belongs to an org and want its display name (e.g. auth guards enriching a
+ * filter-dimensions response) should use this instead.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{id: string, name: string} | null>} the brand's id + name,
+ *   or null if it doesn't exist / doesn't belong to the org.
+ */
+export async function getBrandIdentity(organizationId, brandId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to get brand identity: ${error.message}`);
+  }
+  return data ?? null;
+}
+
+/**
  * Reads a brand's aliases (the `brand_aliases` rows) — the extra names the brand
  * is known by, beyond its display name — each with its `regions`. Returned as
  * `{ name, regions }[]` (empty when the brand has none), the shape the Semrush
