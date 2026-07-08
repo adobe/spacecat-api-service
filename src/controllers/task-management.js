@@ -26,8 +26,10 @@ import {
   STATUS_OK,
 } from '../utils/constants.js';
 import { getHeader } from '../support/http-headers.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 const STATUS_CONFLICT = 409;
+const STATUS_FORBIDDEN = 403;
 
 // Ticket creation modes.
 // 'individual': one ticket per suggestion (N→N). N>1 returns 207 Multi-Status.
@@ -143,7 +145,7 @@ function TaskManagementController(context) {
   }
 
   const {
-    TaskManagementConnection, Ticket, TicketSuggestion, Suggestion,
+    Organization, TaskManagementConnection, Ticket, TicketSuggestion, Suggestion,
   } = dataAccess;
 
   if (!isNonEmptyObject(TaskManagementConnection)) {
@@ -162,6 +164,10 @@ function TaskManagementController(context) {
     throw new Error('Suggestion collection not available');
   }
 
+  if (!isNonEmptyObject(Organization)) {
+    throw new Error('Organization collection not available');
+  }
+
   // AWS SDK auto-detects region from the Lambda execution environment.
   // Constructed once per controller instance (not per request) to reuse the connection pool.
   const smClient = new SecretsManagerClient();
@@ -170,7 +176,24 @@ function TaskManagementController(context) {
   // fetch is available globally in Node 18+ (Lambda runtime).
   const httpClient = { fetch: globalThis.fetch };
 
+  const accessControlUtil = AccessControlUtil.fromContext(context);
+
   // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  /**
+   * Loads an organization by ID and verifies the caller has access to it.
+   * Returns { denied: Response } when not found or forbidden, { org } on success.
+   */
+  async function loadOrgWithAccess(organizationId) {
+    const org = await Organization.findById(organizationId);
+    if (!org) {
+      return { denied: createResponse({ message: 'Organization not found' }, STATUS_NOT_FOUND) };
+    }
+    if (!await accessControlUtil.hasAccess(org)) {
+      return { denied: createResponse({ message: 'Forbidden' }, STATUS_FORBIDDEN) };
+    }
+    return { org };
+  }
 
   /**
    * Loads a connection by ID and verifies it belongs to the given organization.
@@ -199,6 +222,11 @@ function TaskManagementController(context) {
 
     if (!isValidUUID(organizationId)) {
       return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+    }
+
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
     }
 
     let connections;
@@ -233,6 +261,11 @@ function TaskManagementController(context) {
       return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
     }
 
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
+    }
+
     let connection;
     try {
       connection = await loadConnectionForOrg(organizationId, connectionId);
@@ -263,6 +296,11 @@ function TaskManagementController(context) {
 
     if (!isValidUUID(organizationId)) {
       return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+    }
+
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
     }
 
     let tickets;
@@ -311,6 +349,11 @@ function TaskManagementController(context) {
 
     if (!hasText(suggestionId)) {
       return createResponse({ message: 'suggestionId is required' }, STATUS_BAD_REQUEST);
+    }
+
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
     }
 
     let bridge;
@@ -371,6 +414,11 @@ function TaskManagementController(context) {
 
     if (!hasText(opportunityId)) {
       return createResponse({ message: 'opportunityId is required' }, STATUS_BAD_REQUEST);
+    }
+
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
     }
 
     // v1: one ticket per opportunity (optional FK via Ticket.opportunityId).
@@ -442,6 +490,11 @@ function TaskManagementController(context) {
 
     if (!hasText(provider)) {
       return createResponse({ message: 'provider is required' }, STATUS_BAD_REQUEST);
+    }
+
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
     }
 
     if (!isNonEmptyObject(data) || !hasText(data.summary)) {
@@ -1230,6 +1283,11 @@ function TaskManagementController(context) {
       return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
     }
 
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
+    }
+
     let connection;
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
@@ -1308,6 +1366,11 @@ function TaskManagementController(context) {
 
     if (!hasText(projectId)) {
       return createResponse({ message: 'projectId query parameter is required' }, STATUS_BAD_REQUEST);
+    }
+
+    const { denied } = await loadOrgWithAccess(organizationId);
+    if (denied) {
+      return denied;
     }
 
     let connection;
