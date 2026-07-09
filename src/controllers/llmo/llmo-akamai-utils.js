@@ -277,6 +277,13 @@ export function buildRoutingRule(cfg) {
   // Loop guard: exclude requests that already carry one of the headers this rule injects (see
   // LOOP_GUARD_HEADER) — true for Akamai's internal failover retry of the SAME request, never
   // true for a fresh client request.
+  //
+  // TRUST ASSUMPTION: this keys on the mere presence of a client-suppliable header, so a client
+  // that forges x-edgeoptimize-api-key (or x-edgeoptimize-request) can suppress Optimize-at-Edge
+  // routing for itself or force a false x-edgeoptimize-fo. That is acceptable here: the only party
+  // harmed is the forging client (it opts itself out of optimization), and stripping/validating
+  // these at the edge before rule evaluation would require Advanced Metadata, which this GA-only
+  // rule set deliberately avoids. Revisit if these headers ever gate anything security-sensitive.
   const incomingHeaders = cfg.incomingRequestHeaders;
   const guardHeader = LOOP_GUARD_HEADER in incomingHeaders
     ? LOOP_GUARD_HEADER
@@ -409,9 +416,10 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   ]);
   const children = (root.children || []).filter((c) => !managedNames.has(c?.name));
 
-  const idx = insertIndex === undefined || insertIndex === null
-    ? 0
-    : Math.max(0, Math.min(Math.trunc(Number(insertIndex)), children.length));
+  const n = Math.trunc(Number(insertIndex));
+  // Non-numeric / NaN (e.g. a direct caller passing garbage) clamps to 0 rather than corrupting
+  // the slice; the controller already rejects malformed values with a 400 before reaching here.
+  const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, children.length)) : 0;
   root.children = [...children.slice(0, idx), buildParentRule(cfg), ...children.slice(idx)];
   return tree;
 }
@@ -423,6 +431,37 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
  */
 export function managedRuleNames(cfg) {
   return [cfg.ruleNames.parent, cfg.ruleNames.routing, cfg.ruleNames.failoverTest];
+}
+
+// The request header carrying the site's LLMO API key — a confidential value that must never be
+// logged or returned to clients. See buildRuleConfig.
+const API_KEY_HEADER = 'x-edgeoptimize-api-key';
+const REDACTED = '***';
+
+/**
+ * Returns a deep clone of a rule tree with the injected LLMO API key value redacted, for
+ * previews/diffs that leave the server (e.g. the plan response). Walks every rule's behaviors and
+ * replaces the value of the modifyIncomingRequestHeader that sets the API-key header.
+ * @param {object} tree - a PAPI rule tree ({ rules: {...} })
+ * @returns {object} a redacted deep clone
+ */
+export function redactApiKey(tree) {
+  const clone = structuredClone(tree);
+  const walk = (rule) => {
+    if (!rule || typeof rule !== 'object') {
+      return;
+    }
+    (rule.behaviors || []).forEach((b) => {
+      if (b?.name === 'modifyIncomingRequestHeader' && b.options?.customHeaderName === API_KEY_HEADER) {
+        // Mutating a deep clone we own, not the caller's tree.
+        // eslint-disable-next-line no-param-reassign
+        b.options.headerValue = REDACTED;
+      }
+    });
+    (rule.children || []).forEach(walk);
+  };
+  walk(clone.rules);
+  return clone;
 }
 
 // ---------------------------------------------------------------------------

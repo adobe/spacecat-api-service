@@ -14,11 +14,12 @@ import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import AkamaiClient, { normalizeDomain } from '@adobe/spacecat-shared-akamai-client';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  buildRuleConfig, mergeIntoTree, managedRuleNames,
+  buildRuleConfig, mergeIntoTree, managedRuleNames, redactApiKey,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -33,7 +34,7 @@ const CRED_HEADERS = Object.freeze({
   accountSwitchKey: 'x-akamai-account-switch-key', // optional
 });
 // The four EdgeGrid values required to sign any PAPI request. accountSwitchKey is optional and
-// notifyEmails (needed only to activate) is not secret, so it travels in the request body.
+// notifyEmails (needed only to activate) is not a credential, so it travels in the request body.
 const REQUIRED_CRED_KEYS = ['host', 'clientToken', 'clientSecret', 'accessToken'];
 
 const NETWORKS = ['STAGING', 'PRODUCTION'];
@@ -45,6 +46,16 @@ const PROPERTY_ID_RE = /^prp_[A-Za-z0-9]+$/;
 const CONTRACT_ID_RE = /^ctr_[A-Za-z0-9-]+$/;
 const GROUP_ID_RE = /^grp_[A-Za-z0-9]+$/;
 const ACTIVATION_ID_RE = /^atv_[A-Za-z0-9]+$/;
+// SSRF guard: the client builds `https://${host}/...` from x-akamai-host, so restrict it to Akamai
+// EdgeGrid hosts. The `.akamaiapis.net` suffix + this charset reject IP literals, ports (no ':'),
+// and paths (no '/'), so a caller cannot point server-side requests at an arbitrary host.
+const AKAMAI_HOST_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.akamaiapis\.net$/i;
+// Account switch keys look like "1-ABCDEF" / "1-ABCDEF:1-2GHIJ"; validate so a malformed value
+// fails cleanly here instead of as a raw upstream 4xx.
+const ACCOUNT_SWITCH_KEY_RE = /^[A-Za-z0-9:_-]+$/;
+// Numeric fields from the JSON body must be decimal-integer strings/numbers. Number() alone accepts
+// true->1, "0x10"->16, "1e3"->1000, ["5"]->5, so gate on this before converting.
+const DECIMAL_INT_RE = /^[0-9]+$/;
 
 /**
  * Identifies the API caller for audit logging. profile.email is an IMS user GUID (see
@@ -54,12 +65,15 @@ const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.
 
 /**
  * The authenticated caller's human-readable email, used server-side as the Akamai activation
- * notification address. profile.trial_email is the RFC-5322 address on the IMS token (profile.email
- * is an IMS user GUID, not a real address). Returns null when no usable address is present.
+ * notification address. Prefer trial_email (present for trial users), then preferred_username
+ * (the RFC-5322 address on enterprise/IMS tokens); profile.email is an IMS user GUID, not a real
+ * address, so it is only a last resort. Returns null when no usable address is present.
  */
 const getCallerEmail = (context) => {
-  const profile = context?.attributes?.authInfo?.getProfile?.();
-  return hasText(profile?.trial_email) ? profile.trial_email.trim() : null;
+  const profile = context?.attributes?.authInfo?.getProfile?.() || {};
+  const candidate = [profile.trial_email, profile.preferred_username, profile.email]
+    .find((v) => hasText(v));
+  return candidate ? candidate.trim() : null;
 };
 
 /**
@@ -137,8 +151,8 @@ function LlmoAkamaiController(ctx) {
 
   /**
    * Builds a per-request AkamaiClient from the caller's EdgeGrid credential headers, or a
-   * badRequest when a required credential header is missing. `notifyEmails` (not secret) is only
-   * needed to activate() and is threaded through from the request body.
+   * badRequest when a required credential header is missing. `notifyEmails` (not a credential) is
+   * only needed to activate() and is threaded through from the request body.
    * @returns {{ client: AkamaiClient } | { error: Response }}
    */
   const requireClient = (context, { notifyEmails } = {}) => {
@@ -151,13 +165,21 @@ function LlmoAkamaiController(ctx) {
         ),
       };
     }
+    // SSRF guard: reject anything that is not an Akamai EdgeGrid host before it reaches the client
+    // (which would otherwise issue a signed request to `https://${host}/...`).
+    if (!AKAMAI_HOST_RE.test(creds.host)) {
+      return { error: badRequest(`${CRED_HEADERS.host} must be an Akamai EdgeGrid host (*.akamaiapis.net)`) };
+    }
+    if (hasText(creds.accountSwitchKey) && !ACCOUNT_SWITCH_KEY_RE.test(creds.accountSwitchKey)) {
+      return { error: badRequest(`${CRED_HEADERS.accountSwitchKey} contains invalid characters`) };
+    }
     try {
       return { client: new AkamaiClient({ ...creds, notifyEmails }, log) };
     } catch (e) {
-      // The constructor re-validates the required keys; after the check above this is unexpected.
-      // Log the detail internally but return a generic message — the constructor error can echo
-      // credential-derived detail (host, token prefixes) we must not leak to the caller.
-      log.error(`AkamaiClient construction failed: ${e.message}`);
+      // The constructor re-validates the required keys; after the checks above this is unexpected.
+      // Log the error name only (not the message, which can echo credential-derived detail) and
+      // return a generic message to the caller.
+      log.error(`AkamaiClient construction failed: ${e.name}`);
       return { error: badRequest('Invalid Akamai credentials') };
     }
   };
@@ -171,22 +193,30 @@ function LlmoAkamaiController(ctx) {
   const papiErrorResponse = (error, action, context, fields = {}) => {
     const message = error?.message || String(error);
     log.error(auditLine(context, 'papi-call', 'error', { op: action, ...fields, error: message }));
-    if (/-> 401\b/.test(message)) {
+    // Read the status from the "-> <status>:" token the client emits right after the path, not by
+    // scanning the whole string: the response body (up to 1000 chars) can itself contain a
+    // "-> 404" and mis-map a genuine 5xx. Take the FIRST such token, which is the real status.
+    const status = Number(message.match(/-> (\d{3}):/)?.[1]);
+    if (status === 401) {
       return unauthorized('Akamai authentication failed');
     }
-    if (/-> 403\b/.test(message)) {
+    if (status === 403) {
       return forbidden('Akamai authorization failed');
     }
-    if (/-> 404\b/.test(message)) {
+    if (status === 404) {
       // A missing property/version/activation is a caller-addressable 404, not an upstream fault.
       return notFound(`Akamai ${action} target not found`);
     }
-    if (/-> 429\b/.test(message)) {
+    if (status === 429) {
       return createResponse({ message: 'Akamai rate limit exceeded' }, 429);
     }
     return createResponse({ message: `Akamai ${action} failed` }, 502);
   };
 
+  // The LLMO API key is a CONFIDENTIAL string: it is injected into the managed rule tree
+  // (x-edgeoptimize-api-key) and sent to Akamai at deploy, but it must never be logged or returned
+  // to a client. Never put the resolved key, the config, or the un-redacted merged tree into a log
+  // line or response (plan redacts it via redactApiKey; audit lines carry only ids/versions).
   const getLlmoApiKey = async (site, context) => {
     const tokowaka = TokowakaClient.createFrom(context);
     const metaconfig = await tokowaka.fetchMetaconfig(site.getBaseURL());
@@ -229,8 +259,8 @@ function LlmoAkamaiController(ctx) {
     if (insertIndex === undefined || insertIndex === null || insertIndex === '') {
       return null;
     }
-    const n = Number(insertIndex);
-    if (!Number.isInteger(n) || n < 0) {
+    // Require a decimal-integer literal: Number() would otherwise accept true, "0x10", "1e3".
+    if (!DECIMAL_INT_RE.test(String(insertIndex))) {
       return badRequest('insertIndex must be a non-negative integer');
     }
     return null;
@@ -256,17 +286,33 @@ function LlmoAkamaiController(ctx) {
     const serving = (matches || []).some(
       (m) => m.propertyId === ref.propertyId && (m.matchedOn || []).includes('hostname'),
     );
-    if (!serving) {
-      const seen = (matches || []).map((m) => m.propertyId).join(', ') || 'none';
-      log.info(auditLine(context, action, 'guard-blocked', {
-        siteId: site.getId(), propertyId: ref.propertyId, host, seen,
-      }));
-      return forbidden(
-        `Property ${ref.propertyId} does not serve '${host}' on an active hostname `
-        + `(properties serving it: ${seen})`,
-      );
+    if (serving) {
+      return null;
     }
-    return null;
+
+    // findPropertiesByDomain swallows per-search failures (bad/expired creds, rate limiting, ...)
+    // and returns [], so an empty result can be an auth/permission failure rather than a genuine
+    // "wrong property". Probe with an authenticated call that DOES surface errors, so we return a
+    // truthful 401/403/404/5xx instead of a misleading "does not serve site" 403. A non-empty
+    // result (properties matched, just not this one) is unambiguous and skips the probe.
+    if (!(matches || []).length) {
+      try {
+        await client.getLatestVersion(ref.propertyId, ref.contractId, ref.groupId);
+      } catch (e) {
+        return papiErrorResponse(e, 'property lookup', context, {
+          siteId: site.getId(), propertyId: ref.propertyId,
+        });
+      }
+    }
+
+    const seen = (matches || []).map((m) => m.propertyId).join(', ') || 'none';
+    log.info(auditLine(context, action, 'guard-blocked', {
+      siteId: site.getId(), propertyId: ref.propertyId, host, seen,
+    }));
+    return forbidden(cleanupHeaderValue(
+      `Property ${ref.propertyId} does not serve '${host}' on an active hostname `
+      + `(properties serving it: ${seen})`,
+    ));
   };
 
   /**
@@ -335,6 +381,10 @@ function LlmoAkamaiController(ctx) {
     }
 
     try {
+      // NOTE: findPropertiesByDomain swallows per-search failures and returns []; an empty list can
+      // therefore mean "no matching property" OR a credentials/permission failure. It only rejects
+      // on an empty domain (guarded above), so the catch below is defensive against future client
+      // versions. Mutating flows (deploy/activate) disambiguate this via an authenticated probe.
       const properties = await client.findPropertiesByDomain(host);
       return ok({ domain: host, properties });
     } catch (e) {
@@ -399,7 +449,10 @@ function LlmoAkamaiController(ctx) {
         // only its children may be absent. merge always writes a children array.
         currentChildRules: (ruleTree.rules.children || []).map((c) => c.name),
         mergedChildRules: merged.rules.children.map((c) => c.name),
-        merged,
+        // Redact the injected LLMO API key before returning the preview — plan is read-only and
+        // the real key is only needed server-side at deploy; the merged tree ends up in browser
+        // devtools / HAR exports / proxy logs otherwise.
+        merged: redactApiKey(merged),
       });
     } catch (e) {
       return papiErrorResponse(e, 'plan', context, { siteId: site.getId(), propertyId });
@@ -431,11 +484,6 @@ function LlmoAkamaiController(ctx) {
       return refError;
     }
 
-    const { cfg, error: cfgError } = await resolveRuleConfig(site, context);
-    if (cfgError) {
-      return cfgError;
-    }
-
     const { propertyId, contractId, groupId } = ref;
     const { insertIndex } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
@@ -444,9 +492,16 @@ function LlmoAkamaiController(ctx) {
     }
     const siteId = site.getId();
 
+    // Guard before fetching the metaconfig — no point resolving the API key for a call we will
+    // block anyway.
     const guard = await assertPropertyServesSite(client, ref, site, context, 'deploy');
     if (guard) {
       return guard;
+    }
+
+    const { cfg, error: cfgError } = await resolveRuleConfig(site, context);
+    if (cfgError) {
+      return cfgError;
     }
 
     log.info(auditLine(context, 'deploy', 'started', { siteId, propertyId }));
@@ -531,8 +586,13 @@ function LlmoAkamaiController(ctx) {
 
     let version;
     if (rawVersion !== undefined && rawVersion !== null && rawVersion !== '') {
+      // Require a decimal-integer literal (Number() would accept true, "0x10", "1e3", ["5"] and
+      // could activate an unintended version).
+      if (!DECIMAL_INT_RE.test(String(rawVersion))) {
+        return badRequest('version must be a positive integer');
+      }
       version = Number(rawVersion);
-      if (!Number.isInteger(version) || version < 1) {
+      if (version < 1) {
         return badRequest('version must be a positive integer');
       }
     }
@@ -568,6 +628,14 @@ function LlmoAkamaiController(ctx) {
         network,
       );
       const activationId = AkamaiClient.activationIdFromLink(activationLink);
+      if (!hasText(activationId)) {
+        // PAPI accepted the activation but returned no usable link — surface it rather than
+        // reporting success with an empty activationId the UI cannot poll.
+        log.error(auditLine(context, 'activate', 'no-activation-link', {
+          siteId, propertyId, version, network,
+        }));
+        return createResponse({ message: 'Akamai returned no activation link' }, 502);
+      }
       log.info(auditLine(context, 'activate', 'submitted', {
         siteId, propertyId, version, network, activationId,
       }));

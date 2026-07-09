@@ -36,19 +36,23 @@ describe('LlmoAkamaiController', () => {
   let mockAccessControlUtil;
   let mockAkamaiClient;
   let mockTokowakaClient;
+  let capturedClientConfig;
 
   before(async () => {
     // esmock is expensive, so wire it once. The mock factories read the mutable outer references
     // (reassigned per-test in beforeEach) so each test gets fresh stubs without re-running esmock.
-    // Simulates the real client's constructor validation: throws when a credential is the
-    // sentinel below, so the controller's requireClient catch-branch can be exercised.
+    // Captures the constructor config so tests can assert credential + notifyEmails forwarding, and
+    // throws on a sentinel client-token so the requireClient catch-branch can be exercised.
     function AkamaiClientMock(cfg) {
+      capturedClientConfig = cfg;
       if (cfg && cfg.clientToken === '__throw__') {
         throw new Error('AkamaiClient requires clientToken');
       }
       return mockAkamaiClient;
     }
-    AkamaiClientMock.activationIdFromLink = (link) => (link || '').split('/').pop();
+    // Mirror the real activationIdFromLink: strip the query string, trailing slashes, then the
+    // last path segment.
+    AkamaiClientMock.activationIdFromLink = (link) => (link || '').split('?')[0].replace(/\/+$/, '').split('/').pop();
 
     const mod = await esmock('../../../src/controllers/llmo/llmo-akamai.js', {
       '@adobe/spacecat-shared-akamai-client': {
@@ -67,6 +71,7 @@ describe('LlmoAkamaiController', () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
+    capturedClientConfig = undefined;
 
     mockAkamaiClient = {
       findPropertiesByDomain: sandbox.stub().resolves([
@@ -169,10 +174,44 @@ describe('LlmoAkamaiController', () => {
       expect(mockAkamaiClient.findPropertiesByDomain).to.have.been.calledWith('www.example.com');
     });
 
-    it('maps a PAPI 401 to a 401 response', async () => {
+    it('returns 200 with an empty list when the client finds nothing (it swallows search errors)', async () => {
+      // The real findPropertiesByDomain returns [] on bad creds/no match rather than rejecting.
+      mockAkamaiClient.findPropertiesByDomain.resolves([]);
+      const res = await controller.listProperties(mockContext);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.properties).to.deep.equal([]);
+    });
+
+    it('defensively maps a thrown PAPI 401 to a 401 (future client versions)', async () => {
       mockAkamaiClient.findPropertiesByDomain.rejects(new Error('PAPI POST /papi/v1/search -> 401: nope'));
       const res = await controller.listProperties(mockContext);
       expect(res.status).to.equal(401);
+    });
+
+    it('rejects a non-EdgeGrid x-akamai-host (SSRF guard)', async () => {
+      mockContext.pathInfo.headers['x-akamai-host'] = 'https://evil.example.com/steal';
+      const res = await controller.listProperties(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.findPropertiesByDomain).to.not.have.been.called;
+    });
+
+    it('rejects an IP-literal x-akamai-host (SSRF guard)', async () => {
+      mockContext.pathInfo.headers['x-akamai-host'] = '169.254.169.254';
+      const res = await controller.listProperties(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects a malformed x-akamai-account-switch-key', async () => {
+      mockContext.pathInfo.headers['x-akamai-account-switch-key'] = 'bad key!';
+      const res = await controller.listProperties(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('accepts a well-formed account switch key', async () => {
+      mockContext.pathInfo.headers['x-akamai-account-switch-key'] = '1-ABC123:1-DEF456';
+      const res = await controller.listProperties(mockContext);
+      expect(res.status).to.equal(200);
     });
   });
 
@@ -185,6 +224,14 @@ describe('LlmoAkamaiController', () => {
       expect(body.currentChildRules).to.deep.equal(['Existing']);
       expect(body.mergedChildRules[0]).to.equal('Optimize at Edge');
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('redacts the LLMO API key from the previewed merged tree', async () => {
+      const res = await controller.plan(withData(propertyRef));
+      const body = await res.json();
+      const serialized = JSON.stringify(body.merged);
+      expect(serialized).to.not.contain(LLMO_API_KEY);
+      expect(serialized).to.contain('***');
     });
 
     it('rejects a malformed propertyId', async () => {
@@ -279,11 +326,45 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('rejects version 0', async () => {
+      const res = await controller.activate(withData({ ...propertyRef, version: 0 }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.activate).to.not.have.been.called;
+    });
+
     it('returns 403 when no notify email can be derived from the caller', async () => {
-      mockContext.attributes.authInfo.getProfile = () => ({ email: 'guid@org.e' });
+      // getProfile() returning undefined exercises the empty-profile fallback in getCallerEmail.
+      mockContext.attributes.authInfo.getProfile = () => undefined;
       const res = await controller.activate(withData(propertyRef));
       expect(res.status).to.equal(403);
       expect(mockAkamaiClient.activate).to.not.have.been.called;
+    });
+
+    it('falls back to preferred_username for the notify email when trial_email is absent', async () => {
+      mockContext.attributes.authInfo.getProfile = () => ({ preferred_username: 'admin@corp.com' });
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(200);
+      expect(capturedClientConfig.notifyEmails).to.deep.equal(['admin@corp.com']);
+    });
+
+    it('rejects a non-decimal version (e.g. 1e3)', async () => {
+      const res = await controller.activate(withData({ ...propertyRef, version: '1e3' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.activate).to.not.have.been.called;
+    });
+
+    it('returns 502 when Akamai returns no activation link', async () => {
+      mockAkamaiClient.activate.resolves('');
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
+
+    it('threads server-derived notifyEmails and forwards the EdgeGrid credentials to the client', async () => {
+      await controller.activate(withData(propertyRef));
+      expect(capturedClientConfig.notifyEmails).to.deep.equal([CALLER_EMAIL]);
+      expect(capturedClientConfig.host).to.equal('akab-xxx.luna.akamaiapis.net');
+      expect(capturedClientConfig.clientToken).to.equal('ctok');
+      expect(capturedClientConfig.accessToken).to.equal('atok');
     });
   });
 
@@ -366,6 +447,25 @@ describe('LlmoAkamaiController', () => {
     it('deploy returns 502 when the property-serves-site lookup fails', async () => {
       mockAkamaiClient.findPropertiesByDomain.rejects(new Error('lookup boom'));
       const res = await controller.deploy(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
+
+    it('deploy surfaces a real 401 (not a misleading 403) when the guard probe fails on bad creds', async () => {
+      // findPropertiesByDomain swallows the auth error and returns []; the guard then probes with
+      // getLatestVersion, which surfaces the real 401.
+      mockAkamaiClient.findPropertiesByDomain.resolves([]);
+      mockAkamaiClient.getLatestVersion.rejects(new Error('PAPI GET /x -> 401: The signature does not match'));
+      const res = await controller.deploy(withData(propertyRef));
+      expect(res.status).to.equal(401);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('anchors status detection to the "-> NNN:" token, not the response body', async () => {
+      // A genuine 500 whose body text mentions "-> 404" must still map to 502, not 404.
+      mockAkamaiClient.getLatestVersion.rejects(
+        new Error('PAPI GET /x -> 500: upstream said "route -> 404 not configured"'),
+      );
+      const res = await controller.plan(withData(propertyRef));
       expect(res.status).to.equal(502);
     });
 

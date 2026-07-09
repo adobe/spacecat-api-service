@@ -21,6 +21,7 @@ import {
   buildFragments,
   mergeIntoTree,
   managedRuleNames,
+  redactApiKey,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
 const HOSTNAME = 'www.example.com';
@@ -289,6 +290,55 @@ describe('llmo-akamai-utils', () => {
       const tree = { rules: { name: 'default', children: [{ name: 'A' }], variables: [] } };
       const merged = mergeIntoTree(tree, cfg, -5);
       expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
+    });
+
+    it('clamps a non-numeric insertIndex to 0', () => {
+      const cfg = base();
+      const tree = { rules: { name: 'default', children: [{ name: 'A' }], variables: [] } };
+      const merged = mergeIntoTree(tree, cfg, 'nope');
+      expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
+    });
+  });
+
+  describe('redactApiKey', () => {
+    it('redacts the api-key header value and leaves other behaviors untouched, without mutating input', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const merged = mergeIntoTree(
+        { rules: { name: 'default', children: [], variables: [] } },
+        cfg,
+      );
+      const redacted = redactApiKey(merged);
+      const s = JSON.stringify(redacted);
+      expect(s).to.not.contain(API_KEY);
+      expect(s).to.contain('***');
+      // origin/config headers are preserved
+      expect(s).to.contain('live.edgeoptimize.net');
+      // input tree is untouched (deep clone)
+      expect(JSON.stringify(merged)).to.contain(API_KEY);
+    });
+
+    it('tolerates trees with null behaviors, missing options, and no rules', () => {
+      const tree = {
+        rules: {
+          name: 'default',
+          behaviors: [
+            null,
+            { name: 'origin' },
+            {
+              name: 'modifyIncomingRequestHeader',
+              options: { customHeaderName: 'x-edgeoptimize-api-key', headerValue: 'secret' },
+            },
+          ],
+          children: [{ name: 'child', behaviors: [] }],
+        },
+      };
+      const redacted = redactApiKey(tree);
+      const apiKeyBehavior = redacted.rules.behaviors.find(
+        (b) => b && b.options && b.options.customHeaderName === 'x-edgeoptimize-api-key',
+      );
+      expect(apiKeyBehavior.options.headerValue).to.equal('***');
+      // a tree without a rules root is returned unchanged
+      expect(redactApiKey({})).to.deep.equal({});
     });
   });
 });
