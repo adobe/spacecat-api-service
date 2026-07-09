@@ -452,8 +452,8 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.createTaggedPrompts).to.have.been.calledOnce;
       const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
       expect(promptsByText).to.deep.equal({
-        'best running shoes': ['topic:Running Shoes', 'source:ai', 'type:non-branded'],
-        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'type:branded'],
+        'best running shoes': ['topic:Running Shoes', 'source:ai', 'intent:Informational', 'type:non-branded'],
+        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'intent:Informational', 'type:branded'],
       });
       expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
       // Models are STAGED (no inner publish) — only the single final publish runs,
@@ -532,9 +532,9 @@ describe('markets-subworkspace handlers', () => {
       expect(res.status).to.equal(201);
       const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
       expect(promptsByText).to.deep.equal({
-        'Best ACME running shoes': ['topic:Shoes', 'source:ai', 'type:branded'],
-        'top trail sneakers from zoom': ['topic:Shoes', 'source:ai', 'type:branded'],
-        'most comfortable sandals': ['topic:Shoes', 'source:ai', 'type:non-branded'],
+        'Best ACME running shoes': ['topic:Shoes', 'source:ai', 'intent:Informational', 'type:branded'],
+        'top trail sneakers from zoom': ['topic:Shoes', 'source:ai', 'intent:Informational', 'type:branded'],
+        'most comfortable sandals': ['topic:Shoes', 'source:ai', 'intent:Informational', 'type:non-branded'],
       });
     });
 

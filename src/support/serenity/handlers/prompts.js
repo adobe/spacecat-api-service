@@ -19,8 +19,9 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeTagInjection } from './tags.js';
-import { TAG_DIMENSION } from '../prompt-tags.js';
+import { resolveTypeTagInjection, resolveIntentTagInjection } from './tags.js';
+import { TAG_DIMENSION, INTENT_TAG } from '../prompt-tags.js';
+import { classifyPromptIntents } from '../intent-classification.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -337,6 +338,50 @@ export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptTy
 }
 
 /**
+ * Applies a pre-computed, per-request `intent:*` classification map to a
+ * prompt write (serenity-docs#32). Unlike {@link makeTypeInjector}, the
+ * "compute the tag" step is a `Map` lookup, not a per-item classify call —
+ * intent is batch-classified ONCE per request (see `classifyPromptIntents` in
+ * `../intent-classification.js`) since it's an LLM call, not a cheap pure
+ * function. A text missing from `intentByText` (e.g. beyond the AI-gen classify
+ * cap) falls back to `INTENT_TAG.INFORMATIONAL`, the seeded standard value.
+ *
+ * Id-based resolution ({@link resolveIntentTagInjection}, one tag-tree read per
+ * distinct `intent:` value per project) is memoized for the request, mirroring
+ * {@link makeTypeInjector}'s memoization.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {Map<string, string>} intentByText - text -> `intent:<Value>` wire tag.
+ * @param {object} [log]
+ * @returns {(projectId: string, input: { text: string, geoTargetId: number,
+ *   tags: string[], tagIds: string[] | undefined }) =>
+ *   Promise<{ text: string, geoTargetId: number, tags: string[],
+ *   tagIds: string[] | undefined }>}
+ */
+export function makeIntentInjector(transport, semrushWorkspaceId, intentByText, log) {
+  /** @type {Map<string, Promise<{ computedId: string | undefined, intentTagIds: string[] }>>} */
+  const cache = new Map();
+  return async function injectComputedIntent(projectId, input) {
+    const intentTag = intentByText.get(input.text) ?? INTENT_TAG.INFORMATIONAL;
+    if (input.tagIds === undefined) {
+      const stripped = (Array.isArray(input.tags) ? input.tags : [])
+        .filter((t) => !String(t).startsWith(`${TAG_DIMENSION.INTENT}:`));
+      return { ...input, tags: [...stripped, intentTag] };
+    }
+    const key = `${projectId} ${intentTag}`;
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = resolveIntentTagInjection(transport, semrushWorkspaceId, projectId, intentTag, log);
+      cache.set(key, pending);
+    }
+    const { computedId, intentTagIds } = await pending;
+    const stripped = input.tagIds.filter((id) => !intentTagIds.includes(id));
+    return { ...input, tagIds: computedId ? [...stripped, computedId] : stripped };
+  };
+}
+
+/**
  * Validates + normalizes a PATCH prompt body's `text`/`tags`/`tagIds`, shared
  * by {@link handleUpdatePrompt} and its subworkspace twin. `tags` (names) and
  * `tagIds` (upstream ids) are mutually exclusive, mirroring
@@ -425,6 +470,8 @@ export async function handleCreatePrompts(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -449,6 +496,14 @@ export async function handleCreatePrompts(
     classifyPromptType,
     log,
   );
+  // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
+  // under the shared request deadline, then thread the resolved map into each
+  // per-item injection below (a per-item LLM call would be far too slow).
+  const intentByText = await classifyPromptIntents(
+    inputs.map((raw) => String(raw?.text || '')),
+    { env, log, deadline: writeDeadline },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const input = normalizePromptInput(raw);
@@ -471,8 +526,9 @@ export async function handleCreatePrompts(
     }
     const projectId = project.getSemrushProjectId();
     try {
-      // Unified layer: strip any caller-supplied type + inject the computed one.
-      const typed = await injectComputedType(projectId, input);
+      // Unified layer: strip any caller-supplied type/intent + inject the computed ones.
+      let typed = await injectComputedType(projectId, input);
+      typed = await injectComputedIntent(projectId, typed);
       const semrushPromptId = await createOnePrompt(
         transport,
         semrushWorkspaceId,
@@ -583,6 +639,8 @@ export async function handleUpdatePrompt(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
 ) {
   // `semrushPromptId` is validated as non-empty at the controller boundary
   // (serenity.js:259) before this handler is invoked over HTTP, so no
@@ -620,18 +678,25 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
-  // Recompute the type tag from the NEW text BEFORE the delete: the unified layer
-  // (tree read / on-demand tag create) must not run between delete and create,
-  // so a classification failure aborts cleanly with the old prompt still present.
+  // Recompute the type AND intent tags from the NEW text BEFORE the delete: the
+  // unified layer (tree read / on-demand tag create / LLM classify) must not run
+  // between delete and create, so a classification failure aborts cleanly with
+  // the old prompt still present (serenity-docs#31, #32).
   const injectComputedType = makeTypeInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
   );
-  const typed = await injectComputedType(projectId, {
+  const intentByText = await classifyPromptIntents(
+    [nextText],
+    { env, log, deadline: writeDeadline },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
+  let typed = await injectComputedType(projectId, {
     text: nextText, geoTargetId, tags: nextTags, tagIds: nextTagIds,
   });
+  typed = await injectComputedIntent(projectId, typed);
 
   try {
     await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [semrushPromptId]);

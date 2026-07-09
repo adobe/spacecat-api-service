@@ -155,7 +155,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
         text: 'hi', geoTargetId: 2840, languageCode: 'en', tags: ['keep', '', null],
       }],
     }, fakeLog());
-    expect(createResult.created[0].tags).to.deep.equal(['keep']);
+    expect(createResult.created[0].tags).to.deep.equal(['keep', 'intent:Informational']);
 
     // PATCH — tags array with a falsy entry → dropped silently.
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
@@ -170,7 +170,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       },
       fakeLog(),
     );
-    expect(updateResult.body.tags).to.deep.equal(['keep']);
+    expect(updateResult.body.tags).to.deep.equal(['keep', 'intent:Informational']);
   });
 
   // Branch coverage: object-form tags (`{id, name}`) and null `id` on the
@@ -522,7 +522,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'hello',
-      tags: ['a'],
+      tags: ['a', 'intent:Informational'],
     });
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
   });
@@ -538,6 +538,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -553,9 +555,9 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       languageCode: 'en',
       text: 'hello',
       tags: [],
-      tagIds: ['tag-cat-1', 'tag-child-1'],
+      tagIds: ['tag-cat-1', 'tag-child-1', 'intent-tag-id'],
     });
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['tag-cat-1', 'tag-child-1']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['tag-cat-1', 'tag-child-1', 'intent-tag-id']);
     expect(transport.createTaggedPrompts).to.not.have.been.called;
   });
 
@@ -612,6 +614,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -621,8 +625,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     expect(result.created[0].semrushPromptId).to.equal('');
-    expect(result.created[0].tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep']);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', 'intent-tag-id']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', 'intent-tag-id']);
   });
 
   it('returns empty semrushPromptId (not the string "undefined") when createPromptsByIds returns an item with no id', async () => {
@@ -636,6 +640,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -658,6 +664,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
     const tooLong = 'x'.repeat(201);
 
@@ -670,8 +678,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep']);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', 'intent-tag-id']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', 'intent-tag-id']);
   });
 
   it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
@@ -685,6 +693,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
     const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
 
@@ -694,8 +704,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.have.lengthOf(50);
-    expect(result.created[0].tagIds).to.deep.equal(tooMany.slice(0, 50));
+    expect(result.created[0].tagIds).to.have.lengthOf(51);
+    expect(result.created[0].tagIds).to.deep.equal([...tooMany.slice(0, 50), 'intent-tag-id']);
   });
 
   it('skips a create row when tagIds sanitizes to empty (every entry malformed)', async () => {
@@ -924,6 +934,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
 
     const result = await handleUpdatePrompt(
@@ -945,10 +957,10 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       languageCode: 'en',
       text: 'next',
       tags: [],
-      tagIds: ['tag-cat-1'],
+      tagIds: ['tag-cat-1', 'intent-tag-id'],
     });
     expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['tag-cat-1']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['tag-cat-1', 'intent-tag-id']);
     expect(transport.createTaggedPrompts).to.not.have.been.called;
   });
 
@@ -966,6 +978,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
 
     const result = await handleUpdatePrompt(
@@ -980,8 +994,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       fakeLog(),
     );
 
-    expect(result.body.tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep', 'intent-tag-id']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep', 'intent-tag-id']);
   });
 
   it('drops malformed tagIds entries on PATCH like validateParentIdFormat does for parentId', async () => {
@@ -998,6 +1012,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       }),
       createTaggedPrompts: sinon.stub(),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
     const tooLong = 'x'.repeat(201);
 
@@ -1016,8 +1032,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       fakeLog(),
     );
 
-    expect(result.body.tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep', 'intent-tag-id']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep', 'intent-tag-id']);
   });
 
   it('400s when tagIds sanitizes to empty (every entry malformed)', async () => {
@@ -1113,7 +1129,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'new text',
-      tags: ['fresh'],
+      tags: ['fresh', 'intent:Informational'],
     });
     expect(transport.listPromptsByTags).to.have.callCount(0);
     expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
@@ -1181,7 +1197,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     );
 
     expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal([]);
+    expect(result.body.tags).to.deep.equal(['intent:Informational']);
   });
 
   // Branch coverage: upstream createTaggedPrompts returns no ids array →
@@ -1258,6 +1274,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       deletePromptsByIds: sinon.stub().resolves(),
       createPromptsByIds: sinon.stub().rejects(createErr),
       publishProject: sinon.stub().resolves(),
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     };
     const log = fakeLog();
 
@@ -1766,11 +1784,11 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.created).to.have.lengthOf(1);
       // caller's type:non-branded stripped; computed type:branded appended.
-      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded', 'intent:Informational']);
       expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
         WORKSPACE,
         'proj-us-en',
-        { 'is Acme good?': ['topic:X', 'type:branded'] },
+        { 'is Acme good?': ['topic:X', 'type:branded', 'intent:Informational'] },
       );
     });
 
@@ -1787,7 +1805,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classify);
 
-      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:non-branded']);
+      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:non-branded', 'intent:Informational']);
     });
   });
 
@@ -1803,6 +1821,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
             { id: 'tnb', name: 'type:non-branded' },
           ],
         }),
+        createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
         createPromptsByIds: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
         }),
@@ -1818,12 +1837,12 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classify);
 
-      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tb']);
+      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tb', 'intent-tag-id']);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WORKSPACE,
         'proj-us-en',
         ['is Acme good?'],
-        ['tag-cat-1', 'tb'],
+        ['tag-cat-1', 'tb', 'intent-tag-id'],
       );
     });
   });
@@ -1843,7 +1862,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classify);
 
       expect(result.status).to.equal(200);
-      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded', 'intent:Informational']);
     });
   });
 

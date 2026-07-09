@@ -333,6 +333,44 @@ export async function resolveTypeTagInjection(
 }
 
 /**
+ * Resolves the id-based injection of a server-computed `intent:*` tag into a
+ * prompt write (serenity-docs#32). Same shape as {@link resolveTypeTagInjection}
+ * with `TAG_DIMENSION.INTENT` substituted for `TAG_DIMENSION.TYPE` — closed
+ * dimensions share the same resolve-or-create-on-demand semantics.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} wantTag - the computed `intent:<Value>` wire name.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string | undefined, intentTagIds: string[] }>}
+ *   `computedId` is the wanted value's id; `intentTagIds` is every `intent:`
+ *   root id present after resolution (the strip set).
+ */
+export async function resolveIntentTagInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  wantTag,
+  log,
+) {
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  const intentRoots = roots.items.filter(
+    (t) => typeof t.name === 'string' && t.name.startsWith(`${TAG_DIMENSION.INTENT}:`),
+  );
+  const intentTagIds = intentRoots.map((t) => t.id).filter(Boolean);
+  const existing = intentRoots.find((t) => t.name === wantTag);
+  if (existing) {
+    return { computedId: existing.id, intentTagIds };
+  }
+  // Create-on-demand for the wanted `intent:` root — same idempotency
+  // reasoning as `resolveTypeTagInjection` above.
+  const createdList = await transport.createProjectTags(semrushWorkspaceId, projectId, [wantTag]);
+  const { id } = pickTagIds(createdList, undefined);
+  return { computedId: id, intentTagIds: id ? [...intentTagIds, id] : intentTagIds };
+}
+
+/**
  * Flat mode — the market's project id comes from the persisted
  * `BrandSemrushProject` mapping (same resolution as handleListTags).
  *

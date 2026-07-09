@@ -34,8 +34,9 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
-import { topicTag } from '../prompt-tags.js';
+import { topicTag, TAG_DIMENSION, INTENT_TAG } from '../prompt-tags.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
+import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
@@ -189,10 +190,14 @@ function validateCreateBody(body) {
  * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
  *   classification via the shared {@link classifyBrandedTag} (whole-word match,
  *   diacritic-folded, case-insensitive).
+ * @param {object} [options.env] - environment (Azure OpenAI creds), for intent
+ *   classification (serenity-docs#32).
+ * @param {number} [options.writeDeadline] - shared request-write deadline.
  * @param {object} log - logger.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
-  domain, country, topicCap = 0, standardTags = [], brandNames = [],
+  domain, country, topicCap = 0, standardTags = [], brandNames = [], env,
+  writeDeadline = computeWriteDeadline(),
 }, log) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
@@ -212,12 +217,34 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // so a prompt is classified identically no matter how it is written.
   const needles = needlesFromNames(Array.isArray(brandNames) ? brandNames : []);
 
+  // Strip any intent:* tag out of the caller's standardTags (today it's always
+  // the static seeded default, INTENT_TAG.INFORMATIONAL from STANDARD_PROMPT_TAGS)
+  // — it gets replaced per-prompt by the real classification below, capped at
+  // AI_GEN_CLASSIFY_MAX under the shared request deadline (serenity-docs#32).
+  const strippedStandardTags = standardTags
+    .filter((t) => !String(t).startsWith(`${TAG_DIMENSION.INTENT}:`));
+  const allTexts = [];
+  selected.forEach((t) => {
+    (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
+      if (hasText(p) && !allTexts.includes(p)) {
+        allTexts.push(p);
+      }
+    });
+  });
+  const intentByText = await classifyPromptIntents(
+    allTexts.slice(0, AI_GEN_CLASSIFY_MAX),
+    { env, log, deadline: writeDeadline },
+  );
+
   const promptsByText = {};
   selected.forEach((t) => {
     const topic = topicTag(t.topic);
     (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
       if (hasText(p)) {
-        promptsByText[p] = [topic, ...standardTags, classifyBrandedTag(p, needles)];
+        const intentTag = intentByText.get(p) ?? INTENT_TAG.INFORMATIONAL;
+        promptsByText[p] = [
+          topic, ...strippedStandardTags, intentTag, classifyBrandedTag(p, needles),
+        ];
       }
     });
   });
@@ -294,6 +321,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted
  *   row — see `mapping-rows.js` `upsertMappingRow` doc.
+ * @param {object} [options.env] - environment (Azure OpenAI creds), threaded
+ *   into intent classification when `generateTopics` is set (serenity-docs#32).
+ * @param {number} [options.writeDeadline] - shared request-write deadline;
+ *   defaults to a fresh {@link computeWriteDeadline} when omitted.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -314,6 +345,8 @@ export async function handleCreateMarketSubworkspace(
     competitors = [],
     publishMode = 'require',
     dataAccess = null,
+    env = null,
+    writeDeadline = computeWriteDeadline(),
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -414,6 +447,8 @@ export async function handleCreateMarketSubworkspace(
           ...(Array.isArray(body.brandNames) ? body.brandNames : []),
           ...aliasNames,
         ],
+        env,
+        writeDeadline,
       },
       log,
     );

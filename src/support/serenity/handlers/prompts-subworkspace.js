@@ -23,6 +23,7 @@ import {
   normalizePromptInput,
   createOnePrompt,
   makeTypeInjector,
+  makeIntentInjector,
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
@@ -34,6 +35,7 @@ import {
 } from './prompts.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
+import { classifyPromptIntents } from '../intent-classification.js';
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -123,6 +125,8 @@ export async function handleCreatePromptsSubworkspace(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -137,6 +141,11 @@ export async function handleCreatePromptsSubworkspace(
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
+  const intentByText = await classifyPromptIntents(
+    inputs.map((raw) => String(raw?.text || '')),
+    { env, log, deadline: writeDeadline },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const input = normalizePromptInput(raw);
@@ -159,8 +168,9 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip any caller-supplied type + inject the computed one.
-      const typed = await injectComputedType(projectId, input);
+      // Unified layer: strip any caller-supplied type/intent + inject the computed ones.
+      let typed = await injectComputedType(projectId, input);
+      typed = await injectComputedIntent(projectId, typed);
       const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
       return {
         created: {
@@ -227,6 +237,8 @@ export async function handleUpdatePromptSubworkspace(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
 ) {
   const parsedBody = parseUpdatePromptBody(body);
   if (!parsedBody.ok) {
@@ -257,12 +269,18 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
-  // Recompute the type tag from the NEW text BEFORE the delete (see the flat-mode
-  // twin): the unified layer must not run between delete and create.
+  // Recompute the type AND intent tags from the NEW text BEFORE the delete (see
+  // the flat-mode twin): the unified layer must not run between delete and create.
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
-  const typed = await injectComputedType(projectId, {
+  const intentByText = await classifyPromptIntents(
+    [nextText],
+    { env, log, deadline: writeDeadline },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
+  let typed = await injectComputedType(projectId, {
     text: nextText, geoTargetId, tags: nextTags, tagIds: nextTagIds,
   });
+  typed = await injectComputedIntent(projectId, typed);
 
   try {
     await transport.deletePromptsByIds(workspaceId, projectId, [semrushPromptId]);

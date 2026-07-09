@@ -198,6 +198,7 @@ export async function provisionBrandSubworkspace(context, {
         standardTags: [...STANDARD_PROMPT_TAGS],
         brandAliases,
         projectTags: [...PROJECT_STANDARD_TAGS],
+        env: context.env,
         brandUrlSources,
         competitors,
         // A project with neither models nor generated prompts would publish

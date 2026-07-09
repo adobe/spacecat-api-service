@@ -67,6 +67,7 @@ import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js'
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
+import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
@@ -495,6 +496,9 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      // serenity-docs#32: one shared write-budget deadline for classify + create
+      // + publish, computed once at request entry.
+      const writeDeadline = computeWriteDeadline();
       const result = auth.mode === 'subworkspace'
         ? await handleCreatePromptsSubworkspace(
           transport,
@@ -502,6 +506,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
         )
         : await handleCreatePrompts(
           transport,
@@ -511,6 +517,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -531,6 +539,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      const writeDeadline = computeWriteDeadline();
       const result = auth.mode === 'subworkspace'
         ? await handleUpdatePromptSubworkspace(
           transport,
@@ -539,6 +548,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
         )
         : await handleUpdatePrompt(
           transport,
@@ -549,6 +560,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -685,6 +698,7 @@ function SerenityController(context, log, env) {
             brandAliases,
             brandUrlSources,
             competitors,
+            env: ctx.env,
             // auth.brandUuid is an already-persisted brand row here (loadBrand
             // above), so the mapping-row upsert's FK to brands is satisfied —
             // see mapping-rows.js upsertMappingRow doc.
@@ -1211,6 +1225,7 @@ function SerenityController(context, log, env) {
               brandAliases,
               brandUrlSources,
               competitors,
+              env: ctx.env,
               // `brand` was loaded via loadBrand above — an already-persisted
               // row, so the mapping-row upsert's FK to brands is satisfied.
               // Narrowed to the one model the mapping-row helpers touch — see

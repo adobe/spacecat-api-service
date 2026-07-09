@@ -198,6 +198,7 @@ describe('provisionBrandSubworkspace', () => {
       projectTags: PROJECT_STANDARD_TAGS,
       brandUrlSources: null,
       competitors: [],
+      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
       publishMode: 'require',
     });
     // The stub drives the sub-workspace title off the brand's name + id.

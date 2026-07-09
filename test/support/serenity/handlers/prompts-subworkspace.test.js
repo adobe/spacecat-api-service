@@ -47,6 +47,11 @@ function makeTransport(overrides = {}) {
     createTaggedPrompts: sinon.stub().resolves({ ids: ['new-prompt'] }),
     deletePromptsByIds: sinon.stub().resolves(null),
     publishProject: sinon.stub().resolves(null),
+    // serenity-docs#32: intent injection always resolves/creates an
+    // `intent:*` tag id on the id-based path, even when a test isn't
+    // exercising intent classification specifically.
+    listProjectTags: sinon.stub().resolves({ items: [] }),
+    createProjectTags: sinon.stub().resolves([{ id: 'intent-tag-id', name: 'intent:Informational' }]),
     ...overrides,
   };
 }
@@ -141,8 +146,8 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt-by-id' });
-      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tag-child-1']);
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-cat-1', 'tag-child-1']);
+      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tag-child-1', 'intent-tag-id']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-cat-1', 'tag-child-1', 'intent-tag-id']);
       expect(transport.createTaggedPrompts).to.not.have.been.called;
     });
 
@@ -154,11 +159,11 @@ describe('prompts-subworkspace handlers', () => {
           text: 'is Acme good?', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log, classify);
-      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded', 'intent:Informational']);
       expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        { 'is Acme good?': ['topic:X', 'type:branded'] },
+        { 'is Acme good?': ['topic:X', 'type:branded', 'intent:Informational'] },
       );
     });
 
@@ -313,9 +318,9 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.status).to.equal(200);
       expect(result.body.semrushPromptId).to.equal('new-prompt-by-id');
-      expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
+      expect(result.body.tagIds).to.deep.equal(['tag-cat-1', 'intent-tag-id']);
       expect(transport.deletePromptsByIds).to.have.been.calledWith(WS, 'p-us-en', ['old-id']);
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1', 'intent-tag-id']);
       expect(transport.createTaggedPrompts).to.not.have.been.called;
     });
 
@@ -343,11 +348,11 @@ describe('prompts-subworkspace handlers', () => {
         text: 'now mentions Acme', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
       }, log, classify);
       expect(result.status).to.equal(200);
-      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded']);
+      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded', 'intent:Informational']);
       expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        { 'now mentions Acme': ['topic:X', 'type:branded'] },
+        { 'now mentions Acme': ['topic:X', 'type:branded', 'intent:Informational'] },
       );
     });
 
@@ -596,7 +601,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
       languageCode: 'en',
     }, log);
     expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal([]);
+    expect(result.body.tags).to.deep.equal(['intent:Informational']);
   });
 
   // Line 275: `Array.isArray(resp?.ids)&&resp.ids.length>0?String(resp.ids[0]):''` else
@@ -669,6 +674,6 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
       languageCode: 'en',
     }, log);
     expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal(['keep']);
+    expect(result.body.tags).to.deep.equal(['keep', 'intent:Informational']);
   });
 });
