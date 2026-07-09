@@ -1,0 +1,65 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { expect } from 'chai';
+
+import {
+  parseSerenityIntent,
+  SERENITY_INTENT_VALUES,
+  PROMPT_INTENT_MIN_CONFIDENCE,
+  SERENITY_INTENT_CATEGORY_SPEC,
+} from '../../../src/support/serenity/intent-taxonomy.js';
+
+describe('intent-taxonomy.js — parseSerenityIntent (serenity-docs#32)', () => {
+  it('returns the ready-to-use wire tag for a valid value at/above the confidence floor', () => {
+    expect(parseSerenityIntent({ intent: 'Task', confidence: PROMPT_INTENT_MIN_CONFIDENCE }))
+      .to.equal('intent:Task');
+    expect(parseSerenityIntent({ intent: 'Informational', confidence: 0.99 }))
+      .to.equal('intent:Informational');
+  });
+
+  it('accepts every canonical value', () => {
+    SERENITY_INTENT_VALUES.forEach((value) => {
+      expect(parseSerenityIntent({ intent: value, confidence: 1 })).to.equal(`intent:${value}`);
+    });
+  });
+
+  it('returns null for a value outside the 5 canonical Capitalized literals (case-sensitive)', () => {
+    expect(parseSerenityIntent({ intent: 'informational', confidence: 1 })).to.equal(null);
+    expect(parseSerenityIntent({ intent: 'not-a-real-value', confidence: 1 })).to.equal(null);
+    expect(parseSerenityIntent({ intent: undefined, confidence: 1 })).to.equal(null);
+  });
+
+  it('returns null when confidence is below the validity floor', () => {
+    expect(parseSerenityIntent({ intent: 'Task', confidence: PROMPT_INTENT_MIN_CONFIDENCE - 0.01 }))
+      .to.equal(null);
+  });
+
+  it('returns null when confidence is missing, non-numeric, or non-finite', () => {
+    expect(parseSerenityIntent({ intent: 'Task' })).to.equal(null);
+    expect(parseSerenityIntent({ intent: 'Task', confidence: 'high' })).to.equal(null);
+    expect(parseSerenityIntent({ intent: 'Task', confidence: NaN })).to.equal(null);
+    expect(parseSerenityIntent({ intent: 'Task', confidence: Infinity })).to.equal(null);
+  });
+
+  it('returns null for a garbled/empty parsed body', () => {
+    expect(parseSerenityIntent({})).to.equal(null);
+    expect(parseSerenityIntent(null)).to.equal(null);
+    expect(parseSerenityIntent(undefined)).to.equal(null);
+  });
+
+  it('exposes the category spec with the fixed per-call timeout, not env-driven', () => {
+    expect(SERENITY_INTENT_CATEGORY_SPEC.parseResult).to.equal(parseSerenityIntent);
+    expect(SERENITY_INTENT_CATEGORY_SPEC.invokeTimeoutMs).to.be.a('number').greaterThan(0);
+    expect(SERENITY_INTENT_CATEGORY_SPEC.systemPrompt).to.be.a('string').with.length.greaterThan(0);
+  });
+});

@@ -1144,4 +1144,68 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(res.typeTagIds).to.deep.equal([]);
     });
   });
+
+  describe('resolveIntentTagInjection (serenity-docs#32)', () => {
+    let handler;
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    it('resolves the wanted intent value id + all intent ids from the project roots (no create)', async () => {
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().resolves({
+          page: 1,
+          total: 3,
+          items: [
+            { id: 'cat-1', name: 'category:Footwear' },
+            { id: 'ii', name: 'intent:Informational' },
+            { id: 'it', name: 'intent:Task' },
+          ],
+        }),
+      });
+
+      const res = await handler.resolveIntentTagInjection(transport, WORKSPACE, 'proj-1', 'intent:Task', fakeLog());
+
+      expect(res.computedId).to.equal('it');
+      expect(res.intentTagIds).to.have.members(['ii', 'it']);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('creates the intent value on-demand when a legacy project lacks it', async () => {
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
+        createProjectTags: sinon.stub().resolves([{ id: 'new-it', name: 'intent:Task' }]),
+      });
+
+      const res = await handler.resolveIntentTagInjection(transport, WORKSPACE, 'proj-1', 'intent:Task', fakeLog());
+
+      expect(res.computedId).to.equal('new-it');
+      expect(res.intentTagIds).to.deep.equal(['new-it']);
+      expect(transport.createProjectTags)
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['intent:Task']);
+    });
+
+    it('propagates a transport failure while listing the project tag tree', async () => {
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().rejects(new Error('listProjectTags 502')),
+      });
+
+      await expect(
+        handler.resolveIntentTagInjection(transport, WORKSPACE, 'proj-1', 'intent:Task', fakeLog()),
+      ).to.be.rejectedWith(/listProjectTags 502/);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('yields computedId undefined (skips injection) when the create response carries no id', async () => {
+      const transport = makeTransport({
+        listProjectTags: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
+        createProjectTags: sinon.stub().resolves([{}]),
+      });
+
+      const res = await handler.resolveIntentTagInjection(transport, WORKSPACE, 'proj-1', 'intent:Task', fakeLog());
+
+      expect(res.computedId).to.equal(undefined);
+      expect(res.intentTagIds).to.deep.equal([]);
+    });
+  });
 });
