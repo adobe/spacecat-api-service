@@ -42,6 +42,17 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
     attributes: { authInfo: { getType: () => 'ims' } },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      Brand: {
+        findById: sinon.stub().resolves({
+          getId: () => BRAND,
+          getName: () => 'Test Brand',
+          getOrganizationId: () => ORG,
+          getSemrushSubWorkspaceId: () => null,
+          setSemrushSubWorkspaceId: sinon.stub(),
+          setStatus: sinon.stub(),
+          save: sinon.stub().resolves(),
+        }),
+      },
       services: { postgrestClient: { from: () => ({}) } },
     },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
@@ -188,6 +199,45 @@ const FIXTURES = {
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  createSerenityTag: {
+    expectedStatus: 201,
+    controllerMethod: 'createTag',
+    handlerName: 'handleCreateTag',
+    handlerResult: {
+      status: 201,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        type: 'category',
+        name: 'Running Shoes',
+        tag: 'category:Running Shoes',
+      },
+    },
+    data: {
+      type: 'category', name: 'Running Shoes', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
+  updateSerenityTag: {
+    expectedStatus: 200,
+    controllerMethod: 'updateTag',
+    handlerName: 'handleUpdateTag',
+    handlerResult: {
+      status: 200,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagId: 'tag-1',
+        tag: 'category:Running Shoes',
+        parentId: 'tag-parent',
+      },
+    },
+    params: { tagId: 'tag-1' },
+    data: {
+      name: 'category:Running Shoes', parentId: 'tag-parent', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
   listSerenityModels: {
     expectedStatus: 200,
     controllerMethod: 'listModels',
@@ -198,6 +248,58 @@ const FIXTURES = {
       }],
     },
     query: { geoTargetId: '2840', languageCode: 'en' },
+  },
+  updateSerenityModels: {
+    expectedStatus: 200,
+    controllerMethod: 'updateModels',
+    handlerName: 'handleUpdateModels',
+    handlerResult: {
+      items: [{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: 'icon-url',
+      }],
+    },
+    data: { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
+  },
+  activateSerenityBrand: {
+    expectedStatus: 200,
+    controllerMethod: 'activate',
+    // activate orchestrates per-market subworkspace creates; stubbing the subworkspace
+    // market handler is enough to drive the documented 200 (≥1 live) shape.
+    handlerName: 'handleCreateMarketSubworkspace',
+    handlerResult: {
+      status: 201,
+      body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
+    },
+    data: {
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+      brandDisplayName: 'Adobe',
+      markets: [{ market: 'US', languageCode: 'en' }],
+    },
+  },
+  deactivateSerenityBrand: {
+    expectedStatus: 200,
+    controllerMethod: 'deactivate',
+    handlerName: 'decommissionBrandWorkspace',
+    handlerResult: undefined,
+  },
+  listSerenityOrgModels: {
+    expectedStatus: 200,
+    controllerMethod: 'listOrgModels',
+    handlerName: 'listGlobalModelCatalog',
+    handlerResult: {
+      items: [{
+        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: 'icon-url',
+      }],
+    },
+  },
+  listSerenityOrgLanguages: {
+    expectedStatus: 200,
+    controllerMethod: 'listOrgLanguages',
+    handlerName: 'listLanguageCatalog',
+    handlerResult: {
+      items: [{ id: 'lang-en', name: 'English' }],
+    },
   },
 };
 
@@ -252,7 +354,15 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleCreateTag: sinon.stub(),
+        handleUpdateTag: sinon.stub(),
         handleListModels: sinon.stub(),
+        handleUpdateModels: sinon.stub(),
+        handleCreateMarketSubworkspace: sinon.stub(),
+        ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
+        decommissionBrandWorkspace: sinon.stub(),
+        listGlobalModelCatalog: sinon.stub(),
+        listLanguageCatalog: sinon.stub(),
       };
       handlerStubs[fx.handlerName].resolves(fx.handlerResult);
 
@@ -265,6 +375,9 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
+            resolveBrandWorkspace: () => Promise.resolve({
+              mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
+            }),
           },
           '../../src/support/access-control-util.js': {
             default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
@@ -285,6 +398,55 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleDeleteMarket: handlerStubs.handleDeleteMarket,
             handleListTags: handlerStubs.handleListTags,
             handleListModels: handlerStubs.handleListModels,
+            handleUpdateModels: handlerStubs.handleUpdateModels,
+            listGlobalModelCatalog: handlerStubs.listGlobalModelCatalog,
+            listLanguageCatalog: handlerStubs.listLanguageCatalog,
+          },
+          '../../src/support/serenity/handlers/tags.js': {
+            handleCreateTag: handlerStubs.handleCreateTag,
+            handleCreateTagSubworkspace: sinon.stub(),
+            handleUpdateTag: handlerStubs.handleUpdateTag,
+            handleUpdateTagSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/handlers/markets-subworkspace.js': {
+            handleListMarketsSubworkspace: sinon.stub(),
+            handleGetMarketSubworkspace: sinon.stub(),
+            handleCreateMarketSubworkspace: handlerStubs.handleCreateMarketSubworkspace,
+            handleDeleteMarketSubworkspace: sinon.stub(),
+            handleListTagsSubworkspace: sinon.stub(),
+            handleListModelsSubworkspace: sinon.stub(),
+            handleUpdateModelsSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/handlers/prompts-subworkspace.js': {
+            handleListPromptsSubworkspace: sinon.stub(),
+            handleCreatePromptsSubworkspace: sinon.stub(),
+            handleUpdatePromptSubworkspace: sinon.stub(),
+            handleBulkDeletePromptsSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/workspace-lifecycle.js': {
+            ensureSubworkspace: handlerStubs.ensureSubworkspace,
+            decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
+          },
+          // Serenity is active for the org (org-wide LLMO/serenity flag ON) so
+          // the documented success shapes are exercised rather than the
+          // inactive-org 404.
+          '../../src/support/serenity/serenity-active.js': {
+            isSerenityActiveForOrg: () => Promise.resolve(true),
+          },
+          // activate reads brand-level aliases/URLs/competitors once per batch;
+          // stub them so the contract test doesn't hit the fake postgrest client.
+          '../../src/support/brands-storage.js': {
+            getBrandAliases: () => Promise.resolve([]),
+            getBrandUrlSources: () => Promise.resolve({
+              urls: [], socialAccounts: [], earnedContent: [],
+            }),
+            getBrandCompetitors: () => Promise.resolve([]),
+          },
+          // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
+          // succeed; stub it to a site id so the documented 200 (full success)
+          // shape is exercised rather than the 207/502 partial-failure paths.
+          '../../src/support/serenity/site-linkage.js': {
+            ensureMarketSite: () => Promise.resolve('site-x'),
           },
         },
       )).default;

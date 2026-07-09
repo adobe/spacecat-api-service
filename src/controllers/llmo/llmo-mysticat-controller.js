@@ -49,6 +49,7 @@ import {
   createAgenticTrafficByStatusHandler,
   createAgenticTrafficByUserAgentHandler,
   createAgenticTrafficByUrlHandler,
+  createAgenticTrafficHitsByUrlsHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
@@ -197,6 +198,9 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getAgenticTrafficByUrl = createAgenticTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficHitsByUrls = createAgenticTrafficHitsByUrlsHandler(
+    getSiteAndValidateAccess,
+  );
   const getAgenticTrafficFilterDimensions = createAgenticTrafficFilterDimensionsHandler(
     getSiteAndValidateAccess,
   );
@@ -269,6 +273,7 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficByStatus,
     getAgenticTrafficByUserAgent,
     getAgenticTrafficByUrl,
+    getAgenticTrafficHitsByUrls,
     getAgenticTrafficFilterDimensions,
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,

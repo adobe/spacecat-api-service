@@ -150,19 +150,35 @@ describe('Sites Controller', () => {
   let sitesController;
   let context;
   let updateRumConfigStub;
+  let getBrandBySiteStub;
+  let isSemrushMarketMirrorSiteStub;
   let SitesControllerMocked;
 
   before(async () => {
     updateRumConfigStub = sandbox.stub().resolves(true);
+    getBrandBySiteStub = sandbox.stub().resolves(null);
+    isSemrushMarketMirrorSiteStub = sandbox.stub().resolves(false);
     SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
       '../../src/support/rum-config-service.js': {
         updateRumConfig: updateRumConfigStub,
+      },
+      '../../src/support/brands-storage.js': {
+        getBrandBySite: getBrandBySiteStub,
+        isSemrushMarketMirrorSite: isSemrushMarketMirrorSiteStub,
       },
     })).default;
   });
 
   beforeEach(() => {
     sites = buildSites();
+
+    // Reset the brand-attachment stubs to their permissive defaults here (rather than
+    // at the END of individual tests) so an aborted test can never leak contaminated
+    // stub state into the next one.
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    isSemrushMarketMirrorSiteStub.reset();
+    isSemrushMarketMirrorSiteStub.resolves(false);
 
     mockDataAccess = {
       Audit: {
@@ -200,6 +216,9 @@ describe('Sites Controller', () => {
       Organization: {
         findById: sandbox.stub().resolves(null),
         findByImsOrgId: sandbox.stub().resolves(null),
+      },
+      PlgOnboarding: {
+        allByImsOrgId: sandbox.stub().resolves([]),
       },
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
@@ -734,6 +753,119 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Updating organization ID is not allowed');
   });
 
+  it('returns forbidden when changing the URL of a site attached to a Semrush-managed brand', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves({ semrushSubWorkspaceId: 'sub-ws-123' });
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property(
+      'message',
+      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
+    );
+  });
+
+  it('allows changing the URL of a site not attached to a Semrush-managed brand', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('does not check brand attachment when the URL is unchanged', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      // baseURL equals the site's current URL, so the URL-immutability guard is skipped.
+      data: { baseURL: 'https://site1.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+  });
+
+  it('returns forbidden when changing the URL of a Semrush market-mirror site (linked via brand_sites)', async () => {
+    // A serenity brand shell has no brands.site_id, so getBrandBySite finds
+    // nothing; the market mirror is reachable only via the brand_sites lookup.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves(null);
+    isSemrushMarketMirrorSiteStub.reset();
+    isSemrushMarketMirrorSiteStub.resolves(true);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(isSemrushMarketMirrorSiteStub).to.have.been.calledOnce;
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property(
+      'message',
+      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
+    );
+  });
+
+  it('returns 500 (not an opaque throw) when the brand-attachment lookup fails', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.rejects(new Error('postgrest down'));
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://changed.example.com', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(500);
+    expect(error).to.have.property(
+      'message',
+      'Could not verify whether this site URL is editable; please retry',
+    );
+  });
+
   it('returns bad request when updating a site if id not provided', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
@@ -1117,6 +1249,24 @@ describe('Sites Controller', () => {
       expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-paginated-1/,
+      );
+    });
+
+    it('logs clientId=unknown-s2s on the legacy path when a granted consumer has no clientId', async () => {
+      // Granted S2S consumer (non-admin) reaching the legacy flat-array path with a
+      // falsy clientId: the log marker falls back to `unknown-s2s` (not `admin-bypass`).
+      context.s2sConsumer = makeS2SConsumer({ clientId: '' });
+      context.invocation = { id: 'req-unknown-s2s-1' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+
+      const result = await sitesController.getAll(context);
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-unknown-s2s-1 clientId=unknown-s2s/,
       );
     });
 
@@ -1504,6 +1654,24 @@ describe('Sites Controller', () => {
         /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
       );
     });
+
+    it('denies a non-admin caller with no s2sConsumer and logs clientId/consumerId as n/a', async () => {
+      // No s2sConsumer set: hasS2SCapability short-circuits with reason=not-s2s and
+      // undefined clientId/consumerId, so the deny log falls back to `n/a`.
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const result = await sitesController.getIdentity({
+        ...context, params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites\/:siteId\/identity - reason=not-s2s clientId=n\/a consumerId=n\/a/,
+      );
+    });
   });
 
   it('gets a site by base URL', async () => {
@@ -1580,6 +1748,41 @@ describe('Sites Controller', () => {
       currentConversion: 4901,
       previousConversion: 4560,
     });
+  });
+
+  it('passes the locale path prefix to both RUM queries for locale-specific sites', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalClicks: 4901,
+      totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0.19,
+      totalClicks: 4560,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+      totalEngagement: 4800,
+    });
+
+    const getStoredMetrics = sinon.stub().resolves([]);
+    const getBaseURLPathPrefix = sinon.stub().returns('/de');
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+        getBaseURLPathPrefix,
+      },
+    });
+    await sitesControllerMock
+      .default(context, context.log)
+      .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } });
+
+    expect(getBaseURLPathPrefix).to.have.been.calledOnce;
+    expect(context.rumApiClient.query).to.have.been.calledTwice;
+    expect(context.rumApiClient.query.firstCall.args[1]).to.include({ pathPrefix: '/de' });
+    expect(context.rumApiClient.query.secondCall.args[1]).to.include({ pathPrefix: '/de' });
   });
 
   it('gets the latest site metrics with no stored metrics', async () => {
@@ -4353,6 +4556,101 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('detectedCdn validation', () => {
+    it('accepts a valid enum value', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: 'aem-cs-fastly' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.llmo.detectedCdn).to.equal('aem-cs-fastly');
+    });
+
+    it('rejects an array value', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: ['Adobe-managed Fastly'] } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('rejects a stringified array (prod marriottvacationclubs.com case)', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: '["Adobe-managed Fastly"]' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('rejects a human display name', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { detectedCdn: 'Adobe-managed Fastly' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('config.llmo.detectedCdn must be one of');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('does not validate detectedCdn when llmo patch omits it', async () => {
+      const site = sites[0];
+      // Pre-existing (possibly legacy) value must not be re-rejected by an unrelated llmo patch.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        llmo: { detectedCdn: 'Adobe-managed Fastly', brand: 'Old' },
+      });
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { llmo: { brand: 'New' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.llmo.brand).to.equal('New');
+      expect(merged.llmo.detectedCdn).to.equal('Adobe-managed Fastly');
+    });
+  });
+
   describe('enableMoneyPageUrls config flag', () => {
     it('allows disabling money page URLs via config patch', async () => {
       const site = sites[0];
@@ -5337,6 +5635,41 @@ describe('Sites Controller', () => {
         data: { scraperConfig },
         ...defaultAuthAttributes,
       })).to.be.rejectedWith('DDB throttle');
+    });
+
+    it('returns bad request when context.data is missing entirely', async () => {
+      // No `data` property on the context at all: `context.data || {}` defaults to
+      // `{}`, so `scraperConfig` is undefined and the request fails the object guard.
+      const response = await sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('Scraper config required');
+    });
+
+    it('logs an empty header list when an unexpected error fires for a headerless config', async () => {
+      // Re-throw path (non-validation error) for a scraperConfig with no `headers`:
+      // `scraperConfig.headers || {}` falls back to `{}` so the error log lists no headers.
+      const site = sites[0];
+      const wrapped = Object.create(Config({}));
+      Object.defineProperty(wrapped, 'updateScraperConfig', {
+        value: sandbox.stub(), writable: true, configurable: true,
+      });
+      site.getConfig = sandbox.stub().returns(wrapped);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().rejects(new Error('DDB throttle'));
+
+      await expect(sitesController.updateScraperConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { scraperConfig: { someOtherKey: 'value' } },
+        ...defaultAuthAttributes,
+      })).to.be.rejectedWith('DDB throttle');
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(
+        /Error updating scraper config for site .* \(headers=\):/,
+      );
     });
   });
 
@@ -6640,6 +6973,30 @@ describe('Sites Controller', () => {
         expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
+      it('internal caller, PRE_ONBOARD + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product (PLG wizard preserved)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
       it('internal caller, PRE_ONBOARD + enrolled → 200 (tier check skipped, site shown)', async () => {
         context.data = {
           siteId: SITE_IDS[0],
@@ -6667,6 +7024,69 @@ describe('Sites Controller', () => {
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
         mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, no entitlement + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product (PLG wizard preserved)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      it('internal caller, non-ASO product + WAITING_FOR_IP_ALLOWLISTING → 404 site_not_enrolled (PLG check skipped)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'LLMO' } };
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, no entitlement + other PlgOnboarding records (not WAITING) → 404 site_not_enrolled (remap preserved)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'ONBOARDED' },
+          { getStatus: () => 'INACTIVE' },
+        ]);
 
         const response = await sitesController.resolveSite(context);
 
@@ -6857,6 +7277,119 @@ describe('Sites Controller', () => {
         expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
+      it('internal caller, organizationId path: no entitlement + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      it('internal caller, organizationId path: PRE_ONBOARD + WAITING_FOR_IP_ALLOWLISTING → 404 no_entitlement_for_product', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          site: null,
+        });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+          { getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING' },
+        ]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      it('internal caller, PlgOnboarding lookup throws → 404 site_not_enrolled (fail-open)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.rejects(new Error('DB error'));
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, PlgOnboarding returns null records → 404 site_not_enrolled (null-safe)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves(null);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, organizationId path: PlgOnboarding lookup throws → 404 site_not_enrolled (fail-open)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.rejects(new Error('DB error'));
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, organizationId path: PlgOnboarding returns null records → 404 site_not_enrolled (null-safe)', async () => {
+        context.pathInfo = { headers: { 'x-product': 'ASO' } };
+        context.data = {
+          organizationId: INTERNAL_ORG_SPACECAT_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves(null);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
       it('internal caller, imsOrg path (no siteId): no entitlement → 404 site_not_enrolled', async () => {
         context.data = {
           imsOrg: INTERNAL_ORG_IMS_ID,
@@ -6869,6 +7402,278 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+    });
+
+    describe('resolveSite — ReBAC collection filter', () => {
+      function fakeFacsPostgrest(rows) {
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          is: () => builder,
+          order: () => builder,
+          range: () => builder,
+          then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+        };
+        return { from: () => builder };
+      }
+
+      it('resolveByOrg: picks first viewable enrolled site (not first enrolled)', async () => {
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([
+            // Only the SECOND site is granted can_view.
+            { resource_id: SITE_IDS[1], granted_capabilities: ['aso/can_view'] },
+          ]),
+        };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+
+        // Two enrollments: first is SITE_IDS[0] (not viewable), second is SITE_IDS[1] (viewable).
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+          enrollments: [
+            { getId: () => 'e1', getSiteId: () => SITE_IDS[0] },
+            { getId: () => 'e2', getSiteId: () => SITE_IDS[1] },
+          ],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[1]);
+      });
+
+      it('resolveByOrg: returns 404 site_not_enrolled when no enrolled site is viewable', async () => {
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([]), // no can_view grants
+        };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'e1', getSiteId: () => SITE_IDS[0] }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('siteId path: returns 404 site_not_enrolled when specific site is not viewable', async () => {
+        const validSiteId = SITE_IDS[0];
+        context.data = { siteId: validSiteId, organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([]), // caller has no can_view on this site
+        };
+
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'e1', getSiteId: () => validSiteId }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('skips filter when JWT carries the federal can_view grant', async () => {
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        // JWT carries the federal can_view → no PostgREST query needed.
+        context.attributes.authInfo = new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true, email: 'test@test.com', facs_permissions: ['aso/can_view'] })
+          .withAuthenticated(true);
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        // No context.dataAccess.services — if code tries PostgREST it would 503.
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+      });
+
+      it('resolveByOrg: returns 503 when PostgREST is unavailable', async () => {
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {}; // no postgrestClient
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(503);
+      });
+
+      it('resolveByOrg: returns admin-configured default site when it is viewable', async () => {
+        // Stub org config to advertise SITE_IDS[0] as the per-product default site.
+        const configStub = sandbox.stub(testOrganizations[0], 'getConfig')
+          .returns(makeConfigWithDefault(SITE_IDS[0]));
+
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
+          ]),
+        };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+
+        const response = await sitesController.resolveSite(context);
+
+        configStub.restore();
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+      });
+
+      it('resolveByOrg: returns 404 no_entitlement_for_product when org has no entitlement', async () => {
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
+          ]),
+        };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      it('resolveByOrg: returns 404 aso_pre_onboard for non-admin on pre-onboard tier', async () => {
+        const hasAdminStub = sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
+          ]),
+        };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'e1', getSiteId: () => SITE_IDS[0] }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        hasAdminStub.restore();
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      });
+
+      it('resolveByOrg: admin bypasses tier check and returns first viewable site', async () => {
+        // Default ctx has is_admin: true → hasAdminAccess() is true → skips aso_pre_onboard.
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
+          ]),
+        };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'e1', getSiteId: () => SITE_IDS[0] }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
+      });
+
+      it('resolveByOrg: returns 404 when viewable enrollment found but Site.findById returns null', async () => {
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {
+          postgrestClient: fakeFacsPostgrest([
+            { resource_id: SITE_IDS[0], granted_capabilities: ['aso/can_view'] },
+          ]),
+        };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(null); // enrollment found but site was deleted
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'e1', getSiteId: () => SITE_IDS[0] }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('siteId path: returns 503 when PostgREST is unavailable', async () => {
+        context.data = { siteId: SITE_IDS[0], organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+        context.dataAccess.services = {}; // no postgrestClient
+
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'e1', getSiteId: () => SITE_IDS[0] }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(503);
+      });
+
+      it('skips the site filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
+        // LLMO ReBAC-scopes `brand`, not `site` — resolveSite must not apply the
+        // per-site filter. No postgrestClient: if the filter engaged it would 503.
+        context.data = { organizationId: testOrganizations[0].getId() };
+        context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
+
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data.site.id).to.equal(SITE_IDS[0]);
       });
     });
   });

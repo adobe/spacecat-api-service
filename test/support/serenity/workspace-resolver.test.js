@@ -17,8 +17,11 @@ import sinonChai from 'sinon-chai';
 
 import {
   resolveWorkspaceId,
+  resolveBrandWorkspace,
   clearWorkspaceCache,
+  clearBrandWorkspaceCache,
   CACHE_TTL_MS,
+  BRAND_CACHE_TTL_MS,
   NEG_TTL_MS,
   MAX_ENTRIES,
 } from '../../../src/support/serenity/workspace-resolver.js';
@@ -176,5 +179,155 @@ describe('resolveWorkspaceId', () => {
       .to.be.rejectedWith(/Organization data-access not available/);
     await expect(resolveWorkspaceId({ dataAccess: {} }, SPACECAT_ORG))
       .to.be.rejectedWith(/Organization data-access not available/);
+  });
+});
+
+const BRAND_ID = 'brand-bbb-222';
+const SUB_WS = 'subworkspace-ws-777';
+
+function makeBrand(subworkspaceId) {
+  return {
+    getSemrushSubWorkspaceId: () => subworkspaceId,
+  };
+}
+
+function makeDualCtx({ brandFindById, orgFindById } = {}) {
+  return {
+    dataAccess: {
+      Brand: { findById: brandFindById },
+      Organization: { findById: orgFindById },
+    },
+  };
+}
+
+describe('resolveBrandWorkspace', () => {
+  const sandbox = sinon.createSandbox();
+  let clock;
+
+  beforeEach(() => {
+    clearWorkspaceCache();
+    clearBrandWorkspaceCache();
+  });
+
+  afterEach(() => {
+    if (clock) {
+      clock.restore();
+      clock = undefined;
+    }
+    sandbox.restore();
+  });
+
+  it('returns subworkspace mode with the brand subworkspace and the resolved parent', async () => {
+    const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
+    const orgFindById = sandbox.stub().resolves(makeOrg('parent-ws'));
+    const ctx = makeDualCtx({ brandFindById, orgFindById });
+
+    const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+
+    // The parent is resolved alongside the sub-workspace so activate can mint a
+    // fresh sub-workspace without a second org lookup.
+    expect(res).to.deep.equal({
+      mode: 'subworkspace', workspaceId: SUB_WS, parentWorkspaceId: 'parent-ws',
+    });
+  });
+
+  it('returns flat mode with the org parent workspace when the column is absent', async () => {
+    const brandFindById = sandbox.stub().resolves(makeBrand(null));
+    const orgFindById = sandbox.stub().resolves(makeOrg('parent-ws'));
+    const ctx = makeDualCtx({ brandFindById, orgFindById });
+
+    const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+
+    expect(res).to.deep.equal({
+      mode: 'flat', workspaceId: 'parent-ws', parentWorkspaceId: 'parent-ws',
+    });
+  });
+
+  it('returns flat mode with a null workspace when the org has no parent', async () => {
+    const brandFindById = sandbox.stub().resolves(makeBrand(undefined));
+    const orgFindById = sandbox.stub().resolves(makeOrg(null));
+    const ctx = makeDualCtx({ brandFindById, orgFindById });
+
+    const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
+  });
+
+  it('treats a missing brand row as flat mode', async () => {
+    const brandFindById = sandbox.stub().resolves(null);
+    const orgFindById = sandbox.stub().resolves(makeOrg('parent-ws'));
+    const ctx = makeDualCtx({ brandFindById, orgFindById });
+
+    const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+
+    expect(res).to.deep.equal({
+      mode: 'flat', workspaceId: 'parent-ws', parentWorkspaceId: 'parent-ws',
+    });
+  });
+
+  it('caches the subworkspace lookup over the (short) brand positive TTL window', async () => {
+    clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
+    const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
+    const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub() });
+
+    await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+    clock.tick(BRAND_CACHE_TTL_MS - 1);
+    await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+
+    expect(brandFindById).to.have.been.calledOnce;
+  });
+
+  it('re-reads the brand after the short brand positive TTL expires (bounds cross-instance staleness)', async () => {
+    clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
+    const brandFindById = sandbox.stub().resolves(makeBrand(SUB_WS));
+    const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub() });
+
+    await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+    clock.tick(BRAND_CACHE_TTL_MS + 1);
+    await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+
+    expect(brandFindById).to.have.been.calledTwice;
+  });
+
+  it('uses the shorter negative TTL for a flat (no subworkspace) brand', async () => {
+    clock = sinon.useFakeTimers({ now: 0, toFake: ['Date'] });
+    const brandFindById = sandbox.stub().resolves(makeBrand(null));
+    const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub().resolves(makeOrg('p')) });
+
+    await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+    clock.tick(NEG_TTL_MS + 1);
+    await resolveBrandWorkspace(ctx, SPACECAT_ORG, BRAND_ID);
+
+    expect(brandFindById).to.have.been.calledTwice;
+  });
+
+  it('returns flat mode when brandId is blank (no Brand lookup)', async () => {
+    const brandFindById = sandbox.stub();
+    const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub().resolves(makeOrg('p')) });
+
+    const res = await resolveBrandWorkspace(ctx, SPACECAT_ORG, '');
+
+    expect(res).to.deep.equal({ mode: 'flat', workspaceId: 'p', parentWorkspaceId: 'p' });
+    expect(brandFindById).to.not.have.been.called;
+  });
+
+  it('evicts the oldest brand entry past MAX_ENTRIES', async () => {
+    const brandFindById = sandbox.stub().callsFake((id) => Promise.resolve(makeBrand(`ws-${id}`)));
+    const ctx = makeDualCtx({ brandFindById, orgFindById: sandbox.stub() });
+
+    for (let i = 0; i < MAX_ENTRIES + 5; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await resolveBrandWorkspace(ctx, SPACECAT_ORG, `brand-${i}`);
+    }
+
+    // The oldest (brand-0) was evicted, so resolving it again re-reads.
+    const callsBefore = brandFindById.callCount;
+    await resolveBrandWorkspace(ctx, SPACECAT_ORG, 'brand-0');
+    expect(brandFindById.callCount).to.equal(callsBefore + 1);
+  });
+
+  it('throws when context is missing the Brand data-access', async () => {
+    await expect(resolveBrandWorkspace({ dataAccess: {} }, SPACECAT_ORG, BRAND_ID))
+      .to.be.rejectedWith(/Brand data-access not available/);
   });
 });

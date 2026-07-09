@@ -1,0 +1,163 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { ELEMENT_IDS } from './element-ids.js';
+import {
+  buildBrandsPayload,
+  transformBrandsToFilterDimensions,
+  buildMarketsPayload,
+  transformMarketsToFilterDimensions,
+  buildTopicsPayload,
+  transformTopicsForFilterDimensions,
+  transformCategoriesToFilterDimensions,
+  transformIntentsToFilterDimensions,
+  transformOriginsToFilterDimensions,
+  buildWeeksPayload,
+  transformWeeksResponse,
+  buildPromptsPayload,
+  transformPromptsResponse,
+  buildCitedDomainsPayload,
+  transformCitedDomainsResponse,
+} from './definitions/index.js';
+
+/**
+ * Creates the Elements service that composes transport calls with per-element
+ * payload builders and response transformers.
+ *
+ * @param {object} transport - Elements transport created by createElementsTransport().
+ */
+export function createElementsService(transport) {
+  return {
+    /**
+     * Fetches filter dimensions for the URL Inspector dashboard.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query parameters (startDate, endDate, model, etc.).
+     * @param {Array<{id: string, name: string}>} [spacecatBrands=[]] - SpaceCat brands for the org,
+     *   used to resolve `spacecat_brand_id` on each brand entry by name match.
+     * @returns {Promise<object>}
+     */
+    async getUrlInspectorFilterDimensions(
+      workspaceId,
+      params,
+      spacecatBrands = [],
+      brandSemrushProjects = [],
+    ) {
+      const [rawTopics, rawBrands, rawMarkets] = await Promise.all([
+        transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, buildTopicsPayload(params)),
+        transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
+        transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, buildMarketsPayload({})),
+      ]);
+      return {
+        brands: transformBrandsToFilterDimensions(rawBrands, spacecatBrands),
+        regions: transformMarketsToFilterDimensions(rawMarkets, brandSemrushProjects),
+        topics: transformTopicsForFilterDimensions(rawTopics),
+        categories: transformCategoriesToFilterDimensions(rawTopics),
+        page_intents: transformIntentsToFilterDimensions(rawTopics),
+        origins: transformOriginsToFilterDimensions(rawTopics),
+      };
+    },
+
+    /**
+     * Fetches the list of weeks that have Brand Presence data (week filter dropdown).
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query parameters (model, etc.).
+     * @returns {Promise<object>} `{ weeks: [{ week, startDate, endDate }] }`.
+     */
+    /* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
+    async getWeeks(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.WEEKS,
+        buildWeeksPayload(params),
+      );
+      return { weeks: transformWeeksResponse(raw) };
+    },
+    /* c8 ignore stop */
+
+    /**
+     * Fetches the prompts matching the given filters, plus their count.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Filter parameters (model/platform, topics, projectIds).
+     * @returns {Promise<{count: number, prompts: object[]}>} `{ count, prompts }`.
+     */
+    async getPrompts(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.PROMPTS,
+        buildPromptsPayload(params),
+      );
+      return transformPromptsResponse(raw);
+    },
+
+    /**
+     * Fetches domains most frequently cited alongside owned URLs (URL Inspector
+     * Cited Domains panel), backed by element 98b91d00 ("Stats per Domain").
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, brand, startDate, endDate,
+     *   page, pageSize).
+     * @returns {Promise<object>} Legacy contract `{ domains: [...], totalCount }`.
+     */
+    /* c8 ignore start -- LLMO-6020 POC endpoint; unit tests intentionally deferred */
+    async getCitedDomains(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.CITED_DOMAINS,
+        buildCitedDomainsPayload(params),
+      );
+      return transformCitedDomainsResponse(raw, params);
+    },
+
+    /**
+     * Resolves a URL Inspector `region` code (e.g. `US`) to its Semrush `project_id` for the
+     * given brand, by fetching the Markets element and matching the region label + brand.
+     * Semrush projects are unique per (brand, market), so the resulting project_id scopes
+     * subsequent element calls to that brand + region via a top-level `project_id`.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} opts
+     * @param {string} [opts.brandId] - SpaceCat brand UUID for the site; used only as a
+     *   tiebreaker when several brands have a project for the same region.
+     * @param {string} opts.region - UI region code (e.g. `US`).
+     * @param {object[]} [opts.brandSemrushProjects] - Flattened BrandSemrushProject rows for
+     *   ALL org brands (the site's own brand may not own any Semrush projects), used to
+     *   enrich/match the Markets response.
+     * @returns {Promise<string|null>} The matching `semrush_project_id`, or null if none.
+     */
+    async resolveRegionProjectId(workspaceId, {
+      brandId, region, brandSemrushProjects = [],
+    }) {
+      // Fetch markets workspace-wide (mirrors getUrlInspectorFilterDimensions) — a
+      // brand-scoped Markets call (CBF_ws_brand) can come back empty when the Semrush
+      // brand value differs from our brand name.
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.MARKETS,
+        buildMarketsPayload({}),
+      );
+      const regions = transformMarketsToFilterDimensions(raw, brandSemrushProjects);
+      const wanted = String(region).toLowerCase();
+      const matches = regions.filter((r) => r.semrush_project_id
+        && String(r.id ?? '').toLowerCase() === wanted);
+      if (matches.length === 0) {
+        return null;
+      }
+      // Prefer the site's brand when it owns a project for this region; else first match.
+      const preferred = matches.find((r) => r.spacecat_brand_id === brandId);
+      return (preferred ?? matches[0]).semrush_project_id;
+    },
+    /* c8 ignore stop */
+  };
+}

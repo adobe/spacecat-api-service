@@ -28,6 +28,8 @@ import {
   getPromptStats,
   normalizeIntent,
   isMissingIntentColumnError,
+  findPromptsBlockingRegionRemoval,
+  getIntentsByPromptIds,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -50,6 +52,7 @@ describe('prompts-storage', () => {
       ilike: () => chain,
       or: () => chain,
       contains: () => chain,
+      overlaps: () => chain,
       in: () => chain,
       upsert: () => chain,
       insert: () => ({ select: () => thenable(result) }),
@@ -345,6 +348,48 @@ describe('prompts-storage', () => {
       });
       expect(result.limit).to.equal(100);
       expect(result.page).to.equal(1);
+    });
+
+    it('filters by region case-insensitively via array overlap (LLMO-5755)', async () => {
+      // Stored region codes can be lower- or upper-case, so the filter must
+      // match both variants via array overlap rather than a case-sensitive
+      // contains. (LLMO-5755)
+      let overlapsCall = null;
+      const recordingChain = (result) => {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          neq: () => chain,
+          order: () => chain,
+          or: () => chain,
+          contains: () => chain,
+          overlaps: (column, value) => {
+            overlapsCall = { column, value };
+            return chain;
+          },
+          in: () => chain,
+          range: () => thenable(result),
+          maybeSingle: () => thenable(result),
+          single: () => thenable(result),
+          then: (resolve) => resolve(result),
+        };
+        return chain;
+      };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? recordingChain({ data: { id: BRAND_UUID }, error: null })
+          : recordingChain({ data: [], error: null, count: 0 })),
+      };
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        region: 'us',
+        postgrestClient: client,
+      });
+      expect(overlapsCall).to.not.be.null;
+      expect(overlapsCall.column).to.equal('regions');
+      expect(overlapsCall.value).to.have.members(['us', 'US']);
+      expect(overlapsCall.value).to.have.lengthOf(2);
     });
 
     it('uses explicit limit and page values', async () => {
@@ -1099,7 +1144,45 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
     });
 
-    it('skips a deleted prompt matched by prompt_id without updating or inserting', async () => {
+    it('processes every update with bounded concurrency (more rows than the pool)', async () => {
+      // Guards the parallel update loop: with 25 rows and a pool of 20, all rows
+      // must still be updated exactly once (the loop drains via a shared cursor).
+      const rows = Array.from({ length: 25 }, (_, i) => ({
+        id: `row-${i}`, prompt_id: `p${i}`, text: `t${i}`, regions: [], status: 'active',
+      }));
+      const existingData = { data: rows, error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: rows.map((r) => ({ id: r.prompt_id, prompt: `updated ${r.prompt_id}`, regions: [] })),
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(25);
+      expect(result.created).to.equal(0);
+      expect(updateStub.callCount).to.equal(25);
+    });
+
+    it('reactivates a deleted prompt matched by prompt_id', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',
       };
@@ -1130,13 +1213,13 @@ describe('prompts-storage', () => {
         prompts: [{ id: 'del-1', prompt: 'Deleted text', regions: [] }],
         postgrestClient: client,
       });
-      expect(result.updated).to.equal(0);
+      expect(result.updated).to.equal(1);
       expect(result.created).to.equal(0);
-      expect(result.skipped).to.equal(1);
-      expect(updateStub.callCount).to.equal(0);
+      expect(result.skipped).to.equal(0);
+      expect(updateStub.callCount).to.equal(1);
     });
 
-    it('skips a deleted prompt matched by text+regions without inserting', async () => {
+    it('reactivates a deleted prompt matched by text+regions without inserting', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted',
       };
@@ -1144,6 +1227,7 @@ describe('prompts-storage', () => {
       const insertSpy = sinon.stub().returns({
         select: () => thenable({ data: [], error: null }),
       });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -1154,7 +1238,7 @@ describe('prompts-storage', () => {
                 }),
               }),
               insert: insertSpy,
-              update: () => ({ eq: () => thenable({ error: null }) }),
+              update: updateStub,
             };
           }
           return makeChain({});
@@ -1167,9 +1251,84 @@ describe('prompts-storage', () => {
         prompts: [{ prompt: 'Same text', regions: ['us'] }],
         postgrestClient: client,
       });
-      expect(result.skipped).to.equal(1);
+      expect(result.updated).to.equal(1);
       expect(result.created).to.equal(0);
+      expect(result.skipped).to.equal(0);
       expect(insertSpy.callCount).to.equal(0);
+      expect(updateStub.callCount).to.equal(1);
+    });
+
+    it('does not reactivate a pending prompt — keeps it skipped', async () => {
+      const pendingRow = {
+        id: 'row-uuid', prompt_id: 'pend-1', text: 'Pending text', regions: [], status: 'pending',
+      };
+      const existingData = { data: [pendingRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'pend-1', prompt: 'Pending text', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(0);
+      expect(result.created).to.equal(0);
+      expect(result.skipped).to.equal(1);
+      expect(updateStub.callCount).to.equal(0);
+    });
+
+    it('preserves existing DB intent when reactivating a deleted prompt with no incoming intent', async () => {
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-3', text: 'Intent text', regions: [], status: 'deleted', intent: 'brand_awareness',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'del-3', prompt: 'Intent text', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      const [[patch]] = updateStub.args;
+      expect(patch.intent).to.equal('brand_awareness');
     });
 
     it('throws on insert error', async () => {
@@ -1232,7 +1391,7 @@ describe('prompts-storage', () => {
           prompts: [{ id: 'p1', prompt: 'Updated', regions: [] }],
           postgrestClient: client,
         }),
-      ).to.be.rejectedWith('Failed to update prompt');
+      ).to.be.rejectedWith('Failed to update 1 prompt(s): Update failed');
     });
 
     it('uses toInsert.length when insert returns no data', async () => {
@@ -1827,6 +1986,304 @@ describe('prompts-storage', () => {
       expect(result.prompts[0].regions).to.deep.equal([]);
       expect(result.prompts[0].categoryId).to.be.undefined;
       expect(result.prompts[0].topicId).to.be.undefined;
+    });
+
+    it('throws a typed 409 when INSERT returns a 23505 unique-constraint error', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({
+                select: () => thenable({
+                  data: null,
+                  error: {
+                    code: '23505',
+                    message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+                  },
+                }),
+              }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const err = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'p-1', prompt: 'Synthetic prompt text', regions: ['us'] }],
+        postgrestClient: client,
+      }).catch((e) => e);
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(409);
+    });
+
+    it('deduplicates duplicate text+regions in toInsert and does not throw', async () => {
+      // Mock: >1 row in INSERT → 23505 (simulates uq_prompt_text_region_per_brand);
+      // exactly 1 row → success. RED before the intra-batch dedup fix; GREEN after.
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable(
+          Array.isArray(rows) && rows.length > 1
+            ? {
+              data: null,
+              error: {
+                code: '23505',
+                message: 'duplicate key value violates unique constraint "uq_prompt_text_region_per_brand"',
+              },
+            }
+            : { data: rows.map((r) => ({ prompt_id: r.prompt_id })), error: null },
+        ),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-topic-alpha', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-topic-beta', prompt: 'Synthetic test prompt text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.prompts).to.have.lengthOf(1);
+      const insertedRows = insertStub.firstCall.args[0];
+      expect(insertedRows).to.have.lengthOf(1);
+      // p-topic-alpha wins: both topic_id=null, 'p-topic-alpha' < 'p-topic-beta' alphabetically
+      expect(insertedRows[0].prompt_id).to.equal('p-topic-alpha');
+    });
+
+    it('dedup-drop fires once per duplicate and splice reduces toInsert to exactly one row', async () => {
+      // Three prompts with the same synthetic text+regions. Only the winner
+      // (lexicographically first prompt_id when all topic_ids are null) reaches
+      // INSERT. The drop path (lines 740-749) fires twice and the splice mutations
+      // (lines 755-757) reduce toInsert to 1, covering the uncovered block.
+      const warnSpy = sandbox.spy(console, 'warn');
+      const toRow = (r) => ({ prompt_id: r.prompt_id });
+      const insertStub = sinon.stub().callsFake((rows) => ({
+        select: () => thenable({ data: rows.map(toRow), error: null }),
+      }));
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      // Input order is [p-c, p-a, p-b] — winner is always p-a (lex-first prompt_id)
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          { id: 'p-c', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-a', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+          { id: 'p-b', prompt: 'Synthetic triple-dup text', regions: ['us'] },
+        ],
+        postgrestClient: client,
+      });
+
+      // one row inserted, two dropped
+      expect(result.created).to.equal(1);
+      expect(insertStub.firstCall.args[0]).to.have.lengthOf(1);
+      expect(insertStub.firstCall.args[0][0].prompt_id).to.equal('p-a');
+
+      // drop-log fired twice — once for each duplicate
+      const dropLogs = warnSpy.args.filter(([msg]) => msg === '[upsertPrompts] dedup-drop');
+      expect(dropLogs).to.have.lengthOf(2);
+      dropLogs.forEach(([, payload]) => {
+        expect(payload.winning_prompt_id).to.equal('p-a');
+      });
+    });
+
+    it('picks winner by (topic_id, promptId) asc regardless of input order', async () => {
+      // Two UUIDs with an unambiguous lexicographic ordering: T_ALPHA < T_BETA.
+      // The dedup sort key is (topic_id, promptId) asc, so T_ALPHA must always win.
+      const T_ALPHA = '00000000-0000-4000-b000-000000000001';
+      const T_BETA = 'ffffffff-ffff-4fff-bfff-fffffffffffe';
+
+      const warnSpy = sandbox.spy(console, 'warn');
+
+      // topics table returns both rows pre-populated so topicMap resolves UUIDs
+      // immediately and ensureLookupEntries makes no upsert calls.
+      // INSERT always succeeds — dedup fires before the row reaches the DB.
+      const makeClient = (insertStub) => ({
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            return makeChain({
+              data: [{ id: T_ALPHA, name: 'Alpha' }, { id: T_BETA, name: 'Beta' }],
+              error: null,
+            });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      });
+
+      const makeInsertStub = () => sinon.stub().callsFake((rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      }));
+
+      const findDropLog = () => warnSpy.args
+        .find(([msg]) => msg === '[upsertPrompts] dedup-drop')?.[1];
+
+      // Pass 1: feed [alpha, beta]
+      const stub1 = makeInsertStub();
+      const result1 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+        ],
+        postgrestClient: makeClient(stub1),
+      });
+
+      // (a) exactly one row reaches INSERT
+      expect(stub1.firstCall.args[0]).to.have.lengthOf(1);
+      // (b) surviving row carries T_ALPHA
+      expect(stub1.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result1.created).to.equal(1);
+      // (c) log entry correctly identifies winner and dropped topic_id
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+
+      // Pass 2: feed [beta, alpha] — (d) input-order invariance
+      warnSpy.resetHistory();
+      const stub2 = makeInsertStub();
+      const result2 = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            id: 'p-beta', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Beta',
+          },
+          {
+            id: 'p-alpha', prompt: 'Synthetic dedup tie-break text', regions: ['us'], topic: 'Alpha',
+          },
+        ],
+        postgrestClient: makeClient(stub2),
+      });
+
+      expect(stub2.firstCall.args[0]).to.have.lengthOf(1);
+      expect(stub2.firstCall.args[0][0].topic_id).to.equal(T_ALPHA);
+      expect(result2.created).to.equal(1);
+      expect(findDropLog()).to.deep.include({
+        winning_topic_id: T_ALPHA,
+        dropped_topic_id: T_BETA,
+      });
+    });
+
+    it('routes case-variant text to update not insert when an active row already exists', async () => {
+      // Scenario: DB has "hello world" (lowercase); incoming prompt uses "Hello World" (mixed).
+      // The DB constraint uses lower(text), so they collide. getKey must lowercase the text
+      // component to match existingByKey correctly and route to toUpdate, not toInsert.
+      // RED on current (case-sensitive) getKey: misses existingByKey → INSERT stub is called.
+      // GREEN after fix: matches existingByKey → UPDATE path, INSERT stub never reached.
+      const existingRow = {
+        id: 'row-uuid-existing',
+        prompt_id: 'p-existing',
+        text: 'hello world',
+        regions: ['us'],
+        status: 'active',
+      };
+      const toInsertResult = (rows) => ({
+        select: () => thenable({
+          data: rows.map((r) => ({ prompt_id: r.prompt_id })),
+          error: null,
+        }),
+      });
+      const insertStub = sinon.stub().callsFake(toInsertResult);
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [existingRow], error: null }),
+                    in: () => thenable({ data: [existingRow], error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Hello World', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(insertStub.notCalled).to.be.true;
+      expect(result.created).to.equal(0);
+      expect(result.updated).to.equal(1);
     });
   });
 
@@ -2796,6 +3253,90 @@ describe('prompts-storage', () => {
   // intent migration). Writing/reading `intent` there 500s with a missing-
   // column error; the storage layer detects this per-client (WeakMap) and
   // retries without intent so prompts still persist/read.
+  describe('getIntentsByPromptIds', () => {
+    const MISSING_INTENT = { code: '42703', message: 'column prompts.intent does not exist' };
+    // `.in()` result is awaitable and also chains `.eq()` (for the org predicate).
+    const clientReturning = (result, inStub) => ({
+      from: () => ({
+        select: () => ({
+          in: inStub || (() => ({ ...thenable(result), eq: () => thenable(result) })),
+        }),
+      }),
+    });
+
+    it('returns an empty Map for empty/nullish ids or no client', async () => {
+      const client = clientReturning({ data: [], error: null });
+      const sizeFor = async (args) => (await getIntentsByPromptIds(args)).size;
+      expect(await sizeFor({ promptIds: [], postgrestClient: client })).to.equal(0);
+      expect(await sizeFor({ promptIds: [null, undefined], postgrestClient: client })).to.equal(0);
+      expect(await sizeFor({ promptIds: ['p1'], postgrestClient: {} })).to.equal(0);
+    });
+
+    it('maps intent by id, dedupes ids, and skips null/empty intents', async () => {
+      const inStub = sinon.stub().returns(thenable({
+        data: [
+          { id: 'p1', intent: 'Commercial' },
+          { id: 'p2', intent: null },
+          { id: 'p3', intent: '' },
+        ],
+        error: null,
+      }));
+      const client = clientReturning(null, inStub);
+      const map = await getIntentsByPromptIds({
+        promptIds: ['p1', 'p1', 'p2', 'p3', null], postgrestClient: client,
+      });
+      expect(map.get('p1')).to.equal('Commercial');
+      expect(map.has('p2')).to.equal(false);
+      expect(map.has('p3')).to.equal(false);
+      // Deduped to the 3 distinct non-null ids.
+      expect(inStub.firstCall.args[1]).to.deep.equal(['p1', 'p2', 'p3']);
+    });
+
+    it('scopes the lookup by organizationId when provided', async () => {
+      const eqStub = sinon.stub().returns(
+        thenable({ data: [{ id: 'p1', intent: 'Commercial' }], error: null }),
+      );
+      const inStub = sinon.stub().returns({ eq: eqStub });
+      const client = clientReturning(null, inStub);
+      const map = await getIntentsByPromptIds({
+        promptIds: ['p1'], organizationId: 'org-1', postgrestClient: client,
+      });
+      expect(map.get('p1')).to.equal('Commercial');
+      expect(eqStub.calledOnceWithExactly('organization_id', 'org-1')).to.equal(true);
+    });
+
+    it('chunks large id lists into multiple bounded queries', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: [], error: null }));
+      const client = clientReturning(null, inStub);
+      const ids = Array.from({ length: 250 }, (_, i) => `p${i}`);
+      await getIntentsByPromptIds({ promptIds: ids, postgrestClient: client });
+      // 250 ids / 100 per batch → 3 queries, each within the chunk size.
+      expect(inStub.callCount).to.equal(3);
+      expect(inStub.getCalls().map((c) => c.args[1].length)).to.deep.equal([100, 100, 50]);
+    });
+
+    it('logs at debug (not warn) when the intent column is absent, and does not retry', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: null, error: MISSING_INTENT }));
+      const client = clientReturning(null, inStub);
+      const log = { debug: sinon.stub(), warn: sinon.stub() };
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client, log });
+      expect(map.size).to.equal(0);
+      expect(inStub.callCount).to.equal(1);
+      expect(log.debug.called).to.equal(true);
+      expect(log.warn.called).to.equal(false);
+    });
+
+    it('logs at warn (not debug) on a non-missing-column error, returning empty', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: null, error: { message: 'timeout' } }));
+      const client = clientReturning(null, inStub);
+      const log = { debug: sinon.stub(), warn: sinon.stub() };
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client, log });
+      expect(map.size).to.equal(0);
+      expect(log.warn.called).to.equal(true);
+      expect(log.debug.called).to.equal(false);
+    });
+  });
+
   describe('intent column best-effort fallback', () => {
     const MISSING_INTENT_INSERT = {
       code: 'PGRST204',
@@ -3240,6 +3781,131 @@ describe('prompts-storage', () => {
       // Known-unsupported client: intent never set on the patch up front, so the
       // second update's patch carries no `intent` key.
       expect(updateStub.getCall(2).args[0]).to.not.have.property('intent');
+    });
+  });
+
+  describe('findPromptsBlockingRegionRemoval (LLMO-5645)', () => {
+    // Read-only mock: the consistency check fetches non-deleted prompts and
+    // counts, per removed region, how many still reference it.
+    function makeReadClient(promptRows, opts = {}) {
+      return {
+        from: () => ({
+          select() { return this; },
+          eq() { return this; },
+          neq() { return this; },
+          limit() {
+            return Promise.resolve(
+              opts.error ? { data: null, error: opts.error } : { data: promptRows, error: null },
+            );
+          },
+        }),
+      };
+    }
+
+    it('returns empty when no region is removed (new set is a superset)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US'],
+        newRegions: ['US', 'DE'],
+        postgrestClient: makeReadClient([{ id: 'p1', regions: ['US'] }]),
+      });
+      expect(result).to.deep.equal({});
+    });
+
+    it('returns empty when a removed region has no prompts using it', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US'] },
+          { id: 'p2', regions: ['US'] },
+        ]),
+      });
+      expect(result).to.deep.equal({});
+    });
+
+    it('counts prompts still using a removed region (incl. multi-market prompts)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['US', 'DE'] }, // multi-market → still references DE
+          { id: 'p2', regions: ['DE'] }, // DE-only
+          { id: 'p3', regions: ['de'] }, // case-insensitive
+          { id: 'p4', regions: ['US'] }, // unaffected
+          { id: 'p5', regions: null }, // non-array → normalized to [], ignored
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 3 });
+    });
+
+    it('counts each removed region independently when several are stripped at once', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE', 'FR'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['DE'] },
+          { id: 'p2', regions: ['FR'] },
+          { id: 'p3', regions: ['DE', 'FR'] }, // counts toward both
+        ]),
+      });
+      expect(result).to.deep.equal({ de: 2, fr: 2 });
+    });
+
+    it('treats WW like any other region (strict — blocks WW removal)', async () => {
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient([
+          { id: 'p1', regions: ['WW'] },
+          { id: 'p2', regions: ['ww'] },
+        ]),
+      });
+      expect(result).to.deep.equal({ ww: 2 });
+    });
+
+    it('throws when the PostgREST client is missing', async () => {
+      await expect(findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['WW'],
+        newRegions: ['US'],
+        postgrestClient: {},
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('throws when the prompt read fails', async () => {
+      await expect(findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient(null, { error: { message: 'read boom' } }),
+      })).to.be.rejectedWith('Failed to read prompts for region consistency check: read boom');
+    });
+
+    it('warns when the brand exceeds the read cap', async () => {
+      const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `p${i}`, regions: ['US'] }));
+      const warn = sinon.spy();
+      const result = await findPromptsBlockingRegionRemoval({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        oldRegions: ['US', 'DE'],
+        newRegions: ['US'],
+        postgrestClient: makeReadClient(rows),
+        log: { warn },
+      });
+      expect(result).to.deep.equal({});
+      expect(warn.calledOnce).to.equal(true);
     });
   });
 });

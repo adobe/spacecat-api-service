@@ -35,6 +35,9 @@ import worldCountries from 'world-countries';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
+  STATUS_UNAUTHORIZED,
+  X_PROMISE_TOKEN_HEADER,
+  PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
 // Two signals indicate a previous paid onboarding:
@@ -567,13 +570,22 @@ export async function findDeliveryType(url) {
 }
 
 /**
- * Error class with a status code property.
+ * Error class with a status code property. An optional machine-readable `code`
+ * may be assigned by callers after construction (e.g. serenity handlers tag
+ * errors with `ERROR_CODES.*` for downstream branching).
  * @extends Error
  */
 export class ErrorWithStatusCode extends Error {
+  /**
+   * @param {string} message human-readable error message
+   * @param {number} status HTTP status code to surface
+   */
   constructor(message, status) {
     super(message);
+    /** @type {number} */
     this.status = status;
+    /** @type {string|undefined} */
+    this.code = undefined;
   }
 }
 
@@ -664,6 +676,53 @@ export function getImsUserToken(context) {
 }
 
 /**
+ * Get the IMS user token, but ONLY when the caller authenticated via IMS.
+ * The Semrush gateway only understands IMS user tokens, so any flow that
+ * forwards the caller's bearer upstream (serenity proxy, brand provisioning,
+ * brand-edit re-sync) must refuse a non-IMS credential rather than proxy it.
+ * An S2S consumer reaching an `organization:write` route would otherwise have
+ * its non-IMS bearer forwarded to Semrush.
+ * @param {object} context - The request context (attributes.authInfo + headers).
+ * @returns {string} imsUserToken - The validated IMS user access token.
+ * @throws {ErrorWithStatusCode} 401 when the caller is not IMS-authenticated.
+ */
+export function getImsUserTokenStrict(context) {
+  const authInfo = context?.attributes?.authInfo;
+  // Local/automated-E2E escape hatch — mirrors the serenity controller's
+  // requireImsBearer. When SERENITY_ALLOW_NON_IMS_AUTH is set, trust the present
+  // bearer even if the authInfo is not IMS-typed: locally `SKIP_AUTH=true`
+  // injects a mock (non-IMS) admin authInfo, and these flows forward the bearer
+  // to the Semrush vendor MOCK, which ignores it. NO deployed environment sets
+  // this flag (it is never written to Vault), so production auth is unaffected —
+  // the real Semrush gateway still validates the forwarded token end to end.
+  //
+  // Defense-in-depth: the hatch is HARD-DISABLED in production regardless of the
+  // flag, so an accidental SERENITY_ALLOW_NON_IMS_AUTH in prod can never open the
+  // gate — prod always fails closed and requires real IMS auth. Both AWS_ENV and
+  // ENV are checked because the codebase reads prod from either.
+  const isProd = context?.env?.AWS_ENV === 'prod' || context?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && context?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  // Fail closed: forward the bearer upstream ONLY for a caller we can positively
+  // confirm authenticated via IMS (or when the escape hatch is explicitly set).
+  // A missing/non-standard authInfo (no getType) is treated as "not IMS" and
+  // refused, rather than falling through to proxy an unverified bearer to the
+  // Semrush gateway.
+  if (!allowNonIms && (typeof authInfo?.getType !== 'function' || authInfo.getType() !== 'ims')) {
+    // Reached only when resolveSemrushImsToken's x-promise-token check found
+    // nothing (it never falls through to here when the header is present) —
+    // a non-IMS caller has no other way to authenticate to Semrush, so point
+    // them at the promise-token flow instead of a bare "not authenticated".
+    const err = new ErrorWithStatusCode(
+      `IMS authentication required; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
+      STATUS_UNAUTHORIZED,
+    );
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
+    throw err;
+  }
+  return getImsUserToken(context);
+}
+
+/**
  * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
  * @returns {Promise<{
@@ -714,6 +773,55 @@ export async function exchangePromiseToken(context, promiseToken) {
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   )).access_token;
   return accessToken;
+}
+
+/**
+ * Resolves the IMS access token to forward to the Semrush gateway for a request.
+ *
+ * Preferred path: the caller sends `x-promise-token` (minted by POST /auth/v2/promise).
+ * This lets a caller authenticate to spacecat itself with a NON-IMS credential (e.g. a
+ * spacecat JWT on `Authorization`) while still supplying an IMS-exchangeable token for
+ * the upstream Semrush call. The promise token is checked FIRST and, when present,
+ * `getImsUserTokenStrict` (and its `authInfo.getType() === 'ims'` gate) is never invoked.
+ *
+ * Fallback path: no `x-promise-token` — behaves exactly as `getImsUserTokenStrict`,
+ * requiring IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+ *
+ * Shared by every "forward the user's bearer to Semrush" surface: the serenity and
+ * elements proxies, and brand create/edit/provisioning re-sync. The serenity and
+ * elements proxies pass their own IMS-bearer gate (which additionally supports a
+ * test-only non-IMS escape hatch) as `fallback`; callers with no such escape hatch
+ * can omit it and get the strict `getImsUserTokenStrict` behavior.
+ * @param {object} context - The request context.
+ * @param {object} [log] - Logger used to record a promise-token exchange failure.
+ * @param {string} [logLabel] - Prefix for the exchange-failure log line (e.g. 'brands').
+ * @param {(context: object) => string} [fallback] - Called when no promise token is
+ *   present; defaults to `getImsUserTokenStrict`.
+ * @returns {Promise<string>} The IMS access token to forward upstream.
+ * @throws {ErrorWithStatusCode} 401 when neither a promise token nor the fallback works.
+ */
+export async function resolveSemrushImsToken(
+  context,
+  log,
+  logLabel = 'utils',
+  fallback = getImsUserTokenStrict,
+) {
+  const promiseTokenHeader = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
+  if (hasText(promiseTokenHeader)) {
+    let decoded = promiseTokenHeader;
+    try {
+      decoded = decodeURIComponent(promiseTokenHeader);
+    } catch {
+      // Bearer-style tokens may contain literal %; use as-is.
+    }
+    try {
+      return await exchangePromiseToken(context, decoded);
+    } catch (e) {
+      log?.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
+      throw new ErrorWithStatusCode('Invalid or expired promise token', STATUS_UNAUTHORIZED);
+    }
+  }
+  return fallback(context);
 }
 
 /**

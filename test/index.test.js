@@ -119,7 +119,10 @@ describe('Index Tests', () => {
         authInfo: new AuthInfo()
           .withType('api-key')
           .withAuthenticated(true)
-          .withProfile({ user_id: 'test-user' }),
+          // is_admin marks this shared test identity as an internal admin (the
+          // api-key here doubles as ADMIN_API_KEY and hasAdminAccess is stubbed
+          // true below), so facsWrapper bypasses it as an internal identity.
+          .withProfile({ user_id: 'test-user', is_admin: true }),
       },
       env: {
         USER_API_KEY: apiKey,
@@ -133,6 +136,7 @@ describe('Index Tests', () => {
         IMS_CLIENT_CODE: 'mock-client-code',
         IMS_CLIENT_SECRET: 'mock-client-secret',
         IMPORT_CONFIGURATION: '{}',
+        POSTGREST_URL: 'https://postgrest.test',
         REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
         S3_REPORT_BUCKET: 'test-reports-bucket',
         S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
@@ -467,6 +471,26 @@ describe('Index Tests', () => {
     expect(capturedOpts.internalRoutes, 'internalRoutes must be a non-empty array').to.be.an('array').that.is.not.empty;
     // Sanity-check a known internal route is present so an accidental empty list is caught
     expect(capturedOpts.internalRoutes).to.include('POST /event/fulfillment');
+    expect(testMain).to.exist; // reference to satisfy no-unused-vars
+  });
+
+  it('wires facsWrapper with routeFacsCapabilities (PRODUCTS_ROUTES present)', async () => {
+    let capturedOpts;
+    const { main: testMain } = await esmock('../src/index.js', {
+      '@adobe/spacecat-shared-http-utils': {
+        facsWrapper: (fn, opts) => {
+          capturedOpts = opts;
+          return fn;
+        },
+        s2sAuthWrapper: s2sAuthWrapperStub,
+      },
+    });
+    expect(capturedOpts, 'facsWrapper must receive an options object').to.be.an('object');
+    expect(capturedOpts, 'routeFacsCapabilities must be passed to facsWrapper').to.have.property('routeFacsCapabilities');
+    expect(capturedOpts.routeFacsCapabilities, 'routeFacsCapabilities must be an object').to.be.an('object');
+    // The wrapper requires PRODUCTS_ROUTES; sanity-check it is present and non-empty.
+    expect(capturedOpts.routeFacsCapabilities).to.have.property('PRODUCTS_ROUTES');
+    expect(capturedOpts.routeFacsCapabilities.PRODUCTS_ROUTES, 'PRODUCTS_ROUTES must be a non-empty object').to.be.an('object').that.is.not.empty;
     expect(testMain).to.exist; // reference to satisfy no-unused-vars
   });
 });

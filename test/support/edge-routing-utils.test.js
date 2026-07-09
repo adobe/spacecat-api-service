@@ -389,6 +389,42 @@ describe('edge-routing-utils', () => {
     });
   });
 
+  describe('hasSubpath', () => {
+    let hasSubpath;
+
+    before(async () => {
+      ({ hasSubpath } = await import('../../src/support/edge-routing-utils.js'));
+    });
+
+    it('returns true for a URL with a subpath', () => {
+      expect(hasSubpath('https://example.com/docs')).to.be.true;
+    });
+
+    it('returns false for a URL without protocol', () => {
+      expect(hasSubpath('example.com/docs')).to.be.false;
+    });
+
+    it('returns false for a root URL', () => {
+      expect(hasSubpath('https://example.com')).to.be.false;
+    });
+
+    it('returns false for a URL with a trailing slash only', () => {
+      expect(hasSubpath('https://example.com/')).to.be.false;
+    });
+
+    it('returns false for a malformed URL', () => {
+      expect(hasSubpath('not a url %%')).to.be.false;
+    });
+
+    it('returns false for a URL with only a port and no path', () => {
+      expect(hasSubpath('https://example.com:8080')).to.be.false;
+    });
+
+    it('returns true for a URL with a path and a port', () => {
+      expect(hasSubpath('https://example.com:8080/subpath')).to.be.true;
+    });
+  });
+
   describe('detectAemCsFastlyForDomain (integration)', () => {
     const badDomain = () => ({
       toString() {

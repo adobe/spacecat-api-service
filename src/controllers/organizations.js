@@ -35,6 +35,9 @@ import {
   getEntitledProductCodes,
   CUSTOMER_VISIBLE_TIERS,
 } from '../support/utils.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import {
   ensureOrgEntitlement,
   resolveProductCode,
@@ -369,7 +372,39 @@ function OrganizationsController(ctx, env) {
       );
     }
 
-    return ok([...filteredSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
+    // ReBAC collection filter. When facsWrapper marks this session as
+    // FACS-enrolled and resource-scoped (no org-wide can_view — see
+    // context.attributes.facs), narrow the org's OWN sites to those the caller
+    // may view via a state-layer grant. Delegated sites are governed by the
+    // delegation grant itself and pass through unchanged. Absent flag (admin /
+    // internal org / non-ReBAC org / org-wide viewer) => full list.
+    //
+    // Cross-product bypass: only filter when the current product actually
+    // ReBAC-scopes `site` (ASO). Under LLMO, `site` is not a ReBAC resource
+    // (LLMO scopes `brand`), so the state layer holds no per-site grants and
+    // filtering would wrongly hide every site — return the full list instead.
+    let visibleOwnSites = filteredSites;
+    const facs = context.attributes?.facs;
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
+      const unavailable = requirePostgrestForFacsMappings(context);
+      if (unavailable) {
+        return unavailable;
+      }
+      const viewable = await listViewableResourceIds(
+        context.dataAccess.services.postgrestClient,
+        {
+          imsOrgId: organization.getImsOrgId(),
+          product: facs.product,
+          resourceType: 'site',
+          subjectId: facs.subjectId,
+        },
+      );
+      visibleOwnSites = filteredSites.filter((site) => viewable.has(site.getId()));
+    }
+
+    return ok([...visibleOwnSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
   };
 
   /**
