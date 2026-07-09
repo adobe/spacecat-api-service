@@ -83,6 +83,7 @@ function makeHasDataChainClient(resultsByTable = {}) {
   const makeChain = (result) => ({
     select: sinon.stub().returnsThis(),
     eq: sinon.stub().returnsThis(),
+    gte: sinon.stub().returnsThis(),
     limit: sinon.stub().resolves(result),
   });
   const chains = {};
@@ -1090,6 +1091,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['optel']);
+      expect(body.activeSource).to.equal('optel');
     });
 
     it('returns hasData:true and availableSources:["cdn"] when only cdn has records', async () => {
@@ -1103,6 +1105,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['cdn']);
+      expect(body.activeSource).to.equal('cdn');
     });
 
     it('returns availableSources:["cdn","optel"] (cdn before optel) when both Traffic Insights sources have records', async () => {
@@ -1117,6 +1120,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['cdn', 'optel']);
+      expect(body.activeSource).to.equal('cdn');
     });
 
     it('returns hasData:true and availableSources:["adobe_analytics"] when only adobe_analytics has records', async () => {
@@ -1130,6 +1134,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['adobe_analytics']);
+      expect(body.activeSource).to.equal('adobe_analytics');
     });
 
     it('ranks Business Impact sources above Traffic Insights (adobe_analytics before cdn)', async () => {
@@ -1142,6 +1147,7 @@ describe('llmo-referral-traffic', () => {
       );
       const body = await res.json();
       expect(body.availableSources).to.deep.equal(['adobe_analytics', 'cdn']);
+      expect(body.activeSource).to.equal('adobe_analytics');
     });
 
     it('preserves full priority order (adobe_analytics > cja > ga4 > cdn > optel) when all sources have records', async () => {
@@ -1153,6 +1159,7 @@ describe('llmo-referral-traffic', () => {
       );
       const body = await res.json();
       expect(body.availableSources).to.deep.equal(['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel']);
+      expect(body.activeSource).to.equal('adobe_analytics');
     });
 
     it('orders non-adjacent combos correctly (ga4 before optel)', async () => {
@@ -1165,6 +1172,7 @@ describe('llmo-referral-traffic', () => {
       );
       const body = await res.json();
       expect(body.availableSources).to.deep.equal(['ga4', 'optel']);
+      expect(body.activeSource).to.equal('ga4');
     });
 
     it('orders non-adjacent combos correctly (cja before cdn)', async () => {
@@ -1177,6 +1185,7 @@ describe('llmo-referral-traffic', () => {
       );
       const body = await res.json();
       expect(body.availableSources).to.deep.equal(['cja', 'cdn']);
+      expect(body.activeSource).to.equal('cja');
     });
 
     it('returns availableSources:["cja"] when only cja has records', async () => {
@@ -1189,6 +1198,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['cja']);
+      expect(body.activeSource).to.equal('cja');
     });
 
     it('returns availableSources:["ga4"] when only ga4 has records', async () => {
@@ -1201,9 +1211,10 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['ga4']);
+      expect(body.activeSource).to.equal('ga4');
     });
 
-    it('returns hasData:false and availableSources:[] when both tables are empty', async () => {
+    it('returns hasData:false and availableSources:[] when all sources are empty', async () => {
       const client = makeHasDataChainClient();
       const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
         makeContext({ client }),
@@ -1212,9 +1223,10 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(false);
       expect(body.availableSources).to.deep.equal([]);
+      expect(body.activeSource).to.equal(null);
     });
 
-    it('returns hasData:false and availableSources:[] when both tables return null data', async () => {
+    it('returns hasData:false and availableSources:[] when all sources return null data', async () => {
       const nullResults = Object.fromEntries(
         HAS_DATA_TABLES.map((t) => [t, { data: null, error: null }]),
       );
@@ -1226,6 +1238,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(false);
       expect(body.availableSources).to.deep.equal([]);
+      expect(body.activeSource).to.equal(null);
     });
 
     it('returns 500 and fails closed when one source errors (even if the other has data)', async () => {
@@ -1250,7 +1263,7 @@ describe('llmo-referral-traffic', () => {
       expect(ctx.log.error).to.have.been.calledWithMatch(/referral_traffic_ga4/);
     });
 
-    it('returns 500 when both sources error simultaneously', async () => {
+    it('returns 500 when all sources error simultaneously', async () => {
       const errorResults = Object.fromEntries(
         HAS_DATA_TABLES.map((t) => [t, { data: null, error: { message: `${t}-fail` } }]),
       );
@@ -1276,6 +1289,7 @@ describe('llmo-referral-traffic', () => {
       const throwingChain = {
         select: sinon.stub().returnsThis(),
         eq: sinon.stub().returnsThis(),
+        gte: sinon.stub().returnsThis(),
         limit: sinon.stub().rejects(new Error('network timeout')),
       };
       const ctx = makeContext({ client: { from: sinon.stub().returns(throwingChain) } });
@@ -1283,14 +1297,27 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('queries all five referral source tables with the site id, once each', async () => {
+    it('queries all five referral source tables with the site id and lookback bound, once each', async () => {
       const client = makeHasDataChainClient();
+      const beforeProbe = Date.now();
       await createReferralTrafficHasDataHandler(stubbedValidateAccess)(makeContext({ client }));
+      const afterProbe = Date.now();
+      const minLookback = new Date(beforeProbe - 420 * 86400000).toISOString().slice(0, 10);
+      const maxLookback = new Date(afterProbe - 420 * 86400000).toISOString().slice(0, 10);
+      const lookbacks = new Set();
       for (const table of HAS_DATA_TABLES) {
         expect(client.from).to.have.been.calledWith(table);
         expect(client.chains[table].eq).to.have.been.calledWith('site_id', SITE_ID);
+        expect(client.chains[table].gte).to.have.been.calledWith(
+          'traffic_date',
+          sinon.match(/^\d{4}-\d{2}-\d{2}$/),
+        );
+        const lookback = client.chains[table].gte.firstCall.args[1];
+        expect(lookback >= minLookback && lookback <= maxLookback).to.equal(true);
+        lookbacks.add(lookback);
         expect(client.chains[table].limit).to.have.been.calledWith(1);
       }
+      expect(lookbacks.size).to.equal(1);
       // Exactly one probe per source — no extra or duplicate table reads.
       expect(client.from.callCount).to.equal(HAS_DATA_TABLES.length);
     });

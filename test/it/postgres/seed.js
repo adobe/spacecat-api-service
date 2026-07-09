@@ -127,10 +127,13 @@ const REFERRAL_SOURCE_TABLES = {
  * requested source so `GET /sites/:siteId/referral-traffic/has-data` reports
  * exactly those sources (in the backend's resolution-priority order).
  *
- * Rows go into an on-demand far-future (2099) partition: the has-data existence
- * check is date-agnostic (`WHERE site_id = ? LIMIT 1`), and a 2099 range can't
- * collide with the image's real monthly partitions. Runs as the `postgres`
- * superuser via psql to bypass PostgREST role grants + partition routing.
+ * Rows go into an on-demand far-future (2099) partition: the has-data lower
+ * bound accepts them, and a 2099 range can't collide with the image's real
+ * monthly partitions. Runs as the `postgres` superuser via psql to bypass
+ * PostgREST role grants + partition routing.
+ *
+ * Keep siteId/source inputs trusted constants only (canonical seed UUIDs and
+ * the whitelisted source-to-table map), never request-derived values.
  *
  * @param {string} siteId  Site the rows belong to (a canonical seed UUID).
  * @param {Array<'optel'|'cdn'|'adobe_analytics'|'ga4'|'cja'>} sources Sources to

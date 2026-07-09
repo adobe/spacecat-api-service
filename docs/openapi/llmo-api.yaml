@@ -5092,7 +5092,8 @@ llmo-referral-traffic-has-data:
       `source` query param. Response is cacheable. `availableSources` lists all
       sources with data in resolution-priority order
       (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`); callers use the
-      first entry as the active source.
+      first entry as the active source. `activeSource` exposes that highest-priority
+      source directly, or null when no source has data.
     operationId: getReferralTrafficHasData
     responses:
       '200':

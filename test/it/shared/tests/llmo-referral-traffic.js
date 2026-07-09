@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 
-import { SITE_1_ID } from '../seed-ids.js';
+import { SITE_1_ID, SITE_2_ID, SITE_3_ID } from '../seed-ids.js';
 
 /**
  * Shared LLMO Referral Traffic endpoint tests.
@@ -54,8 +54,10 @@ export default function llmoReferralTrafficTests(getHttpClient, resetData, seedR
       const http = getHttpClient();
       const res = await http.admin.get(hasDataPath(SITE_1_ID));
       expect(res.status).to.equal(200);
+      expect(res.headers.get('cache-control')).to.equal('private, max-age=7200');
       expect(res.body).to.have.property('hasData', false);
       expect(res.body).to.have.property('availableSources').that.deep.equals([]);
+      expect(res.body).to.have.property('activeSource', null);
     });
 
     it('rejects an unknown site with a non-2xx (access validation runs before the probe)', async () => {
@@ -82,6 +84,17 @@ export default function llmoReferralTrafficTests(getHttpClient, resetData, seedR
         expect(res.status).to.equal(200);
         expect(res.body.hasData).to.equal(true);
         expect(res.body.availableSources).to.deep.equal(['adobe_analytics', 'cdn']);
+        expect(res.body.activeSource).to.equal('adobe_analytics');
+      });
+
+      it('returns a Business Impact-only source when that is the only source with rows', async () => {
+        seedReferralPresence(SITE_1_ID, ['ga4']);
+        const http = getHttpClient();
+        const res = await http.admin.get(hasDataPath(SITE_1_ID));
+        expect(res.status).to.equal(200);
+        expect(res.body.hasData).to.equal(true);
+        expect(res.body.availableSources).to.deep.equal(['ga4']);
+        expect(res.body.activeSource).to.equal('ga4');
       });
 
       it('preserves full priority order (adobe_analytics > cja > ga4 > cdn > optel) when all sources have rows', async () => {
@@ -91,6 +104,21 @@ export default function llmoReferralTrafficTests(getHttpClient, resetData, seedR
         expect(res.status).to.equal(200);
         expect(res.body.hasData).to.equal(true);
         expect(res.body.availableSources).to.deep.equal(['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel']);
+        expect(res.body.activeSource).to.equal('adobe_analytics');
+      });
+
+      it('keeps source presence isolated by site and denies out-of-org user access', async () => {
+        seedReferralPresence(SITE_3_ID, ['cja']);
+        const http = getHttpClient();
+
+        const sameOrgOtherSite = await http.admin.get(hasDataPath(SITE_2_ID));
+        expect(sameOrgOtherSite.status).to.equal(200);
+        expect(sameOrgOtherSite.body.hasData).to.equal(false);
+        expect(sameOrgOtherSite.body.availableSources).to.deep.equal([]);
+        expect(sameOrgOtherSite.body.activeSource).to.equal(null);
+
+        const denied = await http.user.get(hasDataPath(SITE_3_ID));
+        expect(denied.status).to.equal(403);
       });
     });
   });

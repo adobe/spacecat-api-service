@@ -786,6 +786,9 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
  */
 export const REFERRAL_HAS_DATA_SOURCES = ['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel'];
 export const REFERRAL_HAS_DATA_TABLES = REFERRAL_HAS_DATA_SOURCES.map((s) => SOURCE_TO_TABLE[s]);
+// ~60 weeks; UI can only query the last 52 weeks, so this hides no visible data
+// while letting Postgres prune old traffic_date-RANGE referral traffic partitions.
+const HAS_DATA_LOOKBACK_DAYS = 420;
 
 /**
  * GET /sites/:siteId/referral-traffic/has-data
@@ -795,11 +798,12 @@ export const REFERRAL_HAS_DATA_TABLES = REFERRAL_HAS_DATA_SOURCES.map((s) => SOU
  *
  * Response:
  *   { hasData: boolean,
- *     availableSources: Array<'adobe_analytics'|'cja'|'ga4'|'cdn'|'optel'> }
+ *     availableSources: Array<'adobe_analytics'|'cja'|'ga4'|'cdn'|'optel'>,
+ *     activeSource: 'adobe_analytics'|'cja'|'ga4'|'cdn'|'optel'|null }
  *
  * availableSources lists whichever sources have at least one row for the site,
  * in resolution-priority order (adobe_analytics > cja > ga4 > cdn > optel).
- * Callers use the first entry as the active source. hasData is true iff
+ * activeSource mirrors the first entry. hasData is true iff
  * availableSources is non-empty.
  *
  * All source tables are checked in parallel with limit(1) — no RPC required.
@@ -814,8 +818,16 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
       async (ctx, client, siteId) => {
         let results;
         try {
+          const lookback = new Date(Date.now() - HAS_DATA_LOOKBACK_DAYS * 86400000)
+            .toISOString()
+            .slice(0, 10);
           results = await Promise.all(
-            REFERRAL_HAS_DATA_TABLES.map((table) => client.from(table).select('traffic_date').eq('site_id', siteId).limit(1)),
+            REFERRAL_HAS_DATA_TABLES.map((table) => client
+              .from(table)
+              .select('traffic_date')
+              .eq('site_id', siteId)
+              .gte('traffic_date', lookback)
+              .limit(1)),
           );
         } catch (err) {
           ctx.log.error(`Referral traffic has-data PostgREST error: ${err.message} (siteId=${siteId})`);
@@ -832,7 +844,12 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
         const availableSources = REFERRAL_HAS_DATA_SOURCES.filter(
           (_, i) => (results[i].data || []).length > 0,
         );
-        return cachedOk({ hasData: availableSources.length > 0, availableSources });
+        const activeSource = availableSources[0] ?? null;
+        return cachedOk({
+          hasData: availableSources.length > 0,
+          availableSources,
+          activeSource,
+        });
       },
     );
   };
