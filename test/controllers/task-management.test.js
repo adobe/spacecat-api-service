@@ -2037,12 +2037,12 @@ describe('TaskManagementController', () => {
       expect(body.message).to.equal('Failed to validate suggestion');
     });
 
-    // ── Branch 6: markIdempotencyDone delete fails — only warns, does not throw ─
-    it('logs warn but still returns 201 when idempotency done-delete fails', async () => {
+    // ── Branch 6: markIdempotencyDone update fails — only warns, does not throw ─
+    it('logs warn but still returns 201 when idempotency done-update fails', async () => {
       const conn = makeConnection();
 
-      // Build a postgrestClient whose delete chain rejects on the first eq() call
-      // (the markIdempotencyDone path: .delete().eq(id).catch(warn))
+      // markIdempotencyDone now calls .update({status,response,updated_at}).eq(id)
+      // Make the update chain reject so the catch-warn path fires.
       const pgClient = {
         from: sinon.stub().callsFake(() => ({
           select: sinon.stub().returns({
@@ -2060,9 +2060,11 @@ describe('TaskManagementController', () => {
               single: sinon.stub().resolves({ data: { id: 'idem-id-999' }, error: null }),
             }),
           }),
-          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
+          update: sinon.stub().returns({
+            eq: sinon.stub().callsFake(() => Promise.reject(new Error('PG update error'))),
+          }),
           delete: sinon.stub().returns({
-            eq: sinon.stub().callsFake(() => Promise.reject(new Error('PG delete error'))),
+            eq: sinon.stub().resolves({ data: null, error: null }),
           }),
         })),
       };
@@ -2079,27 +2081,18 @@ describe('TaskManagementController', () => {
       const res = await createTicket(makeReqCtx());
       // Response succeeds — warn-only path does not bubble the error
       expect(res.status).to.equal(201);
-      expect(ctx.log.warn).to.have.been.called;
+      expect(ctx.log.warn).to.have.been.calledWithMatch(
+        sinon.match.object,
+        'Failed to cache completed response in idempotency lock',
+      );
     });
 
-    // ── Branch 7: delete-expired dedup lock fails — proceeds without blocking ───
-    it('proceeds normally when deleting expired dedup lock fails', async () => {
+    // ── Branch 6b: markIdempotencyFailed delete fails — only warns, returns 409 ─
+    it('logs warn but still returns 409 when markIdempotencyFailed delete fails', async () => {
       const conn = makeConnection();
 
-      // The controller calls: .delete().eq(key).eq(org).eq(endpoint).lt(expires_at).catch(warn)
-      // We need a chain: delete() → obj with eq → obj with eq → obj with eq → obj with lt
-      // and the lt() returns a promise that rejects (caught by .catch())
-      function makeDeleteChain() {
-        // depth-3: has lt that returns a rejecting promise (the .catch() in controller catches it)
-        const depth3 = {
-          lt: sinon.stub().callsFake(() => Promise.reject(new Error('delete lt failed'))),
-        };
-        const depth2 = { eq: sinon.stub().returns(depth3), catch: sinon.stub().resolves() };
-        const depth1 = { eq: sinon.stub().returns(depth2), catch: sinon.stub().resolves() };
-        const depth0 = { eq: sinon.stub().returns(depth1) };
-        return depth0;
-      }
-
+      // Single idempotency insert succeeds; ticket creation throws GRANT_REVOKED
+      // which triggers markIdempotencyFailed; the delete rejects but error is swallowed.
       const pgClient = {
         from: sinon.stub().callsFake(() => ({
           select: sinon.stub().returns({
@@ -2114,91 +2107,12 @@ describe('TaskManagementController', () => {
           }),
           insert: sinon.stub().returns({
             select: sinon.stub().returns({
-              single: sinon.stub().resolves({ data: { id: 'idem-id-del' }, error: null }),
+              single: sinon.stub().resolves({ data: { id: 'idem-id-6b' }, error: null }),
             }),
-          }),
-          update: sinon.stub().returns({
-            eq: sinon.stub().resolves({ data: null, error: null }),
-          }),
-          // The dedup delete chain — lt() rejects, .catch() on the await swallows it
-          delete: sinon.stub().callsFake(() => makeDeleteChain()),
-        })),
-      };
-
-      const ctx = makeContext({
-        dataAccess: {
-          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
-        },
-      });
-
-      const { createTicket } = TaskManagementController(ctx);
-      const res = await createTicket(makeReqCtx({
-        data: {
-          summary: 'Dedup delete fail',
-          projectKey: 'PROJ',
-          connectionId: CONN_ID,
-          suggestionIds: [SUGGESTION_ID],
-          opportunityId: OPPORTUNITY_ID,
-        },
-      }));
-      // The .catch() on the delete means the failure is swallowed — ticket still created
-      expect([201, 409, 500]).to.include(res.status);
-      expect(ctx.log.warn).to.have.been.called;
-    });
-
-    // ── Branch 6b: markIdempotencyFailed delete fails — only warns, returns 409 ─
-    it('logs warn but still returns 409 when markIdempotencyFailed delete fails', async () => {
-      const conn = makeConnection();
-
-      // Track insert/delete calls to distinguish idempotency vs dedup rows.
-      let insertCallCount = 0;
-      let deleteCallCount = 0;
-
-      function makeSuccessDeleteChain() {
-        const p = Promise.resolve({ data: null, error: null });
-        return Object.assign(p, {
-          eq: sinon.stub().callsFake(() => makeSuccessDeleteChain()),
-          lt: sinon.stub().callsFake(() => Promise.resolve({ data: null, error: null })),
-        });
-      }
-
-      const pgClient = {
-        from: sinon.stub().callsFake(() => ({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().callsFake(() => {
-            insertCallCount += 1;
-            const data = insertCallCount === 1
-              ? { id: 'idem-id-6b' } // idempotency key insert succeeds
-              : null; // dedup insert fails with duplicate
-            const error = insertCallCount === 1
-              ? null
-              : { code: '23505', message: 'duplicate key value' };
-            return {
-              select: sinon.stub().returns({
-                single: sinon.stub().resolves({ data, error }),
-              }),
-            };
           }),
           update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
-          delete: sinon.stub().callsFake(() => {
-            deleteCallCount += 1;
-            if (deleteCallCount === 1) {
-              // expired dedup cleanup chain — succeeds
-              return makeSuccessDeleteChain();
-            }
-            // markIdempotencyFailed delete — rejects, caught by try/catch
-            return { eq: sinon.stub().callsFake(() => Promise.reject(new Error('PG delete failed'))) };
+          delete: sinon.stub().returns({
+            eq: sinon.stub().callsFake(() => Promise.reject(new Error('PG delete failed'))),
           }),
         })),
       };
@@ -2211,10 +2125,27 @@ describe('TaskManagementController', () => {
         },
       });
 
-      const { createTicket } = TaskManagementController(ctx);
+      // esmock the ticket client to throw GRANT_REVOKED so we reach markIdempotencyFailed + 409
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({
+              createTicket: sinon.stub().rejects(Object.assign(new Error('grant revoked'), { code: 'GRANT_REVOKED' })),
+            }),
+          },
+        },
+      })).default;
+
+      const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx({
         data: {
-          summary: 'Dedup in-flight + idem delete fail',
+          summary: 'Grant revoked + idem delete fail',
           projectKey: 'PROJ',
           connectionId: CONN_ID,
           suggestionIds: [SUGGESTION_ID],
@@ -2224,176 +2155,6 @@ describe('TaskManagementController', () => {
       // markIdempotencyFailed delete error is swallowed — 409 still returned
       expect(res.status).to.equal(409);
       expect(ctx.log.warn).to.have.been.called;
-    });
-
-    // ── Branch 7b: releaseDedupLock delete fails — only warns, ticket still 201 ─
-    it('logs warn but still returns 201 when releaseDedupLock delete fails', async () => {
-      const conn = makeConnection();
-
-      let insertCallCount = 0;
-      let deleteCallCount = 0;
-
-      function makeSuccessDeleteChain() {
-        const p = Promise.resolve({ data: null, error: null });
-        return Object.assign(p, {
-          eq: sinon.stub().callsFake(() => makeSuccessDeleteChain()),
-          lt: sinon.stub().callsFake(() => Promise.resolve({ data: null, error: null })),
-        });
-      }
-
-      const pgClient = {
-        from: sinon.stub().callsFake(() => ({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().callsFake(() => {
-            insertCallCount += 1;
-            // Both inserts succeed (idempotency key + dedup lock)
-            const id = insertCallCount === 1 ? 'idem-id-7b' : 'dedup-id-7b';
-            return {
-              select: sinon.stub().returns({
-                single: sinon.stub().resolves({ data: { id }, error: null }),
-              }),
-            };
-          }),
-          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
-          delete: sinon.stub().callsFake(() => {
-            deleteCallCount += 1;
-            if (deleteCallCount === 1) {
-              // expired dedup cleanup — succeeds
-              return makeSuccessDeleteChain();
-            }
-            if (deleteCallCount === 2) {
-              // releaseDedupLock (completeDedupLock) — rejects, caught by try/catch
-              return { eq: sinon.stub().callsFake(() => Promise.reject(new Error('dedup release failed'))) };
-            }
-            // markIdempotencyDone — succeeds
-            return makeSuccessDeleteChain();
-          }),
-        })),
-      };
-
-      const ctx = makeContext({
-        dataAccess: {
-          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
-        },
-      });
-
-      const { createTicket } = TaskManagementController(ctx);
-      const res = await createTicket(makeReqCtx({
-        data: {
-          summary: 'Dedup release fail',
-          projectKey: 'PROJ',
-          connectionId: CONN_ID,
-          mode: 'grouped',
-          suggestionIds: [SUGGESTION_ID],
-          opportunityId: OPPORTUNITY_ID,
-        },
-      }));
-      // releaseDedupLock error is swallowed — ticket still created
-      expect(res.status).to.equal(201);
-      expect(ctx.log.warn).to.have.been.calledWithMatch(
-        sinon.match.object,
-        'Failed to release dedup lock',
-      );
-    });
-
-    // ── Branch 8: dedup insert DB error that is NOT a duplicate — proceed ───────
-    it('proceeds without dedup lock when dedup insert fails with non-duplicate error', async () => {
-      const conn = makeConnection();
-
-      // Track how many times insert is called so we return the right response
-      let insertCallCount = 0;
-      const pgClient = {
-        from: sinon.stub().callsFake(() => ({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().callsFake(() => {
-            insertCallCount += 1;
-            // First insert: idempotency key — succeeds
-            if (insertCallCount === 1) {
-              return {
-                select: sinon.stub().returns({
-                  single: sinon.stub().resolves({ data: { id: 'idem-id-777' }, error: null }),
-                }),
-              };
-            }
-            // Second insert: dedup lock — fails with non-unique error
-            return {
-              select: sinon.stub().returns({
-                single: sinon.stub().resolves({
-                  data: null,
-                  error: { code: '42P01', message: 'relation does not exist' },
-                }),
-              }),
-            };
-          }),
-          update: sinon.stub().returns({
-            eq: sinon.stub().resolves({ data: null, error: null }),
-          }),
-          delete: sinon.stub().callsFake(() => {
-            const p = Promise.resolve({ data: null, error: null });
-            return Object.assign(p, {
-              eq: sinon.stub().callsFake(() => {
-                const p2 = Promise.resolve({ data: null, error: null });
-                return Object.assign(p2, {
-                  eq: sinon.stub().callsFake(() => {
-                    const p3 = Promise.resolve({ data: null, error: null });
-                    return Object.assign(p3, {
-                      eq: sinon.stub().callsFake(() => {
-                        const p4 = Promise.resolve({ data: null, error: null });
-                        return Object.assign(p4, {
-                          lt: sinon.stub().resolves({ data: null, error: null }),
-                        });
-                      }),
-                    });
-                  }),
-                });
-              }),
-            });
-          }),
-        })),
-      };
-
-      const ctx = makeContext({
-        dataAccess: {
-          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
-        },
-      });
-
-      const { createTicket } = TaskManagementController(ctx);
-      const res = await createTicket(makeReqCtx({
-        data: {
-          summary: 'Non-dup dedup error',
-          projectKey: 'PROJ',
-          connectionId: CONN_ID,
-          suggestionIds: [SUGGESTION_ID],
-          opportunityId: OPPORTUNITY_ID,
-        },
-      }));
-      // Non-duplicate DB error on dedup insert → warn + proceed
-      expect(ctx.log.warn).to.have.been.called;
-      // Ticket creation still proceeds — result is 201 or (if Ticket.create also fails) 500
-      expect([201, 500]).to.include(res.status);
     });
 
     // ── Branch 9: per-item Suggestion not found in individual batch mode ─────────
@@ -2781,93 +2542,6 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(404);
       const body = await res.json();
       expect(body.message).to.include('not found');
-    });
-
-    // ── Lines 750-761: dedup lock duplicate conflict → 409 IN_FLIGHT ─────────────
-    it('returns 409 IN_FLIGHT when dedup lock insert hits unique constraint (second insert)', async () => {
-      const conn = makeConnection();
-      let insertCallCount = 0;
-      const pgClient = {
-        from: sinon.stub().callsFake(() => ({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().callsFake(() => {
-            insertCallCount += 1;
-            if (insertCallCount === 1) {
-              // First insert: idempotency key — succeeds
-              return {
-                select: sinon.stub().returns({
-                  single: sinon.stub().resolves({ data: { id: 'idem-id-dedup-1' }, error: null }),
-                }),
-              };
-            }
-            // Second insert: dedup lock — fails with unique constraint
-            return {
-              select: sinon.stub().returns({
-                single: sinon.stub().resolves({
-                  data: null,
-                  error: { code: '23505', message: 'duplicate key value violates unique constraint' },
-                }),
-              }),
-            };
-          }),
-          update: sinon.stub().returns({
-            eq: sinon.stub().resolves({ data: null, error: null }),
-          }),
-          delete: sinon.stub().callsFake(() => {
-            const p = Promise.resolve({ data: null, error: null });
-            return Object.assign(p, {
-              eq: sinon.stub().callsFake(() => {
-                const p2 = Promise.resolve({ data: null, error: null });
-                return Object.assign(p2, {
-                  eq: sinon.stub().callsFake(() => {
-                    const p3 = Promise.resolve({ data: null, error: null });
-                    return Object.assign(p3, {
-                      eq: sinon.stub().callsFake(() => {
-                        const p4 = Promise.resolve({ data: null, error: null });
-                        return Object.assign(p4, {
-                          lt: sinon.stub().resolves({ data: null, error: null }),
-                        });
-                      }),
-                    });
-                  }),
-                });
-              }),
-            });
-          }),
-        })),
-      };
-
-      const ctx = makeContext({
-        dataAccess: {
-          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
-        },
-      });
-
-      const { createTicket } = TaskManagementController(ctx);
-      const res = await createTicket(makeReqCtx({
-        data: {
-          summary: 'Dedup conflict ticket',
-          projectKey: 'PROJ',
-          connectionId: CONN_ID,
-          suggestionIds: [SUGGESTION_ID],
-          opportunityId: OPPORTUNITY_ID,
-        },
-      }));
-      expect(res.status).to.equal(409);
-      const body = await res.json();
-      expect(body.code).to.equal('IN_FLIGHT');
-      expect(body.message).to.include('already in progress');
     });
 
     // ── Lines 820-823: Suggestion.findById throws in individual batch mode → 500 in results
@@ -3434,163 +3108,6 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(500);
       expect(conn.save).to.have.been.called;
       expect(ctx.log.warn).to.have.been.called;
-    });
-
-    // ── releaseDedupLock early return (line 771-772): dedupKeyId is null ─────────
-    it('grouped mode: releaseDedupLock exits early when dedup insert failed non-dup', async () => {
-      const conn = makeConnection();
-      let insertCount = 0;
-      function makeDelChain() {
-        const p = Promise.resolve({ data: null, error: null });
-        return Object.assign(p, {
-          eq: sinon.stub().callsFake(() => makeDelChain()),
-          lt: sinon.stub().resolves({ data: null, error: null }),
-        });
-      }
-      const pgClient = {
-        from: sinon.stub().returns({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().callsFake(() => {
-            insertCount += 1;
-            if (insertCount === 1) {
-              return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: { id: 'idem-r1' }, error: null }) }) };
-            }
-            // dedup lock insert — non-duplicate error → dedupKeyId stays null
-            return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: null, error: { code: '42P01', message: 'relation missing' } }) }) };
-          }),
-          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
-          delete: sinon.stub().callsFake(() => makeDelChain()),
-        }),
-      };
-
-      const ctx = makeContext({
-        dataAccess: {
-          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
-        },
-      });
-
-      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
-        '@aws-sdk/client-secrets-manager': {
-          SecretsManagerClient: class {
-            // eslint-disable-next-line class-methods-use-this
-            send() { return Promise.resolve({}); }
-          },
-        },
-        '@adobe/spacecat-shared-ticket-client': {
-          TicketClientFactory: {
-            create: sinon.stub().returns({
-              createTicket: sinon.stub().rejects(new Error('network error')),
-            }),
-          },
-        },
-      })).default;
-
-      const { createTicket } = Ctrl(ctx);
-      const res = await createTicket(makeReqCtx({
-        data: {
-          summary: 'Dedup null release',
-          projectKey: 'PROJ',
-          connectionId: CONN_ID,
-          mode: 'grouped',
-          suggestionIds: [SUGGESTION_ID],
-          opportunityId: OPPORTUNITY_ID,
-        },
-      }));
-      // releaseDedupLock() early-returns (dedupKeyId=null); grouped generic error → 500
-      expect(res.status).to.equal(500);
-      expect(ctx.log.warn).to.have.been.called; // non-dup dedup warn
-    });
-
-    // ── completeDedupLock early return (line 782-783): dedupKeyId is null ────────
-    it('grouped mode: completeDedupLock exits early when dedup insert failed non-dup', async () => {
-      const conn = makeConnection();
-      const ticket = makeTicket();
-      let insertCount2 = 0;
-      function makeDelChain2() {
-        const p = Promise.resolve({ data: null, error: null });
-        return Object.assign(p, {
-          eq: sinon.stub().callsFake(() => makeDelChain2()),
-          lt: sinon.stub().resolves({ data: null, error: null }),
-        });
-      }
-      const pgClient2 = {
-        from: sinon.stub().returns({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().callsFake(() => {
-            insertCount2 += 1;
-            if (insertCount2 === 1) {
-              return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: { id: 'idem-c1' }, error: null }) }) };
-            }
-            // dedup lock insert — non-duplicate error → dedupKeyId stays null
-            return { select: sinon.stub().returns({ single: sinon.stub().resolves({ data: null, error: { code: '42P01', message: 'relation missing' } }) }) };
-          }),
-          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
-          delete: sinon.stub().callsFake(() => makeDelChain2()),
-        }),
-      };
-
-      const ctx = makeContext({
-        dataAccess: {
-          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
-          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          Ticket: { create: sinon.stub().resolves(ticket) },
-          TicketSuggestion: { create: sinon.stub().resolves() },
-          services: { postgrestClient: pgClient2 },
-        },
-      });
-
-      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
-        '@aws-sdk/client-secrets-manager': {
-          SecretsManagerClient: class {
-            // eslint-disable-next-line class-methods-use-this
-            send() { return Promise.resolve({}); }
-          },
-        },
-        '@adobe/spacecat-shared-ticket-client': {
-          TicketClientFactory: {
-            create: sinon.stub().returns({
-              createTicket: sinon.stub().resolves({
-                ticketId: 'PROJ-99', ticketKey: 'PROJ-99', ticketUrl: 'https://x.net/PROJ-99', ticketStatus: 'To Do',
-              }),
-            }),
-          },
-        },
-      })).default;
-
-      const { createTicket } = Ctrl(ctx);
-      const res = await createTicket(makeReqCtx({
-        data: {
-          summary: 'Dedup null complete',
-          projectKey: 'PROJ',
-          connectionId: CONN_ID,
-          mode: 'grouped',
-          suggestionIds: [SUGGESTION_ID],
-          opportunityId: OPPORTUNITY_ID,
-        },
-      }));
-      // completeDedupLock() early-returns (dedupKeyId=null); grouped succeeds → 201
-      expect(res.status).to.equal(201);
-      expect(ctx.log.warn).to.have.been.called; // non-dup dedup warn
     });
   });
 
