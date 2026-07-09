@@ -669,7 +669,7 @@ export async function performAsoPlgOnboarding({
 
     // Step 5d: Resolve EDS code config and hlxConfig from RUM host
     try {
-      await updateCodeConfig(site, rumHost, { say: () => {} }, log);
+      await updateCodeConfig(site, rumHost, { say: () => {} }, log, context);
       if (site.getCode()?.owner) {
         steps.codeConfigResolved = true;
       }
