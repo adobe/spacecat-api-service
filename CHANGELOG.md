@@ -1,3 +1,10 @@
+# [1.636.0](https://github.com/adobe/spacecat-api-service/compare/v1.635.0...v1.636.0) (2026-07-09)
+
+
+### Features
+
+* **preflight:** log terminal run outcomes from both poll handlers ([#2777](https://github.com/adobe/spacecat-api-service/issues/2777)) ([17dd9c9](https://github.com/adobe/spacecat-api-service/commit/17dd9c9de6d452305eaa5782a7934e419519f035))
+
 # [1.635.0](https://github.com/adobe/spacecat-api-service/compare/v1.634.0...v1.635.0) (2026-07-09)
 
 
