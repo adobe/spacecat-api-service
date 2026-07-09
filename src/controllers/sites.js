@@ -147,13 +147,28 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
 /**
+ * Removes a trailing glob wildcard from a site baseURL so it can be used for
+ * prefix matching. A site baseURL may be configured with a wildcard suffix
+ * (e.g. https://example.com/en-ge/*) to scope it to a subtree; the literal
+ * wildcard must be stripped before URL normalization/comparison, otherwise no
+ * metric URL will ever match.
+ * @param {string} baseURL - Site base URL, possibly ending in a wildcard.
+ * @returns {string} baseURL with any trailing wildcard and slash removed.
+ */
+const stripBaseURLWildcard = (baseURL) => (baseURL || '')
+  .replace(/\/\*+$/, '') // trailing /* or /**
+  .replace(/\*+$/, '') // bare trailing *
+  .replace(/\/$/, ''); // leftover trailing slash
+
+/**
  * Filters Ahrefs top pages by site base URL
  * @param {Array} topPages - Array of SiteTopPage objects
  * @param {string} siteBaseURL - Site base URL to filter by
  * @returns {Array} Filtered top pages
  */
 const filterTopPagesByBaseURL = (topPages, siteBaseURL) => {
-  const normalizedBaseURL = canonicalizeUrl(siteBaseURL, { stripQuery: true });
+  const dewildcardedBaseURL = stripBaseURLWildcard(siteBaseURL);
+  const normalizedBaseURL = canonicalizeUrl(dewildcardedBaseURL, { stripQuery: true });
 
   return topPages.filter((page) => {
     const pageUrl = page.getUrl();
@@ -1105,7 +1120,7 @@ function SitesController(ctx, log, env) {
 
     // Filter by site baseURL when requested
     if (filterByBaseURL) {
-      const siteBaseURL = site.getBaseURL();
+      const siteBaseURL = stripBaseURLWildcard(site.getBaseURL());
       const originalCount = metricsData.length;
 
       // Normalize baseURL: remove protocol and www variants, keep path

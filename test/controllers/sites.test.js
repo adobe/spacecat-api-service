@@ -3153,6 +3153,113 @@ describe('Sites Controller', () => {
       expect(response[1].url).to.equal('https://site1.com/book/hotels');
       expect(response[2].url).to.equal('https://www.site1.com/book/cars');
     });
+
+    it('strips a trailing /* wildcard from baseURL when filtering', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Site baseURL scoped to a locale subtree with a wildcard suffix
+      sites[0].getBaseURL = () => 'https://site1.com/en-ge/*';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/en-ge/home.html', pageviews: 5000 },
+        { url: 'https://site1.com/en-ge/shipping.html', pageviews: 4000 },
+        { url: 'https://site1.com/en-us/home.html', pageviews: 3000 },
+        { url: 'https://other.com/en-ge/home.html', pageviews: 2000 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Only /en-ge pages of site1.com should match; wildcard must not break matching
+      expect(response).to.have.length(2);
+      expect(response[0].url).to.equal('https://site1.com/en-ge/home.html');
+      expect(response[1].url).to.equal('https://site1.com/en-ge/shipping.html');
+    });
+
+    it('matches www and non-www metric URLs with a wildcard baseURL', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Non-www baseURL with wildcard; RUM data is www-hosted
+      sites[0].getBaseURL = () => 'https://site1.com/en-ge/*';
+
+      const mockMetrics = [
+        { url: 'https://www.site1.com/en-ge/home.html', pageviews: 5000 },
+        { url: 'http://site1.com/en-ge/shipping.html', pageviews: 4000 },
+        { url: 'https://www.other.com/en-ge/home.html', pageviews: 3000 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      expect(response).to.have.length(2);
+      expect(response[0].url).to.equal('https://www.site1.com/en-ge/home.html');
+      expect(response[1].url).to.equal('http://site1.com/en-ge/shipping.html');
+    });
+
+    it('applies wildcard baseURL filter before top100 filtering', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      sites[0].getBaseURL = () => 'https://site1.com/en-ge/*';
+
+      const mockMetrics = [
+        ...Array.from({ length: 50 }, (_, i) => ({
+          url: `https://site1.com/en-ge/page${i}.html`,
+          pageviews: 1000 + i,
+        })),
+        ...Array.from({ length: 50 }, (_, i) => ({
+          url: `https://site1.com/en-us/page${i}.html`,
+          pageviews: 2000 + i,
+        })),
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTop100PageViews: 'true',
+        },
+      });
+
+      const response = await result.json();
+
+      // Only the 50 /en-ge pages survive baseURL filtering, then top100 keeps all 50
+      expect(response).to.have.length(50);
+      response.forEach((item) => {
+        expect(item.url).to.include('/en-ge/');
+      });
+    });
   });
 
   describe('Metrics filtering by top organic search pages', () => {
@@ -3661,6 +3768,56 @@ describe('Sites Controller', () => {
       expect(response.find((m) => m.url === 'https://site1.com/page1')).to.exist;
       expect(response.find((m) => m.url === 'https://site1.com/page2')).to.exist;
       expect(response.find((m) => m.url === 'https://other.com/page3')).to.not.exist;
+    });
+
+    it('combines filterByTopOrganicSearchPages with a wildcard baseURL', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Wildcard baseURL scoped to a locale subtree
+      sites[0].getBaseURL = () => 'https://site1.com/en-ge/*';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/en-ge/home.html', pageviews: 5000, lcp: 1500 },
+        { url: 'https://site1.com/en-ge/shipping.html', pageviews: 3000, lcp: 2000 },
+        { url: 'https://site1.com/en-us/home.html', pageviews: 4000, lcp: 1800 },
+      ];
+
+      // Top pages span multiple locales; only /en-ge pages must survive the wildcard baseURL filter
+      const mockTopPages = [
+        { getUrl: () => 'https://site1.com/en-ge/home.html', getTraffic: () => 10000 },
+        { getUrl: () => 'https://site1.com/en-us/home.html', getTraffic: () => 9000 },
+        { getUrl: () => 'https://site1.com/en-ge/shipping.html', getTraffic: () => 7000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTopOrganicSearchPages: '5',
+        },
+      });
+
+      const response = await result.json();
+
+      // Only the two /en-ge top pages should be considered; /en-us is excluded by wildcard baseURL
+      expect(response).to.have.length(2);
+      expect(response.find((m) => m.url === 'https://site1.com/en-ge/home.html')).to.exist;
+      expect(response.find((m) => m.url === 'https://site1.com/en-ge/shipping.html')).to.exist;
+      expect(response.find((m) => m.url === 'https://site1.com/en-us/home.html')).to.not.exist;
     });
 
     it('handles null URLs in top pages when combining filterByTopOrganicSearchPages with filterByBaseURL', async () => {
