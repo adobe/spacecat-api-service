@@ -1011,6 +1011,71 @@ describe('Fixes Controller', () => {
       const result = await response.json();
       expect(result).to.deep.equal([FixDto.toJSON(failedFix)]);
     });
+
+    it('responds 400 for an invalid status value', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      requestContext.data = { status: 'NOT_A_REAL_STATUS' };
+
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 400 });
+      expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
+    });
+
+    it('responds 400 for a non-positive limit', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      requestContext.data = { limit: '0' };
+
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'limit must be a positive integer' });
+    });
+
+    it('responds 400 for a non-integer limit', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      requestContext.data = { limit: 'not-a-number' };
+
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'limit must be a positive integer' });
+    });
+
+    it('caps the aggregated result set at the effective limit', async () => {
+      const fixEntities = await Promise.all([
+        fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          changeDetails: { arbitrary: 'value 1' },
+        }),
+        fixEntityCollection.create({
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+          opportunityId,
+          changeDetails: { arbitrary: 'value 2' },
+        }),
+      ]);
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves(fixEntities);
+
+      requestContext.data = { limit: '1' };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result).to.deep.equal([FixDto.toJSON(fixEntities[0])]);
+    });
+
+    it('clamps a limit above the maximum down to the maximum', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves([]);
+
+      requestContext.data = { limit: '999999' };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
   });
 
   describe('getting fixes by status', () => {
