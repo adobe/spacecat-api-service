@@ -2542,6 +2542,53 @@ describe('TaskManagementController', () => {
       expect(thrown.message).to.equal('DB down');
     });
 
+    it('individual batch: short-circuits remaining suggestions after grant revocation', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
+      const sid3 = 'dddddddd-eeee-ffff-aaaa-dddddddddddd';
+      const conn = makeConnection();
+      const grantRevokedErr = Object.assign(new Error('Grant revoked'), { code: 'GRANT_REVOKED' });
+
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const jiraCreateTicket = sinon.stub().rejects(grantRevokedErr);
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: { create: sinon.stub().returns({ createTicket: jiraCreateTicket }) },
+        },
+      })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Batch grant revoked',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2, sid3],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      expect(body.results).to.have.lengthOf(3);
+      body.results.forEach((r) => {
+        expect(r.status).to.equal(409);
+        expect(r.error).to.equal('connection_reauth_required');
+      });
+      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+      expect(jiraCreateTicket).to.have.been.calledOnce;
+    });
+
     // ── Branch 11: connection.save() fails after Jira error in grouped mode ──────
     it('grouped mode: logs warn but still returns 500 when connection.save fails after Jira error', async () => {
       const conn = makeConnection({
@@ -3174,6 +3221,47 @@ describe('TaskManagementController', () => {
       expect(conn.markRequiresReauth).to.not.have.been.called;
     });
 
+    it('grouped mode: returns 409 and marks reauth when ticketClient.createTicket throws GRANT_REVOKED', async () => {
+      const conn = makeConnection();
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
+          Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
+        },
+      });
+
+      const grantRevokedErr = Object.assign(new Error('Grant revoked'), { code: 'GRANT_REVOKED' });
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ createTicket: sinon.stub().rejects(grantRevokedErr) }),
+          },
+        },
+      })).default;
+
+      const { createTicket } = Ctrl(ctx);
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Grouped grant revoked',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          mode: 'grouped',
+          suggestionIds: [SUGGESTION_ID],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.message).to.include('reconnect');
+      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+    });
+
     // ── Lines 999-1009: Grouped mode Ticket.create throws → 500 ─────────────────
     it('grouped mode: returns 500 when Ticket.create throws after Jira createTicket succeeds', async () => {
       const conn = makeConnection();
@@ -3637,6 +3725,37 @@ describe('TaskManagementController', () => {
       expect(conn.markRequiresReauth).to.not.have.been.called;
     });
 
+    it('returns 409 and marks reauth when Jira client throws GRANT_REVOKED', async () => {
+      const conn = makeConnection();
+      const err = Object.assign(new Error('Grant revoked'), { code: 'GRANT_REVOKED' });
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findById: sinon.stub().resolves(conn),
+          },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ listProjects: sinon.stub().rejects(err) }),
+          },
+        },
+      })).default;
+
+      const { listProjects } = Ctrl(ctx);
+      const res = await listProjects(makeReqCtx());
+      expect(res.status).to.equal(409);
+      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+    });
+
     it('returns 500 on generic list projects error', async () => {
       const conn = makeConnection();
       const ctx = makeContext({
@@ -3802,6 +3921,37 @@ describe('TaskManagementController', () => {
       const res = await listIssueTypes(makeReqCtx());
       expect(res.status).to.equal(409);
       expect(conn.markRequiresReauth).to.not.have.been.called;
+    });
+
+    it('returns 409 and marks reauth when Jira client throws GRANT_REVOKED', async () => {
+      const conn = makeConnection();
+      const err = Object.assign(new Error('Grant revoked'), { code: 'GRANT_REVOKED' });
+      const ctx = makeContext({
+        dataAccess: {
+          TaskManagementConnection: {
+            findById: sinon.stub().resolves(conn),
+          },
+        },
+      });
+
+      const Ctrl = (await esmock('../../src/controllers/task-management.js', {
+        '@aws-sdk/client-secrets-manager': {
+          SecretsManagerClient: class {
+            // eslint-disable-next-line class-methods-use-this
+            send() { return Promise.resolve({}); }
+          },
+        },
+        '@adobe/spacecat-shared-ticket-client': {
+          TicketClientFactory: {
+            create: sinon.stub().returns({ listIssueTypes: sinon.stub().rejects(err) }),
+          },
+        },
+      })).default;
+
+      const { listIssueTypes } = Ctrl(ctx);
+      const res = await listIssueTypes(makeReqCtx());
+      expect(res.status).to.equal(409);
+      expect(conn.markRequiresReauth).to.have.been.calledOnce;
     });
 
     it('returns 500 on generic list issue types error', async () => {
