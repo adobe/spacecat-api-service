@@ -17,7 +17,7 @@ import sinon from 'sinon';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../src/support/utils.js';
 import {
-  roundUpToBlock, promptUnits, modelChangeUnits, marketNeed, readAiTotals,
+  roundUpToBlock, modelChangeUnits, readAiTotals,
   ensureAiHeadroom, releaseAiSurplus, DEFAULT_BLOCKS, DEFAULT_POLL,
 } from '../../../src/support/serenity/resource-manager.js';
 
@@ -61,13 +61,12 @@ describe('resource-manager — pure helpers', () => {
     expect(roundUpToBlock(3, 1)).to.equal(3);
   });
 
-  it('need calculators clamp negatives to 0', () => {
-    expect(promptUnits(3, 2)).to.equal(6);
-    expect(promptUnits(-3, 2)).to.equal(0);
-    expect(modelChangeUnits(10, 1)).to.equal(10);
-    expect(modelChangeUnits(10, -1)).to.equal(0);
-    expect(marketNeed({ generatedTexts: 4, models: 2 })).to.deep.equal({ projects: 1, prompts: 8 });
-    expect(marketNeed()).to.deep.equal({ projects: 1, prompts: 0 });
+  it('modelChangeUnits: publishedTexts × Δmodels, clamps a swap/removal (Δ ≤ 0) to 0', () => {
+    expect(modelChangeUnits(10, 1)).to.equal(10); // net add of 1 model over 10 texts
+    expect(modelChangeUnits(200, 2)).to.equal(400);
+    expect(modelChangeUnits(10, 0)).to.equal(0); // swap (net 0) → no top-up
+    expect(modelChangeUnits(10, -1)).to.equal(0); // net removal → no top-up (release handles it)
+    expect(modelChangeUnits(-3, 2)).to.equal(0); // negative texts clamped
   });
 
   it('readAiTotals: strict nested accessor, drafted defaults to 0', () => {
@@ -323,6 +322,24 @@ describe('resource-manager — releaseAiSurplus', () => {
       childId: CHILD, poll: { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() },
     }, log);
     expect(r).to.deep.equal({ released: false });
+  });
+
+  it('failFast: lowers total with ONE transfer and NO settle poll (synchronous request-path release)', async () => {
+    // projects at floor (used 5 / total 5, no surplus); prompts used dropped to 50 after a removal
+    // republish, total 400 → release lowers prompts to roundUp(50)=100, projects untouched.
+    const t = makeTransport({ child: resources(dim(5, 0, 5), dim(50, 0, 400)) });
+    const r = await releaseAiSurplus(t, { childId: CHILD, failFast: true }, log);
+    expect(r.released).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.been.calledOnceWith(CHILD, ai(5, 100));
+    expect(t.getWorkspaceStatus).to.not.have.been.called; // no settle poll on the fail-fast path
+  });
+
+  it('failFast: a transient "workspace not ready" is swallowed best-effort (503 not thrown)', async () => {
+    const transfer = sinon.stub().rejects(notReady());
+    const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
+    const r = await releaseAiSurplus(t, { childId: CHILD, failFast: true }, log);
+    expect(r).to.deep.equal({ released: false });
+    expect(transfer).to.have.callCount(1); // one attempt, no retry loop
   });
 
   it('exports the default blocks', () => {

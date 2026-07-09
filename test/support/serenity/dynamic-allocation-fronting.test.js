@@ -231,6 +231,55 @@ describe('dynamic-allocation fronting — update-models', () => {
     expect(t.transferWorkspaceResources).to.have.been.called;
   });
 
+  it('ON + swap (drop 1, add 1 → net delta 0): ZERO resource transfers (no over-grant)', async () => {
+    // Current [m1]; request [m2] — a swap. finalCount 1 − currentCount 1 = net 0. Gross-add sizing
+    // would top up publishedTexts × 1; net-delta sizing must transfer nothing.
+    const listAiModels = sinon.stub().resolves({ items: [{ id: 'a1', model: { id: 'm1', key: 'k1' } }] });
+    const listPromptsByTags = sinon.stub().resolves({ items: [{ id: 'q1' }, { id: 'q2' }] });
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      listAiModels,
+      listPromptsByTags,
+    });
+    await handleUpdateModelsSubworkspace(
+      t,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['m2'] },
+      log,
+      { dynamicAllocation: true, masterId: MASTER },
+    );
+    // No top-up (net 0) and no release (net not < 0) → zero resource transfers.
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON + pure removal (net delta < 0): NO top-up, ONE release AFTER the publish', async () => {
+    // Current [m1, m2]; request [m1] — net −1. No top-up; after the sync publishes, release the
+    // freed units (child prompts used 100 / total 500 → release lowers total to 100).
+    const listAiModels = sinon.stub().resolves({
+      items: [{ id: 'a1', model: { id: 'm1', key: 'k1' } }, { id: 'a2', model: { id: 'm2', key: 'k2' } }],
+    });
+    const getWorkspaceResources = sinon.stub();
+    getWorkspaceResources.withArgs(WS).resolves(resources(dimObj(1, 0, 5), dimObj(100, 0, 500)));
+    getWorkspaceResources.withArgs(MASTER).resolves(AMPLE_MASTER);
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      listAiModels,
+      getWorkspaceResources,
+    });
+    await handleUpdateModelsSubworkspace(
+      t,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
+      log,
+      { dynamicAllocation: true, masterId: MASTER },
+    );
+    // Exactly one transfer (the release), and it ran AFTER the publish (publish → read → release).
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+    expect(t.publishProject.calledBefore(t.transferWorkspaceResources)).to.equal(true);
+    expect(t.getWorkspaceResources.calledAfter(t.publishProject)).to.equal(true);
+  });
+
   it('ON but no models added (net-zero Δ): no headroom read', async () => {
     const listAiModels = sinon.stub().resolves({ items: [{ id: 'a1', model: { id: 'm1', key: 'k1' } }] });
     const t = makeTransport({

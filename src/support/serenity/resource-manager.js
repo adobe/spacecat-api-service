@@ -93,28 +93,17 @@ export function roundUpToBlock(n, block) {
 // ---- need calculators (domain intent — a transport decorator can't compute these) --------------
 
 /**
- * Prompt units for M texts across K attached models — metered at publish (`texts × models`).
- * @param {number} texts @param {number} models @returns {number}
- */
-export const promptUnits = (texts, models) => Math.max(0, texts) * Math.max(0, models);
-
-/**
- * Prompt units for attaching/removing Δmodels to a project that already has `publishedTexts`
- * published texts — every existing text re-meters by the model delta.
+ * Prompt units re-metered when a project's model set changes by `deltaModels` — every one of its
+ * `publishedTexts` published texts re-meters by the model delta (`texts × Δmodels`, live-verified).
+ * The model-update seam sizes on the SIGNED net delta (`finalModelCount − currentModelCount`): a
+ * positive value is a top-up need, and this clamps a swap (net 0) or a net removal (net < 0) to 0
+ * so no top-up fires — the freed units are handed back by `releaseAiSurplus` after the publish
+ * instead. (The create/bulk-prompt seams size at their PUBLISH seam from `used + drafted` via
+ * `ensureAiHeadroom({ includeDrafted })`, which is staleness-immune, so they need no calculator.)
  * @param {number} publishedTexts @param {number} deltaModels @returns {number}
  */
 export const modelChangeUnits = (publishedTexts, deltaModels) => Math.max(0, publishedTexts)
   * Math.max(0, deltaModels);
-
-/**
- * Need for creating + publishing a market: one project plus its generated prompts' units.
- * @param {{ generatedTexts?: number, models?: number }} [spec]
- * @returns {Dims}
- */
-export const marketNeed = ({ generatedTexts = 0, models = 0 } = {}) => ({
-  projects: 1,
-  prompts: promptUnits(generatedTexts, models),
-});
 
 // ---- reads --------------------------------------------------------------------------------------
 
@@ -346,11 +335,16 @@ export async function ensureAiHeadroom(transport, {
  * @param {Partial<Blocks>} [opts.floor] minimum `total` per dim to retain (default 0)
  * @param {Blocks} [opts.blocks]
  * @param {PollOpts} [opts.poll]
+ * @param {boolean} [opts.failFast] when true, do the release transfer with ONE attempt and NO
+ *   settle poll (via the hot-path {@link transferOnce}) instead of the poll-based settle loop. Set
+ *   this for a SYNCHRONOUS request-path caller (e.g. the model-update seam releasing units the
+ *   removal just freed): honours the fail-fast hot-path rule, and is safe because release is
+ *   best-effort + the transfer is absolute/idempotent and has no dependent op after it in-request.
  * @param {any} [log]
  * @returns {Promise<{ released: boolean, target?: { projects: number, prompts: number } }>}
  */
 export async function releaseAiSurplus(transport, {
-  childId, floor = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL,
+  childId, floor = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL, failFast = false,
 }, log) {
   try {
     const child = readAiTotals(await transport.getWorkspaceResources(childId));
@@ -367,7 +361,11 @@ export async function releaseAiSurplus(transport, {
     if (!lowered) {
       return { released: false };
     }
-    await transferAndSettle(transport, childId, target, poll, log);
+    if (failFast) {
+      await transferOnce(transport, childId, target, log);
+    } else {
+      await transferAndSettle(transport, childId, target, poll, log);
+    }
     return { released: true, target };
   } catch (e) {
     // Best-effort for EXPECTED failures (transport / pool / busy) — a reconciler converges strays.

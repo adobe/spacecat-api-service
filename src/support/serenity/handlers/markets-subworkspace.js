@@ -36,7 +36,7 @@ import {
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
-import { modelChangeUnits } from '../resource-manager.js';
+import { modelChangeUnits, releaseAiSurplus } from '../resource-manager.js';
 import { topicTag } from '../prompt-tags.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
@@ -606,13 +606,12 @@ export async function handleDeleteMarketSubworkspace(
   if (dataAccess) {
     await tombstoneMappingRow(dataAccess, project.id, log);
   }
-  // SCOPE NOTE (serenity-docs#22, Rainer 2026-07-08): this delete does NOT yet call
-  // `releaseAiSurplus` to hand the freed project/prompt units back to the parent pool — release
-  // wiring on delete / model-remove is a deliberate fast-follow, not built here. The stranded units
-  // self-heal (next `ensureAiHeadroom` reuse, a later release, or decommission — see the
-  // `releaseAiSurplus` scope note). When that wiring lands, it MUST follow the same INLINE,
-  // fail-fast, best-effort shape as `ensureAiHeadroom` (one transfer, no poll, never throws);
-  // do NOT add an async queue/worker/reconciler for it — none is needed.
+  // SCOPE NOTE (serenity-docs#22): this market DELETE does NOT yet call `releaseAiSurplus` to hand
+  // the freed project/prompt units back to the parent pool — release wiring on the delete path is a
+  // deliberate fast-follow, not built here. The stranded units self-heal (next `ensureAiHeadroom`
+  // reuse, a later release, or decommission — see the `releaseAiSurplus` scope note). When it
+  // lands, follow the model-update seam (`handleUpdateModelsSubworkspace`): inline, fail-fast
+  // (`releaseAiSurplus({ failFast: true })`), best-effort, post-publish — no async queue/worker.
   return { status: 204 };
 }
 
@@ -763,10 +762,10 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  * @param {object} body
  * @param {object} log
  * @param {object} [options]
- * @param {boolean} [options.dynamicAllocation=false] - global kill-switch. When on, front the
- *   prompt re-meter (`publishedTexts × Δmodels`) BEFORE the sync's inner publish. Fronting lives at
- *   this mode-guarded caller, NOT inside the shared `syncModelsForProject`, so flat mode is
- *   untouched (byte-for-byte).
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch. When on, size on the
+ *   SIGNED net model delta: top up (`publishedTexts × netDelta`) before the sync's publish on a net
+ *   ADD, and release the freed units after it on a net REMOVAL. Lives at this mode-guarded caller,
+ *   NOT inside the shared `syncModelsForProject`, so flat mode is untouched (byte-for-byte).
  * @param {string} [options.masterId=''] - org parent/master workspace id (units pool).
  */
 export async function handleUpdateModelsSubworkspace(
@@ -798,35 +797,39 @@ export async function handleUpdateModelsSubworkspace(
   }
   const projectId = String(project.id);
 
-  // PROMPT re-meter seam: attaching Δ models re-meters every published text at the sync's inner
-  // publish (`publishedTexts × Δmodels`). Front it here (no-op when OFF). Guarded on `enabled` so
-  // the OFF path issues zero extra reads. `added` is computed the same way syncModelsForProject
-  // diffs (catalog id set difference) so the metered count matches what will actually be added.
+  // PROMPT re-meter seam. PUT /models is REPLACE semantics — one request may add AND remove models
+  // — so size on the SIGNED NET model delta (`finalModelCount − currentModelCount`), not adds.
+  // published consumption is `publishedTexts × finalModelCount`, so a swap (net 0) or a net removal
+  // consumes nothing extra and must NOT top up (gross-add sizing over-grants and can spuriously
+  // 409 ORG_POOL_EXHAUSTED). A net ADD tops up before the sync's publish; a net REMOVAL frees units
+  // that are handed back after it. No-op when OFF (guarded on `enabled` → zero extra reads).
   const headroom = createHeadroomGuard(
     transport,
     { enabled: dynamicAllocation, childId: workspaceId, masterId },
     log,
   );
+  let netDelta = 0;
   if (headroom.enabled) {
-    // NOTE: this reads the current model set to size the top-up, and syncModelsForProject below
-    // reads it again to diff — one duplicate ai_models fetch on the flag-ON path. Deduping it needs
-    // a shared pre-mutation diff seam in syncModelsForProject (tracked as a PR-4 follow-up); the
-    // duplicate read is latency-only (not a correctness/pool concern), so it is accepted here.
+    // Reads the current model set to size the delta; syncModelsForProject below reads it again to
+    // diff — one duplicate ai_models fetch on the flag-ON path (latency-only, not a correctness
+    // concern; deduping needs a shared pre-mutation diff seam in syncModelsForProject — PR-4).
+    // listSliceModels returns one cleaned item per attached model, so its length IS the current
+    // attached-model count (all we need for the net delta — not the id set).
     const current = await listSliceModels(transport, workspaceId, projectId);
-    const currentIds = new Set();
-    for (const m of current.items || []) {
-      if (m && hasText(m.id)) {
-        currentIds.add(String(m.id));
-      }
-    }
-    const added = [...new Set(modelIds.map(String))].filter((id) => !currentIds.has(id)).length;
-    if (added > 0) {
+    const finalModelCount = new Set(modelIds.map(String)).size;
+    netDelta = finalModelCount - current.items.length;
+    if (netDelta > 0) {
       const publishedTexts = await countPublishedPrompts(transport, workspaceId, projectId, log);
-      await headroom.ensure({ prompts: modelChangeUnits(publishedTexts, added) });
+      // OPEN QUESTION (serenity-docs#22, Rainer 2026-07-08): the sync's publish also converts this
+      // project's DRAFTED prompts to `used`, yet this seam does NOT pass `includeDrafted` (the
+      // create-market/bulk-prompt seams do). Whether that under-provisions depends on whether
+      // Semrush re-checks the prompt dimension at publish or only at the write (§2 asserts
+      // write-only). NOT guessed here — deferred to the live-gateway canary (§8) to settle.
+      await headroom.ensure({ prompts: modelChangeUnits(publishedTexts, netDelta) });
     }
   }
 
-  return syncModelsForProject(
+  const result = await syncModelsForProject(
     transport,
     workspaceId,
     projectId,
@@ -834,4 +837,14 @@ export async function handleUpdateModelsSubworkspace(
     { geoTargetId, languageCode },
     log,
   );
+
+  // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then
+  // the child's `used` reflects the removal, so releaseAiSurplus reads it and lowers `total` to it
+  // (ordering §3 requires: publish → read → release). Fail-fast (one transfer, no settle poll) +
+  // best-effort per the release scope decision; childId is guaranteed present (headroom.enabled).
+  if (headroom.enabled && netDelta < 0) {
+    await releaseAiSurplus(transport, { childId: workspaceId, failFast: true }, log);
+  }
+
+  return result;
 }
