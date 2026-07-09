@@ -329,8 +329,17 @@ export async function ensureAiHeadroom(transport, {
 /**
  * Release whole freed blocks back to the parent AFTER a delete/removal has been re-published (so
  * `used` reflects the removal). Never drops the child below `floor`; best-effort — logs and returns
- * on any failure (a reconciler converges strays). Intended for the async/reconciler path, not the
- * synchronous delete request.
+ * on any failure.
+ *
+ * SCOPE DECISION (serenity-docs#22, Rainer 2026-07-08 — explicit, not an oversight): release runs
+ * INLINE, fail-fast, best-effort, with NO async/queue/worker/reconciler infra — and none is
+ * needed. Because a transfer is ABSOLUTE + idempotent, a missed or failed release simply leaves
+ * surplus units stranded on the child; that self-heals three ways — the child's next
+ * `ensureAiHeadroom` reuses the headroom (no re-transfer), a later release retry lowers it, or
+ * decommission reclaims the whole allocation. So do NOT read "reconciler" here as "async infra
+ * still needed"; the earlier "async/reconciler path" framing is superseded by this inline
+ * best-effort decision. If/when a caller wires release into the delete / model-remove paths, keep
+ * this same inline best-effort shape — do not introduce a queue or worker for it.
  * @param {any} transport
  * @param {object} opts
  * @param {string} opts.childId

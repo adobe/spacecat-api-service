@@ -606,6 +606,13 @@ export async function handleDeleteMarketSubworkspace(
   if (dataAccess) {
     await tombstoneMappingRow(dataAccess, project.id, log);
   }
+  // SCOPE NOTE (serenity-docs#22, Rainer 2026-07-08): this delete does NOT yet call
+  // `releaseAiSurplus` to hand the freed project/prompt units back to the parent pool — release
+  // wiring on delete / model-remove is a deliberate fast-follow, not built here. The stranded units
+  // self-heal (next `ensureAiHeadroom` reuse, a later release, or decommission — see the
+  // `releaseAiSurplus` scope note). When that wiring lands, it MUST follow the same INLINE,
+  // fail-fast, best-effort shape as `ensureAiHeadroom` (one transfer, no poll, never throws);
+  // do NOT add an async queue/worker/reconciler for it — none is needed.
   return { status: 204 };
 }
 

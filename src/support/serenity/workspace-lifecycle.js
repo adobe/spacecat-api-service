@@ -303,6 +303,13 @@ export async function ensureSubworkspace(
     // replaces — the metered handlers top up just-in-time (ensureAiHeadroom) and release surplus,
     // so re-flattening the total here would both undo a JIT top-up and, on an ON→OFF rollback of an
     // already-grown child, risk setting `total` below `used`. Flag OFF unchanged (byte-for-byte).
+    //
+    // SCOPE DECISION (serenity-docs#22, Rainer 2026-07-08 — explicit, NOT a deferral): there is NO
+    // rightsizing/backfill sweep for children already carved under the OLD flat allocation, and
+    // none is planned. It was evaluated and rejected as unnecessary: decommission already releases
+    // a child's FULL allocation to the parent pool, and any over-provisioned survivor self-heals
+    // on its next delete/model-remove release or on decommission (the carve only over-reserves — it
+    // never breaks the child). So do not read the absence of a migration sweep as missing work.
     if (!dynamicAllocation) {
       await transport.transferWorkspaceResources(existing, resourceAllocation(marketCount));
       await pollUntilCreated(transport, existing, poll);
