@@ -42,13 +42,14 @@ export const SUPPORTED_EDGE_ROUTING_CDN_TYPES = Object.keys(EDGE_OPTIMIZE_CDN_ST
 export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-marking';
 
 // Import worker job type for async pattern-based covered marking.
-// Enqueued after pattern deploy (domain-wide today; extensible to segments later)
-// so the import worker marks all matching URL-level suggestions as covered.
+// Enqueued after a pattern suggestion (domain-wide or path-level) is deployed, so the
+// import worker marks all matching suggestions as covered outside the API request path.
 export const PATTERN_COVERED_MARKING_TYPE = 'pattern-based-covered-marking';
 
 // Import worker job type for async pattern-based covered cleanup.
-// Enqueued after domain-wide rollback so the import worker removes coveredByDomainWide
-// from all affected URL-level suggestions outside the API request path.
+// Enqueued after a pattern suggestion (domain-wide or path-level) is rolled back, so the
+// import worker removes the covered marking from all affected suggestions outside the
+// API request path.
 export const PATTERN_COVERED_CLEANUP_TYPE = 'pattern-based-covered-cleanup';
 
 // Delay (seconds) before triggering the edge-optimize enabled marking job after CDN routing update.

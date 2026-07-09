@@ -197,11 +197,11 @@ async function enqueuePatternJob({
     }));
 
     log.info(
-      `[${logPrefix}] Queued domain-wide ${actionLabel} for `
-      + `${patternBasedSuggestionIds.length} domain-wide suggestion(s)`,
+      `[${logPrefix}] Queued pattern-based ${actionLabel} for `
+      + `${patternBasedSuggestionIds.length} pattern suggestion(s)`,
     );
   } catch (sqsError) {
-    log.warn(`[${logPrefix}] Failed to queue domain-wide ${warningLabel}: ${sqsError.message}`);
+    log.warn(`[${logPrefix}] Failed to queue pattern-based ${warningLabel}: ${sqsError.message}`);
   }
 }
 
@@ -2425,11 +2425,11 @@ function SuggestionsController(ctx, sqs, env) {
 
       context.log.info(`[edge-deploy] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
 
-      // Enqueue async covered marking for deployed domain-wide suggestions.
-      // The sync Promise.all inside deployToEdge times out at 2-3k+ suggestions;
-      // the import worker job guarantees marking happens regardless.
+      // Enqueue async covered marking for deployed pattern suggestions (domain-wide and
+      // path-level alike). The sync Promise.all inside deployToEdge times out at 2-3k+
+      // suggestions; the import worker job guarantees marking happens regardless.
       const succeededSuggestionIds = new Set(succeededSuggestions.map((s) => s.getId()));
-      const succeededDomainWideIds = domainWideSuggestions
+      const succeededPatternSuggestionIds = [...domainWideSuggestions, ...pathSuggestions]
         .map(({ suggestion }) => suggestion.getId())
         .filter((id) => succeededSuggestionIds.has(id));
 
@@ -2440,7 +2440,7 @@ function SuggestionsController(ctx, sqs, env) {
           type: PATTERN_COVERED_MARKING_TYPE,
           siteId,
           opportunityId,
-          patternBasedSuggestionIds: succeededDomainWideIds,
+          patternBasedSuggestionIds: succeededPatternSuggestionIds,
         },
         log: context.log,
         logPrefix: 'edge-deploy',
@@ -2795,8 +2795,9 @@ function SuggestionsController(ctx, sqs, env) {
     let succeededSuggestions = [];
 
     // Delegate all rollback to the tokowaka client — domain-wide, path-level, and per-URL
-    // suggestions are all handled uniformly. The client also cleans up suggestions that were
-    // covered by a domain-wide or path-level pattern deployment.
+    // suggestions are all handled uniformly (allow-list/config removal). Cleanup of
+    // suggestions covered by the rolled-back pattern happens separately, asynchronously,
+    // via the enqueuePatternJob call below.
     if (isNonEmptyArray(validSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
@@ -2833,12 +2834,12 @@ function SuggestionsController(ctx, sqs, env) {
           + `suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`,
         );
 
-        // Enqueue async covered cleanup for rolled-back domain-wide suggestions.
-        // The import worker removes coveredByDomainWide from affected URL suggestions
-        // outside the API request path to avoid large synchronous save fanout.
+        // Enqueue async covered cleanup for rolled-back pattern suggestions (domain-wide
+        // and path-level alike). The import worker removes the covered marking from
+        // affected URL suggestions outside the API request path to avoid large
+        // synchronous save fanout.
         const succeededSuggestionIds = new Set(succeededSuggestions.map((s) => s.getId()));
-        const succeededDomainWideIds = validPatterns
-          .filter(isDomainWideSuggestion)
+        const succeededPatternSuggestionIds = validPatterns
           .map((suggestion) => suggestion.getId())
           .filter((id) => succeededSuggestionIds.has(id));
 
@@ -2849,7 +2850,7 @@ function SuggestionsController(ctx, sqs, env) {
             type: PATTERN_COVERED_CLEANUP_TYPE,
             siteId,
             opportunityId,
-            patternBasedSuggestionIds: succeededDomainWideIds,
+            patternBasedSuggestionIds: succeededPatternSuggestionIds,
           },
           log: context.log,
           logPrefix: 'edge-rollback',

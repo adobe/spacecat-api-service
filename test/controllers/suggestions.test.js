@@ -8824,6 +8824,59 @@ describe('Suggestions Controller', () => {
       expect(payload.patternBasedSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
     });
 
+    it('enqueues pattern-based-covered-marking job after successful path-level deploy', async () => {
+      const pathSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/blog',
+          pathType: 'prefix',
+          pathPattern: '/blog',
+          allowedRegexPatterns: ['^https://example\\.com/blog/.*$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      setEdgeSuggestions([pathSuggestion]);
+
+      const suggestionsControllerWithImportWorkerQueue = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker',
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [pathSuggestion],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      });
+
+      await suggestionsControllerWithImportWorkerQueue.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/import-worker');
+      expect(payload.type).to.equal('pattern-based-covered-marking');
+      expect(payload.patternBasedSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
+    });
+
     it('chunks pattern-based-covered-marking jobs when payload exceeds SQS safe size', async () => {
       const suggestionIds = [
         'a'.repeat(100 * 1024),
@@ -8954,7 +9007,7 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(context.log.warn.calledWithMatch('Failed to queue domain-wide covered marking')).to.equal(true);
+      expect(context.log.warn.calledWithMatch('Failed to queue pattern-based covered marking')).to.equal(true);
     });
 
     it('logs warning and skips enqueue when IMPORT_WORKER_QUEUE_URL is missing', async () => {
@@ -11423,6 +11476,52 @@ describe('Suggestions Controller', () => {
       expect(payload.patternBasedSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
     });
 
+    it('enqueues pattern-based-covered-cleanup job after successful path-level rollback', async () => {
+      const suggestionsControllerWithImportWorkerQueue = SuggestionsController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        IMPORT_WORKER_QUEUE_URL: 'https://sqs.example.com/import-worker',
+      });
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves({
+        getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/blog',
+          pathType: 'prefix',
+          pathPattern: '/blog',
+          allowedRegexPatterns: ['^https://example\\.com/blog/.*$'],
+          edgeDeployed: Date.now(),
+        }),
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      });
+
+      const response = await suggestionsControllerWithImportWorkerQueue.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const [, payload] = mockSqs.sendMessage.firstCall.args;
+      expect(payload.type).to.equal('pattern-based-covered-cleanup');
+      expect(payload.patternBasedSuggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
+    });
+
     it('logs warning and skips cleanup enqueue when IMPORT_WORKER_QUEUE_URL is missing', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
@@ -11463,7 +11562,7 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(context.log.warn.calledWithMatch('Failed to queue domain-wide covered cleanup')).to.equal(true);
+      expect(context.log.warn.calledWithMatch('Failed to queue pattern-based covered cleanup')).to.equal(true);
     });
 
     it('passes undefined updatedBy when profile email is missing (shared client applies fallbacks)', async () => {
