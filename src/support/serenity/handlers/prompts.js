@@ -460,7 +460,12 @@ export async function mapLimit(items, limit, mapper) {
  * POST /serenity/prompts — bulk create.
  * Each input must carry `(geoTargetId, languageCode, text, tags?)`. Inputs
  * are grouped by slice; the matching BrandSemrushProject row resolves the
- * upstream project; publish runs once per affected project at the end.
+ * upstream project; publish runs once per affected project at the end —
+ * unless `body.deferPublish` is true (serenity-docs#32 CSV-chunking), in
+ * which case the create is a draft-only write and the caller is responsible
+ * for triggering a publish itself (e.g. a normal, non-deferred call on the
+ * last chunk of an import, which publishes every project touched across the
+ * whole import since a single CSV import always targets one project).
  */
 export async function handleCreatePrompts(
   transport,
@@ -582,6 +587,12 @@ export async function handleCreatePrompts(
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
 
+  if (body?.deferPublish === true) {
+    return {
+      created, skipped, failed, published: false,
+    };
+  }
+
   const publishErrors = await publishAffected(
     transport,
     semrushWorkspaceId,
@@ -598,7 +609,9 @@ export async function handleCreatePrompts(
     });
   }
 
-  return { created, skipped, failed };
+  return {
+    created, skipped, failed, published: true,
+  };
 }
 
 /**

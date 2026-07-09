@@ -816,6 +816,50 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       message: 'publish: publish boom',
     });
   });
+
+  // serenity-docs#32: CSV chunking on elmo-ui creates drafts-only per chunk
+  // (deferPublish: true) and publishes once on the final, non-deferred chunk.
+  it('skips publishProject and reports published:false when body.deferPublish is true', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'ok', geoTargetId: 2840, languageCode: 'en', tags: [],
+      }],
+      deferPublish: true,
+    }, fakeLog());
+
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.published).to.equal(false);
+    expect(transport.publishProject).to.not.have.been.called;
+  });
+
+  it('publishes and reports published:true when body.deferPublish is absent', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'ok', geoTargetId: 2840, languageCode: 'en', tags: [],
+      }],
+    }, fakeLog());
+
+    expect(result.published).to.equal(true);
+    expect(transport.publishProject).to.have.been.calledOnce;
+  });
 });
 
 describe('handlers/prompts.js — handleUpdatePrompt', () => {

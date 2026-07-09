@@ -215,6 +215,12 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
+  if (body?.deferPublish === true) {
+    return {
+      created, skipped, failed, published: false,
+    };
+  }
+
   const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
@@ -222,7 +228,9 @@ export async function handleCreatePromptsSubworkspace(
     failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
   }
 
-  return { created, skipped, failed };
+  return {
+    created, skipped, failed, published: true,
+  };
 }
 
 /**

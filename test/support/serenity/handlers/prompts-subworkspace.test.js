@@ -246,6 +246,32 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.failed).to.have.length(1);
       expect(result.failed[0].message).to.match(/^publish:/);
     });
+
+    // serenity-docs#32: CSV chunking creates drafts-only per chunk
+    // (deferPublish: true), publishing once on the final, non-deferred chunk.
+    it('skips publishProject and reports published:false when body.deferPublish is true', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+        deferPublish: true,
+      }, log);
+      expect(result.created).to.have.length(1);
+      expect(result.published).to.equal(false);
+      expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    it('publishes and reports published:true when body.deferPublish is absent', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.published).to.equal(true);
+      expect(transport.publishProject).to.have.been.calledOnce;
+    });
   });
 
   describe('handleUpdatePromptSubworkspace', () => {
