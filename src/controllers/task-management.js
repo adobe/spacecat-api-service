@@ -960,12 +960,13 @@ function TaskManagementController(context) {
           }
 
           if (batchTicketErr) {
-            const isReauthNeeded = batchTicketErr.status === 401
-              || batchTicketErr.code === 'TOKEN_REFRESH_REQUIRED'
+            const isGrantRevoked = batchTicketErr.code === 'GRANT_REVOKED'
               || batchTicketErr.code === 'REQUIRES_REAUTH'
-              || batchTicketErr.code === 'GRANT_REVOKED'
               || batchTicketErr.message?.includes('requires re-authorization');
-            if (isReauthNeeded) {
+            const isTokenExpired = batchTicketErr.status === 401
+              || batchTicketErr.code === 'TOKEN_REFRESH_REQUIRED';
+
+            if (isGrantRevoked) {
               // eslint-disable-next-line no-await-in-loop
               await connection.markRequiresReauth();
               results.push({ suggestionId: suggId, status: STATUS_CONFLICT, error: 'connection_reauth_required' });
@@ -974,6 +975,13 @@ function TaskManagementController(context) {
               const remainingIds = suggestionIds.slice(suggestionIds.indexOf(suggId) + 1);
               for (const remainingId of remainingIds) {
                 results.push({ suggestionId: remainingId, status: STATUS_CONFLICT, error: 'connection_reauth_required' });
+              }
+              break;
+            } else if (isTokenExpired) {
+              results.push({ suggestionId: suggId, status: STATUS_CONFLICT, error: 'token_refresh_required' });
+              const remainingIds = suggestionIds.slice(suggestionIds.indexOf(suggId) + 1);
+              for (const remainingId of remainingIds) {
+                results.push({ suggestionId: remainingId, status: STATUS_CONFLICT, error: 'token_refresh_required' });
               }
               break;
             } else {
@@ -1080,14 +1088,21 @@ function TaskManagementController(context) {
           parent: data.parent,
         });
       } catch (err) {
-        const isReauthNeeded = err.status === 401
-          || err.code === 'TOKEN_REFRESH_REQUIRED'
+        const isGrantRevoked = err.code === 'GRANT_REVOKED'
           || err.code === 'REQUIRES_REAUTH'
-          || err.code === 'GRANT_REVOKED'
           || err.message?.includes('requires re-authorization');
-        if (isReauthNeeded) {
+        const isTokenExpired = err.status === 401
+          || err.code === 'TOKEN_REFRESH_REQUIRED';
+
+        if (isGrantRevoked) {
           await connection.markRequiresReauth();
           const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
+          await releaseDedupLock();
+          await markIdempotencyFailed();
+          return createResponse(body, STATUS_CONFLICT);
+        }
+        if (isTokenExpired) {
+          const body = { message: 'Jira OAuth token expired. Please retry after refreshing tokens.' };
           await releaseDedupLock();
           await markIdempotencyFailed();
           return createResponse(body, STATUS_CONFLICT);
@@ -1219,19 +1234,20 @@ function TaskManagementController(context) {
         parent: data.parent,
       });
     } catch (err) {
-      // Detect both direct Jira API 401 (err.status) and OAuthCredentialManager's
-      // refresh-token-revoked error (plain Error without .status, but with a
-      // specific message). Both require marking the connection for re-auth and
-      // surfacing a 409 so the UI can prompt the user to reconnect.
-      const isReauthNeeded = err.status === 401
-        || err.code === 'TOKEN_REFRESH_REQUIRED'
+      const isGrantRevoked = err.code === 'GRANT_REVOKED'
         || err.code === 'REQUIRES_REAUTH'
-        || err.code === 'GRANT_REVOKED'
         || err.message?.includes('requires re-authorization');
+      const isTokenExpired = err.status === 401
+        || err.code === 'TOKEN_REFRESH_REQUIRED';
 
-      if (isReauthNeeded) {
+      if (isGrantRevoked) {
         await connection.markRequiresReauth();
         const body = { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' };
+        await markIdempotencyFailed();
+        return createResponse(body, STATUS_CONFLICT);
+      }
+      if (isTokenExpired) {
+        const body = { message: 'Jira OAuth token expired. Please retry after refreshing tokens.' };
         await markIdempotencyFailed();
         return createResponse(body, STATUS_CONFLICT);
       }
@@ -1420,16 +1436,22 @@ function TaskManagementController(context) {
       const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
       projects = await ticketClient.listProjects();
     } catch (err) {
-      const isReauthNeeded = err.status === 401
-        || err.code === 'TOKEN_REFRESH_REQUIRED'
+      const isGrantRevoked = err.code === 'GRANT_REVOKED'
         || err.code === 'REQUIRES_REAUTH'
-        || err.code === 'GRANT_REVOKED'
         || err.message?.includes('requires re-authorization');
+      const isTokenExpired = err.status === 401
+        || err.code === 'TOKEN_REFRESH_REQUIRED';
 
-      if (isReauthNeeded) {
+      if (isGrantRevoked) {
         await connection.markRequiresReauth();
         return createResponse(
           { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
+          STATUS_CONFLICT,
+        );
+      }
+      if (isTokenExpired) {
+        return createResponse(
+          { message: 'Jira OAuth token expired. Please retry after refreshing tokens.' },
           STATUS_CONFLICT,
         );
       }
@@ -1508,16 +1530,22 @@ function TaskManagementController(context) {
       const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
       issueTypes = await ticketClient.listIssueTypes(projectId);
     } catch (err) {
-      const isReauthNeeded = err.status === 401
-        || err.code === 'TOKEN_REFRESH_REQUIRED'
+      const isGrantRevoked = err.code === 'GRANT_REVOKED'
         || err.code === 'REQUIRES_REAUTH'
-        || err.code === 'GRANT_REVOKED'
         || err.message?.includes('requires re-authorization');
+      const isTokenExpired = err.status === 401
+        || err.code === 'TOKEN_REFRESH_REQUIRED';
 
-      if (isReauthNeeded) {
+      if (isGrantRevoked) {
         await connection.markRequiresReauth();
         return createResponse(
           { message: 'Jira OAuth token is invalid. Please reconnect the Jira integration.' },
+          STATUS_CONFLICT,
+        );
+      }
+      if (isTokenExpired) {
+        return createResponse(
+          { message: 'Jira OAuth token expired. Please retry after refreshing tokens.' },
           STATUS_CONFLICT,
         );
       }

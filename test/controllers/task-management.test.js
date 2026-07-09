@@ -964,7 +964,7 @@ describe('TaskManagementController', () => {
       const { createTicket } = Ctrl(ctx);
       const res = await createTicket(makeReqCtx());
       expect(res.status).to.equal(409);
-      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+      expect(conn.markRequiresReauth).to.not.have.been.called;
     });
 
     it('returns 409 when OAuthCredentialManager throws requires re-authorization', async () => {
@@ -2437,7 +2437,7 @@ describe('TaskManagementController', () => {
     });
 
     // ── Branch 10a: batch reauth short-circuits remaining items ─────────────────
-    it('individual batch: short-circuits remaining suggestions after 401 reauth', async () => {
+    it('individual batch: short-circuits remaining suggestions after 401 token expiry', async () => {
       const sid2 = 'dddddddd-eeee-ffff-aaaa-cccccccccccc';
       const sid3 = 'dddddddd-eeee-ffff-aaaa-dddddddddddd';
       const conn = makeConnection();
@@ -2482,10 +2482,10 @@ describe('TaskManagementController', () => {
       expect(body.results).to.have.lengthOf(3);
       body.results.forEach((r) => {
         expect(r.status).to.equal(409);
-        expect(r.error).to.equal('connection_reauth_required');
+        expect(r.error).to.equal('token_refresh_required');
       });
-      // markRequiresReauth called exactly once (not for each short-circuited item)
-      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+      // markRequiresReauth is NOT called for 401 (token expiry path)
+      expect(conn.markRequiresReauth).to.not.have.been.called;
       // Jira called only once — breaks out of loop
       expect(jiraCreateTicket).to.have.been.calledOnce;
     });
@@ -2498,7 +2498,7 @@ describe('TaskManagementController', () => {
       const conn = makeConnection({
         markRequiresReauth: sinon.stub().rejects(new Error('DB down')),
       });
-      const reauthErr = Object.assign(new Error('Unauthorized'), { status: 401 });
+      const reauthErr = Object.assign(new Error('Grant revoked'), { code: 'GRANT_REVOKED' });
 
       const ctx = makeContext({
         dataAccess: {
@@ -3170,7 +3170,8 @@ describe('TaskManagementController', () => {
       }));
       expect(res.status).to.equal(409);
       const body = await res.json();
-      expect(body.message).to.include('reconnect');
+      expect(body.message).to.include('expired');
+      expect(conn.markRequiresReauth).to.not.have.been.called;
     });
 
     // ── Lines 999-1009: Grouped mode Ticket.create throws → 500 ─────────────────
@@ -3604,7 +3605,7 @@ describe('TaskManagementController', () => {
       expect(body.projects).to.deep.equal(projects);
     });
 
-    it('returns 409 and marks reauth when Jira client returns 401', async () => {
+    it('returns 409 and does not mark reauth when Jira client returns 401', async () => {
       const conn = makeConnection();
       const err = Object.assign(new Error('Unauthorized'), { status: 401 });
       const ctx = makeContext({
@@ -3633,7 +3634,7 @@ describe('TaskManagementController', () => {
       const { listProjects } = Ctrl(ctx);
       const res = await listProjects(makeReqCtx());
       expect(res.status).to.equal(409);
-      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+      expect(conn.markRequiresReauth).to.not.have.been.called;
     });
 
     it('returns 500 on generic list projects error', async () => {
@@ -3772,7 +3773,7 @@ describe('TaskManagementController', () => {
       expect(body.issueTypes).to.deep.equal(issueTypes);
     });
 
-    it('returns 409 and marks reauth when Jira client returns 401', async () => {
+    it('returns 409 and does not mark reauth when Jira client returns 401', async () => {
       const conn = makeConnection();
       const err = Object.assign(new Error('Unauthorized'), { status: 401 });
       const ctx = makeContext({
@@ -3800,7 +3801,7 @@ describe('TaskManagementController', () => {
       const { listIssueTypes } = Ctrl(ctx);
       const res = await listIssueTypes(makeReqCtx());
       expect(res.status).to.equal(409);
-      expect(conn.markRequiresReauth).to.have.been.calledOnce;
+      expect(conn.markRequiresReauth).to.not.have.been.called;
     });
 
     it('returns 500 on generic list issue types error', async () => {
