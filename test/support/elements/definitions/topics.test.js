@@ -52,6 +52,16 @@ describe('topics definitions', () => {
       expect(payload.filters.advanced.filters[0].val).to.equal('perplexity');
     });
 
+    it('translates a SpaceCat/UI platform code to the Semrush model', () => {
+      const payload = buildTopicsPayload({ model: 'gemini' });
+      expect(payload.filters.advanced.filters[0].val).to.equal('gemini-2.5-flash');
+    });
+
+    it('accepts the platform alias and translates it', () => {
+      const payload = buildTopicsPayload({ platform: 'openai' });
+      expect(payload.filters.advanced.filters[0].val).to.equal('gpt-5');
+    });
+
     it('sets comparison_data_formatting to union', () => {
       const payload = buildTopicsPayload();
       expect(payload.comparison_data_formatting).to.equal('union');

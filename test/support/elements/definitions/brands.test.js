@@ -34,6 +34,16 @@ describe('brands definitions', () => {
       expect(payload.filters.advanced.filters[0].val).to.equal('perplexity');
     });
 
+    it('translates a SpaceCat/UI platform code to the Semrush model', () => {
+      const payload = buildBrandsPayload({ model: 'copilot' });
+      expect(payload.filters.advanced.filters[0].val).to.equal('microsoft-copilot');
+    });
+
+    it('accepts the platform alias and translates it', () => {
+      const payload = buildBrandsPayload({ platform: 'openai' });
+      expect(payload.filters.advanced.filters[0].val).to.equal('gpt-5');
+    });
+
     it('sets comparison_data_formatting to union', () => {
       const payload = buildBrandsPayload();
       expect(payload.comparison_data_formatting).to.equal('union');
