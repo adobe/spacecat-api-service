@@ -301,9 +301,6 @@ describe('AgenticCategoriesController', () => {
     ['javascript scheme', 'javascript'.concat(':alert(1)')],
     ['data scheme', 'data:text/html,<script>1</script>'],
     ['backslash host-injection', '/'.concat(String.fromCharCode(92), 'evil.com/x')],
-    ['bare token without leading slash', 'a;b;c'],
-    ['bare path without leading slash', 'products/lightroom'],
-    ['host-only without scheme or slash', 'example.com/foo'],
   ].forEach(([label, bad]) => {
     it(`create returns 400 when a url is invalid (${label})`, async () => {
       const { controller } = loadController();
@@ -320,9 +317,11 @@ describe('AgenticCategoriesController', () => {
     expect(res.status).to.equal(400);
   });
 
-  // Accepted shapes: absolute paths (incl. localized), and full http(s) URLs.
+  // Accepted shapes: absolute paths, bare paths (no leading slash — some
+  // customers store them this way), localized paths, and full http(s) URLs.
   [
     ['absolute path', ['/en/home', '/en/products']],
+    ['bare path without leading slash', ['en/home', 'products/lightroom']],
     ['localized path with locale + hyphen', ['/en-us/home', '/en-us/products']],
     ['full https url', ['https://example.com/en/home', 'https://example.com/en/products']],
     ['full http url', ['http://example.com/en/home', 'http://example.com/en/products']],
