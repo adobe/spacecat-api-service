@@ -260,13 +260,14 @@ No service-to-service credentials are involved — the user's own IMS token is t
 
 ## SpaceCat Routes
 
-### Org-scoped (workspace-level, implemented)
+### Brand-scoped (implemented)
 
-The endpoint below uses `authorizeOrg`.
+The endpoints below use `authorizeOrg`, which resolves `:brandId` to that brand's Semrush sub-workspace (or the org's parent workspace when the brand has none provisioned yet).
 
 | Method | Path | Controller | Description |
 |---|---|---|---|
-| GET | `/v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | All filter dimensions for the URL Inspector dashboard |
+| GET | `/v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions` | `listUrlInspectorFilterDimensions` | Filter dimensions for the URL Inspector dashboard, scoped to that brand |
+| GET | `/v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks` | `listWeeks` | Weeks with Brand Presence data, scoped to that brand |
 
 > **Note:** The brand-, market-, and tag-selector data (formerly served by dedicated `/serenity/brands`, `/serenity/*/markets`, and `/serenity/*/tags` endpoints) is now provided by the existing Serenity APIs. Only the aggregated URL Inspector filter-dimensions endpoint is served by this Elements wrapper.
 

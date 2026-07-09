@@ -16,6 +16,18 @@ import {
 import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 import { checkDateRange } from './traffic-date-range.js';
+import {
+  rotationContext,
+  shouldRotate,
+  rotatingPostgrest,
+  computeWindow,
+} from './traffic-rotation.js';
+
+// Read-time rotation of the two frozen demo sites' referral data lives entirely
+// in the wrapped PostgREST client injected by withReferralTrafficAuth; handlers
+// call client.rpc(...) unaware of rotation. The one exception is /weeks, whose
+// window is a pure function of now() (not a client fetch) — it still reads this.
+const rotationCtx = (siteId) => rotationContext(siteId, 'referral');
 
 /**
  * Site-scoped referral traffic handler factories.
@@ -161,7 +173,12 @@ async function withReferralTrafficAuth(
     return internalServerError('Access validation failed');
   }
 
-  return handlerFn(context, Site.postgrestService, siteId);
+  // Demo sites read through a rotating client (frozen data → rolling window);
+  // every other site gets the real client unchanged (zero behavior change).
+  const client = shouldRotate(siteId, 'referral')
+    ? rotatingPostgrest(Site.postgrestService, siteId, 'referral')
+    : Site.postgrestService;
+  return handlerFn(context, client, siteId);
 }
 
 // ============================================================================
@@ -229,10 +246,8 @@ export function createReferralTrafficKpisHandler(getSiteAndValidateAccess) {
       'kpis',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_kpis',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_kpis', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic kpis PostgREST error: ${error.message}`);
@@ -271,9 +286,10 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
       'trend',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
+        const rpcParams = commonRpcParams(siteId, parsed);
         const { data, error } = await client.rpc(
           'rpc_referral_traffic_trend',
-          commonRpcParams(siteId, parsed),
+          rpcParams,
         );
 
         if (error) {
@@ -322,10 +338,8 @@ export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess)
       'by-platform',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_platform',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_platform', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-platform PostgREST error: ${error.message}`);
@@ -370,10 +384,8 @@ export function createReferralTrafficByDeviceHandler(getSiteAndValidateAccess) {
       'by-device',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_device',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_device', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-device PostgREST error: ${error.message}`);
@@ -410,10 +422,8 @@ export function createReferralTrafficByRegionHandler(getSiteAndValidateAccess) {
       'by-region',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_region',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_region', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-region PostgREST error: ${error.message}`);
@@ -450,10 +460,8 @@ export function createReferralTrafficByPageIntentHandler(getSiteAndValidateAcces
       'by-page-intent',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_page_intent',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_page_intent', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-page-intent PostgREST error: ${error.message}`);
@@ -511,14 +519,15 @@ export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
         const rawSortOrder = (q.sortOrder || q.sort_order || 'desc').toLowerCase();
         const sortOrder = VALID_SORT_ORDERS.has(rawSortOrder) ? rawSortOrder : 'desc';
 
-        const { data, error } = await client.rpc('rpc_referral_traffic_by_url', {
+        const rpcParams = {
           ...commonRpcParams(siteId, parsed),
           p_url_search: urlPathSearch,
           p_limit: limit,
           p_offset: pageOffset,
           p_sort_by: sortBy,
           p_sort_order: sortOrder,
-        });
+        };
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_url', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-url PostgREST error: ${error.message}`);
@@ -576,6 +585,27 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
         const rawSource = q.source;
         const source = VALID_SOURCES.has(rawSource) ? rawSource : DEFAULT_SOURCE;
         const tableName = SOURCE_TO_TABLE[source];
+
+        const rot = rotationCtx(siteId);
+        if (rot.rotate) {
+          // Rotation: the window is a pure function of now(); we only need to
+          // know whether THIS source has any canned rows. One existence check
+          // (not the two-query min/max), then synthesize — mirrors the agentic
+          // /weeks early-return while preserving per-source emptiness.
+          const { data, error } = await client
+            .from(tableName)
+            .select('traffic_date')
+            .eq('site_id', siteId)
+            .limit(1);
+          if (error) {
+            ctx.log.error(`Referral traffic weeks existence PostgREST error: ${error.message}`);
+            return internalServerError('Failed to fetch referral traffic date range');
+          }
+          if ((data || []).length === 0) {
+            return ok({ weeks: [] });
+          }
+          return ok({ weeks: computeWindow(rot.now).weeks });
+        }
 
         const [minResult, maxResult] = await Promise.all([
           client
@@ -712,11 +742,8 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
         }
         const source = rawSource != null ? rawSource : DEFAULT_BUSINESS_IMPACT_SOURCE;
         const parsed = { ...parseParams(ctx), source };
-
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_business_impact',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_business_impact', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic business-impact PostgREST error: ${error.message}`);
