@@ -82,7 +82,6 @@ function serializeTicket(ticket, suggestions) {
     ticketStatus: ticket.getTicketStatus(),
     ticketProvider: ticket.getTicketProvider(),
     opportunityId: ticket.getOpportunityId?.() ?? null,
-    createdBy: ticket.getCreatedBy(),
     createdAt: ticket.getCreatedAt?.() ?? null,
     statusSyncedAt: null, // v1: always null; populated by v2 webhook sync
   };
