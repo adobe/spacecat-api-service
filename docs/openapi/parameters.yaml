@@ -482,3 +482,43 @@ agentTypes:
     multiple:
       value: Chatbots,Research
       summary: URL Inspector PG inclusion list
+akamaiHost:
+  name: x-akamai-host
+  in: header
+  required: true
+  description: >-
+    Akamai EdgeGrid API host for the customer's account, e.g.
+    `akab-xxxxx.luna.akamaiapis.net`. Client-supplied per request; never
+    persisted or logged by the service.
+  schema:
+    type: string
+akamaiClientToken:
+  name: x-akamai-client-token
+  in: header
+  required: true
+  description: Akamai EdgeGrid client token. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
+akamaiClientSecret:
+  name: x-akamai-client-secret
+  in: header
+  required: true
+  description: Akamai EdgeGrid client secret. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
+akamaiAccessToken:
+  name: x-akamai-access-token
+  in: header
+  required: true
+  description: Akamai EdgeGrid access token. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
+akamaiAccountSwitchKey:
+  name: x-akamai-account-switch-key
+  in: header
+  required: false
+  description: >-
+    Optional Akamai account switch key, for partners operating across multiple
+    Akamai accounts. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
