@@ -688,6 +688,18 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/config:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-config'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/properties:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-properties'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/plan:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activate:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activate'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activation-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activation-status'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:

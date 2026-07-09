@@ -165,6 +165,14 @@ const routeFacsCapabilities = {
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+    // LLMO Akamai onboarding — LLMO-admin manual provisioning, gated by
+    // isLLMOAdministrator() with caller-supplied x-akamai-* credentials; not a FACS surface.
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
@@ -788,9 +796,10 @@ const routeFacsCapabilities = {
       // Org-level Serenity catalog reads (no brandId).
       'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
-      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
-      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)
       'GET /sites/:siteId/preflights': 'llmo/can_view',

@@ -2384,9 +2384,33 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.info(`[geo-experiment] Could not fetch prompts for ${geoExperimentId}: ${s3Error.message}`);
     }
 
+    // Fetch impact-measurement insights from S3 only when explicitly requested.
+    // Insights exist once impact measurement completes; the S3 key is stored on the
+    // experiment as insightsLocation (see spacecat-shared GeoExperiment model).
+    let insights;
+    const includeInsights = context.data?.includeInsights === 'true';
+    if (includeInsights) {
+      insights = null;
+      const insightsS3Key = geoExperiment.getInsightsLocation?.();
+      if (insightsS3Key) {
+        try {
+          const { s3Client, s3Bucket, GetObjectCommand } = context.s3;
+          const response = await s3Client.send(
+            new GetObjectCommand({ Bucket: s3Bucket, Key: insightsS3Key }),
+          );
+          const body = await response.Body.transformToString();
+          insights = JSON.parse(body);
+        } catch (s3Error) {
+          // Insights may not exist yet (e.g. impact measurement not yet complete)
+          context.log.info(`[geo-experiment] Could not fetch insights for ${geoExperimentId}: ${s3Error.message}`);
+        }
+      }
+    }
+
     return ok({
       ...GeoExperimentDto.toJSON(geoExperiment),
       prompts,
+      ...(includeInsights ? { insights } : {}),
     });
   };
 

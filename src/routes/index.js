@@ -75,6 +75,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} llmoController - The LLMO controller.
  * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
  * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
+ * @param {Object} llmoAkamaiController - The LLMO Akamai onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -140,6 +141,7 @@ export default function getRouteHandlers(
   llmoController,
   llmoCloudflareController,
   llmoCloudFrontController,
+  llmoAkamaiController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -238,11 +240,14 @@ export default function getRouteHandlers(
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
     'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
     // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
-    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
-    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks': elementsController.listWeeks,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': elementsController.listWeeks,
     // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
@@ -549,6 +554,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': llmoCloudflareController.addRoute,
+
+    // LLMO Akamai Onboarding Routes
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': llmoAkamaiController.getConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': llmoAkamaiController.listProperties,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': llmoAkamaiController.plan,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': llmoAkamaiController.deploy,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': llmoAkamaiController.activate,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': llmoAkamaiController.activationStatus,
 
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,

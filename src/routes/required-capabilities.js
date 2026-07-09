@@ -107,6 +107,15 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
+  // LLMO Akamai onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
+  // uses caller-supplied EdgeGrid credentials via x-akamai-* headers, not S2S JWT
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',
@@ -285,9 +294,10 @@ const routeRequiredCapabilities = {
   // access enforced in the controller (listOrgModels / listOrgLanguages).
   'GET /v2/orgs/:spaceCatId/serenity/models': 'organization:read',
   'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',

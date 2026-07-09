@@ -65,6 +65,8 @@ import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/seren
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
+import { marketForGeoTargetId } from '../support/serenity/locations.js';
+import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
@@ -432,6 +434,35 @@ function SerenityController(context, log, env) {
     return brand;
   }
 
+  /**
+   * Builds the server-side `type:branded`/`type:non-branded` classifier for the
+   * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
+   * name + aliases ONCE per request, then returns a pure
+   * `(text, geoTargetId) => TYPE_TAG` closure: each prompt's market is derived
+   * from its geoTargetId and the alias needles are region-clamped to that market
+   * (memoized per market). This is the SAME classifier the AI-generation and
+   * onboarding paths use, so a prompt is classified identically no matter how it
+   * is written; the client never controls the value.
+   */
+  async function buildPromptTypeClassifier(ctx, brandUuid) {
+    const brand = await loadBrand(ctx, brandUuid);
+    const brandName = brand.getName?.() || '';
+    const brandAliases = await getBrandAliases(
+      brandUuid,
+      ctx.dataAccess.services.postgrestClient,
+    );
+    const needlesByMarket = new Map();
+    return (text, geoTargetId) => {
+      const market = marketForGeoTargetId(geoTargetId) || '';
+      let needles = needlesByMarket.get(market);
+      if (!needles) {
+        needles = brandNeedles(brandName, brandAliases, market);
+        needlesByMarket.set(market, needles);
+      }
+      return classifyBrandedTag(text, needles);
+    };
+  }
+
   const listPrompts = async (ctx) => {
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
@@ -463,8 +494,15 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       const result = auth.mode === 'subworkspace'
-        ? await handleCreatePromptsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
+        ? await handleCreatePromptsSubworkspace(
+          transport,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+          classifyPromptType,
+        )
         : await handleCreatePrompts(
           transport,
           ctx.dataAccess,
@@ -472,6 +510,7 @@ function SerenityController(context, log, env) {
           auth.workspaceId,
           ctx.data || {},
           log,
+          classifyPromptType,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -491,6 +530,7 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       const result = auth.mode === 'subworkspace'
         ? await handleUpdatePromptSubworkspace(
           transport,
@@ -498,6 +538,7 @@ function SerenityController(context, log, env) {
           semrushPromptId,
           ctx.data || {},
           log,
+          classifyPromptType,
         )
         : await handleUpdatePrompt(
           transport,
@@ -507,6 +548,7 @@ function SerenityController(context, log, env) {
           semrushPromptId,
           ctx.data || {},
           log,
+          classifyPromptType,
         );
       return createResponse(result.body, result.status);
     } catch (e) {

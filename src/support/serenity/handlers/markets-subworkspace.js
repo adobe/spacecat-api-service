@@ -34,7 +34,8 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
-import { TYPE_TAG, topicTag } from '../prompt-tags.js';
+import { topicTag } from '../prompt-tags.js';
+import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
@@ -166,17 +167,6 @@ function validateCreateBody(body) {
 }
 
 /**
- * Classifies a generated prompt as `type:branded` when its text mentions the
- * brand — i.e. (lower-cased) prompt text contains any of the brand-name/alias
- * `needles` (already lower-cased + trimmed) as a substring — else
- * `type:non-branded`. Empty `needles` ⇒ everything is non-branded.
- */
-function brandedTypeTag(promptText, needles) {
-  const hay = String(promptText).toLowerCase();
-  return needles.some((n) => hay.includes(n)) ? TYPE_TAG.BRANDED : TYPE_TAG.NON_BRANDED;
-}
-
-/**
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
@@ -197,7 +187,8 @@ function brandedTypeTag(promptText, needles) {
  * @param {number} [options.topicCap=0] - keep the top N topics by volume (0 = all).
  * @param {string[]} [options.standardTags=[]] - tags added to every generated prompt.
  * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
- *   classification (substring match, case-insensitive).
+ *   classification via the shared {@link classifyBrandedTag} (whole-word match,
+ *   diacritic-folded, case-insensitive).
  * @param {object} log - logger.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
@@ -215,18 +206,18 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     .sort((a, b) => (Number(b?.volume) || 0) - (Number(a?.volume) || 0));
   const selected = topicCap > 0 ? ranked.slice(0, topicCap) : ranked;
 
-  // Brand-name + alias needles for branded classification: lower-cased + trimmed
-  // so the substring match is case-insensitive and whitespace-tolerant.
-  const brandNeedles = (Array.isArray(brandNames) ? brandNames : [])
-    .map((s) => String(s || '').trim().toLowerCase())
-    .filter((s) => s.length > 0);
+  // Brand-name + alias needles for branded classification. The shared classifier
+  // (branded-classifier.js) folds diacritics, lower-cases, and matches on whole
+  // word boundaries — the SAME implementation the manual create/edit paths use,
+  // so a prompt is classified identically no matter how it is written.
+  const needles = needlesFromNames(Array.isArray(brandNames) ? brandNames : []);
 
   const promptsByText = {};
   selected.forEach((t) => {
     const topic = topicTag(t.topic);
     (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
       if (hasText(p)) {
-        promptsByText[p] = [topic, ...standardTags, brandedTypeTag(p, brandNeedles)];
+        promptsByText[p] = [topic, ...standardTags, classifyBrandedTag(p, needles)];
       }
     });
   });
@@ -280,7 +271,8 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   The market-applicable names are added to the project's `brand_names`
  *   (alongside the primary name) so the project carries them, and — together with
  *   the brand name(s) — used to classify each generated prompt as `type:branded`
- *   (text contains a name/alias, case-insensitive) or `type:non-branded`.
+ *   (text mentions a name/alias as a whole word, diacritic-folded) or
+ *   `type:non-branded`.
  * @param {string[]} [options.projectTags=[]] - project-level tag taxonomy to
  *   register on the project (via createProjectTags) independent of any prompt.
  * @param {object} [options.brandUrlSources=null] - the brand's URL sources

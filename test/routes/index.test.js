@@ -368,6 +368,15 @@ describe('getRouteHandlers', () => {
     getPermissions: () => null,
   };
 
+  const mockLlmoAkamaiController = {
+    getConfig: () => null,
+    listProperties: () => null,
+    plan: () => null,
+    deploy: () => null,
+    activate: () => null,
+    activationStatus: () => null,
+  };
+
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
   };
@@ -626,6 +635,7 @@ describe('getRouteHandlers', () => {
       mockLlmoController,
       mockLlmoCloudflareController,
       mockLlmoCloudFrontController,
+      mockLlmoAkamaiController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -885,9 +895,10 @@ describe('getRouteHandlers', () => {
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/languages',
-      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions',
-      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
@@ -1174,6 +1185,12 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
