@@ -1,3 +1,10 @@
+# [1.637.0](https://github.com/adobe/spacecat-api-service/compare/v1.636.0...v1.637.0) (2026-07-09)
+
+
+### Features
+
+* **fixes:** add site-wide GET /sites/:siteId/fixes endpoint ([#2781](https://github.com/adobe/spacecat-api-service/issues/2781)) ([b61d3bc](https://github.com/adobe/spacecat-api-service/commit/b61d3bce2a9c842556a62a4859bc5d2fea155b47)), closes [adobe/spacecat-shared#1792](https://github.com/adobe/spacecat-shared/issues/1792) [#1792](https://github.com/adobe/spacecat-api-service/issues/1792) [adobe/spacecat-shared#1792](https://github.com/adobe/spacecat-shared/issues/1792) [#1792](https://github.com/adobe/spacecat-api-service/issues/1792)
+
 # [1.636.0](https://github.com/adobe/spacecat-api-service/compare/v1.635.0...v1.636.0) (2026-07-09)
 
 
