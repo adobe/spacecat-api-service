@@ -98,7 +98,7 @@ export function logPreflightOutcome(log, processName, job) {
     const err = job.getError();
     log.warn(`[Preflight] Run failed. jobId=${jobId} process=${processName} status=${status} errorCode=${err?.code ?? 'none'} errorMessage=${err?.message ?? 'none'}`);
   } else {
-    log.info(`[Preflight] Run in process.  status=${status}`);
+    log.info(`[Preflight] Run in progress.  status=${status}`);
   }
 }
 
