@@ -165,6 +165,7 @@ const routeFacsCapabilities = {
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/logpush',
     // LLMO Akamai onboarding — LLMO-admin manual provisioning, gated by
     // isLLMOAdministrator() with caller-supplied x-akamai-* credentials; not a FACS surface.
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
@@ -1185,6 +1186,10 @@ const routeFacsCapabilities = {
     // External / shared identifiers:
     'accessId', 'batchId', 'clientId', 'consumerId', 'contactSalesLeadId',
     'externalUserId', 'imsOrgId', 'grantId', 'userId',
+    // Cloudflare zone identifier (POST .../cloudflare/zones/:zoneId/logpush) — a Cloudflare
+    // resource, not a SpaceCat/ReBAC entity; the route is gated by isLLMOAdministrator() with
+    // a caller-supplied x-cloudflare-token (see facs-capabilities.js's non-FACS-surface list).
+    'zoneId',
     // ASO dispatcher-overlay service name (GET /config/:service/redirects.txt) —
     // an X-ASO-API-Key-authenticated internal route, not a FACS resource.
     'service',

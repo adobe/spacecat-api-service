@@ -13,7 +13,7 @@
 import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import { hasText, tracingFetch as fetch, CLOUDFLARE_LOGPUSH_FIELDS } from '@adobe/spacecat-shared-utils';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -53,6 +53,13 @@ const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
 // Boundary input validation (defense-in-depth, independent of CloudflareClient behaviour).
 const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+// Logpush (LLMO-5869): the zone-scoped HTTP-request dataset, and the auth-service endpoint
+// (LLMO-6116) that reads back the Cloudflare ownership-challenge token from the customer's
+// cdn-logs S3 bucket — api-service never touches that bucket directly.
+const LOGPUSH_DATASET = 'http_requests';
+const AUTH_SERVICE_OWNERSHIP_TOKEN_PATH = '/auth/cdn-logs-infrastructure/cloudflare-ownership-token';
+const LLMO_PRODUCT_HEADER_VALUE = 'LLMO';
 
 /**
  * Identifies the API caller for audit logging and worker tagging. profile.email is an IMS user
@@ -177,6 +184,49 @@ function LlmoCloudflareController(ctx) {
     const tokowaka = TokowakaClient.createFrom(context);
     const metaconfig = await tokowaka.fetchMetaconfig(site.getBaseURL());
     return metaconfig?.apiKeys?.[0] ?? null;
+  };
+
+  /**
+   * The site's CDN bucket config as written by auth-service's provisioning flow
+   * (bucketName/allowedPaths/region/cdnProvider), or null when the site hasn't been provisioned
+   * yet. Same defensive accessor used by check-cdn-logs-status.js.
+   */
+  const getCdnBucketConfig = (site) => site.getConfig?.()?.getLlmoCdnBucketConfig?.() || null;
+
+  /**
+   * Asks auth-service (LLMO-6116) to read a Cloudflare ownership-challenge token out of the
+   * customer's cdn-logs S3 bucket — api-service is never granted S3 access to that bucket
+   * (least-privilege boundary; see auth-service's provision.js header comment). Forwards the
+   * caller's own Authorization header rather than using a service credential, mirroring the
+   * existing reverse call auth-service already makes into api-service (llmo-config-wrapper.js).
+   */
+  const fetchCloudflareOwnershipToken = async (context, siteId, filename) => {
+    const authServiceBaseUrl = env.AUTH_SERVICE_BASE_URL;
+    if (!hasText(authServiceBaseUrl)) {
+      throw new Error('AUTH_SERVICE_BASE_URL is not configured');
+    }
+
+    const url = new URL(`${authServiceBaseUrl}${AUTH_SERVICE_OWNERSHIP_TOKEN_PATH}`);
+    url.searchParams.set('siteId', siteId);
+    if (hasText(filename)) {
+      url.searchParams.set('filename', filename);
+    }
+
+    const authHeader = context.pathInfo?.headers?.authorization;
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        ...(authHeader ? { Authorization: authHeader } : {}),
+        'x-product': LLMO_PRODUCT_HEADER_VALUE,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`auth-service ownership-token request returned ${res.status} ${res.statusText}`);
+    }
+
+    const body = await res.json();
+    return body?.ownershipToken;
   };
 
   const fetchWorkerScript = async () => {
@@ -569,12 +619,143 @@ function LlmoCloudflareController(ctx) {
     }
   };
 
+  /**
+   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/logpush
+   * Creates the Cloudflare Logpush job that forwards the zone's HTTP request logs into Adobe's
+   * cdn-logs S3 bucket (LLMO-5869). `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
+   * supplied as a path param here (unlike addRoute's body-supplied zoneId, per this endpoint's
+   * routing spec).
+   *
+   * Requires the site to already be provisioned for Cloudflare log forwarding (bucketName /
+   * allowedPaths / region on the site's cdnBucketConfig, written by auth-service's provisioning
+   * flow) — returns 409 with an actionable message otherwise.
+   *
+   * Steps: (1) idempotency check against existing Logpush jobs on the zone/dataset — Cloudflare
+   * job creation is NOT inherently idempotent, unlike CloudWatch Logs CreateDelivery, so this is
+   * the primary guard; (2) trigger a fresh ownership challenge (Cloudflare writes a token file to
+   * the S3 bucket); (3) ask auth-service to read that token back, since only auth-service has S3
+   * access to the bucket (LLMO-6116) — forwards the caller's own Authorization header rather than
+   * a service credential; (4) create the Logpush job with that token.
+   */
+  const createLogpush = async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+    const { site } = result;
+
+    const { client: cfClient, error: cfError } = requireCfClient(context);
+    if (cfError) {
+      return cfError;
+    }
+
+    const { zoneId } = context.params;
+    if (!hasText(zoneId)) {
+      return badRequest('Missing zoneId in path');
+    }
+    if (!CF_ID_RE.test(zoneId)) {
+      return badRequest('zoneId must be a 32-character hexadecimal Cloudflare zone ID');
+    }
+
+    const cdnBucketConfig = getCdnBucketConfig(site);
+    const { bucketName, allowedPaths, region } = cdnBucketConfig || {};
+    const pathPrefix = allowedPaths?.[0];
+    if (!hasText(bucketName) || !hasText(pathPrefix) || !hasText(region)) {
+      return createResponse({
+        message: 'Site is not provisioned for Cloudflare log forwarding; run provisioning first',
+      }, 409);
+    }
+
+    const siteId = site.getId();
+    // The literal {DATE} token is Cloudflare's own daily-subfolder placeholder (expands server-side
+    // to YYYYMMDD) — required, not cosmetic: auth-service's challenge-file reader scans exactly
+    // this date-prefixed layout.
+    const destinationConf = `s3://${bucketName}/${pathPrefix}{DATE}?region=${region}`;
+
+    log.info(auditLine(context, 'cf-logpush', 'started', { siteId, zoneId }));
+
+    // Primary idempotency guard: check reality before creating anything.
+    let existingJobs;
+    try {
+      existingJobs = await cfClient.listLogpushJobs(zoneId, LOGPUSH_DATASET);
+    } catch (e) {
+      return cfErrorResponse(e, 'logpush job listing', context, { siteId, zoneId });
+    }
+    const existingJob = (existingJobs || [])
+      .find((job) => job?.destination_conf === destinationConf);
+    if (existingJob) {
+      log.info(auditLine(context, 'cf-logpush', 'already-exists', { siteId, zoneId }));
+      return ok({ created: false, alreadyExisted: true, jobId: existingJob.id });
+    }
+
+    let filename;
+    try {
+      const ownership = await cfClient.requestLogpushOwnership(zoneId, destinationConf);
+      filename = ownership?.filename;
+    } catch (e) {
+      return cfErrorResponse(e, 'logpush ownership challenge', context, { siteId, zoneId });
+    }
+
+    let ownershipToken;
+    try {
+      ownershipToken = await fetchCloudflareOwnershipToken(context, siteId, filename);
+    } catch (e) {
+      log.error(auditLine(context, 'cf-logpush', 'ownership-token-failed', {
+        siteId, zoneId, error: e.message,
+      }));
+      return createResponse({ message: 'Failed to retrieve the Cloudflare ownership token' }, 502);
+    }
+    if (!hasText(ownershipToken)) {
+      log.error(auditLine(context, 'cf-logpush', 'ownership-token-missing', { siteId, zoneId }));
+      return createResponse({
+        message: 'Cloudflare ownership token not yet available; retry shortly',
+      }, 502);
+    }
+
+    const jobName = registrableDomain(new URL(site.getBaseURL()).hostname) || siteId;
+    const payload = {
+      name: jobName,
+      dataset: LOGPUSH_DATASET,
+      destination_conf: destinationConf,
+      ownership_challenge: ownershipToken,
+      output_options: {
+        field_names: CLOUDFLARE_LOGPUSH_FIELDS,
+        timestamp_format: 'rfc3339',
+      },
+      enabled: true,
+    };
+
+    try {
+      const job = await cfClient.createLogpushJob(zoneId, payload);
+      log.info(auditLine(context, 'cf-logpush', 'created', { siteId, zoneId }));
+      return ok({ created: true, alreadyExisted: false, jobId: job?.id });
+    } catch (e) {
+      // TOCTOU defense: rather than pattern-match an unverified Cloudflare error message (the
+      // exact duplicate-destination error shape is an open E2E-only confirm per LLMO-5869), check
+      // reality again — if a matching job now exists, treat the race as a success.
+      let postFailureJobs;
+      try {
+        postFailureJobs = await cfClient.listLogpushJobs(zoneId, LOGPUSH_DATASET);
+      } catch (listErr) {
+        return cfErrorResponse(e, 'logpush job creation', context, { siteId, zoneId });
+      }
+      const raceJob = (postFailureJobs || [])
+        .find((job) => job?.destination_conf === destinationConf);
+      if (raceJob) {
+        log.info(auditLine(context, 'cf-logpush', 'conflict-race', { siteId, zoneId }));
+        return ok({ created: false, alreadyExisted: true, jobId: raceJob.id });
+      }
+      return cfErrorResponse(e, 'logpush job creation', context, { siteId, zoneId });
+    }
+  };
+
   return {
     getCloudflareConfig,
     listAccounts,
     listZones,
     deployWorker,
     addRoute,
+    createLogpush,
   };
 }
 
