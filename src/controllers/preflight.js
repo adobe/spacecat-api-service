@@ -97,8 +97,6 @@ export function logPreflightOutcome(log, processName, job) {
   } else if (status === AsyncJob.Status.FAILED) {
     const err = job.getError();
     log.warn(`[Preflight] Run failed. jobId=${jobId} process=${processName} status=${status} errorCode=${err?.code ?? 'none'} errorMessage=${err?.message ?? 'none'}`);
-  } else {
-    log.info(`[Preflight] Run in progress.  status=${status}`);
   }
 }
 
