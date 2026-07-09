@@ -206,19 +206,15 @@ function LlmoCloudflareController(ctx) {
       throw new Error('AUTH_SERVICE_BASE_URL is not configured');
     }
 
-    const url = new URL(`${authServiceBaseUrl}${AUTH_SERVICE_OWNERSHIP_TOKEN_PATH}`);
-    url.searchParams.set('siteId', siteId);
-    if (hasText(filename)) {
-      url.searchParams.set('filename', filename);
-    }
-
     const authHeader = context.pathInfo?.headers?.authorization;
-    const res = await fetch(url.toString(), {
-      method: 'GET',
+    const res = await fetch(`${authServiceBaseUrl}${AUTH_SERVICE_OWNERSHIP_TOKEN_PATH}`, {
+      method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         ...(authHeader ? { Authorization: authHeader } : {}),
         'x-product': LLMO_PRODUCT_HEADER_VALUE,
       },
+      body: JSON.stringify({ siteId, ...(hasText(filename) ? { filename } : {}) }),
     });
 
     if (!res.ok) {

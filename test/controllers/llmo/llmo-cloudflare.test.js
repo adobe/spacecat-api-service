@@ -863,11 +863,14 @@ describe('LlmoCloudflareController', () => {
       }));
 
       // The auth-service call forwards the caller's own Authorization header + x-product, and
-      // never has api-service touch S3 directly.
+      // never has api-service touch S3 directly. POST with a body, not GET with a query string
+      // — the endpoint has real side effects (deletes the S3 file, writes Secrets Manager).
       const [fetchUrl, fetchOptions] = mockFetch.getCall(0).args;
       expect(fetchUrl).to.equal(
-        `https://auth.example.com/auth/cdn-logs-infrastructure/cloudflare-ownership-token?siteId=${SITE_ID}&filename=${encodeURIComponent(FILENAME)}`,
+        'https://auth.example.com/auth/cdn-logs-infrastructure/cloudflare-ownership-token',
       );
+      expect(fetchOptions.method).to.equal('POST');
+      expect(JSON.parse(fetchOptions.body)).to.deep.equal({ siteId: SITE_ID, filename: FILENAME });
       expect(fetchOptions.headers.Authorization).to.equal('Bearer caller-token');
       expect(fetchOptions.headers['x-product']).to.equal('LLMO');
     });
@@ -878,6 +881,14 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(200);
       const [, fetchOptions] = mockFetch.getCall(0).args;
       expect(fetchOptions.headers).to.not.have.property('Authorization');
+    });
+
+    it('omits filename from the auth-service request body when Cloudflare returns none', async () => {
+      mockCfClient.requestLogpushOwnership.resolves({ valid: true });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const [, fetchOptions] = mockFetch.getCall(0).args;
+      expect(JSON.parse(fetchOptions.body)).to.deep.equal({ siteId: SITE_ID });
     });
 
     it('treats a null Logpush job list as empty and creates a new job', async () => {
