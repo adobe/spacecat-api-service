@@ -15,6 +15,8 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { ConnectError, Code } from '@connectrpc/connect';
+import { SOURCES_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
+import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   handleBrandStats,
   handleBrandTopics,
@@ -624,6 +626,37 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.body.total).to.equal(10);
     });
 
+    it('defaults order to PROMPTS_COUNT DESC when no sort params', async () => {
+      clients.sourceClient.sources.resolves({ source: [] });
+      clients.voSourcesClient.sourcesTotals.resolves({ totals: [] });
+      const sp = new URLSearchParams('domain=example.com');
+      await handleBrandCitedPages(sp, clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].order).to.deep.equal({
+        by: SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT,
+        direction: ORDER_DIRECTION_ENUM.DESC,
+      });
+    });
+
+    it('maps sortBy/sortDirection into the gRPC order (URL ASC)', async () => {
+      clients.sourceClient.sources.resolves({ source: [] });
+      clients.voSourcesClient.sourcesTotals.resolves({ totals: [] });
+      const sp = new URLSearchParams('domain=example.com&sortBy=URL&sortDirection=ASC');
+      await handleBrandCitedPages(sp, clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].order).to.deep.equal({
+        by: SOURCES_REQUEST_ORDER_BY_ENUM.URL,
+        direction: ORDER_DIRECTION_ENUM.ASC,
+      });
+    });
+
+    it('falls back to default order.by for an unknown sortBy', async () => {
+      clients.sourceClient.sources.resolves({ source: [] });
+      clients.voSourcesClient.sourcesTotals.resolves({ totals: [] });
+      const sp = new URLSearchParams('domain=example.com&sortBy=BOGUS');
+      await handleBrandCitedPages(sp, clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].order.by)
+        .to.equal(SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT);
+    });
+
     it('uses month param and falls back when targetDate fails', async () => {
       clients.sourceClient.sources.onFirstCall().rejects(new Error('targetDate fail'));
       clients.sourceClient.sources.onSecondCall().resolves({ source: [{ url: 'https://example.com/p', promptsCount: 1 }] });
@@ -1024,6 +1057,38 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('sorts by name ascending when sortBy=NAME&sortDirection=ASC', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({
+        brands: [{ brandName: 'Zebra', count: 10 }, { brandName: 'Apple', count: 100 }],
+      });
+      const sp = new URLSearchParams('domain=example.com&sortBy=NAME&sortDirection=ASC');
+      const res = await handleBrandTopBrands(sp, clients);
+      expect(res.body.data.map((r) => r.name)).to.deep.equal(['Apple', 'Zebra']);
+    });
+
+    it('sorts by mentions ascending when sortDirection=ASC (default sortBy)', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({
+        brands: [{ brandName: 'Big', count: 100 }, { brandName: 'Small', count: 1 }],
+      });
+      const sp = new URLSearchParams('domain=example.com&sortDirection=ASC');
+      const res = await handleBrandTopBrands(sp, clients);
+      expect(res.body.data.map((r) => r.name)).to.deep.equal(['Small', 'Big']);
+    });
+
+    it('fetches the full set (not a truncated window) for NAME sort with an offset', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
+      await handleBrandTopBrands(new URLSearchParams('domain=example.com&sortBy=NAME&offset=10&limit=10'), clients);
+      // NAME order differs from the client's native mentions-desc, so the whole set
+      // must be fetched before sorting+slicing — otherwise page 2 slices a wrong subset.
+      expect(clients.brandClient.topBrandsByDomain.firstCall.args[0].limit).to.equal(1000);
+    });
+
+    it('uses a truncated fetch window for the default mentions-desc order with an offset', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
+      await handleBrandTopBrands(new URLSearchParams('domain=example.com&offset=10&limit=10'), clients);
+      expect(clients.brandClient.topBrandsByDomain.firstCall.args[0].limit).to.equal(21);
+    });
+
     it('returns 200 with brands list', async () => {
       clients.brandClient.topBrandsByDomain.resolves({
         brands: [{ brandName: 'BrandA', count: 100 }],
@@ -1130,6 +1195,22 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('maps sortBy/sortDirection into the gRPC order (default PROMPTS_COUNT DESC; DOMAIN ASC)', async () => {
+      clients.sourceClient.sourceDomains.resolves({ domains: [] });
+      clients.voSourcesClient.domainsTotals.resolves({ totals: [] });
+      await handleBrandCitedSources(new URLSearchParams('domain=example.com'), clients);
+      expect(clients.sourceClient.sourceDomains.firstCall.args[0].order).to.deep.equal({
+        by: DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT,
+        direction: ORDER_DIRECTION_ENUM.DESC,
+      });
+      clients.sourceClient.sourceDomains.resetHistory();
+      await handleBrandCitedSources(new URLSearchParams('domain=example.com&sortBy=DOMAIN&sortDirection=ASC'), clients);
+      expect(clients.sourceClient.sourceDomains.firstCall.args[0].order).to.deep.equal({
+        by: DOMAINS_REQUEST_ORDER_BY_ENUM.DOMAIN,
+        direction: ORDER_DIRECTION_ENUM.ASC,
+      });
+    });
+
     it('returns 200 with domains list', async () => {
       clients.sourceClient.sourceDomains.resolves({
         domains: [{
@@ -1226,6 +1307,23 @@ describe('AI Visibility – brands handlers', () => {
       const sp = new URLSearchParams('');
       const res = await handleBrandSourceOpportunities(sp, clients);
       expect(res.status).to.equal(400);
+    });
+
+    it('maps sortBy/sortDirection into the gap gRPC order (default ORGANIC_TRAFFIC DESC; MENTIONS ASC)', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
+      clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
+      clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
+      await handleBrandSourceOpportunities(new URLSearchParams('domain=example.com'), clients);
+      expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].order).to.deep.equal({
+        by: DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC,
+        direction: ORDER_DIRECTION_ENUM.DESC,
+      });
+      clients.sourceClient.gapSourceDomains.resetHistory();
+      await handleBrandSourceOpportunities(new URLSearchParams('domain=example.com&sortBy=MENTIONS&sortDirection=ASC'), clients);
+      expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].order).to.deep.equal({
+        by: DOMAINS_REQUEST_ORDER_BY_ENUM.MENTIONS,
+        direction: ORDER_DIRECTION_ENUM.ASC,
+      });
     });
 
     it('returns 200 with gap source domains', async () => {

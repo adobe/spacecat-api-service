@@ -15,6 +15,7 @@
 import { ConnectError, Code } from '@connectrpc/connect';
 import { BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
+import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   SOURCES_REQUEST_ORDER_BY_ENUM,
   DOMAINS_REQUEST_ORDER_BY_ENUM,
@@ -93,6 +94,25 @@ function buildByDateEntry(year, month, slice) {
     ownedSources: num(agg?.ownedSources),
     visibilityByEngine,
   };
+}
+
+/**
+ * Resolves gRPC list ordering from `sortBy`/`sortDirection` query params.
+ * `sortBy` is matched against the given order-by enum's member names (e.g.
+ * `PROMPTS_COUNT`, `URL`, `DOMAIN`); unknown or `UNSPECIFIED` values fall back
+ * to `defaultBy`. Direction defaults to DESC (matching the previous fixed order
+ * the client displayed via its now-removed client-side sort). Returns a
+ * `{ by, direction }` object for the request `order`.
+ */
+function resolveGrpcSortOrder(sp, orderByEnum, defaultBy) {
+  const byKey = sp.get('sortBy')?.trim();
+  const mappedBy = byKey ? orderByEnum[byKey] : undefined;
+  const by = (typeof mappedBy === 'number' && mappedBy > 0) ? mappedBy : defaultBy;
+  const dirKey = sp.get('sortDirection')?.trim()?.toUpperCase();
+  const mappedDir = dirKey ? ORDER_DIRECTION_ENUM[dirKey] : undefined;
+  const direction = (typeof mappedDir === 'number' && mappedDir > 0)
+    ? mappedDir : ORDER_DIRECTION_ENUM.DESC;
+  return { by, direction };
 }
 
 export function mapStatsByLLM(data, dateRange) {
@@ -438,7 +458,7 @@ export async function handleBrandCitedPages(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
-  const order = { by: SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT };
+  const order = resolveGrpcSortOrder(sp, SOURCES_REQUEST_ORDER_BY_ENUM, SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT);
   const monthYm = parseMonthYM(sp);
   const monthRaw = sp.get('month')?.trim();
   const listReq = {
@@ -560,9 +580,15 @@ export async function handleBrandTopBrands(sp, clients) {
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
+  const topBrandsSortBy = sp.get('sortBy')?.trim()?.toUpperCase() === 'NAME' ? 'NAME' : 'MENTIONS';
+  const topBrandsSortAsc = sp.get('sortDirection')?.trim()?.toUpperCase() === 'ASC';
   const llmSingle = optionalLlmFromQuery(sp);
+  // The truncated fetch window is only correct when the final order matches the gRPC
+  // client's native mentions-desc order. For NAME or ascending sorts we must fetch the
+  // full set (1000 cap) so the JS sort + slice paginates over the whole dataset.
+  const nativeMentionsDescOrder = topBrandsSortBy === 'MENTIONS' && !topBrandsSortAsc;
   const minForSlice = offset + limit + 1;
-  const fetchN = offset === 0 ? 1000 : Math.min(1000, minForSlice);
+  const fetchN = (offset === 0 || !nativeMentionsDescOrder) ? 1000 : Math.min(1000, minForSlice);
   const brandDomain = domain.replace(/^www\./, '').toLowerCase();
   const listArgs = { country, brandDomain, limit: fetchN };
 
@@ -592,7 +618,11 @@ export async function handleBrandTopBrands(sp, clients) {
       ...(sliceCountry ? { country: sliceCountry } : {}),
     };
   }).sort((a, b) => {
-    const d = b.mentions - a.mentions;
+    if (topBrandsSortBy === 'NAME') {
+      const c = a.name.localeCompare(b.name);
+      return topBrandsSortAsc ? c : -c;
+    }
+    const d = topBrandsSortAsc ? (a.mentions - b.mentions) : (b.mentions - a.mentions);
     return d !== 0 ? d : a.name.localeCompare(b.name);
   });
   const total = dataFull.length;
@@ -613,7 +643,7 @@ export async function handleBrandCitedSources(sp, clients) {
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
   const listReq = {
-    country, llm: llmEnum, target, order: { by: DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT }, range: { limit, offset },
+    country, llm: llmEnum, target, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT), range: { limit, offset },
   };
   const totalsReq = { country, llm: llmEnum, target };
 
@@ -693,7 +723,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
     target: brandTarget(domain),
     competitors,
     kind: kinds,
-    order: { by: DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC },
+    order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC),
     range: { limit: rangeLimit, offset },
   };
   if (snapshotDate) { listBody.date = snapshotDate; }
