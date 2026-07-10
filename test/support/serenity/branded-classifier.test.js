@@ -143,6 +143,11 @@ describe('serenity branded-classifier', () => {
       expect(classifyBrandedTag('', needles)).to.equal(TYPE_TAG.NON_BRANDED);
       expect(classifyBrandedTag(undefined, needles)).to.equal(TYPE_TAG.NON_BRANDED);
     });
+
+    it('tolerates a non-array needles argument', () => {
+      expect(classifyBrandedTag('is Ace a good brand?', undefined)).to.equal(TYPE_TAG.NON_BRANDED);
+      expect(classifyBrandedTag('is Ace a good brand?', null)).to.equal(TYPE_TAG.NON_BRANDED);
+    });
   });
 
   describe('classifyBrandedTag — regular plurals of the brand name', () => {
@@ -156,13 +161,25 @@ describe('serenity branded-classifier', () => {
     });
 
     it('matches the -es plural only after a sibilant stem', () => {
-      // Sibilant stems take -es: Lexus → Lexuses, Bosch → Bosches, Fox → Foxes.
+      // One case per SIBILANT_RE alternation: s, x, z, ch, sh.
       expect(branded('are Lexuses reliable?', ['Lexus'])).to.equal(TYPE_TAG.BRANDED);
-      expect(branded('do Bosches last long?', ['Bosch'])).to.equal(TYPE_TAG.BRANDED);
       expect(branded('are Foxes fast?', ['Fox'])).to.equal(TYPE_TAG.BRANDED);
+      expect(branded('are Benzes reliable?', ['Benz'])).to.equal(TYPE_TAG.BRANDED);
+      expect(branded('do Bosches last long?', ['Bosch'])).to.equal(TYPE_TAG.BRANDED);
+      expect(branded('are Bushes evergreen?', ['Bush'])).to.equal(TYPE_TAG.BRANDED);
       // A non-sibilant stem must NOT admit -es — `Buickes` is not a word, and
       // admitting it would let any needle match an arbitrary `…es` word.
       expect(branded('are Buickes good?', ['Buick'])).to.equal(TYPE_TAG.NON_BRANDED);
+      // A sibilant stem with neither the bare form nor a plural present stays non-branded.
+      expect(branded('best luxury sedan', ['Lexus'])).to.equal(TYPE_TAG.NON_BRANDED);
+    });
+
+    it('composes the possessive strip with the sibilant -es plural', () => {
+      // `Ross's` normalizes to the needle `ross` (possessive stripped), whose
+      // stem is sibilant — so the plural `Rosses` matches through both new paths.
+      expect(branded('are Rosses near you?', ["Ross's"])).to.equal(TYPE_TAG.BRANDED);
+      expect(branded("is Ross's open today?", ["Ross's"])).to.equal(TYPE_TAG.BRANDED);
+      expect(branded('is Ross open today?', ["Ross's"])).to.equal(TYPE_TAG.BRANDED);
     });
 
     it('matches the singular and plural possessive', () => {
