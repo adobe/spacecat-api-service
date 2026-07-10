@@ -606,6 +606,7 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
+  'GET /sites/:siteId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',
