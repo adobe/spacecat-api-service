@@ -1,3 +1,10 @@
+# [1.638.0](https://github.com/adobe/spacecat-api-service/compare/v1.637.3...v1.638.0) (2026-07-10)
+
+
+### Features
+
+* Semrush Elements owned-urls endpoint | LLMO-6086 ([#2780](https://github.com/adobe/spacecat-api-service/issues/2780)) ([3ac74f2](https://github.com/adobe/spacecat-api-service/commit/3ac74f2c7cceb7f796c9e966e558c6b1abcf094e)), closes [adobe/mysticat-data-service#779](https://github.com/adobe/mysticat-data-service/issues/779)
+
 ## [1.637.3](https://github.com/adobe/spacecat-api-service/compare/v1.637.2...v1.637.3) (2026-07-10)
 
 
