@@ -5,7 +5,7 @@
   of the License at http://www.apache.org/licenses/LICENSE-2.0
 -->
 
-# LLMO Semrush Elements API — Filter Dimensions, Weeks, Prompts & Cited Domains
+# LLMO Semrush Elements API — Filter Dimensions, Weeks, Prompts, Cited Domains & Owned URLs
 
 SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence / URL Inspector dashboards.
 
@@ -19,7 +19,8 @@ SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence
 2. [List Weeks](#2-list-weeks)
 3. [List Prompts](#3-list-prompts)
 4. [List Cited Domains](#4-list-cited-domains)
-5. [Supported Models](#5-supported-models)
+5. [List Owned URLs](#5-list-owned-urls)
+6. [Supported Models](#6-supported-models)
 
 ---
 
@@ -331,7 +332,79 @@ Rows are sorted by `totalCitations` **descending** and sliced client-side (Semru
 
 ---
 
-## 5. Supported Models
+## 5. List Owned URLs
+
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls`**
+
+Returns the brand's own cited URLs with per-URL citation metrics + weekly trends, for the URL Inspector **"Your cited URLs"** table. **Drop-in compatible with the legacy `url-inspector/owned-urls` contract.** **Hybrid data source:** citations + trends come from Semrush; agentic + referral traffic come from Adobe Postgres (a separate pipeline), joined by `(site_id, url_path)`.
+
+### Parameters
+
+| Name | In | Required | Description |
+|---|---|---|---|
+| `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `brandId` | path | ✅ | SpaceCat brand UUID. Selects the brand's Semrush **sub-workspace** (flat-mode falls back to the org parent). LLMO ReBAC `brand` resource (FACS `llmo/can_view`); requires `brand:read`. `404` if not in the org |
+| `model` / `platform` | query | ❌ | AI model filter (`model` wins). Default `search-gpt` |
+| `startDate` / `start_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing, malformed, or after `endDate` |
+| `endDate` / `end_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing or malformed |
+| `categoryId` / `category` | query | ❌ | Category label → tag `category:<label>` (server-side, stats element) |
+| `region` | query | ❌ | Region code (e.g. `US`). Resolved to the market's Semrush **project**. `all`/absent → all the brand's markets (queried per-project) |
+| `siteId` / `site_id` | query | ❌ | SpaceCat site UUID for the **traffic** join only. Validated to belong to `brandId` (`400` otherwise). Absent → agentic/referral degrade to `0`/`[]` |
+| `referralSource` / `referral_source` | query | ❌ | `optel` (default) \| `cdn` \| `ga4` \| `adobe_analytics` \| `cja` — selects the referral source table |
+| `page` | query | ❌ | 0-based page index (default `0`) |
+| `pageSize` | query | ❌ | Rows per page (default `50`, clamped to `[1, 1000]`) |
+
+### Underlying Elements
+
+| Element | UUID | Shape | Role |
+|---|---|---|---|
+| `STATS_PER_URL` | `9af5ed83-049b-493a-85d7-99c7d4deddba` | `table` | Per-URL citations (`source`, `citations`, `prompts_with_citation`, `domain_type`, `project_id`) |
+| `URL_TRENDS` | `afb2e5d3-3955-4e0d-aeb1-7e28cdecd9f9` | `line` | Weekly per-URL trend — **all URLs in ONE call** (`legend`=url, `x`=week, `y__mentions`, `y__positions`) |
+
+Both are scoped by top-level `project_id` + date + `CBF_model`. The endpoint fans out **per project** (per market) — each call stays under the Semrush **50,000-row cap** (a workspace-wide call hits it) and carries its region — then merges. Traffic comes from `rpc_url_inspector_owned_urls_traffic` (mysticat-data-service, LLMO-6086), which takes the page's URLs and joins `agentic_traffic_weekly` + `referral_traffic_<source>` by `(site_id, url_path)`.
+
+### What it returns
+
+Only `domain_type='Owned'` rows are kept (client-side — the element has no server-side content-type filter). URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full owned count. Traffic is joined for the current page's URLs only. Field mapping:
+
+- **`url`** ← `source`; **`citations`** ← `citations`; **`promptsCited`** ← `prompts_with_citation`
+- **`regions`** ← the region code(s) of the project(s) the URL appears in
+- **`weeklyCitations`** ← trend rows grouped by URL: `{ week: 'YYYY-Www', value: y__mentions }`
+- **`agenticHits` / `agenticHitsTrend` / `referralHits` / `referralHitsTrend`** ← Postgres traffic RPC (`0`/`[]` when no match)
+- **`urlId`** → `''`, **`products`** → `[]`, **`weeklyPromptsCited`** → `[]` (see gaps)
+
+### Response example
+
+```json
+{
+  "urls": [
+    {
+      "urlId": "",
+      "url": "https://www.example.com/pricing",
+      "citations": 44,
+      "promptsCited": 40,
+      "products": [],
+      "regions": ["US"],
+      "weeklyCitations": [{ "week": "2026-W18", "value": 12 }],
+      "weeklyPromptsCited": [],
+      "agenticHits": 0,
+      "agenticHitsTrend": [],
+      "referralHits": 0,
+      "referralHitsTrend": []
+    }
+  ],
+  "totalCount": 37
+}
+```
+
+> **⚠️ Gaps (POC):**
+> 1. **No Semrush source for `urlId`, `products`, `weeklyPromptsCited`** — stubbed `''`/`[]`/`[]`. `urlId` has no `source_urls.id` equivalent, so the future url-prompts drilldown must key off the URL string, not a uuid. The trend element exposes mentions + positions only (no per-week prompt count). *Deferred follow-up* (cf. LLMO-6071).
+> 2. **Traffic is a separate Adobe pipeline.** Semrush owned URLs frequently have no matching agentic/referral rows (different pipeline, different time coverage), so those fields legitimately return `0`/`[]`. Requires `siteId` + `DATA_SERVICE_PROVIDER=postgres`.
+> 3. **Region resolution is org-wide** (same best-effort caveat as Cited Domains gap 3).
+
+---
+
+## 6. Supported Models
 
 The `model` (or `platform`) query parameter is accepted by these endpoints. Only the following Semrush values are valid; any unrecognised value silently falls back to the default (`search-gpt`).
 
