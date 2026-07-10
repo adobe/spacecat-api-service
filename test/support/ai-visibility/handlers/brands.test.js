@@ -657,6 +657,22 @@ describe('AI Visibility – brands handlers', () => {
         .to.equal(SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT);
     });
 
+    it('falls back to DESC for an unknown sortDirection', async () => {
+      clients.sourceClient.sources.resolves({ source: [] });
+      clients.voSourcesClient.sourcesTotals.resolves({ totals: [] });
+      await handleBrandCitedPages(new URLSearchParams('domain=example.com&sortDirection=BOGUS'), clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].order.direction)
+        .to.equal(ORDER_DIRECTION_ENUM.DESC);
+    });
+
+    it('matches sortBy case-insensitively', async () => {
+      clients.sourceClient.sources.resolves({ source: [] });
+      clients.voSourcesClient.sourcesTotals.resolves({ totals: [] });
+      await handleBrandCitedPages(new URLSearchParams('domain=example.com&sortBy=url'), clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].order.by)
+        .to.equal(SOURCES_REQUEST_ORDER_BY_ENUM.URL);
+    });
+
     it('uses month param and falls back when targetDate fails', async () => {
       clients.sourceClient.sources.onFirstCall().rejects(new Error('targetDate fail'));
       clients.sourceClient.sources.onSecondCall().resolves({ source: [{ url: 'https://example.com/p', promptsCount: 1 }] });
@@ -1064,6 +1080,14 @@ describe('AI Visibility – brands handlers', () => {
       const sp = new URLSearchParams('domain=example.com&sortBy=NAME&sortDirection=ASC');
       const res = await handleBrandTopBrands(sp, clients);
       expect(res.body.data.map((r) => r.name)).to.deep.equal(['Apple', 'Zebra']);
+    });
+
+    it('sorts by name descending when sortBy=NAME without sortDirection', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({
+        brands: [{ brandName: 'Apple', count: 10 }, { brandName: 'Zebra', count: 100 }],
+      });
+      const res = await handleBrandTopBrands(new URLSearchParams('domain=example.com&sortBy=NAME'), clients);
+      expect(res.body.data.map((r) => r.name)).to.deep.equal(['Zebra', 'Apple']);
     });
 
     it('sorts by mentions ascending when sortDirection=ASC (default sortBy)', async () => {

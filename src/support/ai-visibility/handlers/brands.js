@@ -105,7 +105,11 @@ function buildByDateEntry(year, month, slice) {
  * `{ by, direction }` object for the request `order`.
  */
 function resolveGrpcSortOrder(sp, orderByEnum, defaultBy) {
-  const byKey = sp.get('sortBy')?.trim();
+  // Unlike `resolveFtsSort` in topics.js (which 400s on an unrecognized sort value),
+  // this deliberately falls back to the default — matched by the OpenAPI docs
+  // ("Unknown values fall back to the default"). Keep it lenient; don't "fix" it to throw.
+  // `sortBy` is matched case-insensitively (enum member names are uppercase).
+  const byKey = sp.get('sortBy')?.trim()?.toUpperCase();
   const mappedBy = byKey ? orderByEnum[byKey] : undefined;
   const by = (typeof mappedBy === 'number' && mappedBy > 0) ? mappedBy : defaultBy;
   const dirKey = sp.get('sortDirection')?.trim()?.toUpperCase();
@@ -619,11 +623,11 @@ export async function handleBrandTopBrands(sp, clients) {
     };
   }).sort((a, b) => {
     if (topBrandsSortBy === 'NAME') {
-      const c = a.name.localeCompare(b.name);
+      const c = a.name.localeCompare(b.name, 'en');
       return topBrandsSortAsc ? c : -c;
     }
     const d = topBrandsSortAsc ? (a.mentions - b.mentions) : (b.mentions - a.mentions);
-    return d !== 0 ? d : a.name.localeCompare(b.name);
+    return d !== 0 ? d : a.name.localeCompare(b.name, 'en');
   });
   const total = dataFull.length;
   const page = dataFull.slice(offset, offset + limit);
