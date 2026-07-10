@@ -29,7 +29,13 @@ use(sinonChai);
  * orchestration tests in llmo-onboarding.test.js.
  */
 describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
-  const GENERIC_ERROR = "We couldn't onboard this domain — please contact support.";
+  const GENERIC_ERROR = "We couldn't onboard this domain right now. Please use our "
+    + 'domain onboarding guide instead: https://experienceleague.adobe.com/en/docs/'
+    + 'llm-optimizer/using/essentials/quick-start#step-1-onboard-your-domain';
+  // Header-safe range enforced by cleanupHeaderValue() / Node's http header validation
+  // (this is the exact class of char — em dash, curly quotes — that previously crashed
+  // the response with a 500 "Invalid character in header content [\"x-error\"]").
+  const HEADER_SAFE = /^[\t\x20-\x7E\x80-\xFF]*$/;
 
   let LlmoController;
   let controller;
@@ -328,6 +334,10 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
       const body = await res.json();
       expect(body.message).to.equal(GENERIC_ERROR);
       expect(body.message).to.not.contain('already onboarded');
+      // Regression guard (LLMO-6147): a message with a char outside this range
+      // crashes the real x-error header with a 500 at the HTTP layer — a failure
+      // this mocked http-utils test can't otherwise catch.
+      expect(HEADER_SAFE.test(body.message)).to.be.true;
       expect(performLlmoOnboardingStub).to.not.have.been.called;
     });
   });
@@ -342,6 +352,7 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
       const body = await res.json();
       expect(body.message).to.equal(GENERIC_ERROR);
       expect(body.message).to.not.contain('SharePoint');
+      expect(HEADER_SAFE.test(body.message)).to.be.true;
 
       // Ops gets the internal reason; the customer does not.
       expect(postLlmoAlertStub).to.have.been.calledOnce;
