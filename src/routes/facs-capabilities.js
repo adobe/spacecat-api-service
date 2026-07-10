@@ -660,6 +660,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/brand-profile': 'llmo/can_view',
       'GET /sites/:siteId/experiments': 'llmo/can_view',
       'GET /sites/:siteId/files': 'llmo/can_view',
+      'GET /sites/:siteId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_view',
       'GET /sites/:siteId/ims-org-access': 'llmo/can_view',
@@ -800,6 +801,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)
       'GET /sites/:siteId/preflights': 'llmo/can_view',
@@ -971,6 +973,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_view',

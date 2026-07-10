@@ -298,6 +298,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
@@ -606,6 +607,7 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
+  'GET /sites/:siteId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',

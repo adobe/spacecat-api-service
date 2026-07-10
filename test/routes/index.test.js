@@ -249,6 +249,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockFixesController = {
+    getAllForSite: () => null,
     getAllForOpportunity: () => null,
     getByStatus: () => null,
     getByID: () => null,
@@ -899,6 +900,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
@@ -1115,6 +1117,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'GET /tools/scrape/jobs/by-url/:url/:processingType',
       'GET /tools/scrape/jobs/by-url/:url',
+      'GET /sites/:siteId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',

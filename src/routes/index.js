@@ -248,6 +248,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
@@ -478,6 +479,7 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-url/:url': scrapeJobController.getScrapeUrlByProcessingType,
 
     // Fixes
+    'GET /sites/:siteId/fixes': (c) => fixesController.getAllForSite(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),

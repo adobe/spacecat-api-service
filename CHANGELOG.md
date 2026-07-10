@@ -1,3 +1,45 @@
+# [1.638.0](https://github.com/adobe/spacecat-api-service/compare/v1.637.3...v1.638.0) (2026-07-10)
+
+
+### Features
+
+* Semrush Elements owned-urls endpoint | LLMO-6086 ([#2780](https://github.com/adobe/spacecat-api-service/issues/2780)) ([3ac74f2](https://github.com/adobe/spacecat-api-service/commit/3ac74f2c7cceb7f796c9e966e558c6b1abcf094e)), closes [adobe/mysticat-data-service#779](https://github.com/adobe/mysticat-data-service/issues/779)
+
+## [1.637.3](https://github.com/adobe/spacecat-api-service/compare/v1.637.2...v1.637.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* crashing x-error header in onboard-site generic error ([#2787](https://github.com/adobe/spacecat-api-service/issues/2787)) ([f75c8ab](https://github.com/adobe/spacecat-api-service/commit/f75c8abbbb9149430f442de4743ed61330d955af))
+
+## [1.637.2](https://github.com/adobe/spacecat-api-service/compare/v1.637.1...v1.637.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **agentic-rules:** reject invalid URLs in category/page-type rules ([#2773](https://github.com/adobe/spacecat-api-service/issues/2773)) ([bcb9f60](https://github.com/adobe/spacecat-api-service/commit/bcb9f60ec70692b5b267478726f768e5d802b519))
+
+## [1.637.1](https://github.com/adobe/spacecat-api-service/compare/v1.637.0...v1.637.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* rejected the demo/internal domains ([#2613](https://github.com/adobe/spacecat-api-service/issues/2613)) ([75ca49e](https://github.com/adobe/spacecat-api-service/commit/75ca49e394286f50ed671605458e0ac31012b7bb))
+
+# [1.637.0](https://github.com/adobe/spacecat-api-service/compare/v1.636.0...v1.637.0) (2026-07-09)
+
+
+### Features
+
+* **fixes:** add site-wide GET /sites/:siteId/fixes endpoint ([#2781](https://github.com/adobe/spacecat-api-service/issues/2781)) ([b61d3bc](https://github.com/adobe/spacecat-api-service/commit/b61d3bce2a9c842556a62a4859bc5d2fea155b47)), closes [adobe/spacecat-shared#1792](https://github.com/adobe/spacecat-shared/issues/1792) [#1792](https://github.com/adobe/spacecat-api-service/issues/1792) [adobe/spacecat-shared#1792](https://github.com/adobe/spacecat-shared/issues/1792) [#1792](https://github.com/adobe/spacecat-api-service/issues/1792)
+
+# [1.636.0](https://github.com/adobe/spacecat-api-service/compare/v1.635.0...v1.636.0) (2026-07-09)
+
+
+### Features
+
+* **preflight:** log terminal run outcomes from both poll handlers ([#2777](https://github.com/adobe/spacecat-api-service/issues/2777)) ([17dd9c9](https://github.com/adobe/spacecat-api-service/commit/17dd9c9de6d452305eaa5782a7934e419519f035))
+
 # [1.635.0](https://github.com/adobe/spacecat-api-service/compare/v1.634.0...v1.635.0) (2026-07-09)
 
 
