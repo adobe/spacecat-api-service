@@ -45,6 +45,8 @@ const RAW_TOPICS = {
       { value: 'category:Firefly' },
       { value: 'intent:Informational' },
       { value: 'source:organic' },
+      { value: 'type:branded' },
+      { value: 'plain-tag' },
     ],
   },
 };
@@ -84,9 +86,21 @@ describe('createElementsService', () => {
       expect(calledIds).to.include(ELEMENT_IDS.MARKETS);
     });
 
-    it('returns an object with brands, regions, topics, categories, page_intents, origins keys', async () => {
+    it('returns an object with brands, regions, topics, categories, page_intents, origins, type, tags keys', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result).to.have.all.keys(['brands', 'regions', 'topics', 'categories', 'page_intents', 'origins']);
+      expect(result).to.have.all.keys([
+        'brands', 'regions', 'topics', 'categories', 'page_intents', 'origins', 'type', 'tags',
+      ]);
+    });
+
+    it('groups unknown prefix:value tags under their own prefix key', async () => {
+      const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
+      expect(result.type).to.deep.equal([{ id: null, label: 'branded' }]);
+    });
+
+    it('collects plain, prefix-less tags into the generic tags key', async () => {
+      const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
+      expect(result.tags).to.deep.equal([{ id: null, label: 'plain-tag' }]);
     });
 
     it('brands contains filter dimensions for each brand', async () => {

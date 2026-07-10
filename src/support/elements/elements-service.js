@@ -22,6 +22,7 @@ import {
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,
   transformOriginsToFilterDimensions,
+  transformOtherTagsForFilterDimensions,
   buildWeeksPayload,
   transformWeeksResponse,
   buildPromptsPayload,
@@ -61,7 +62,7 @@ export function createElementsService(transport) {
         transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
         transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, buildMarketsPayload({})),
       ]);
-      return {
+      const result = {
         brands: transformBrandsToFilterDimensions(rawBrands, spacecatBrands),
         regions: transformMarketsToFilterDimensions(rawMarkets, brandSemrushProjects),
         topics: transformTopicsForFilterDimensions(rawTopics),
@@ -69,6 +70,15 @@ export function createElementsService(transport) {
         page_intents: transformIntentsToFilterDimensions(rawTopics),
         origins: transformOriginsToFilterDimensions(rawTopics),
       };
+      // Merge any tag types not covered above (e.g. `type:branded`) under their own
+      // prefix key, and plain prefix-less tags under `tags` — see
+      // transformOtherTagsForFilterDimensions.
+      const { tags, ...otherGroups } = transformOtherTagsForFilterDimensions(rawTopics);
+      Object.entries(otherGroups).forEach(([key, items]) => {
+        result[key] = result[key] ? [...result[key], ...items] : items;
+      });
+      result.tags = tags;
+      return result;
     },
 
     /**

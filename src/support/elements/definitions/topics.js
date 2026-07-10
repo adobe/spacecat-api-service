@@ -49,21 +49,43 @@ function extractByPrefix(raw, prefix) {
 }
 
 /**
- * Extracts only "topic:"-prefixed entries → `{ id: null, label }`.
+ * Splits a "Parent__Child" value into its child label and parent label.
+ * Splits on the first "__" only, so a label containing further "__" occurrences
+ * is preserved intact in the child label.
+ * @param {string} value - Raw stripped tag value.
+ * @returns {{label: string, parent_id?: null, parent_label?: string}}
+ */
+function splitParent(value) {
+  const sep = '__';
+  const idx = value.indexOf(sep);
+  if (idx === -1) {
+    return { label: value };
+  }
+  return {
+    label: value.slice(idx + sep.length),
+    parent_id: null,
+    parent_label: value.slice(0, idx),
+  };
+}
+
+/**
+ * Extracts only "topic:"-prefixed entries → `{ id: null, label }`, plus
+ * `parent_id`/`parent_label` when the tag encodes a "Parent__Child" hierarchy.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformTopicsForFilterDimensions(raw) {
-  return extractByPrefix(raw, 'topic:').map((label) => ({ id: null, label }));
+  return extractByPrefix(raw, 'topic:').map((value) => ({ id: null, ...splitParent(value) }));
 }
 
 /**
- * Extracts only "category:"-prefixed entries → `{ id: null, label }`.
+ * Extracts only "category:"-prefixed entries → `{ id: null, label }`, plus
+ * `parent_id`/`parent_label` when the tag encodes a "Parent__Child" hierarchy.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformCategoriesToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'category:').map((label) => ({ id: null, label }));
+  return extractByPrefix(raw, 'category:').map((value) => ({ id: null, ...splitParent(value) }));
 }
 
 /**
@@ -82,4 +104,43 @@ export function transformIntentsToFilterDimensions(raw) {
  */
 export function transformOriginsToFilterDimensions(raw) {
   return extractByPrefix(raw, 'source:').map((label) => ({ id: label, label }));
+}
+
+const KNOWN_TAG_PREFIXES = ['topic:', 'category:', 'intent:', 'source:'];
+
+/**
+ * Extracts every tag NOT already covered by the known `topic:`/`category:`/
+ * `intent:`/`source:` prefixes, so newly-introduced Semrush tag types (e.g.
+ * `type:branded`) surface in the response without a code change per prefix.
+ *
+ * - `prefix:value` tags are grouped by their prefix into a dynamic key
+ *   (e.g. `{ type: [{ id: null, label: 'branded' }, ...] }`).
+ * - Plain tags with no `prefix:` at all are collected into a generic `tags` array.
+ *
+ * Both forms apply the same `Parent__Child` splitting as the known dimensions.
+ *
+ * @param {object} raw - Raw response from the Elements API.
+ * @returns {{[prefix: string]: FilterDimensionItem[], tags: FilterDimensionItem[]}}
+ */
+export function transformOtherTagsForFilterDimensions(raw) {
+  const values = (raw?.blocks?.value ?? [])
+    .map((item) => String(item.value ?? ''))
+    .filter((value) => value !== '' && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
+
+  const groups = {};
+  const tags = [];
+
+  values.forEach((value) => {
+    const sepIdx = value.indexOf(':');
+    if (sepIdx === -1) {
+      tags.push({ id: null, ...splitParent(value) });
+      return;
+    }
+    const prefix = value.slice(0, sepIdx);
+    const rest = value.slice(sepIdx + 1);
+    groups[prefix] = groups[prefix] ?? [];
+    groups[prefix].push({ id: null, ...splitParent(rest) });
+  });
+
+  return { ...groups, tags };
 }

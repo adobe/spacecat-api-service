@@ -17,6 +17,7 @@ import {
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,
   transformOriginsToFilterDimensions,
+  transformOtherTagsForFilterDimensions,
 } from '../../../../src/support/elements/definitions/topics.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 
@@ -27,6 +28,8 @@ const RAW_MIXED = {
       { value: 'topic:AI' },
       { value: 'category:Firefly' },
       { value: 'category:Experience Cloud' },
+      { value: 'category:Modular & Configurable Sofas__Compact Shippable Furniture' },
+      { value: 'topic:Furniture__Compact Shippable Furniture' },
       { value: 'intent:Informational' },
       { value: 'intent:Transactional' },
       { value: 'source:organic' },
@@ -103,7 +106,35 @@ describe('topics definitions', () => {
       expect(result).to.deep.equal([
         { id: null, label: 'SEO' },
         { id: null, label: 'AI' },
+        {
+          id: null,
+          label: 'Compact Shippable Furniture',
+          parent_id: null,
+          parent_label: 'Furniture',
+        },
       ]);
+    });
+
+    it('adds parent_id/parent_label when the value contains a double underscore', () => {
+      const raw = { blocks: { value: [{ value: 'topic:Furniture__Sofas' }] } };
+      const [item] = transformTopicsForFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: null,
+        label: 'Sofas',
+        parent_id: null,
+        parent_label: 'Furniture',
+      });
+    });
+
+    it('splits only on the first double underscore', () => {
+      const raw = { blocks: { value: [{ value: 'topic:A__B__C' }] } };
+      const [item] = transformTopicsForFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: null,
+        label: 'B__C',
+        parent_id: null,
+        parent_label: 'A',
+      });
     });
 
     it('sets id to null for each entry', () => {
@@ -136,7 +167,35 @@ describe('topics definitions', () => {
       expect(result).to.deep.equal([
         { id: null, label: 'Firefly' },
         { id: null, label: 'Experience Cloud' },
+        {
+          id: null,
+          label: 'Compact Shippable Furniture',
+          parent_id: null,
+          parent_label: 'Modular & Configurable Sofas',
+        },
       ]);
+    });
+
+    it('adds parent_id/parent_label when the value contains a double underscore', () => {
+      const raw = { blocks: { value: [{ value: 'category:Sofas__Modular Sofas' }] } };
+      const [item] = transformCategoriesToFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: null,
+        label: 'Modular Sofas',
+        parent_id: null,
+        parent_label: 'Sofas',
+      });
+    });
+
+    it('splits only on the first double underscore', () => {
+      const raw = { blocks: { value: [{ value: 'category:A__B__C' }] } };
+      const [item] = transformCategoriesToFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: null,
+        label: 'B__C',
+        parent_id: null,
+        parent_label: 'A',
+      });
     });
 
     it('sets id to null for each entry', () => {
@@ -212,6 +271,76 @@ describe('topics definitions', () => {
       const result = transformOriginsToFilterDimensions(raw);
       expect(result).to.have.length(1);
       expect(result[0].id).to.equal('organic');
+    });
+  });
+
+  describe('transformOtherTagsForFilterDimensions', () => {
+    it('returns only an empty tags array when raw is null', () => {
+      expect(transformOtherTagsForFilterDimensions(null)).to.deep.equal({ tags: [] });
+    });
+
+    it('excludes known-prefixed entries (topic/category/intent/source)', () => {
+      const result = transformOtherTagsForFilterDimensions(RAW_MIXED);
+      expect(result).to.not.have.property('topic');
+      expect(result).to.not.have.property('category');
+      expect(result).to.not.have.property('intent');
+      expect(result).to.not.have.property('source');
+    });
+
+    it('groups unknown prefix:value tags by their prefix', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: 'type:branded' },
+            { value: 'type:unbranded' },
+            { value: 'abc:value' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result.type).to.deep.equal([
+        { id: null, label: 'branded' },
+        { id: null, label: 'unbranded' },
+      ]);
+      expect(result.abc).to.deep.equal([{ id: null, label: 'value' }]);
+      expect(result.tags).to.deep.equal([]);
+    });
+
+    it('collects plain, prefix-less tags into the generic tags array', () => {
+      const raw = { blocks: { value: [{ value: 'abc' }, { value: 'another-plain-tag' }] } };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result.tags).to.deep.equal([
+        { id: null, label: 'abc' },
+        { id: null, label: 'another-plain-tag' },
+      ]);
+    });
+
+    it('applies Parent__Child splitting to grouped and plain tags alike', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: 'type:Branded__Sub' },
+            { value: 'Parent__Child' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result.type).to.deep.equal([
+        {
+          id: null, label: 'Sub', parent_id: null, parent_label: 'Branded',
+        },
+      ]);
+      expect(result.tags).to.deep.equal([
+        {
+          id: null, label: 'Child', parent_id: null, parent_label: 'Parent',
+        },
+      ]);
+    });
+
+    it('ignores empty string values', () => {
+      const raw = { blocks: { value: [{ value: '' }, { value: 'abc' }] } };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result.tags).to.deep.equal([{ id: null, label: 'abc' }]);
     });
   });
 });
