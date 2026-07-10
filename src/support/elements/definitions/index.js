@@ -27,3 +27,4 @@ export {
   buildOwnedUrlsTrendPayload,
   transformOwnedUrlsResponse,
 } from './owned-urls.js';
+export { buildDomainUrlsPayload, transformDomainUrlsResponse } from './domain-urls.js';

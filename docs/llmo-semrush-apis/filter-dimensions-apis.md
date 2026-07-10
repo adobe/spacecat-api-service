@@ -5,7 +5,7 @@
   of the License at http://www.apache.org/licenses/LICENSE-2.0
 -->
 
-# LLMO Semrush Elements API — Filter Dimensions, Weeks, Prompts, Cited Domains & Owned URLs
+# LLMO Semrush Elements API — Filter Dimensions, Weeks, Prompts, Cited Domains, Owned URLs & Domain URLs
 
 SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence / URL Inspector dashboards.
 
@@ -20,7 +20,8 @@ SpaceCat wrapper endpoints over the Semrush Elements APIs for the Brand Presence
 3. [List Prompts](#3-list-prompts)
 4. [List Cited Domains](#4-list-cited-domains)
 5. [List Owned URLs](#5-list-owned-urls)
-6. [Supported Models](#6-supported-models)
+6. [List Domain URLs](#6-list-domain-urls)
+7. [Supported Models](#7-supported-models)
 
 ---
 
@@ -404,7 +405,71 @@ Only `domain_type='Owned'` rows are kept (client-side — the element has no ser
 
 ---
 
-## 6. Supported Models
+## 6. List Domain URLs
+
+**`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls`**
+
+Phase 2 of the URL Inspector **"Cited Third Party URLs"** expandable tree: expand a cited domain (from [Cited Domains](#4-list-cited-domains)) → the URLs within it. **Drop-in compatible with the legacy `url-inspector/domain-urls` contract.** Same Semrush element as [Owned URLs](#5-list-owned-urls) (`STATS_PER_URL` 9af5ed83) **minus** the trend element and the Postgres traffic hybrid, filtered to a single domain (required `hostname`) instead of `domain_type='Owned'`.
+
+### Parameters
+
+| Name | In | Required | Description |
+|---|---|---|---|
+| `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
+| `brandId` | path | ✅ | SpaceCat brand UUID. Selects the brand's Semrush **sub-workspace** (flat-mode falls back to the org parent). LLMO ReBAC `brand` resource (FACS `llmo/can_view`); requires `brand:read`. `404` if not in the org |
+| `hostname` / `domain` | query | ✅ | The (registered) domain to drill into, as returned by Cited Domains. `400` if missing. Matched host-or-subdomain (see below) |
+| `model` / `platform` | query | ❌ | AI model filter (`model` wins). Default `search-gpt` |
+| `startDate` / `start_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing, malformed, or after `endDate` |
+| `endDate` / `end_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing or malformed |
+| `categoryId` / `category` | query | ❌ | Category label → tag `category:<label>` (server-side, stats element) |
+| `region` | query | ❌ | Region code (e.g. `US`). Resolved to the market's Semrush **project**. `all`/absent → all the brand's markets (queried per-project) |
+| `page` | query | ❌ | 0-based page index (default `0`) |
+| `pageSize` | query | ❌ | Rows per page (default `50`, clamped to `[1, 1000]`) |
+
+### Underlying Element
+
+| Element | UUID | Shape | Role |
+|---|---|---|---|
+| `STATS_PER_URL` | `9af5ed83-049b-493a-85d7-99c7d4deddba` | `table` | Per-URL citations (`source`, `citations`, `prompts_with_citation`, `domain_type`, `project_id`) |
+
+Scoped by top-level `project_id` + date + `CBF_model`. The endpoint fans out **per project** (per market) — each call stays under the Semrush **50,000-row cap** — then merges. There is **no trend element and no traffic RPC** (that is Owned URLs only).
+
+### What it returns
+
+The element has **no server-side domain filter** (verified live: `CBF_domain`/`cbf_domain`/`CBF_source`, `eq` + `contains`, all return the full project table), so `hostname` is applied **client-side** — the same pattern Owned URLs uses for `domain_type='Owned'`. Cited Domains reports the **registered domain** (e.g. `openai.com`), but `source` hosts are often subdomains (`help.openai.com`), so a row matches when its host **equals `hostname` or is a subdomain of it** (`host === hostname || host.endsWith('.'+hostname)`, `www.`-stripped, lowercased). Exact-host matching would miss most URLs — e.g. `cambridge.org` is only ever cited via `dictionary.cambridge.org`. URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full post-filter count. Field mapping:
+
+- **`url`** ← `source`; **`citations`** ← `citations`; **`promptsCited`** ← `prompts_with_citation`
+- **`contentType`** ← `domain_type`
+- **`regions`** ← the region code(s) of the project(s) the URL appears in, joined (string)
+- **`urlId`** → `''`, **`categories`** → `''` (see gaps)
+
+### Response example
+
+```json
+{
+  "urls": [
+    {
+      "urlId": "",
+      "url": "https://help.openai.com/en/articles/pricing",
+      "contentType": "Other",
+      "citations": 44,
+      "promptsCited": 40,
+      "categories": "",
+      "regions": "US"
+    }
+  ],
+  "totalCount": 37
+}
+```
+
+> **⚠️ Gaps (POC):**
+> 1. **No Semrush source for `urlId`, `categories`** — stubbed `''`. `urlId` has no `source_urls.id` equivalent (so a future url-prompts drilldown must key off the URL string); the stats element carries no per-URL category. *Deferred follow-up* (cf. LLMO-6086 / LLMO-6071).
+> 2. **`regions` is a string**, not an array — this endpoint follows the legacy `domain-urls` contract (and the UI `DomainUrlRow` type), unlike Owned URLs which returns `regions` as an array.
+> 3. **Region resolution is org-wide** (same best-effort caveat as Cited Domains gap 3).
+
+---
+
+## 7. Supported Models
 
 The `model` (or `platform`) query parameter is accepted by these endpoints. Only the following Semrush values are valid; any unrecognised value silently falls back to the default (`search-gpt`).
 
