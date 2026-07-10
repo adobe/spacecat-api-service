@@ -1939,5 +1939,25 @@ describe('Organizations Controller', () => {
       expect(body.map((s) => s.id)).to.have.members([SITE1_ID]);
       expect(context.log.info).to.not.have.been.calledWithMatch(/cross-product listing/);
     });
+
+    it('skips the ReBAC collection filter when the cross-product scope is present', async () => {
+      // A resource-scoped FACS session that would normally trigger the ReBAC
+      // filter under ASO. Deliberately do NOT provide postgrestClient: if the
+      // filter engaged, `requirePostgrestForFacsMappings` would return 503.
+      // The cross-product scope must short-circuit the filter entirely, so we
+      // expect 200 with the full entitled-sites union.
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Same expectation as the baseline cross-product listing: entitlement gate
+      // still preserved (ASO entitled → only site1 enrolled).
+      expect(body.map((s) => s.id)).to.have.members([SITE1_ID]);
+    });
   });
 });

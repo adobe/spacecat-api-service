@@ -379,15 +379,28 @@ function OrganizationsController(ctx, env) {
     // delegation grant itself and pass through unchanged. Absent flag (admin /
     // internal org / non-ReBAC org / org-wide viewer) => full list.
     //
-    // Cross-product bypass: only filter when the current product actually
+    // Product-shape bypass: only filter when the current product actually
     // ReBAC-scopes `site` (ASO). Under LLMO, `site` is not a ReBAC resource
     // (LLMO scopes `brand`), so the state layer holds no per-site grants and
     // filtering would wrongly hide every site — return the full list instead.
+    //
+    // Cross-product (SITES-46454) bypass: when the session carries
+    // `sites:list:cross_product` (minted at login via `unique_client_id` or
+    // `cdn_origin_verified`), the caller is trusted at the CLIENT level to see
+    // the union of sites the org is entitled to across every product. That
+    // client-level trust intentionally supersedes the per-user, per-product
+    // ReBAC filter — the ReBAC filter is keyed on a single product's `site`
+    // resource, and applying it under the cross-product branch would filter
+    // out sites from other products that don't have any per-user grant on the
+    // FACS-enrolled product (they are still authorised by the client-level
+    // scope). Skip the filter entirely in this branch. See
+    // mysticat-architecture/platform/decisions/multi-product-login-phase1.md.
     let visibleOwnSites = filteredSites;
     const facs = context.attributes?.facs;
     const hasFACSCapability = facs?.enabled
       && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
-    if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
+    if (!isCrossProduct
+      && facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
       const unavailable = requirePostgrestForFacsMappings(context);
       if (unavailable) {
         return unavailable;
