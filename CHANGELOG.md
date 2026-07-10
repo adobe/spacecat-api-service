@@ -1,3 +1,10 @@
+## [1.637.2](https://github.com/adobe/spacecat-api-service/compare/v1.637.1...v1.637.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **agentic-rules:** reject invalid URLs in category/page-type rules ([#2773](https://github.com/adobe/spacecat-api-service/issues/2773)) ([bcb9f60](https://github.com/adobe/spacecat-api-service/commit/bcb9f60ec70692b5b267478726f768e5d802b519))
+
 ## [1.637.1](https://github.com/adobe/spacecat-api-service/compare/v1.637.0...v1.637.1) (2026-07-10)
 
 
