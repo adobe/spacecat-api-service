@@ -78,6 +78,16 @@ v2-prompts-by-brand:
         type: string
         enum: [ai, human]
       description: Filter by origin (ai or human)
+    - name: source
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >-
+        Filter by prompt source (exact match), e.g. `gsc`, `semrush`,
+        `base_url`, `config`. Free-form string — sources are open-ended and
+        added by upstream producers (e.g. DRS) without API changes, so no enum
+        is enforced.
     - name: sort
       in: query
       required: false
