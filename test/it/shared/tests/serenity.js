@@ -417,6 +417,33 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(promoted.status).to.equal(400);
     });
 
+    // Upstream stores a parent pointer, not a tree, so it would accept a parent
+    // that already descends from the tag being moved. Both nodes would then hang
+    // off no root, and — since every tree walk starts at the roots — neither could
+    // be found again: the subtree would be unreachable and unrepairable through
+    // this API. The proxy refuses the edge rather than depend on upstream to.
+    it('PATCH /serenity/tags/:tagId 400s a re-parent onto the tag\'s own descendant', async () => {
+      await createUsMarket();
+      const parent = await createTag('Outerwear');
+      const child = await createTag('Parkas', parent.body.id);
+
+      const cycled = await getHttpClient().admin.patch(`${base}/tags/${parent.body.id}`, {
+        name: 'Outerwear',
+        parentId: child.body.id,
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(cycled.status).to.equal(400);
+
+      // The tree is untouched: the parent still sits under the `category` root and
+      // still carries its child.
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      expect(children.status).to.equal(200);
+      expect(children.body.items.map((t) => t.id)).to.include(child.body.id);
+    });
+
     it('PATCH /serenity/tags/:tagId 404s an id absent from this market tree', async () => {
       await createUsMarket();
       // Without the target's current parent there is no PATCH body that preserves it,

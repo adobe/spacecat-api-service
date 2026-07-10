@@ -70,8 +70,9 @@ export function initialMarketProjectName(market, languageCode) {
  *   project empty (models still attached when supplied).
  * @param {Array<string|{name: string, regions?: string[]}>} [params.brandAliases]
  *   - brand aliases; region-clamped to the initial market by the create handler.
- *   With the brand name they classify each generated prompt as `type:branded` /
- *   `type:non-branded` and populate the project's `brand_names`.
+ *   With the brand name they classify each generated prompt under the `type`
+ *   dimension as `branded` / `non-branded`, and populate the project's
+ *   `brand_names`.
  * @param {object} [params.brandUrlSources] - the brand's URL sources
  *   ({ urls, socialAccounts, earnedContent }) pushed onto the initial market's
  *   own-brand benchmark (own sites + social + earned). Best-effort: a failed

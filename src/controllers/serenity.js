@@ -434,7 +434,7 @@ function SerenityController(context, log, env) {
   }
 
   /**
-   * Builds the server-side `type:branded`/`type:non-branded` classifier for the
+   * Builds the server-side `branded`/`non-branded` `type`-value classifier for the
    * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
    * name + aliases ONCE per request, then returns a pure
    * `(text, geoTargetId) => TYPE_VALUE` closure: each prompt's market is derived
@@ -793,11 +793,14 @@ function SerenityController(context, log, env) {
   };
 
   /**
-   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
-   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
-   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
-   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
-   * for one, is derived from the `category:` tags across a brand's markets.
+   * POST /serenity/tags — register a bare-named prompt tag beneath a dimension
+   * root, on a single market (the (geoTargetId, languageCode) slice in the body).
+   * `type` names the dimension (one of ALL_DIMENSIONS). An open `category` value
+   * is customer-authored and may name a `parentId` inside its own dimension; a
+   * closed dimension's value comes from a fixed vocabulary and is resolved or
+   * created under its own root, never under a caller-chosen parent. The UI's
+   * "Categories" view, for one, is derived from the `category` root's descendants
+   * across a brand's markets.
    * Dispatches by workspace mode, mirroring the tags/markets handlers.
    */
   const createTag = async (ctx) => {

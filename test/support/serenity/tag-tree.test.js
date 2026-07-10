@@ -22,7 +22,7 @@ import {
   provisionDimensionTree,
   ensureClosedValue,
   resolveTypeValueInjection,
-  findTagInTree,
+  findTagsInTree,
   assertParentWithinDimension,
 } from '../../../src/support/serenity/tag-tree.js';
 import {
@@ -174,7 +174,10 @@ describe('serenity tag-tree', () => {
       );
       expect(listProjectTags).to.have.been.calledTwice;
       expect(byName.get('intent')).to.equal('r-int');
-      expect(createdNames).to.deep.equal(['category', 'intent']);
+      // `intent` was resolved by the re-read, not minted by this call's echo, so it
+      // is NOT claimed. Claiming it would report `created: true` for a tag another
+      // writer may have won.
+      expect(createdNames).to.deep.equal(['category']);
       expect(log.warn).to.have.been.calledWithMatch(/echoed fewer nodes than requested/);
     });
 
@@ -429,34 +432,91 @@ describe('serenity tag-tree', () => {
     });
   });
 
-  describe('findTagInTree', () => {
+  describe('findTagsInTree', () => {
+    it('places several ids in one walk and reports each ancestry', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const found = await findTagsInTree(
+        transport,
+        WS,
+        PROJECT,
+        [TAG_IDS.subCategoryHuman, TAG_IDS.categoryRoot],
+        fakeLog(),
+      );
+      expect(found.get(TAG_IDS.categoryRoot)).to.deep.equal({
+        kind: 'root', parentId: null, rootName: 'category', ancestorIds: [],
+      });
+      expect(found.get(TAG_IDS.subCategoryHuman)).to.deep.include({
+        kind: 'descendant', rootName: 'category',
+      });
+      expect(found.get(TAG_IDS.subCategoryHuman).ancestorIds).to.deep.equal([
+        TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes,
+      ]);
+    });
+
+    it('stops walking as soon as every wanted id is placed', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      await findTagsInTree(transport, WS, PROJECT, [TAG_IDS.categoryRunningShoes], fakeLog());
+      // Root level, then the `category` root's children. The closed roots' levels
+      // are never read, because the target was already placed.
+      expect(transport.listProjectTags).to.have.been.calledTwice;
+    });
+
+    it('maps an id absent from the tree to unknown, alongside the ones it placed', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const found = await findTagsInTree(
+        transport,
+        WS,
+        PROJECT,
+        [TAG_IDS.sourceHuman, 'no-such-tag'],
+        fakeLog(),
+      );
+      expect(found.get(TAG_IDS.sourceHuman).rootName).to.equal('source');
+      expect(found.get('no-such-tag')).to.deep.equal({
+        kind: 'unknown', parentId: null, rootName: null, ancestorIds: [],
+      });
+    });
+  });
+
+  describe('findTagsInTree — single-id placement', () => {
     it('reports a dimension root as a root, with its own name as the dimension', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
-      const found = await findTagInTree(transport, WS, PROJECT, TAG_IDS.intentRoot, fakeLog());
-      expect(found).to.deep.equal({ kind: 'root', parentId: null, rootName: 'intent' });
+      const placed = await findTagsInTree(transport, WS, PROJECT, [TAG_IDS.intentRoot], fakeLog());
+      const found = placed.get(TAG_IDS.intentRoot);
+      expect(found).to.deep.equal({
+        kind: 'root', parentId: null, rootName: 'intent', ancestorIds: [],
+      });
     });
 
     it('reports a depth-3 sub-category with the dimension it descends from', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
       const sub = TAG_IDS.subCategoryHuman;
-      const found = await findTagInTree(transport, WS, PROJECT, sub, fakeLog());
+      const found = (await findTagsInTree(transport, WS, PROJECT, [sub], fakeLog())).get(sub);
       expect(found.kind).to.equal('descendant');
       expect(found.parentId).to.equal(TAG_IDS.categoryRunningShoes);
       // The bare name `human` also exists under the `source` root. Ancestry, not
       // the name, decides the dimension.
       expect(found.rootName).to.equal('category');
+      // Root first, the tag itself excluded — this is what the re-parent guard
+      // tests membership against.
+      expect(found.ancestorIds).to.deep.equal([
+        TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes,
+      ]);
     });
 
     it('reports the same bare name under a different root as that other dimension', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
-      const found = await findTagInTree(transport, WS, PROJECT, TAG_IDS.sourceHuman, fakeLog());
+      const placed = await findTagsInTree(transport, WS, PROJECT, [TAG_IDS.sourceHuman], fakeLog());
+      const found = placed.get(TAG_IDS.sourceHuman);
       expect(found.rootName).to.equal('source');
     });
 
     it('reports an id absent from the tree as unknown', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
-      const found = await findTagInTree(transport, WS, PROJECT, 'no-such-tag', fakeLog());
-      expect(found).to.deep.equal({ kind: 'unknown', parentId: null, rootName: null });
+      const placed = await findTagsInTree(transport, WS, PROJECT, ['no-such-tag'], fakeLog());
+      const found = placed.get('no-such-tag');
+      expect(found).to.deep.equal({
+        kind: 'unknown', parentId: null, rootName: null, ancestorIds: [],
+      });
     });
 
     it('terminates on an upstream parentage cycle instead of walking forever', async () => {
@@ -472,7 +532,8 @@ describe('serenity tag-tree', () => {
           }],
         }),
       };
-      const found = await findTagInTree(transport, WS, PROJECT, 'no-such-tag', fakeLog());
+      const placed = await findTagsInTree(transport, WS, PROJECT, ['no-such-tag'], fakeLog());
+      const found = placed.get('no-such-tag');
       expect(found.kind).to.equal('unknown');
     });
 
@@ -491,7 +552,7 @@ describe('serenity tag-tree', () => {
         levels[c.id] = [];
       }
       const transport = { listProjectTags: makeListProjectTagsStub(levels) };
-      const err = await findTagInTree(transport, WS, PROJECT, 'no-such-tag', fakeLog())
+      const err = await findTagsInTree(transport, WS, PROJECT, ['no-such-tag'], fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);

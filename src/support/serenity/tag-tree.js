@@ -54,11 +54,27 @@ import {
 } from './prompt-tags.js';
 
 /**
- * Ceiling on the level reads one tree walk may perform. The tree has no upstream
+ * Where one tag sits in the dimension tree.
+ *
+ * @typedef {object} TagPosition
+ * @property {'root' | 'descendant' | 'unknown'} kind
+ * @property {string | null} parentId
+ * @property {string | null} rootName - the tag's dimension: its own name when it
+ *   IS a root, else `path[0]`.
+ * @property {string[]} ancestorIds - ids of the tag's ancestors, root FIRST and
+ *   the tag itself excluded. Empty for a root and for an unknown id.
+ */
+
+/**
+ * Ceiling on the LEVEL reads one tree walk may perform. The tree has no upstream
  * depth or width limit, so an unresolvable id would otherwise cost one sequential
- * read per node against Semrush's shared rate limit. Bounds total reads rather
- * than per-level width: truncating a level would report a tag that exists as
- * absent, which is a wrong answer rather than a slow one.
+ * read per node against Semrush's shared rate limit.
+ *
+ * A "read" here is one {@link listProjectTagTree} call — one level of one node.
+ * That call pages internally, so this caps the levels a walk visits, not the
+ * upstream HTTP calls it issues; a level wider than one page costs more than one
+ * call. Nothing caps a level's width on purpose: truncating a level would report
+ * a tag that exists as absent, which is a wrong answer rather than a slow one.
  */
 const MAX_TREE_READS = 200;
 
@@ -178,12 +194,20 @@ export async function ensureChildren(
     // The create answered 2xx and the draft-layer re-read still does not see the
     // name. Returning here would let a caller answer 2xx for a write that did not
     // land, handing it an `undefined` tag id.
+    log?.error?.('ensureChildren: upstream accepted the create but did not persist it', {
+      semrushWorkspaceId,
+      projectId,
+      parentId,
+      unresolved,
+    });
     throw new ErrorWithStatusCode(
       `upstream did not persist the tag(s): ${unresolved.join(', ')}`,
       502,
     );
   }
-  return { byName, createdNames: missing };
+  // Only the names the create echoed are ours to claim. A name that reappeared on
+  // the re-read was resolved, not minted here — another writer may have won it.
+  return { byName, createdNames: missing.filter((name) => existing.has(name)) };
 }
 
 /**
@@ -225,47 +249,58 @@ function rootIdOf(roots, dimension) {
 }
 
 /**
- * Locates `tagId` in the project's draft tag tree and reports where it sits,
- * including the DIMENSION it belongs to — the name of its root ancestor.
+ * Locates every id in `tagIds` in the project's draft tag tree, in ONE walk, and
+ * reports where each sits: the DIMENSION it belongs to (the name of its root
+ * ancestor) and the ids of its ancestors, root-first.
  *
  * There is no upstream "get tag by id", so this walks the tree a level at a time:
- * the roots first, then the children of every node that has any. A `visited` set
- * makes an upstream parentage cycle terminate, and {@link MAX_TREE_READS} bounds
- * the total reads. Nothing here caps a level's width: dropping the tail of a
- * level would report an existing tag as absent, and callers turn `unknown` into
- * a 404.
+ * the roots first, then the children of every node that has any. Resolving a set
+ * in one traversal is what keeps a re-parent — which must place both the moved
+ * tag and its prospective parent — from paying for the tree twice, and it reads
+ * both positions from the SAME snapshot, so the ancestry proved for one cannot
+ * have moved under the other.
+ *
+ * A `visited` set makes an upstream parentage cycle terminate, and
+ * {@link MAX_TREE_READS} bounds the level reads. Nothing here caps a level's
+ * width: dropping the tail of a level would report an existing tag as absent,
+ * and callers turn `unknown` into a 404.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} tagId - the upstream id to locate.
+ * @param {string[]} tagIds - the upstream ids to locate.
  * @param {object} [log] - logger.
- * @returns {Promise<{ kind: 'root' | 'descendant' | 'unknown',
- *   parentId: string | null, rootName: string | null }>} `rootName` is the tag's
- *   dimension: its own name when it IS a root, else `path[0]`.
+ * @returns {Promise<Map<string, TagPosition>>} one entry per DISTINCT requested
+ *   id; an id absent from the tree maps to a `kind: 'unknown'` position.
  */
-export async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, log) {
+export async function findTagsInTree(transport, semrushWorkspaceId, projectId, tagIds, log) {
+  const wanted = new Set(tagIds);
+  /** @type {Map<string, TagPosition>} */
+  const found = new Map();
   const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
-  const asRoot = roots.items.find((t) => t.id === tagId);
-  if (asRoot) {
-    return { kind: 'root', parentId: null, rootName: asRoot.name };
+  for (const root of roots.items) {
+    if (wanted.has(root.id)) {
+      found.set(root.id, {
+        kind: 'root', parentId: null, rootName: root.name, ancestorIds: [],
+      });
+    }
   }
   const visited = new Set();
   let reads = 1;
   let frontier = roots.items
     .filter((r) => r.childrenCount > 0)
-    .map((r) => ({ node: r, rootName: r.name }));
-  while (frontier.length > 0) {
+    .map((r) => ({ node: r, rootName: r.name, ancestorIds: [r.id] }));
+  while (frontier.length > 0 && found.size < wanted.size) {
     const next = [];
-    for (const { node, rootName } of frontier) {
+    for (const { node, rootName, ancestorIds } of frontier) {
       if (!visited.has(node.id)) {
         visited.add(node.id);
         reads += 1;
         if (reads > MAX_TREE_READS) {
           throw new ErrorWithStatusCode('tag tree too large to resolve', 502);
         }
-        // Sequential by design: stop at the first node whose children contain the
-        // target rather than fanning out every node's children concurrently.
+        // Sequential by design: stop as soon as every wanted id is placed rather
+        // than fanning out every node's children concurrently.
         // eslint-disable-next-line no-await-in-loop
         const children = await listProjectTagTree(
           transport,
@@ -274,27 +309,58 @@ export async function findTagInTree(transport, semrushWorkspaceId, projectId, ta
           node.id,
           log,
         );
-        const found = children.items.find((t) => t.id === tagId);
-        if (found) {
-          return {
-            kind: 'descendant',
-            parentId: found.parentId ?? node.id,
-            rootName: found.path?.[0]?.name ?? rootName,
-          };
+        for (const child of children.items) {
+          if (wanted.has(child.id)) {
+            found.set(child.id, {
+              kind: 'descendant',
+              parentId: child.parentId ?? node.id,
+              rootName: child.path?.[0]?.name ?? rootName,
+              ancestorIds,
+            });
+          }
+        }
+        if (found.size === wanted.size) {
+          return found;
         }
         next.push(...children.items
           .filter((t) => t.childrenCount > 0)
-          .map((child) => ({ node: child, rootName })));
+          .map((child) => ({ node: child, rootName, ancestorIds: [...ancestorIds, child.id] })));
       }
     }
     frontier = next;
   }
-  return { kind: 'unknown', parentId: null, rootName: null };
+  for (const id of wanted) {
+    if (!found.has(id)) {
+      found.set(id, {
+        kind: 'unknown', parentId: null, rootName: null, ancestorIds: [],
+      });
+    }
+  }
+  return found;
 }
 
 /**
- * Throws unless `parentId` names the `dimension` root itself or one of its
- * descendants.
+ * Locates one tag. Thin wrapper over {@link findTagsInTree}; see it for the walk.
+ * Private on purpose: a caller that already knows both ids it needs should place
+ * them in a single walk rather than call this twice.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the upstream id to locate.
+ * @param {object} [log] - logger.
+ * @returns {Promise<TagPosition>} `rootName` is the tag's dimension: its own name
+ *   when it IS a root, else `path[0]`.
+ */
+async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
+  return /** @type {TagPosition} */ (found.get(tagId));
+}
+
+/**
+ * Throws unless `parent` is the `dimension` root itself or one of its
+ * descendants, and — when a tag is being MOVED under it — unless `parent` sits
+ * outside that tag's own subtree.
  *
  * A tag's dimension is its root ancestor, so an unchecked `parentId` is the one
  * edge that can move a tag into a dimension its caller never named — filing a
@@ -303,10 +369,45 @@ export async function findTagInTree(transport, semrushWorkspaceId, projectId, ta
  * against the three closed root ids: a parent nested under a closed root is one
  * level deeper and would pass that test.
  *
+ * The subtree check is the same argument one edge further in. Upstream stores a
+ * parent pointer, not a tree, so it will happily accept `A.parent = B` when `B`
+ * already descends from `A`. Nothing then references `A` or `B` from a root, and
+ * because every walk here starts AT the roots, both become permanently
+ * unreachable: `findTagsInTree` reports them `unknown`, every later PATCH 404s,
+ * and no request can undo the edge. The `visited` set makes such a cycle
+ * survivable on read; refusing it on write is what keeps it from existing.
+ *
+ * @param {string} dimension - the dimension the new/edited tag belongs to.
+ * @param {TagPosition} parent - the resolved position of the caller's `parentId`.
+ * @param {string} [movingTagId] - the tag being re-parented; omitted on a create,
+ *   where nothing exists yet to be a parent's ancestor.
+ * @returns {void}
+ */
+export function assertParentPlacement(dimension, parent, movingTagId) {
+  if (parent.kind === 'unknown') {
+    throw new ErrorWithStatusCode('parentId does not resolve to a tag on this market', 400);
+  }
+  if (parent.rootName !== dimension) {
+    throw new ErrorWithStatusCode(
+      `parentId must be the "${dimension}" dimension root or one of its descendants`,
+      400,
+    );
+  }
+  if (movingTagId && parent.ancestorIds.includes(movingTagId)) {
+    throw new ErrorWithStatusCode('parentId must not be a descendant of the tag', 400);
+  }
+}
+
+/**
+ * Resolves `parentId` and asserts it may parent a tag of `dimension`. Used by the
+ * CREATE paths, where the tag does not exist yet; a re-parent instead resolves
+ * the target and the parent together via {@link findTagsInTree} and calls
+ * {@link assertParentPlacement} directly.
+ *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} dimension - the dimension the new/edited tag belongs to.
+ * @param {string} dimension - the dimension the new tag belongs to.
  * @param {string} parentId - the caller-supplied parent id.
  * @param {object} [log] - logger.
  * @returns {Promise<void>}
@@ -320,15 +421,7 @@ export async function assertParentWithinDimension(
   log,
 ) {
   const parent = await findTagInTree(transport, semrushWorkspaceId, projectId, parentId, log);
-  if (parent.kind === 'unknown') {
-    throw new ErrorWithStatusCode('parentId does not resolve to a tag on this market', 400);
-  }
-  if (parent.rootName !== dimension) {
-    throw new ErrorWithStatusCode(
-      `parentId must be the "${dimension}" dimension root or one of its descendants`,
-      400,
-    );
-  }
+  assertParentPlacement(dimension, parent);
 }
 
 /**

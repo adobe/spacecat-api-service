@@ -399,7 +399,9 @@ export function createSerenityTransport({ env, imsToken }) {
      * brand topics (with up to 100 prompt strings each) for a domain + market,
      * fetched live from the AI-SEO service. Workspace-scoped, NOT project-scoped.
      * Returns an array of `{ topic, volume, prompts: string[] }`. Used at
-     * brand-create to seed the new project's prompts (tagged `topic:<NAME>`).
+     * brand-create to seed the new project's prompt TEXT. The topic name itself
+     * is not attached as a tag: the service returns topics with no category to
+     * hang them under, so generated prompts arrive uncategorized.
      */
     async getBrandTopics(semrushWorkspaceId, { domain, country }) {
       return unwrap('GET', await projects.GET(
@@ -415,9 +417,10 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/aio/tags — creates project-level
-     * AIO tags (the standard taxonomy: intent/source/type, plus `category:`
-     * values) independent of any prompt. Body shape: { names: string[],
-     * parent_id?: string } (model.TreeNodeListRequest). Tags already attached to
+     * AIO tags (the standard taxonomy: intent/source/type, plus the customer's
+     * own values beneath the `category` root) independent of any prompt. Body
+     * shape: { names: string[], parent_id?: string } (model.TreeNodeListRequest).
+     * Tags already attached to
      * prompts are reused by name, so pre-creating a tag that a later prompt also
      * carries does not duplicate.
      *
@@ -452,7 +455,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * GET /v2/workspaces/{ws}/projects/{pid}/aio/tags — lists the project's
      * STANDALONE AIO tags (the ones `createProjectTags` registers), independent of
      * whether any prompt carries them. This is the only read that surfaces a tag
-     * with no carrying prompt — e.g. a freshly-created, still-empty `category:<NAME>`
+     * with no carrying prompt — e.g. a freshly-created, still-empty category
      * — so the Categories surface can round-trip it. `parent_id` + `search` are
      * required by the upstream contract; pass empty strings to list all.
      *

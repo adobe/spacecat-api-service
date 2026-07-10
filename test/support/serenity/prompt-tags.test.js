@@ -26,7 +26,6 @@ import {
   isDimensionRootName,
   isClosedDimension,
   closedValuesOf,
-  dimensionOf,
 } from '../../../src/support/serenity/prompt-tags.js';
 
 describe('serenity prompt-tags taxonomy', () => {
@@ -102,44 +101,6 @@ describe('serenity prompt-tags taxonomy', () => {
 
     it('is frozen', () => {
       expect(Object.isFrozen(STANDARD_PROMPT_TAG_VALUES)).to.equal(true);
-    });
-  });
-
-  describe('dimensionOf', () => {
-    it('reads the dimension off path[0] at depth 2', () => {
-      expect(dimensionOf({ name: 'Running Shoes', path: [{ id: 'r', name: 'category' }] }))
-        .to.equal('category');
-    });
-
-    it('reads the dimension off path[0] at depth 3, not off the direct parent', () => {
-      const subCategory = {
-        name: 'Trail',
-        path: [{ id: 'r', name: 'category' }, { id: 'c', name: 'Running Shoes' }],
-      };
-      expect(dimensionOf(subCategory)).to.equal('category');
-    });
-
-    it('distinguishes two same-named tags by their dimension root', () => {
-      const subCategory = {
-        name: 'human',
-        path: [{ id: 'r', name: 'category' }, { id: 'c', name: 'Running Shoes' }],
-      };
-      const sourceValue = { name: 'human', path: [{ id: 's', name: 'source' }] };
-      expect(dimensionOf(subCategory)).to.equal('category');
-      expect(dimensionOf(sourceValue)).to.equal('source');
-    });
-
-    it("falls back to the tag's own name when it is a root (no breadcrumb)", () => {
-      expect(dimensionOf({ name: 'type', path: null })).to.equal('type');
-      expect(dimensionOf({ name: 'intent', path: [] })).to.equal('intent');
-      expect(dimensionOf({ name: 'source' })).to.equal('source');
-    });
-
-    it('returns undefined when neither a breadcrumb nor a name is usable', () => {
-      expect(dimensionOf({})).to.equal(undefined);
-      expect(dimensionOf({ name: '' })).to.equal(undefined);
-      expect(dimensionOf({ path: [null] })).to.equal(undefined);
-      expect(dimensionOf({ path: [{ id: 'r' }] })).to.equal(undefined);
     });
   });
 });

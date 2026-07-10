@@ -197,10 +197,13 @@ function validateCreateBody(body) {
  * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
  *   classification via the shared {@link classifyBrandedTag} (whole-word match,
  *   diacritic-folded, case-insensitive).
+ * @param {{ values: Map<string, Map<string, string>> }} options.provisioned - the
+ *   already-provisioned dimension tree. The caller provisions it unconditionally,
+ *   so re-resolving it here would read the whole taxonomy a second time per request.
  * @param {object} log - logger.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
-  domain, country, topicCap = 0, brandNames = [],
+  domain, country, topicCap = 0, brandNames = [], provisioned,
 }, log) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
@@ -239,9 +242,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
 
   // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
   // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
-  // `provisionDimensionTree` resolves every closed value or throws a 502, so the
+  // `provisionDimensionTree` resolved every closed value or threw a 502, so the
   // standard values and the whole `type` vocabulary are present here by construction.
-  const { values } = await provisionDimensionTree(transport, workspaceId, projectId, log);
+  const { values } = provisioned;
   const standardIds = STANDARD_PROMPT_TAG_VALUES.map(
     ({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)),
   );
@@ -408,7 +411,7 @@ export async function handleCreateMarketSubworkspace(
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
   // exactly the four dimension roots, whether or not it has prompts yet.
-  await provisionDimensionTree(transport, workspaceId, projectId, log);
+  const provisioned = await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /
   // publishing — a project with no models can't track anything. Stage only
@@ -426,8 +429,10 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
-  // Generate topics+prompts from the brand domain + market and attach them,
-  // tagging each prompt with its `topic:<NAME>` plus the standard tag set.
+  // Generate topics+prompts from the brand domain + market and attach them. The
+  // topic seeds the prompt TEXT only and is not attached as a tag: the AI-SEO
+  // service returns topics with no category to hang them under, so the generated
+  // prompts arrive uncategorized, carrying only the standard tag set.
   let generated = { topicCount: 0, promptCount: 0 };
   if (generateTopics) {
     generated = await generateAndAttachPrompts(
@@ -438,6 +443,7 @@ export async function handleCreateMarketSubworkspace(
         domain: body.brandDomain,
         country: body.market,
         topicCap,
+        provisioned,
         // Branded classification needles: the brand's own name(s) + the
         // market-applicable aliases.
         brandNames: [
@@ -681,7 +687,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   }
   // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
   // prompt vocabulary) OR standalone (registered via createProjectTags but not yet
-  // carried by any prompt — e.g. a just-created, still-empty `category:<NAME>`).
+  // carried by any prompt — e.g. a just-created, still-empty category).
   // The Categories surface must round-trip BOTH, so merge them by tag name. The
   // standalone list is best-effort: a hiccup there must not regress the
   // prompt-derived behavior that already worked.

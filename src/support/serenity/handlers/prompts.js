@@ -414,6 +414,20 @@ export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptTy
  *   | { ok: false, status: number, body: object }}
  */
 export function parseUpdatePromptBody(body) {
+  // Before the missing-field check: a caller still sending the retired `tags` key
+  // has no `tagIds`, so testing for the absent field first would answer
+  // `missingFields` and never name the key that is actually wrong. Same ordering,
+  // and same reason, as {@link normalizePromptInput}.
+  if (body?.tags !== undefined) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: 'tags is not supported; address tags by upstream id via tagIds',
+      },
+    };
+  }
   if (!body || body.text === undefined || body.tagIds === undefined) {
     return {
       ok: false,
@@ -421,16 +435,6 @@ export function parseUpdatePromptBody(body) {
       body: {
         error: 'missingFields',
         message: 'PATCH body must include text and tagIds',
-      },
-    };
-  }
-  if (body.tags !== undefined) {
-    return {
-      ok: false,
-      status: 400,
-      body: {
-        error: 'invalidRequest',
-        message: 'tags is not supported; address tags by upstream id via tagIds',
       },
     };
   }

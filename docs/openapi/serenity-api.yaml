@@ -629,8 +629,16 @@ v2-serenity-tag-by-id:
       rejected with a 400: the root level is reserved for the four dimension
       roots, so a tag can never legally become one.
 
+      A re-parent stays inside the tag's own dimension, and the new parent may
+      not be the tag itself or one of its descendants (400). Upstream stores a
+      parent pointer rather than a tree and would accept such an edge, leaving
+      the tag and its subtree reachable from no root — and so unreachable and
+      unrepairable through this API.
+
       The four dimension roots themselves cannot be renamed or re-parented
-      (400) — doing so would leave their whole subtree without a dimension.
+      (400) — doing so would leave their whole subtree without a dimension. A
+      closed dimension's value cannot be renamed or re-parented either: its
+      vocabulary is fixed.
     operationId: updateSerenityTag
     security:
       - ims_key: []
@@ -658,7 +666,9 @@ v2-serenity-tag-by-id:
                   field to leave the parent unchanged — the proxy resolves the
                   tag's current parent and re-sends it upstream rather than
                   omitting it, which would promote the tag to a root. Explicit
-                  JSON `null` is rejected (400).
+                  JSON `null` is rejected (400). Must resolve to a tag on this
+                  market, inside the tag's own dimension, and must be neither the
+                  tag itself nor one of its descendants.
               geoTargetId:
                 type: integer
                 minimum: 1
@@ -688,7 +698,9 @@ v2-serenity-tag-by-id:
       '400':
         description: |
           Malformed body, a name carrying ':' or shadowing a dimension root, an
-          explicit null `parentId`, or a PATCH targeting a dimension root.
+          explicit null `parentId`, a `parentId` outside the tag's dimension or
+          inside the tag's own subtree, or a PATCH targeting a dimension root or
+          a closed dimension's value.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }

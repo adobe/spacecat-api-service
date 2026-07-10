@@ -27,7 +27,8 @@ import {
 import {
   ensureClosedValue,
   ensureDimensionRoots,
-  findTagInTree,
+  findTagsInTree,
+  assertParentPlacement,
   assertParentWithinDimension,
 } from '../tag-tree.js';
 
@@ -588,8 +589,38 @@ function parseUpdateTagBody(body) {
 }
 
 /**
+ * Resolves a PATCH's target and, when the caller supplied one, its prospective
+ * parent — in a SINGLE tree walk against one snapshot. Walking twice would both
+ * double the sequential upstream reads and let the parent move between the two
+ * traversals, so the ancestry proved for it need not still hold.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the PATCH target's id.
+ * @param {string | undefined} parentId - the requested parent, when re-parenting.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ target: import('../tag-tree.js').TagPosition,
+ *   parent: import('../tag-tree.js').TagPosition }>} `parent` mirrors `target`
+ *   when no re-parent was requested; the callers ignore it in that case.
+ */
+async function resolveUpdateTargets(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  tagId,
+  parentId,
+  log,
+) {
+  const wanted = parentId === undefined ? [tagId] : [tagId, parentId];
+  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, wanted, log);
+  const target = /** @type {import('../tag-tree.js').TagPosition} */ (found.get(tagId));
+  return { target, parent: /** @type {any} */ (found.get(parentId ?? tagId)) };
+}
+
+/**
  * Decides what to forward upstream for a PATCH, given the target's resolved tree
- * position (see {@link findTagInTree}).
+ * position (see {@link findTagsInTree}).
  *
  * The outgoing body ALWAYS carries an explicit `parent_id`: an upstream PATCH
  * that omits it PROMOTES the tag to a root (verified live). So a rename-only
@@ -635,7 +666,7 @@ function buildUpdatePayload(parsed, target, tagId) {
   if (parentId === tagId) {
     throw new ErrorWithStatusCode('parentId must not be the tag itself', 400);
   }
-  // findTagInTree's descendant branch always resolves a parent (falling back to
+  // findTagsInTree's descendant branch always resolves a parent (falling back to
   // the node it was found under), so this is never null.
   const currentParentId = /** @type {string} */ (target.parentId);
   return { name: value, parentIdToSend: parentId ?? currentParentId };
@@ -683,18 +714,19 @@ export async function handleUpdateTag(
     throw marketNotFound();
   }
   const projectId = row.getSemrushProjectId();
-  const target = await findTagInTree(transport, semrushWorkspaceId, projectId, id, log);
+  const { target, parent } = await resolveUpdateTargets(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    id,
+    parsed.parentId,
+    log,
+  );
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
-    // A re-parent may move a tag within its dimension, never across one.
-    await assertParentWithinDimension(
-      transport,
-      semrushWorkspaceId,
-      projectId,
-      /** @type {string} */ (target.rootName),
-      parsed.parentId,
-      log,
-    );
+    // A re-parent may move a tag within its dimension, never across one — and
+    // never under the tag's own subtree, which would strand it outside the tree.
+    assertParentPlacement(/** @type {string} */ (target.rootName), parent, id);
   }
   const updated = await transport.updateProjectTag(
     semrushWorkspaceId,
@@ -742,18 +774,19 @@ export async function handleUpdateTagSubworkspace(
     throw marketNotFound();
   }
   const projectId = String(project.id);
-  const target = await findTagInTree(transport, workspaceId, projectId, id, log);
+  const { target, parent } = await resolveUpdateTargets(
+    transport,
+    workspaceId,
+    projectId,
+    id,
+    parsed.parentId,
+    log,
+  );
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
-    // A re-parent may move a tag within its dimension, never across one.
-    await assertParentWithinDimension(
-      transport,
-      workspaceId,
-      projectId,
-      /** @type {string} */ (target.rootName),
-      parsed.parentId,
-      log,
-    );
+    // A re-parent may move a tag within its dimension, never across one — and
+    // never under the tag's own subtree, which would strand it outside the tree.
+    assertParentPlacement(/** @type {string} */ (target.rootName), parent, id);
   }
   const updated = await transport.updateProjectTag(
     workspaceId,

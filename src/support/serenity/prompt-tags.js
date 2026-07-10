@@ -166,21 +166,3 @@ export function isClosedDimension(dimension) {
 export function closedValuesOf(dimension) {
   return CLOSED_DIMENSION_VALUES[/** @type {keyof CLOSED_DIMENSION_VALUES} */ (dimension)] ?? [];
 }
-
-/**
- * The dimension a tag belongs to, read off its upstream breadcrumb. `path` is a
- * full root-first ancestry EXCLUDING the tag itself, so a root's own `path` is
- * empty/absent and its dimension is its own name.
- *
- * @param {{ name?: string, path?: ({ name?: string } | null)[] | null }} tag
- * @returns {string | undefined} the dimension root's name, or undefined when it
- *   cannot be determined.
- */
-export function dimensionOf(tag) {
-  const root = Array.isArray(tag?.path) && tag.path.length > 0 ? tag.path[0] : undefined;
-  if (root && typeof root.name === 'string' && root.name) {
-    return root.name;
-  }
-  // No breadcrumb: the tag is itself a root.
-  return typeof tag?.name === 'string' && tag.name ? tag.name : undefined;
-}

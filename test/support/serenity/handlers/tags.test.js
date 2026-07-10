@@ -1117,6 +1117,60 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
+    // The self-parent guard above is the depth-0 case of this one. Upstream stores
+    // a parent pointer, not a tree, so it accepts `A.parent = B` when B already
+    // descends from A. Both nodes then hang off nothing: every walk starts at the
+    // roots, so neither is reachable, every later PATCH 404s, and no request can
+    // undo the edge. The proxy is the only component that walks the tree.
+    it('400s a re-parent onto one of the tag\'s own descendants', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        // `subcategory-human` is the child of `category-running-shoes`.
+        TAG_IDS.categoryRunningShoes,
+        {
+          name: 'Running Shoes',
+          parentId: TAG_IDS.subCategoryHuman,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/must not be a descendant of the tag/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // The target and the prospective parent are placed by ONE traversal, against
+    // one snapshot. Two walks would double the sequential upstream reads and could
+    // observe the parent at two different positions.
+    it('resolves the target and the new parent in a single tree walk', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.categoryRunningShoes,
+        {
+          name: 'Footwear',
+          parentId: TAG_IDS.categoryRoot,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      // One root-level read (which places the `category` root) plus one read of
+      // that root's children (which places the target). Never a second walk.
+      expect(transport.listProjectTags).to.have.been.calledTwice;
+    });
+
     it('re-parents a sub-category onto another category within the dimension', async () => {
       const transport = makeTransport({
         updateProjectTag: sinon.stub().resolves({
@@ -1200,7 +1254,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     });
   });
 
-  describe('findTagInTree — walk bounds', () => {
+  describe('tag-tree walk bounds', () => {
     let handler;
     beforeEach(async () => {
       handler = await import('../../../../src/support/serenity/handlers/tags.js');
@@ -1336,6 +1390,29 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(res.body).to.not.have.property('brandId');
       expect(transport.updateProjectTag)
         .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-sub-1', TARGET, { name: 'Footwear', parentId: TAG_IDS.categoryRoot });
+    });
+
+    // The subworkspace twin shares buildUpdatePayload and the placement guard, so
+    // the cycle is refused here too rather than only on the flat-mode route.
+    it('400s a re-parent onto one of the tag\'s own descendants', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeTransport();
+      const err = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.categoryRunningShoes,
+        {
+          name: 'Running Shoes',
+          parentId: TAG_IDS.subCategoryHuman,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/must not be a descendant of the tag/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
     it('404s (marketNotFound) when the slice has no live project', async () => {

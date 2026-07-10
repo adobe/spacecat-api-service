@@ -846,7 +846,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
 
 describe('handlers/prompts.js — handleUpdatePrompt', () => {
   // Regression guard for the "drop slow path" decision: PATCH treats the
-  // body as the full next state, so omitting either text or tags is a
+  // body as the full next state, so omitting either text or tagIds is a
   // client error. Previously omitting tags meant "preserve" and forced a
   // 10k-prompt walk per request — that's now gone, and the missing-field
   // 400 keeps the contract honest.
@@ -860,7 +860,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       BRAND,
       WORKSPACE,
       'sem-1',
-      { geoTargetId: 2840, languageCode: 'en', tags: ['only-tags'] },
+      { geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'] },
       fakeLog(),
     );
 
@@ -884,6 +884,29 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
     expect(result.status).to.equal(400);
     expect(result.body.error).to.equal('missingFields');
+  });
+
+  // The shape a caller that has not migrated actually sends: the retired `tags`
+  // key and NO `tagIds`. The missing-field check must not run first, or the 400
+  // names the field the caller never heard of instead of the one it sent.
+  it('400s naming `tags` when a legacy body carries tags and no tagIds', async () => {
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tags: ['category:Shoes'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/tags is not supported/);
   });
 
   // `tags` is rejected on its own, not merely when it collides with `tagIds`:
