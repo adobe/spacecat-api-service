@@ -437,7 +437,7 @@ function SerenityController(context, log, env) {
    * Builds the server-side `type:branded`/`type:non-branded` classifier for the
    * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
    * name + aliases ONCE per request, then returns a pure
-   * `(text, geoTargetId) => TYPE_TAG` closure: each prompt's market is derived
+   * `(text, geoTargetId) => TYPE_VALUE` closure: each prompt's market is derived
    * from its geoTargetId and the alias needles are region-clamped to that market
    * (memoized per market). This is the SAME classifier the AI-generation and
    * onboarding paths use, so a prompt is classified identically no matter how it
