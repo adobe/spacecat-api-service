@@ -165,6 +165,14 @@ const routeFacsCapabilities = {
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+    // LLMO Akamai onboarding — LLMO-admin manual provisioning, gated by
+    // isLLMOAdministrator() with caller-supplied x-akamai-* credentials; not a FACS surface.
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
@@ -652,6 +660,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/brand-profile': 'llmo/can_view',
       'GET /sites/:siteId/experiments': 'llmo/can_view',
       'GET /sites/:siteId/files': 'llmo/can_view',
+      'GET /sites/:siteId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_view',
       'GET /sites/:siteId/ims-org-access': 'llmo/can_view',
@@ -963,6 +972,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_view',

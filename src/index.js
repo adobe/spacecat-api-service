@@ -80,6 +80,7 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoCloudflareController from './controllers/llmo/llmo-cloudflare.js';
 import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
+import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
@@ -260,6 +261,7 @@ async function run(request, context) {
     const llmoController = LlmoController(context);
     const llmoCloudflareController = LlmoCloudflareController(context);
     const llmoCloudFrontController = LlmoCloudFrontController(context);
+    const llmoAkamaiController = LlmoAkamaiController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fanoutReportController = FanoutReportController(context);
@@ -323,6 +325,7 @@ async function run(request, context) {
       llmoController,
       llmoCloudflareController,
       llmoCloudFrontController,
+      llmoAkamaiController,
       llmoMysticatController,
       llmoOpportunitiesController,
       userActivitiesController,

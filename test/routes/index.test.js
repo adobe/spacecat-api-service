@@ -249,6 +249,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockFixesController = {
+    getAllForSite: () => null,
     getAllForOpportunity: () => null,
     getByStatus: () => null,
     getByID: () => null,
@@ -366,6 +367,15 @@ describe('getRouteHandlers', () => {
     deploy: () => null,
     plan: () => null,
     getPermissions: () => null,
+  };
+
+  const mockLlmoAkamaiController = {
+    getConfig: () => null,
+    listProperties: () => null,
+    plan: () => null,
+    deploy: () => null,
+    activate: () => null,
+    activationStatus: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -626,6 +636,7 @@ describe('getRouteHandlers', () => {
       mockLlmoController,
       mockLlmoCloudflareController,
       mockLlmoCloudFrontController,
+      mockLlmoAkamaiController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -1105,6 +1116,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'GET /tools/scrape/jobs/by-url/:url/:processingType',
       'GET /tools/scrape/jobs/by-url/:url',
+      'GET /sites/:siteId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
@@ -1175,6 +1187,12 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',

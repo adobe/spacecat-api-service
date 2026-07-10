@@ -107,6 +107,15 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
+  // LLMO Akamai onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
+  // uses caller-supplied EdgeGrid credentials via x-akamai-* headers, not S2S JWT
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',
@@ -597,6 +606,7 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
+  'GET /sites/:siteId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',
