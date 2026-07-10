@@ -10944,35 +10944,77 @@ SerenityPrompt:
       description: BCP-47 primary subtag (lowercase) for the slice.
     text:
       type: string
+    tags:
+      type: array
+      items: { $ref: '#/SerenityPromptTag' }
+      description: |
+        The tags carried by this prompt, one entry per tag, keyed by upstream
+        id. Present on `GET /serenity/prompts` list items.
+
+        Tag names are NOT unique: uniqueness is scoped per (project, parent)
+        upstream, so a prompt can carry two tags with the same bare name from
+        different dimensions (a sub-category `human` and the `source` value
+        `human`). Read a tag's dimension from `path[0].name`, never from its
+        own name.
     tagMap:
       type: object
       additionalProperties: { type: string }
+      deprecated: true
       description: |
-        Map of tag name → upstream tag id. Keys are the tag names (e.g.
-        "category:Firefly"); values are the Semrush tag UUIDs to pass back as
-        `tagIds` query params when filtering. Tags without an upstream id carry
-        an empty string value and are excluded from tag_ids filter calls.
-        Tag names are assumed unique per Semrush project; if duplicates exist,
-        only the last entry is retained.
-      example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
-    tags:
-      type: array
-      items: { type: string }
-      description: |
-        Echo of the tag NAMES this prompt was created/updated with via the
-        legacy name-based write path (`SerenityPromptInput.tags` /
-        `SerenityUpdatePromptRequest.tags`). Only present on a create/update
-        response (`SerenityCreatePromptsResponse.created`, the
-        `updateSerenityPrompt` 200); absent on `GET /serenity/prompts` list
-        items, which carry `tagMap` instead.
+        DEPRECATED — use `tags`. Map of tag name → upstream tag id. Being keyed
+        by name, it cannot represent a prompt carrying two same-named tags from
+        different dimensions: only one survives, and which one depends on
+        upstream ordering. Removed once every consumer reads `tags`.
+      example: { "Firefly": "uuid-1", "Commercial": "uuid-2" }
     tagIds:
       type: array
       items: { type: string }
       description: |
-        Echo of the upstream tag ids this prompt was created/updated with via
-        the id-based write path (serenity-docs#24). Only present when the
-        request used `tagIds` rather than `tags` — mutually exclusive with a
-        non-empty `tags` on the same response.
+        Echo of the upstream tag ids this prompt was created/updated with.
+        Present on a create/update response
+        (`SerenityCreatePromptsResponse.created`, the `updateSerenityPrompt`
+        200); absent on `GET /serenity/prompts` list items, which carry `tags`.
+
+SerenityPromptTag:
+  type: object
+  description: |
+    One tag carried by a prompt, with its own parentage.
+
+    Upstream serializes a tag identically wherever it appears — embedded on a
+    prompt, or listed by the tag tree read — so a prompt's tags carry their own
+    `parentId` and `path`. What varies is DEPTH, not endpoint: a dimension root
+    omits both, a descendant carries both. A tag with no `path` is therefore a
+    root, and its own `name` is its dimension.
+  required: [id, name]
+  properties:
+    id:
+      type: string
+      description: Upstream tag id. Pass back as a `tagIds` query param to filter.
+    name:
+      type: string
+      description: The tag's bare name. Never contains a ':' and is not unique on its own.
+    parentId:
+      type: [string, 'null']
+      description: Upstream id of this tag's parent, or null when it is a dimension root.
+    path:
+      type: [array, 'null']
+      description: |
+        Root-first ancestry, EXCLUDING the tag itself. `path[0]` is the tag's
+        dimension root (`category`, `intent`, `source` or `type`), which is how
+        a tag's dimension is determined at any depth. Null for a dimension root.
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string }
+          name: { type: string }
+  example:
+    id: "uuid-1"
+    name: "Trail"
+    parentId: "uuid-cat"
+    path:
+      - { id: "uuid-root", name: "category" }
+      - { id: "uuid-cat", name: "Running Shoes" }
 
 SerenityPromptListResponse:
   type: object
@@ -10988,24 +11030,18 @@ SerenityPromptListResponse:
 SerenityPromptInput:
   type: object
   description: |
-    One row in a bulk-create prompts request. `tags` (names, via the legacy
-    name-based upstream write path) and `tagIds` (upstream tag ids from a
-    prior tags list/create, via the id-based write path — serenity-docs#24)
-    are mutually exclusive: supply at most one. `tagIds`, when present, must
-    be non-empty.
-  required: [text, geoTargetId, languageCode]
+    One row in a bulk-create prompts request. Tags are addressed by upstream id
+    (`tagIds`, from a prior tags list/create) and never by name: a name cannot
+    identify a nested tag, because upstream scopes tag-name uniqueness to
+    (project, parent). A `tags` key is rejected with 400.
+  required: [text, geoTargetId, languageCode, tagIds]
   properties:
     text: { type: string }
-    tags:
-      type: array
-      items: { type: string }
-      default: []
-      description: Tag NAMES. Mutually exclusive with tagIds.
     tagIds:
       type: array
       items: { type: string }
       minItems: 1
-      description: Upstream tag ids. Mutually exclusive with tags.
+      description: Upstream tag ids to attach to this prompt.
     geoTargetId:
       type: integer
       minimum: 1
@@ -11058,10 +11094,9 @@ SerenityUpdatePromptRequest:
     project without scanning. `geoTargetId`, `languageCode`, and `text` are
     always required — the upstream provider's API has no in-place update or
     GET-by-id, so the server runs DELETE-old + POST-new and treats the body
-    as the full next state. Exactly one of `tags` (pass `[]` to clear) or
-    `tagIds` (non-empty, id-based write path — serenity-docs#24) must also be
-    present; they are mutually exclusive.
-  required: [geoTargetId, languageCode, text]
+    as the full next state. `tagIds` (non-empty) is required; tags are addressed
+    by upstream id and never by name, so a `tags` key is rejected with 400.
+  required: [geoTargetId, languageCode, text, tagIds]
   properties:
     geoTargetId:
       type: integer
@@ -11070,15 +11105,11 @@ SerenityUpdatePromptRequest:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     text: { type: string }
-    tags:
-      type: array
-      items: { type: string }
-      description: Tag NAMES. Mutually exclusive with tagIds.
     tagIds:
       type: array
       items: { type: string }
       minItems: 1
-      description: Upstream tag ids. Mutually exclusive with tags.
+      description: Upstream tag ids to attach to the replacement prompt.
 
 SerenityBulkDeletePromptsRequest:
   type: object

@@ -18,7 +18,7 @@ import {
   brandNeedles,
   classifyBrandedTag,
 } from '../../../src/support/serenity/branded-classifier.js';
-import { TYPE_TAG } from '../../../src/support/serenity/prompt-tags.js';
+import { TYPE_VALUE } from '../../../src/support/serenity/prompt-tags.js';
 
 describe('serenity branded-classifier', () => {
   describe('normalizeMatch', () => {
@@ -78,54 +78,54 @@ describe('serenity branded-classifier', () => {
     const needles = needlesFromNames(['Ace', 'Le Creuset', 'Örsted']);
 
     it('matches a needle as a whole word → branded', () => {
-      expect(classifyBrandedTag('is Ace a good brand?', needles)).to.equal(TYPE_TAG.BRANDED);
+      expect(classifyBrandedTag('is Ace a good brand?', needles)).to.equal(TYPE_VALUE.BRANDED);
     });
 
     it('does NOT match a needle as a substring of a larger word → non-branded', () => {
       expect(classifyBrandedTag('what is the best surface finish?', needles))
-        .to.equal(TYPE_TAG.NON_BRANDED);
+        .to.equal(TYPE_VALUE.NON_BRANDED);
       expect(classifyBrandedTag('tell me about outer space', needles))
-        .to.equal(TYPE_TAG.NON_BRANDED);
+        .to.equal(TYPE_VALUE.NON_BRANDED);
     });
 
     it('matches a multi-word needle only as a contiguous whole-word run', () => {
       expect(classifyBrandedTag('best Le Creuset dutch oven', needles))
-        .to.equal(TYPE_TAG.BRANDED);
+        .to.equal(TYPE_VALUE.BRANDED);
       expect(classifyBrandedTag('le fancy creuset pan', needles))
-        .to.equal(TYPE_TAG.NON_BRANDED);
+        .to.equal(TYPE_VALUE.NON_BRANDED);
     });
 
     it('folds decomposing diacritics on BOTH sides (café ≈ cafe, Örsted ≈ orsted)', () => {
       expect(classifyBrandedTag('who founded Orsted energy?', needles))
-        .to.equal(TYPE_TAG.BRANDED);
+        .to.equal(TYPE_VALUE.BRANDED);
       const cafeNeedles = needlesFromNames(['Café']);
-      expect(classifyBrandedTag('a cafe near me', cafeNeedles)).to.equal(TYPE_TAG.BRANDED);
+      expect(classifyBrandedTag('a cafe near me', cafeNeedles)).to.equal(TYPE_VALUE.BRANDED);
     });
 
     it('folds NON-decomposing accented/ligature letters (Ø/Æ/ß have no NFD form)', () => {
       // Ørsted: Ø (U+00D8) has no canonical decomposition, so NFD+strip alone
       // would leave it — the explicit fold table makes it match ASCII "Orsted".
       const orsted = needlesFromNames(['Ørsted']);
-      expect(classifyBrandedTag('who founded Orsted energy?', orsted)).to.equal(TYPE_TAG.BRANDED);
+      expect(classifyBrandedTag('who founded Orsted energy?', orsted)).to.equal(TYPE_VALUE.BRANDED);
       // …and the reverse: an ASCII needle matches an accented prompt.
       expect(classifyBrandedTag('tell me about Ørsted', needlesFromNames(['Orsted'])))
-        .to.equal(TYPE_TAG.BRANDED);
+        .to.equal(TYPE_VALUE.BRANDED);
       // ß → ss
       expect(classifyBrandedTag('is Straße a street?', needlesFromNames(['Strasse'])))
-        .to.equal(TYPE_TAG.BRANDED);
+        .to.equal(TYPE_VALUE.BRANDED);
     });
 
     it('is case- and punctuation-insensitive', () => {
-      expect(classifyBrandedTag('ACE!!! is great', needles)).to.equal(TYPE_TAG.BRANDED);
+      expect(classifyBrandedTag('ACE!!! is great', needles)).to.equal(TYPE_VALUE.BRANDED);
     });
 
     it('empty needles ⇒ everything is non-branded', () => {
-      expect(classifyBrandedTag('Ace Le Creuset Orsted', [])).to.equal(TYPE_TAG.NON_BRANDED);
+      expect(classifyBrandedTag('Ace Le Creuset Orsted', [])).to.equal(TYPE_VALUE.NON_BRANDED);
     });
 
     it('tolerates empty / nullish prompt text', () => {
-      expect(classifyBrandedTag('', needles)).to.equal(TYPE_TAG.NON_BRANDED);
-      expect(classifyBrandedTag(undefined, needles)).to.equal(TYPE_TAG.NON_BRANDED);
+      expect(classifyBrandedTag('', needles)).to.equal(TYPE_VALUE.NON_BRANDED);
+      expect(classifyBrandedTag(undefined, needles)).to.equal(TYPE_VALUE.NON_BRANDED);
     });
   });
 });

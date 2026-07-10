@@ -13,64 +13,133 @@
 import { expect } from 'chai';
 
 import {
-  TAG_DIMENSION,
-  SOURCE_TAG,
-  INTENT_TAG,
-  TYPE_TAG,
-  topicTag,
-  STANDARD_PROMPT_TAGS,
-  PROJECT_STANDARD_TAGS,
+  DIMENSION,
+  DIMENSION_ROOT_NAMES,
+  SOURCE_VALUE,
+  INTENT_VALUE,
+  TYPE_VALUE,
+  CLOSED_DIMENSION_VALUES,
+  CLOSED_DIMENSIONS,
+  OPEN_DIMENSIONS,
+  ALL_DIMENSIONS,
+  STANDARD_PROMPT_TAG_VALUES,
+  isDimensionRootName,
+  isClosedDimension,
+  closedValuesOf,
+  dimensionOf,
 } from '../../../src/support/serenity/prompt-tags.js';
 
 describe('serenity prompt-tags taxonomy', () => {
-  describe('topicTag', () => {
-    it('builds the topic:<NAME> tag, preserving the name verbatim', () => {
-      expect(topicTag('Running Shoes')).to.equal('topic:Running Shoes');
+  describe('dimension roots', () => {
+    it('has exactly four roots, all bare-named', () => {
+      expect([...DIMENSION_ROOT_NAMES]).to.deep.equal(['category', 'intent', 'source', 'type']);
+      DIMENSION_ROOT_NAMES.forEach((n) => expect(n).to.not.include(':'));
     });
 
-    it('does not slug or trim — whitespace and non-ASCII are preserved', () => {
-      expect(topicTag('  spaced  ')).to.equal('topic:  spaced  ');
-      expect(topicTag('Café Münich')).to.equal('topic:Café Münich');
+    it('splits the roots into one open and three closed dimensions', () => {
+      expect([...OPEN_DIMENSIONS]).to.deep.equal([DIMENSION.CATEGORY]);
+      expect([...CLOSED_DIMENSIONS]).to.deep.equal(['intent', 'source', 'type']);
+      expect([...ALL_DIMENSIONS].sort()).to.deep.equal([...DIMENSION_ROOT_NAMES].sort());
     });
 
-    it('produces a bare-prefix tag for an empty name (no transformation)', () => {
-      expect(topicTag('')).to.equal('topic:');
-    });
-
-    it('uses the TOPIC dimension constant as the prefix', () => {
-      expect(topicTag('X').startsWith(`${TAG_DIMENSION.TOPIC}:`)).to.equal(true);
-    });
-  });
-
-  describe('STANDARD_PROMPT_TAGS', () => {
-    it('seeds source:ai + intent:Informational only (type is classified per prompt)', () => {
-      expect([...STANDARD_PROMPT_TAGS]).to.deep.equal([SOURCE_TAG.AI, INTENT_TAG.INFORMATIONAL]);
+    it('recognises a reserved root name', () => {
+      expect(isDimensionRootName('category')).to.equal(true);
+      expect(isDimensionRootName('type')).to.equal(true);
+      expect(isDimensionRootName('Running Shoes')).to.equal(false);
     });
 
     it('is frozen (immutable single source of truth)', () => {
-      expect(Object.isFrozen(STANDARD_PROMPT_TAGS)).to.equal(true);
+      expect(Object.isFrozen(DIMENSION)).to.equal(true);
+      expect(Object.isFrozen(DIMENSION_ROOT_NAMES)).to.equal(true);
+      expect(Object.isFrozen(CLOSED_DIMENSION_VALUES)).to.equal(true);
     });
   });
 
-  describe('PROJECT_STANDARD_TAGS', () => {
-    it('registers the full taxonomy: all intents, then sources, then types', () => {
-      expect([...PROJECT_STANDARD_TAGS]).to.deep.equal([
-        ...Object.values(INTENT_TAG),
-        ...Object.values(SOURCE_TAG),
-        ...Object.values(TYPE_TAG),
+  describe('closed vocabularies', () => {
+    it('carries all five intents, including Navigational', () => {
+      expect([...closedValuesOf(DIMENSION.INTENT)]).to.deep.equal([
+        'Informational', 'Task', 'Commercial', 'Transactional', 'Navigational',
+      ]);
+      expect(INTENT_VALUE.NAVIGATIONAL).to.equal('Navigational');
+    });
+
+    it('carries the source and type vocabularies', () => {
+      expect([...closedValuesOf(DIMENSION.SOURCE)]).to.deep.equal(['ai', 'human']);
+      expect([...closedValuesOf(DIMENSION.TYPE)]).to.deep.equal(['branded', 'non-branded']);
+      expect(SOURCE_VALUE.AI).to.equal('ai');
+      expect(TYPE_VALUE.NON_BRANDED).to.equal('non-branded');
+    });
+
+    it('every closed value is bare — no dimension prefix survives', () => {
+      CLOSED_DIMENSIONS.forEach((d) => {
+        closedValuesOf(d).forEach((v) => expect(v).to.not.include(':'));
+      });
+    });
+
+    it('reports the open dimension as not closed, with no fixed vocabulary', () => {
+      expect(isClosedDimension(DIMENSION.CATEGORY)).to.equal(false);
+      expect([...closedValuesOf(DIMENSION.CATEGORY)]).to.deep.equal([]);
+    });
+
+    it('returns an empty vocabulary for an unknown dimension', () => {
+      expect([...closedValuesOf('nope')]).to.deep.equal([]);
+    });
+  });
+
+  describe('STANDARD_PROMPT_TAG_VALUES', () => {
+    it('seeds source=ai + intent=Informational only (type is classified per prompt)', () => {
+      expect(STANDARD_PROMPT_TAG_VALUES.map((t) => [t.dimension, t.name])).to.deep.equal([
+        ['source', 'ai'],
+        ['intent', 'Informational'],
       ]);
     });
 
+    it('names only values that exist in their dimension vocabulary', () => {
+      STANDARD_PROMPT_TAG_VALUES.forEach(({ dimension, name }) => {
+        expect(closedValuesOf(dimension)).to.include(name);
+      });
+    });
+
     it('is frozen', () => {
-      expect(Object.isFrozen(PROJECT_STANDARD_TAGS)).to.equal(true);
+      expect(Object.isFrozen(STANDARD_PROMPT_TAG_VALUES)).to.equal(true);
     });
   });
 
-  describe('tag dimension constants', () => {
-    it('every value tag is prefixed with its dimension', () => {
-      Object.values(SOURCE_TAG).forEach((t) => expect(t).to.match(/^source:/));
-      Object.values(INTENT_TAG).forEach((t) => expect(t).to.match(/^intent:/));
-      Object.values(TYPE_TAG).forEach((t) => expect(t).to.match(/^type:/));
+  describe('dimensionOf', () => {
+    it('reads the dimension off path[0] at depth 2', () => {
+      expect(dimensionOf({ name: 'Running Shoes', path: [{ id: 'r', name: 'category' }] }))
+        .to.equal('category');
+    });
+
+    it('reads the dimension off path[0] at depth 3, not off the direct parent', () => {
+      const subCategory = {
+        name: 'Trail',
+        path: [{ id: 'r', name: 'category' }, { id: 'c', name: 'Running Shoes' }],
+      };
+      expect(dimensionOf(subCategory)).to.equal('category');
+    });
+
+    it('distinguishes two same-named tags by their dimension root', () => {
+      const subCategory = {
+        name: 'human',
+        path: [{ id: 'r', name: 'category' }, { id: 'c', name: 'Running Shoes' }],
+      };
+      const sourceValue = { name: 'human', path: [{ id: 's', name: 'source' }] };
+      expect(dimensionOf(subCategory)).to.equal('category');
+      expect(dimensionOf(sourceValue)).to.equal('source');
+    });
+
+    it("falls back to the tag's own name when it is a root (no breadcrumb)", () => {
+      expect(dimensionOf({ name: 'type', path: null })).to.equal('type');
+      expect(dimensionOf({ name: 'intent', path: [] })).to.equal('intent');
+      expect(dimensionOf({ name: 'source' })).to.equal('source');
+    });
+
+    it('returns undefined when neither a breadcrumb nor a name is usable', () => {
+      expect(dimensionOf({})).to.equal(undefined);
+      expect(dimensionOf({ name: '' })).to.equal(undefined);
+      expect(dimensionOf({ path: [null] })).to.equal(undefined);
+      expect(dimensionOf({ path: [{ id: 'r' }] })).to.equal(undefined);
     });
   });
 });

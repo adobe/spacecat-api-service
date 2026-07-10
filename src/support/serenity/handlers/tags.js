@@ -21,23 +21,30 @@ import {
 } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
-  tagFor, TAG_DIMENSION, CREATABLE_TAG_DIMENSIONS, CLOSED_TAG_DIMENSIONS, PROJECT_STANDARD_TAGS,
+  ALL_DIMENSIONS, CLOSED_DIMENSIONS,
+  isClosedDimension, closedValuesOf, isDimensionRootName,
 } from '../prompt-tags.js';
+import { ensureClosedValue, ensureDimensionRoots } from '../tag-tree.js';
 import { listProjectTagTree } from './markets.js';
 
 /**
  * POST /serenity/tags — create a prompt TAG on a single market.
  *
- * A ROOT tag is a `dimension:<NAME>` string registered on a market's project
- * (the `aio/tags` surface, via {@link createProjectTags}) under one of the
- * OPEN dimensions ({@link CREATABLE_TAG_DIMENSIONS} — `category` / `topic`);
- * the closed taxonomies (`source` / `intent` / `type`) have a fixed value enum
- * and are not freely creatable, so the `type` is validated against the
- * allow-list (this is what bounds the allowed prefixes). A CHILD tag (created
- * with `parentId`, 1-level nesting) is BARE — no dimension prefix — matching
- * the migration CLI's write shape (serenity-docs#24 §2). The UI's
- * "Categories" view is the `category:` slice of these root tags, plus their
- * bare children, across the brand's markets.
+ * Every tag is BARE-NAMED and lives under one of the four dimension roots
+ * (`category`, `intent`, `source`, `type`) on a market's project — the
+ * `aio/tags` surface, via {@link createProjectTags}. A tag's dimension is its
+ * root ancestor, never a prefix on its name, so `type` in the request body
+ * names the dimension the value belongs to rather than something written into
+ * the name.
+ *
+ * The three CLOSED dimensions (`intent` / `source` / `type`) have a fixed value
+ * enum: `name` must be one of those values, no `parentId` is accepted (their
+ * values are always direct children of the dimension root), and the create is
+ * resolve-or-create — a small, project-wide-shared set every caller may need
+ * the id of. The one OPEN dimension (`category`) carries customer-authored
+ * values: a category hangs under the `category` root, a sub-category under a
+ * category (via `parentId`). The UI's "Categories" view is the `category`
+ * root's subtree across the brand's markets.
  *
  * Both the flat-mode and subworkspace-mode handlers resolve the market's project
  * id from the `(geoTargetId, languageCode)` slice and register one tag.
@@ -98,17 +105,18 @@ function parseParentId(raw) {
 }
 
 /**
- * Validates the UPDATE body's `parentId`, preserving the distinction between
- * omitted (`undefined` -- leave the current parent alone) and an explicit JSON
- * `null` (promote a child to root -- serenity-docs#24 section 3.1 gate 1,
- * verified live 2026-07-02: an explicit `parent_id: null` in the upstream
- * PATCH body promotes a child; omitting the field entirely does not, and an
- * empty string is also a live no-op). {@link parseParentId} (used by create)
- * deliberately collapses omitted/null/empty to "no parent" because create has
- * no current parent to preserve -- that collapse would be wrong here.
+ * Validates the UPDATE body's `parentId`. `undefined` (omitted) means "keep the
+ * current parent" -- which this proxy honours by RE-SENDING the target's current
+ * parent upstream, never by omitting the field: an upstream PATCH body without
+ * `parent_id` PROMOTES the tag to a root (verified live), stranding it outside
+ * its dimension while every carrying prompt stays attached.
+ *
+ * An explicit `null` is rejected. Under the dimension-root model the root level
+ * is reserved for the four dimension roots, so promoting a tag to a root is never
+ * a legal request -- it would produce a tag with no dimension.
  *
  * @param {object} body - the raw request body.
- * @returns {string | null | undefined}
+ * @returns {string | undefined}
  */
 function parseUpdateParentId(body) {
   if (!body || !Object.prototype.hasOwnProperty.call(body, 'parentId')) {
@@ -116,15 +124,18 @@ function parseUpdateParentId(body) {
   }
   const raw = body.parentId;
   if (raw === null) {
-    return null;
+    throw new ErrorWithStatusCode(
+      'parentId must not be null: the root level is reserved for the dimension roots, '
+      + 'so a tag cannot be promoted to a root',
+      400,
+    );
   }
   if (typeof raw !== 'string') {
-    throw new ErrorWithStatusCode('parentId must be a string or null', 400);
+    throw new ErrorWithStatusCode('parentId must be a string', 400);
   }
   const id = raw.trim();
   if (!id) {
-    // An explicit empty string carries no live-verified meaning of its own
-    // (gate 1: it's a no-op, distinct from `null`) -- treat it as omission.
+    // Omission and an empty string mean the same thing: keep the current parent.
     return undefined;
   }
   validateParentIdFormat(id);
@@ -134,17 +145,15 @@ function parseUpdateParentId(body) {
 /**
  * Validates + normalizes the create-tag body, throwing a 400
  * {@link ErrorWithStatusCode} on the first problem. Returns the parsed
- * `{ type, name, geoTargetId, languageCode, parentId, isClosed }`. `parentId`
- * (optional) is an upstream tag id under which the new tag is nested (1-level
- * category tree) -- only legal for an OPEN dimension. `isClosed` is true when
- * `type` is one of {@link CLOSED_TAG_DIMENSIONS} (`source`/`intent`/`type`):
- * the `name` must then be one of that dimension's fixed enum values (checked
- * against {@link PROJECT_STANDARD_TAGS}) and no `parentId` may be present --
- * closed-dimension tags are always roots. The handler resolves-or-creates a
- * closed-dimension tag (idempotent) rather than blind-creating it (see
- * {@link handleCreateTag}) since it is a small, project-wide-shared set of
- * values every caller may need the id of, unlike an OPEN dimension's
- * customer-authored, resolve-before-create-by-the-caller names (gate 7).
+ * `{ type, name, geoTargetId, languageCode, parentId, isClosed }`.
+ *
+ * `type` names one of {@link ALL_DIMENSIONS}. `name` is BARE — a `:` is
+ * rejected rather than rewritten, and a reserved dimension-root name is refused
+ * so no value can shadow a root. `parentId` (optional) is the upstream id of
+ * the tag the new one nests under; it is only legal for the OPEN dimension,
+ * since a closed dimension's values are always direct children of its root.
+ * `isClosed` is true for the dimensions in {@link CLOSED_DIMENSIONS}, whose
+ * `name` must be one of that dimension's fixed values ({@link closedValuesOf}).
  *
  * @param {object} body - request body.
  * @returns {{
@@ -154,17 +163,16 @@ function parseUpdateParentId(body) {
  */
 function parseCreateTagBody(body) {
   const type = hasText(body?.type) ? String(body.type).trim().toLowerCase() : '';
-  // Both tuples are frozen literal tuples; widen to string[] so `.includes(type)`
-  // accepts an arbitrary runtime string for the membership test.
-  const openDimensions = /** @type {readonly string[]} */ (CREATABLE_TAG_DIMENSIONS);
-  const closedDimensions = /** @type {readonly string[]} */ (CLOSED_TAG_DIMENSIONS);
-  const isClosed = closedDimensions.includes(type);
-  if (!isClosed && !openDimensions.includes(type)) {
+  // Frozen literal tuple; widen to string[] so `.includes(type)` accepts an
+  // arbitrary runtime string for the membership test.
+  const dimensions = /** @type {readonly string[]} */ (ALL_DIMENSIONS);
+  if (!dimensions.includes(type)) {
     throw new ErrorWithStatusCode(
-      `type must be one of: ${[...CREATABLE_TAG_DIMENSIONS, ...CLOSED_TAG_DIMENSIONS].join(', ')}`,
+      `type must be one of: ${ALL_DIMENSIONS.join(', ')}`,
       400,
     );
   }
+  const isClosed = isClosedDimension(type);
   const rawName = hasText(body?.name) ? String(body.name).trim() : '';
   if (!rawName) {
     throw new ErrorWithStatusCode('name is required', 400);
@@ -175,11 +183,20 @@ function parseCreateTagBody(body) {
       400,
     );
   }
-  // The `<type>:` prefix is added by tagFor(); a `:` in the name would either
-  // double-prefix or smuggle a different dimension (e.g. type=category,
-  // name='topic:x' → 'category:topic:x'). Reject rather than silently rewrite.
+  // Tag names are bare under the dimension-root model — a tag's dimension is its
+  // root ancestor, never a prefix on its name. A `:` would be a stale caller
+  // trying to smuggle a dimension into the name; reject rather than rewrite.
   if (rawName.includes(':')) {
     throw new ErrorWithStatusCode('name must not contain ":"', 400);
+  }
+  // The root level holds exactly the four dimension roots. A value may not
+  // shadow one of their names, or the tree would have two tags a reader cannot
+  // tell apart by name at the level that matters.
+  if (isDimensionRootName(rawName)) {
+    throw new ErrorWithStatusCode(
+      `name must not be a reserved dimension root name (${ALL_DIMENSIONS.join(', ')})`,
+      400,
+    );
   }
   // Reject C0/C1-adjacent control characters (incl. DEL): unprintable chars have
   // no legitimate place in a customer-authored tag value and cause UI + upstream
@@ -189,8 +206,7 @@ function parseCreateTagBody(body) {
   if (/[\u0000-\u001F\u007F]/.test(rawName)) {
     throw new ErrorWithStatusCode('name must not contain control characters', 400);
   }
-  if (isClosed
-    && !(/** @type {readonly string[]} */ (PROJECT_STANDARD_TAGS)).includes(`${type}:${rawName}`)) {
+  if (isClosed && !(/** @type {readonly string[]} */ (closedValuesOf(type))).includes(rawName)) {
     throw new ErrorWithStatusCode(
       `name is not a valid ${type} value`,
       400,
@@ -210,7 +226,8 @@ function parseCreateTagBody(body) {
   const parentId = parseParentId(body?.parentId);
   if (isClosed && parentId !== undefined) {
     throw new ErrorWithStatusCode(
-      `parentId is not allowed for a closed dimension (${CLOSED_TAG_DIMENSIONS.join(', ')})`,
+      `parentId is not allowed for a closed dimension (${CLOSED_DIMENSIONS.join(', ')}): `
+      + 'its values are always direct children of the dimension root',
       400,
     );
   }
@@ -239,6 +256,27 @@ function pickTagIds(result, requestedParentId) {
   return { id, parentId };
 }
 
+/**
+ * The id of an OPEN dimension's root tag, provisioning the four dimension roots
+ * if the project predates them. An open-dimension create with no `parentId`
+ * hangs the new value directly under this root.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} dimension - an open dimension (`category`).
+ * @param {object} [log] - logger.
+ * @returns {Promise<string>}
+ */
+async function resolveOpenRootId(transport, semrushWorkspaceId, projectId, dimension, log) {
+  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+  const rootId = roots.get(dimension);
+  if (!rootId) {
+    throw new ErrorWithStatusCode(`could not resolve the "${dimension}" dimension root`, 502);
+  }
+  return rootId;
+}
+
 /** Throws a 404 `marketNotFound` for a slice with no backing project. */
 function marketNotFound() {
   const err = new ErrorWithStatusCode(
@@ -247,89 +285,6 @@ function marketNotFound() {
   );
   err.code = ERROR_CODES.MARKET_NOT_FOUND;
   return err;
-}
-
-/**
- * Resolves a closed-dimension tag's upstream id, creating it only if the
- * project doesn't already have it. Unlike an OPEN-dimension create (gate 7:
- * a duplicate name is a hard 500, resolve-before-create is the CALLER's job),
- * a closed-dimension tag is a small, fixed, project-wide-shared value that
- * many independent callers legitimately need the id of -- so the proxy itself
- * does the resolve-before-create, making POST /serenity/tags idempotent for
- * these specific values. Searches the ROOTS level only (closed dims are never
- * nested).
- *
- * @param {object} transport - Serenity transport (Semrush proxy client).
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {string} tag - the full `<dimension>:<value>` wire name.
- * @param {object} [log] - logger.
- * @returns {Promise<{ id: string | undefined, created: boolean }>}
- */
-async function resolveOrCreateClosedTag(transport, semrushWorkspaceId, projectId, tag, log) {
-  // Closed tags are seeded at project creation and will almost always be on
-  // page 1; stop paginating as soon as a match is found instead of always
-  // walking the full root tag list.
-  const roots = await listProjectTagTree(
-    transport,
-    semrushWorkspaceId,
-    projectId,
-    '',
-    log,
-    (t) => t.name === tag,
-  );
-  const existing = roots.items.find((t) => t.name === tag);
-  if (existing) {
-    return { id: existing.id, created: false };
-  }
-  const createdList = await transport.createProjectTags(semrushWorkspaceId, projectId, [tag]);
-  const { id } = pickTagIds(createdList, undefined);
-  return { id, created: true };
-}
-
-/**
- * Resolves the id-based injection of a server-computed `type:*` tag into a
- * prompt write (serenity-docs#31). Lists the project's ROOT tags ONCE and:
- *   - collects the ids of ALL existing `type:` roots, so the caller can strip
- *     any caller-supplied `type:*` tag id (the client must never set the value);
- *   - ensures the WANTED `type:<value>` has an upstream id, creating it on-demand
- *     for older projects that predate the standard taxonomy (idempotent — new
- *     projects already carry both values from {@link PROJECT_STANDARD_TAGS}).
- * Both `type:branded` and `type:non-branded` are roots (closed dims never nest).
- *
- * @param {object} transport - Serenity transport (Semrush proxy client).
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {string} wantTag - the computed `type:<value>` wire name.
- * @param {object} [log] - logger.
- * @returns {Promise<{ computedId: string | undefined, typeTagIds: string[] }>}
- *   `computedId` is the wanted value's id; `typeTagIds` is every `type:` root id
- *   present after resolution (the strip set).
- */
-export async function resolveTypeTagInjection(
-  transport,
-  semrushWorkspaceId,
-  projectId,
-  wantTag,
-  log,
-) {
-  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
-  const typeRoots = roots.items.filter(
-    (t) => typeof t.name === 'string' && t.name.startsWith(`${TAG_DIMENSION.TYPE}:`),
-  );
-  const typeTagIds = typeRoots.map((t) => t.id).filter(Boolean);
-  const existing = typeRoots.find((t) => t.name === wantTag);
-  if (existing) {
-    return { computedId: existing.id, typeTagIds };
-  }
-  // Create-on-demand for the wanted `type:` root. We only reach here when the
-  // list above had no matching root, so this is safe against duplicates for a
-  // single request; concurrent writers racing the same missing tag rely on the
-  // upstream tag resolver being idempotent by (project, name) — the same
-  // resolve-or-create assumption `resolveOrCreateClosedTag` makes.
-  const createdList = await transport.createProjectTags(semrushWorkspaceId, projectId, [wantTag]);
-  const { id } = pickTagIds(createdList, undefined);
-  return { computedId: id, typeTagIds: id ? [...typeTagIds, id] : typeTagIds };
 }
 
 /**
@@ -364,44 +319,52 @@ export async function handleCreateTag(
     throw marketNotFound();
   }
   const projectId = row.getSemrushProjectId();
-  const tag = tagFor(type, name);
 
   if (isClosed) {
-    const { id, created } = await resolveOrCreateClosedTag(
+    const { id, rootId, created } = await ensureClosedValue(
       transport,
       semrushWorkspaceId,
       projectId,
-      tag,
+      type,
+      name,
       log,
     );
-    log?.info?.('handleCreateTag: resolved closed-dimension tag', {
-      brandId, geoTargetId, languageCode, tag, created,
+    log?.info?.('handleCreateTag: resolved closed-dimension value', {
+      brandId, geoTargetId, languageCode, type, name, created,
     });
     return {
       status: 200,
       body: {
-        brandId, geoTargetId, languageCode, type, name, tag, id, parentId: null, created,
+        brandId, geoTargetId, languageCode, type, name, id, parentId: rootId ?? null, created,
       },
     };
   }
 
-  // A nested child is created BARE (no dimension prefix) — only a root gets the
-  // `<dimension>:<value>` name. See issue 21 §1 / serenity-docs#24 §2.
-  const openTag = parentId ? name : tag;
+  // An open-dimension value is always a DESCENDANT of its dimension root: a
+  // customer category hangs off the `category` root, a sub-category off a
+  // category. An omitted parentId therefore means "directly under the root",
+  // not "at the root level".
+  const targetParentId = parentId ?? await resolveOpenRootId(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    type,
+    log,
+  );
   const created = await transport.createProjectTags(
     semrushWorkspaceId,
     projectId,
-    [openTag],
-    { parentId },
+    [name],
+    { parentId: targetParentId },
   );
-  const { id, parentId: createdParentId } = pickTagIds(created, parentId);
+  const { id, parentId: createdParentId } = pickTagIds(created, targetParentId);
   log?.info?.('handleCreateTag: registered tag', {
-    brandId, geoTargetId, languageCode, tag: openTag, parentId,
+    brandId, geoTargetId, languageCode, name, parentId: targetParentId,
   });
   return {
     status: 201,
     body: {
-      brandId, geoTargetId, languageCode, type, name, tag: openTag, id, parentId: createdParentId,
+      brandId, geoTargetId, languageCode, type, name, id, parentId: createdParentId,
     },
   };
 }
@@ -430,44 +393,48 @@ export async function handleCreateTagSubworkspace(
     throw marketNotFound();
   }
   const projectId = String(project.id);
-  const tag = tagFor(type, name);
 
   if (isClosed) {
-    const { id, created } = await resolveOrCreateClosedTag(
+    const { id, rootId, created } = await ensureClosedValue(
       transport,
       workspaceId,
       projectId,
-      tag,
+      type,
+      name,
       log,
     );
-    log?.info?.('handleCreateTagSubworkspace: resolved closed-dimension tag', {
-      geoTargetId, languageCode, tag, created,
+    log?.info?.('handleCreateTagSubworkspace: resolved closed-dimension value', {
+      geoTargetId, languageCode, type, name, created,
     });
     return {
       status: 200,
       body: {
-        geoTargetId, languageCode, type, name, tag, id, parentId: null, created,
+        geoTargetId, languageCode, type, name, id, parentId: rootId ?? null, created,
       },
     };
   }
 
-  // A nested child is created BARE (no dimension prefix) — only a root gets the
-  // `<dimension>:<value>` name. See issue 21 §1 / serenity-docs#24 §2.
-  const openTag = parentId ? name : tag;
+  const targetParentId = parentId ?? await resolveOpenRootId(
+    transport,
+    workspaceId,
+    projectId,
+    type,
+    log,
+  );
   const created = await transport.createProjectTags(
     workspaceId,
     projectId,
-    [openTag],
-    { parentId },
+    [name],
+    { parentId: targetParentId },
   );
-  const { id, parentId: createdParentId } = pickTagIds(created, parentId);
+  const { id, parentId: createdParentId } = pickTagIds(created, targetParentId);
   log?.info?.('handleCreateTagSubworkspace: registered tag', {
-    geoTargetId, languageCode, tag: openTag, parentId,
+    geoTargetId, languageCode, name, parentId: targetParentId,
   });
   return {
     status: 201,
     body: {
-      geoTargetId, languageCode, type, name, tag: openTag, id, parentId: createdParentId,
+      geoTargetId, languageCode, type, name, id, parentId: createdParentId,
     },
   };
 }
@@ -494,16 +461,15 @@ function requireTagId(tagId) {
 
 /**
  * Validates + normalizes the update-tag body's SYNTAX only, throwing a 400 on
- * the first problem. Deliberately does NOT judge whether a bare (no dimension
- * prefix) name is legal -- that depends on whether the PATCH target is
- * currently a root or a child, which only {@link resolveTagTarget} can answer
- * (it needs transport access this pure parser doesn't have). See
+ * the first problem. Whether the PATCH target may be renamed at all depends on
+ * its position in the tree, which only {@link resolveTagTarget} can answer (it
+ * needs transport access this pure parser doesn't have). See
  * {@link buildUpdatePayload} for that cross-check.
  *
  * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).
  * @returns {{
- *   dimension: string, value: string, hasDimensionPrefix: boolean,
- *   parentId: string | null | undefined, geoTargetId: number, languageCode: string,
+ *   value: string, parentId: string | undefined,
+ *   geoTargetId: number, languageCode: string,
  * }}
  */
 function parseUpdateTagBody(body) {
@@ -511,23 +477,22 @@ function parseUpdateTagBody(body) {
   if (!rawName) {
     throw new ErrorWithStatusCode('name is required', 400);
   }
-  const colon = rawName.indexOf(':');
-  const hasDimensionPrefix = colon > 0;
-  const dimension = hasDimensionPrefix ? rawName.slice(0, colon).toLowerCase() : '';
-  const value = hasDimensionPrefix ? rawName.slice(colon + 1) : rawName;
-  if (!value) {
-    throw new ErrorWithStatusCode('name must not be empty', 400);
-  }
+  const value = rawName;
   if (value.length > MAX_TAG_NAME_LEN) {
     throw new ErrorWithStatusCode(
       `name value must not exceed ${MAX_TAG_NAME_LEN} characters`,
       400,
     );
   }
-  // At most one ':' -- a second colon would smuggle a nested dimension, whether
-  // the target turns out to be a root (one ':' expected) or a child (none).
+  // Names are bare: a tag's dimension is its root ancestor, not a name prefix.
   if (value.includes(':')) {
-    throw new ErrorWithStatusCode('name must contain at most one ":"', 400);
+    throw new ErrorWithStatusCode('name must not contain ":"', 400);
+  }
+  if (isDimensionRootName(value)) {
+    throw new ErrorWithStatusCode(
+      `name must not be a reserved dimension root name (${ALL_DIMENSIONS.join(', ')})`,
+      400,
+    );
   }
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001F\u007F]/.test(value)) {
@@ -546,7 +511,7 @@ function parseUpdateTagBody(body) {
     );
   }
   return {
-    dimension, value, hasDimensionPrefix, parentId, geoTargetId, languageCode,
+    value, parentId, geoTargetId, languageCode,
   };
 }
 
@@ -574,88 +539,81 @@ function parseUpdateTagBody(body) {
  * @param {string} projectId
  * @param {string} tagId - the PATCH target's upstream id.
  * @param {object} [log] - logger.
- * @returns {Promise<{ kind: 'root' | 'child' | 'unknown', parentId: string | null }>}
+ * @returns {Promise<{ kind: 'root' | 'descendant' | 'unknown', parentId: string | null }>}
  */
 async function resolveTagTarget(transport, semrushWorkspaceId, projectId, tagId, log) {
   const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
   if (roots.items.some((t) => t.id === tagId)) {
     return { kind: 'root', parentId: null };
   }
-  const candidates = roots.items.filter((root) => root.childrenCount > 0);
-  const searched = candidates.slice(0, MAX_ROOTS_TO_SEARCH);
-  for (const root of searched) {
-    // Sequential by design: stop at the first root whose children contain the
-    // target, rather than fanning out every root's children concurrently for
-    // what is expected to resolve within the first few roots in practice.
-    // eslint-disable-next-line no-await-in-loop
-    const children = await listProjectTagTree(
-      transport,
-      semrushWorkspaceId,
-      projectId,
-      root.id,
-      log,
-    );
-    const found = children.items.find((t) => t.id === tagId);
-    if (found) {
-      return { kind: 'child', parentId: found.parentId ?? root.id };
+  const candidates = roots.items
+    .filter((root) => root.childrenCount > 0)
+    .slice(0, MAX_ROOTS_TO_SEARCH);
+  // Walk the tree breadth-first, one level at a time. A customer category sits at
+  // depth 2 and a sub-category at depth 3, so a single children lookup per root is
+  // not enough; each level's children with descendants of their own are queued.
+  let frontier = candidates;
+  while (frontier.length > 0) {
+    const next = [];
+    for (const node of frontier) {
+      // Sequential by design: stop at the first node whose children contain the
+      // target, rather than fanning out every node's children concurrently for
+      // what is expected to resolve within the first few in practice.
+      // eslint-disable-next-line no-await-in-loop
+      const children = await listProjectTagTree(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        node.id,
+        log,
+      );
+      const found = children.items.find((t) => t.id === tagId);
+      if (found) {
+        return { kind: 'descendant', parentId: found.parentId ?? node.id };
+      }
+      next.push(...children.items.filter((t) => t.childrenCount > 0));
     }
+    frontier = next.slice(0, MAX_ROOTS_TO_SEARCH);
   }
   return { kind: 'unknown', parentId: null };
 }
 
 /**
- * Cross-checks the parsed update body's name shape against the PATCH target's
- * resolved tree position (see {@link resolveTagTarget}), and decides what
- * `parentId` to forward upstream. A root keeps the legacy
- * `<dimension>:<value>` requirement (dimension validated against
- * {@link CREATABLE_TAG_DIMENSIONS}, unchanged); a child takes a bare name
- * (no dimension prefix -- mirrors {@link handleCreateTag}'s create-side rule)
- * and ALWAYS gets an explicit `parentId` in the outgoing PATCH: the caller's
- * requested `parentId` when re-parenting, explicit `null` when PROMOTING to
- * root (gate 1), otherwise the child's own CURRENT parent so a rename-only
- * PATCH never omits it (gate 5). An unresolvable (`unknown`) target falls
- * back to the pre-existing full-name requirement and an omitted `parentId` --
- * the upstream 404 on the `tag_id` path segment is what actually catches a
- * genuinely unknown id, not this validation.
+ * Decides what to forward upstream for a PATCH, given the target's resolved tree
+ * position (see {@link resolveTagTarget}).
  *
- * @param {{
- *   hasDimensionPrefix: boolean, dimension: string, value: string,
- *   parentId: string | null | undefined,
- * }} parsed
- * @param {{ kind: 'root' | 'child' | 'unknown', parentId: string | null }} target
- * @returns {{ tag: string, parentIdToSend: string | null | undefined }}
+ * The outgoing body ALWAYS carries an explicit `parent_id`: an upstream PATCH
+ * that omits it PROMOTES the tag to a root (verified live). So a rename-only
+ * PATCH re-sends the target's own current parent, and a re-parent sends the
+ * requested one.
+ *
+ * A DIMENSION ROOT is not editable — the root level is reserved for the four
+ * roots, and renaming or moving one would leave its whole subtree without a
+ * dimension. An UNRESOLVABLE id is refused rather than forwarded: without
+ * knowing the target's current parent there is no body that preserves it, and
+ * guessing would promote the tag.
+ *
+ * @param {{ value: string, parentId: string | undefined }} parsed
+ * @param {{ kind: 'root' | 'descendant' | 'unknown', parentId: string | null }} target
+ * @returns {{ name: string, parentIdToSend: string }}
  */
 function buildUpdatePayload(parsed, target) {
-  const {
-    hasDimensionPrefix, dimension, value, parentId,
-  } = parsed;
-  if (target.kind === 'child') {
-    if (hasDimensionPrefix) {
-      throw new ErrorWithStatusCode('a child tag name must not contain ":"', 400);
-    }
-    // target.parentId is never null here: resolveTagTarget's child branch always
-    // resolves it (falling back to the child's own root id), so no `?? undefined`
-    // is needed the way the root/unknown branch below needs one. `parentId` is
-    // either a re-parent target string, explicit `null` (promote-to-root, gate
-    // 1), or `undefined` (omitted -- fall back to the current parent, gate 5).
-    return {
-      tag: value,
-      parentIdToSend: parentId !== undefined ? parentId : /** @type {string} */ (target.parentId),
-    };
-  }
-  // Root, or an id we could not resolve in the tree walk -- legacy behavior:
-  // require the full "<dimension>:<value>" shape.
-  const creatable = /** @type {readonly string[]} */ (CREATABLE_TAG_DIMENSIONS);
-  if (!hasDimensionPrefix || !creatable.includes(dimension)) {
+  const { value, parentId } = parsed;
+  if (target.kind === 'root') {
     throw new ErrorWithStatusCode(
-      `name must be a "<dimension>:<value>" tag where dimension is one of: ${CREATABLE_TAG_DIMENSIONS.join(', ')}`,
+      `a dimension root (${ALL_DIMENSIONS.join(', ')}) cannot be renamed or re-parented`,
       400,
     );
   }
-  // A root has no parent to remove, so an explicit `null` (promote-to-root) is
-  // a no-op here -- not live-verified against a root specifically, so it is
-  // defensively collapsed to omission rather than forwarded.
-  return { tag: `${dimension}:${value}`, parentIdToSend: parentId ?? undefined };
+  if (target.kind === 'unknown') {
+    const err = new ErrorWithStatusCode('No tag with this id on this market', 404);
+    err.code = ERROR_CODES.TAG_NOT_FOUND;
+    throw err;
+  }
+  // resolveTagTarget's descendant branch always resolves a parent (falling back
+  // to the node it was found under), so this is never null.
+  const currentParentId = /** @type {string} */ (target.parentId);
+  return { name: value, parentIdToSend: parentId ?? currentParentId };
 }
 
 /**
@@ -664,13 +622,11 @@ function buildUpdatePayload(parsed, target) {
  * `BrandSemrushProject` mapping (same resolution as handleCreateTag).
  *
  * Resolves the target's current tree position first (see
- * {@link resolveTagTarget}) so a child rename never omits `parent_id` (which
- * would silently promote it to root, serenity-docs#24 section 3.1 gate 5) and
- * so a bare (no dimension prefix) name is only accepted for a child, mirroring
- * {@link handleCreateTag}'s create-side rule. An id we cannot resolve in the
- * tree walk falls back to the pre-existing full-name requirement; the
- * upstream 404 on the `tag_id` path segment (surfaced via the controller's
- * mapError) is what actually catches a genuinely unknown id.
+ * {@link resolveTagTarget}) so a rename never omits `parent_id` — an upstream
+ * PATCH without it silently promotes the tag to a root (serenity-docs#24
+ * section 3.1 gate 5). A dimension root is refused with a 400, and an id absent
+ * from the tree with a 404 `tagNotFound` rather than forwarded: without the
+ * target's current parent there is no body that preserves it.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {object} dataAccess - data-access layer (BrandSemrushProject).
@@ -703,21 +659,21 @@ export async function handleUpdateTag(
   }
   const projectId = row.getSemrushProjectId();
   const target = await resolveTagTarget(transport, semrushWorkspaceId, projectId, id, log);
-  const { tag, parentIdToSend } = buildUpdatePayload(parsed, target);
+  const { name, parentIdToSend } = buildUpdatePayload(parsed, target);
   const updated = await transport.updateProjectTag(
     semrushWorkspaceId,
     projectId,
     id,
-    { name: tag, parentId: parentIdToSend },
+    { name, parentId: parentIdToSend },
   );
   const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTag: updated tag', {
-    brandId, geoTargetId, languageCode, tagId: id, tag, parentId: parentIdToSend,
+    brandId, geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
   });
   return {
     status: 200,
     body: {
-      brandId, geoTargetId, languageCode, tagId: id, tag, parentId: updatedParentId,
+      brandId, geoTargetId, languageCode, tagId: id, name, parentId: updatedParentId,
     },
   };
 }
@@ -751,21 +707,21 @@ export async function handleUpdateTagSubworkspace(
   }
   const projectId = String(project.id);
   const target = await resolveTagTarget(transport, workspaceId, projectId, id, log);
-  const { tag, parentIdToSend } = buildUpdatePayload(parsed, target);
+  const { name, parentIdToSend } = buildUpdatePayload(parsed, target);
   const updated = await transport.updateProjectTag(
     workspaceId,
     projectId,
     id,
-    { name: tag, parentId: parentIdToSend },
+    { name, parentId: parentIdToSend },
   );
   const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTagSubworkspace: updated tag', {
-    geoTargetId, languageCode, tagId: id, tag, parentId: parentIdToSend,
+    geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
   });
   return {
     status: 200,
     body: {
-      geoTargetId, languageCode, tagId: id, tag, parentId: updatedParentId,
+      geoTargetId, languageCode, tagId: id, name, parentId: updatedParentId,
     },
   };
 }

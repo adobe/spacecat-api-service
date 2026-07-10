@@ -13,108 +13,174 @@
 // @ts-check
 
 /**
- * Serenity prompt-tag taxonomy — the single source of truth for the
- * `dimension:value` tag strings attached to prompts (and registered as the tag
- * vocabulary on each project). Import these constants instead of hardcoding tag
- * literals anywhere in the serenity flow.
+ * Serenity prompt-tag taxonomy — the single source of truth for the tag tree
+ * attached to prompts (and registered as the tag vocabulary on each project).
+ * Import these constants instead of hardcoding tag literals anywhere in the
+ * serenity flow.
+ *
+ * A tag's DIMENSION is its root ancestor, not a prefix on its name. Every
+ * project's tag tree has exactly four roots — `category`, `intent`, `source`,
+ * `type` — and every tag value is a bare-named descendant of one of them. No
+ * tag name contains a `:`. A tag's dimension is therefore `path[0]` of the
+ * upstream breadcrumb (verified against the live Semrush API: `path[]` is a
+ * full root-first ancestry at any depth), never something parsed out of a name.
+ *
+ * Depth is a property of the data, not of this module: a customer category
+ * sits at depth 2 (child of the `category` root) and a sub-category at depth 3.
+ * The upstream API caps neither, so nothing here does either.
+ *
+ * Names are NOT unique on their own — upstream uniqueness is scoped per
+ * `(project, parent)`. A sub-category named `human` and the `source` value
+ * `human` are two distinct tags. Never key a tag by name alone; key by id.
  */
 
-// Tag dimension prefixes (the part before the colon).
-export const TAG_DIMENSION = Object.freeze({
-  TOPIC: 'topic',
-  SOURCE: 'source',
-  INTENT: 'intent',
-  TYPE: 'type',
+/**
+ * The four dimension roots. Each is a bare-named ROOT tag on every project.
+ */
+export const DIMENSION = Object.freeze({
   CATEGORY: 'category',
+  INTENT: 'intent',
+  SOURCE: 'source',
+  TYPE: 'type',
 });
 
-// `source:<value>` — who authored the prompt.
-export const SOURCE_TAG = Object.freeze({
-  AI: 'source:ai',
-  HUMAN: 'source:human',
+/** Root names, in the order they are provisioned on a project. */
+export const DIMENSION_ROOT_NAMES = Object.freeze([
+  DIMENSION.CATEGORY,
+  DIMENSION.INTENT,
+  DIMENSION.SOURCE,
+  DIMENSION.TYPE,
+]);
+
+/** `source` values — who authored the prompt. */
+export const SOURCE_VALUE = Object.freeze({
+  AI: 'ai',
+  HUMAN: 'human',
 });
 
-// `intent:<value>` — the searcher intent the prompt represents.
-//
-// These are the Semrush AIO intent TARGETS, the shared vocabulary that the
-// mysticat-data-service customer-onboarding script also registers as a project's
-// tag taxonomy (its `DEFAULT_PROJECT_TAGS`). They are NOT the raw data-service
-// intent buckets persisted in `prompts.intent` (those — informational /
-// instructional / comparative / transactional / planning / delegation — live in
-// `src/support/intent.js` and are unchanged here). The DRS-bucket → Semrush-target
-// mapping is the onboarding script's `INTENT_MAP` (mysticat-data-service
-// `scripts/customer_onboarding/tags.py`; see mysticat-data-service PR #737).
-// `Navigational` has no DRS source bucket but is part of the Semrush vocabulary,
-// so it belongs in the taxonomy even though no generated prompt is tagged with it.
-export const INTENT_TAG = Object.freeze({
-  INFORMATIONAL: 'intent:Informational',
-  TASK: 'intent:Task',
-  COMMERCIAL: 'intent:Commercial',
-  TRANSACTIONAL: 'intent:Transactional',
-  NAVIGATIONAL: 'intent:Navigational',
+/**
+ * `intent` values — the searcher intent the prompt represents.
+ *
+ * These are the Semrush AIO intent TARGETS, the shared vocabulary that the
+ * mysticat-data-service customer-onboarding script also registers as a project's
+ * tag taxonomy. They are NOT the raw data-service intent buckets persisted in
+ * `prompts.intent` (those — informational / instructional / comparative /
+ * transactional / planning / delegation — live in `src/support/intent.js` and
+ * are unchanged here). The DRS-bucket → Semrush-target mapping is the onboarding
+ * script's `INTENT_MAP` (mysticat-data-service `scripts/serenity_migration/tags.py`).
+ *
+ * `Navigational` has no DRS source bucket, so no generated prompt is tagged with
+ * it, but it is part of the Semrush vocabulary and every live customer project
+ * carries it — so it belongs in the taxonomy.
+ */
+export const INTENT_VALUE = Object.freeze({
+  INFORMATIONAL: 'Informational',
+  TASK: 'Task',
+  COMMERCIAL: 'Commercial',
+  TRANSACTIONAL: 'Transactional',
+  NAVIGATIONAL: 'Navigational',
 });
 
-// `type:<value>` — whether the prompt mentions the brand.
-export const TYPE_TAG = Object.freeze({
-  BRANDED: 'type:branded',
-  NON_BRANDED: 'type:non-branded',
+/** `type` values — whether the prompt mentions the brand. */
+export const TYPE_VALUE = Object.freeze({
+  BRANDED: 'branded',
+  NON_BRANDED: 'non-branded',
 });
 
-/** Builds the `<dimension>:<NAME>` tag string for a dimension + free-form value. */
-export function tagFor(dimension, name) {
-  return `${dimension}:${name}`;
-}
+/**
+ * The CLOSED dimensions and their fixed child vocabularies. A caller may never
+ * mint an arbitrary value under these; the values below are provisioned as the
+ * root's children on every project. A caller may still "create" one of these
+ * (POST /serenity/tags) to learn its upstream id, but only a value already in
+ * the enum, and the create is resolve-before-create/idempotent — unlike an OPEN
+ * dimension, where a duplicate `(parent, name)` is a hard upstream 500 by design
+ * (verified live) and resolve-before-create is the caller's job.
+ */
+export const CLOSED_DIMENSION_VALUES = Object.freeze({
+  [DIMENSION.INTENT]: Object.freeze(Object.values(INTENT_VALUE)),
+  [DIMENSION.SOURCE]: Object.freeze(Object.values(SOURCE_VALUE)),
+  [DIMENSION.TYPE]: Object.freeze(Object.values(TYPE_VALUE)),
+});
 
-/** Builds the `topic:<NAME>` tag for a topic name. */
-export function topicTag(name) {
-  return tagFor(TAG_DIMENSION.TOPIC, name);
+/** The closed dimensions — fixed vocabularies, never customer-authored. */
+export const CLOSED_DIMENSIONS = Object.freeze([
+  DIMENSION.INTENT,
+  DIMENSION.SOURCE,
+  DIMENSION.TYPE,
+]);
+
+/**
+ * The OPEN dimensions — a caller may create arbitrary descendants at any depth.
+ * `category` is the only one: a customer category is a child of the `category`
+ * root, and a sub-category is a child of a category.
+ */
+export const OPEN_DIMENSIONS = Object.freeze([DIMENSION.CATEGORY]);
+
+/** Every dimension a caller may address on the create-tag endpoint. */
+export const ALL_DIMENSIONS = Object.freeze([...OPEN_DIMENSIONS, ...CLOSED_DIMENSIONS]);
+
+/**
+ * The closed-dimension values applied to EVERY AI-generated prompt: `source:ai`
+ * (AI-authored) plus the default `Informational` intent (the most common intent
+ * for brand-topic prompts; re-classification can refine it later). The `type`
+ * value is classified per prompt at generation time (branded vs non-branded —
+ * see the handler), so it is NOT seeded here.
+ *
+ * Each entry names a dimension and the bare value beneath it; the caller resolves
+ * the pair to an upstream tag id against the project's tree.
+ */
+export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
+  Object.freeze({ dimension: DIMENSION.SOURCE, name: SOURCE_VALUE.AI }),
+  Object.freeze({ dimension: DIMENSION.INTENT, name: INTENT_VALUE.INFORMATIONAL }),
+]);
+
+/**
+ * True when `name` is one of the four dimension roots. Root names are reserved:
+ * a customer category may not be called `category`, and a closed value may not
+ * be minted at the root level.
+ *
+ * @param {string} name - a bare tag name.
+ * @returns {boolean}
+ */
+export function isDimensionRootName(name) {
+  return (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
 }
 
 /**
- * The tag dimensions a caller may freely create values under (the open
- * taxonomies). The closed taxonomies — `source` / `intent` / `type` — have a
- * fixed value enum registered as {@link PROJECT_STANDARD_TAGS}, so callers must
- * NOT mint arbitrary values under them; only `topic` and `category` accept
- * customer-authored values. The create-tag endpoint validates the requested
- * `type` against this list, which is what bounds the allowed tag prefixes.
+ * True when `dimension` has a fixed child vocabulary.
+ *
+ * @param {string} dimension
+ * @returns {boolean}
  */
-export const CREATABLE_TAG_DIMENSIONS = Object.freeze([
-  TAG_DIMENSION.CATEGORY,
-  TAG_DIMENSION.TOPIC,
-]);
+export function isClosedDimension(dimension) {
+  return (/** @type {readonly string[]} */ (CLOSED_DIMENSIONS)).includes(dimension);
+}
 
 /**
- * The closed dimensions — `source` / `intent` / `type` — whose values are a
- * fixed enum ({@link PROJECT_STANDARD_TAGS}), never customer-authored. A
- * caller may still "create" one of these (POST /serenity/tags) to learn its
- * upstream id, but ONLY a value already in the enum, and the create is
- * resolve-before-create/idempotent (unlike {@link CREATABLE_TAG_DIMENSIONS}'s
- * open dimensions, where a duplicate name is a hard upstream 500 by design —
- * see serenity-docs#24 §3.1 gate 7). Closed-dimension tags are always roots;
- * `parentId` is rejected for them.
+ * The fixed child vocabulary of a closed dimension, or an empty tuple for an
+ * open one.
+ *
+ * @param {string} dimension
+ * @returns {readonly string[]}
  */
-export const CLOSED_TAG_DIMENSIONS = Object.freeze([
-  TAG_DIMENSION.SOURCE,
-  TAG_DIMENSION.INTENT,
-  TAG_DIMENSION.TYPE,
-]);
+export function closedValuesOf(dimension) {
+  return CLOSED_DIMENSION_VALUES[/** @type {keyof CLOSED_DIMENSION_VALUES} */ (dimension)] ?? [];
+}
 
-// Tags applied to EVERY AI-generated prompt on top of its `topic:<NAME>` tag:
-// `source:ai` (AI-authored) plus the default `intent:Informational` (the most
-// common intent for brand-topic prompts; re-classification can refine it
-// later). `type:` is classified per prompt at generation time (branded vs
-// non-branded — see the handler), so it is NOT seeded here.
-export const STANDARD_PROMPT_TAGS = Object.freeze([
-  SOURCE_TAG.AI,
-  INTENT_TAG.INFORMATIONAL,
-]);
-
-// The full tag TAXONOMY registered on EVERY project (via createProjectTags),
-// independent of any prompt — so classification can later apply the right
-// intent / source / type value per prompt. Order: all intents, then sources,
-// then types.
-export const PROJECT_STANDARD_TAGS = Object.freeze([
-  ...Object.values(INTENT_TAG),
-  ...Object.values(SOURCE_TAG),
-  ...Object.values(TYPE_TAG),
-]);
+/**
+ * The dimension a tag belongs to, read off its upstream breadcrumb. `path` is a
+ * full root-first ancestry EXCLUDING the tag itself, so a root's own `path` is
+ * empty/absent and its dimension is its own name.
+ *
+ * @param {{ name?: string, path?: ({ name?: string } | null)[] | null }} tag
+ * @returns {string | undefined} the dimension root's name, or undefined when it
+ *   cannot be determined.
+ */
+export function dimensionOf(tag) {
+  const root = Array.isArray(tag?.path) && tag.path.length > 0 ? tag.path[0] : undefined;
+  if (root && typeof root.name === 'string' && root.name) {
+    return root.name;
+  }
+  // No breadcrumb: the tag is itself a root.
+  return typeof tag?.name === 'string' && tag.name ? tag.name : undefined;
+}

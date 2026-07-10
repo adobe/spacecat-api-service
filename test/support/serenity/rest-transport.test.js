@@ -430,21 +430,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('createTaggedPrompts', () => {
-    it('POSTs to /v2/.../aio/prompts/tagged with grouped prompts', async () => {
-      fetchStub.resolves(fetchOk({ ids: ['p1', 'p2'], existing_count: 0 }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const promptsByTag = { 'topic:acrobat': ['What is Acrobat?'] };
-      await transport.createTaggedPrompts(WORKSPACE_ID, PROJECT_ID, promptsByTag);
-
-      const call = await callOf(fetchStub);
-      expect(call.method).to.equal('POST');
-      expect(call.url).to.include('/aio/prompts/tagged');
-      expect(JSON.parse(call.body)).to.deep.equal({ prompts: promptsByTag });
-    });
-  });
-
   describe('createPromptsByIds', () => {
     it('POSTs to /v2/.../aio/prompts with { items, tag_ids } and returns the list wrapper', async () => {
       fetchStub.resolves(fetchOk({
@@ -898,14 +883,16 @@ describe('Semrush REST transport', () => {
       expect(result).to.deep.equal({ id: 'tag-1', name: 'category:Renamed', parent_id: 'parent-1' });
     });
 
-    it('omits parent_id when only renaming', async () => {
-      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'category:Renamed' }));
+    it('re-sends the current parent_id when only renaming (omitting it would promote)', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'Renamed', parent_id: 'root-1' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', { name: 'category:Renamed' });
+      await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', {
+        name: 'Renamed', parentId: 'root-1',
+      });
 
       const call = await callOf(fetchStub);
-      expect(JSON.parse(call.body)).to.deep.equal({ name: 'category:Renamed' });
+      expect(JSON.parse(call.body)).to.deep.equal({ name: 'Renamed', parent_id: 'root-1' });
     });
 
     it('sends a literal null parent_id to promote a child to root (gate 1)', async () => {
@@ -920,11 +907,25 @@ describe('Semrush REST transport', () => {
       expect(JSON.parse(call.body)).to.deep.equal({ name: 'Sneakers', parent_id: null });
     });
 
+    // Upstream has no "leave the parent alone" body: a PATCH without `parent_id`
+    // PROMOTES the tag to a root (verified live). Refuse to build such a body.
+    it('throws rather than omitting parent_id (omission promotes the tag to a root)', async () => {
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      for (const parentId of [undefined, '']) {
+        // eslint-disable-next-line no-await-in-loop
+        await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', {
+          name: 'Renamed', parentId,
+        })).to.be.rejectedWith(TypeError, /parentId is required/);
+      }
+      expect(fetchStub.called).to.equal(false);
+    });
+
     it('surfaces an upstream 404 as a SerenityTransportError', async () => {
       fetchStub.resolves(fetchFail(404, { message: 'not found' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'ghost', { name: 'category:X' }))
+      await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'ghost', { name: 'X', parentId: 'root-1' }))
         .to.be.rejected.then((err) => {
           expect(err.status).to.equal(404);
           expect(err.body).to.deep.equal({ message: 'not found' });

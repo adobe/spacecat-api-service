@@ -19,11 +19,9 @@ import { createSerenityTransport, SerenityTransportError } from './rest-transpor
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
-import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from './prompt-tags.js';
 
 // Re-exported for callers/tests that drive brand provisioning. The tag
 // vocabularies themselves live in `prompt-tags.js` (single source of truth).
-export { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS };
 
 // Brand-create generation policy (tunable). Keep the top N generated topics by
 // search volume; brand-topics returns up to 10 topics x up to 100 prompts each,
@@ -188,16 +186,16 @@ export async function provisionBrandSubworkspace(context, {
       null,
       null,
       // Brand-create attaches the chosen LLMs and, WHEN generateTopics is set,
-      // generates+attaches topics/prompts (top N by volume, tagged `topic:<NAME>`
-      // + standard tags) before publishing. With generateTopics=false the project
-      // is created empty (no prompts); models are still attached when supplied.
+      // generates+attaches prompts (top N topics by volume, each prompt carrying
+      // the standard closed-dimension values plus its branded/non-branded `type`
+      // value) before publishing. The dimension-root taxonomy is provisioned on
+      // every project regardless. With generateTopics=false the project is created
+      // empty (no prompts); models are still attached when supplied.
       {
         modelIds,
         generateTopics,
         topicCap: generateTopics ? MAX_TOPICS_ON_CREATE : 0,
-        standardTags: [...STANDARD_PROMPT_TAGS],
         brandAliases,
-        projectTags: [...PROJECT_STANDARD_TAGS],
         brandUrlSources,
         competitors,
         // A project with neither models nor generated prompts would publish

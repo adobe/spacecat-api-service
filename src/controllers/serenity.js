@@ -64,7 +64,6 @@ import {
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
-import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -680,8 +679,6 @@ function SerenityController(context, log, env) {
           {
             generateTopics: genMarketTopics,
             topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
-            standardTags: genMarketTopics ? [...STANDARD_PROMPT_TAGS] : [],
-            projectTags: genMarketTopics ? [...PROJECT_STANDARD_TAGS] : [],
             brandAliases,
             brandUrlSources,
             competitors,
@@ -1199,8 +1196,6 @@ function SerenityController(context, log, env) {
               // the project is published empty (no prompts) — today's default.
               generateTopics: generatePrompts,
               topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
-              standardTags: generatePrompts ? [...STANDARD_PROMPT_TAGS] : [],
-              projectTags: generatePrompts ? [...PROJECT_STANDARD_TAGS] : [],
               // A project with neither models nor generated prompts publishes
               // "empty units" → Semrush's disguised quota 405. Tolerate it
               // (best-effort, leaves a draft) rather than failing activation; a

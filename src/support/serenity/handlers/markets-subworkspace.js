@@ -34,7 +34,8 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
-import { topicTag } from '../prompt-tags.js';
+import { DIMENSION, STANDARD_PROMPT_TAG_VALUES } from '../prompt-tags.js';
+import { provisionDimensionTree } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
@@ -170,13 +171,21 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * `topic:<TopicName>`, the caller's `standardTags`, and a branded/non-branded
- * `type:` tag derived from `brandNames` (brand name + aliases). Returns the
- * topic/prompt counts. A generation that yields nothing is a clean no-op (no
- * upstream write).
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}) plus
+ * a branded / non-branded `type` value derived from `brandNames` (brand name +
+ * aliases). Returns the topic/prompt counts. A generation that yields nothing is
+ * a clean no-op (no upstream write).
  *
- * Prompt text is the createTaggedPrompts key, so identical text across topics
- * collapses to one entry (last tag set wins) — acceptable and rare.
+ * The generated topic name is NOT attached. Under the dimension-root model a
+ * topic is a sub-category — a depth-3 descendant of a customer category — and
+ * the AI-SEO service returns topics with no category to hang them under, so
+ * there is no correct parent to create them below. Generated prompts therefore
+ * arrive uncategorized and are categorized later (adobe/serenity-docs#44).
+ *
+ * Writes are id-based: `createPromptsByIds` takes ONE shared `tag_ids` array per
+ * call, so the texts are partitioned by their resolved tag-id set — which, with
+ * topics gone, is exactly two groups (branded and non-branded). Identical text
+ * collapses to one entry per group.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} workspaceId - sub-workspace the project lives in.
@@ -185,14 +194,13 @@ function validateCreateBody(body) {
  * @param {string} options.domain - brand domain to generate topics for.
  * @param {string} options.country - market/country code to generate topics for.
  * @param {number} [options.topicCap=0] - keep the top N topics by volume (0 = all).
- * @param {string[]} [options.standardTags=[]] - tags added to every generated prompt.
  * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
  *   classification via the shared {@link classifyBrandedTag} (whole-word match,
  *   diacritic-folded, case-insensitive).
  * @param {object} log - logger.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
-  domain, country, topicCap = 0, standardTags = [], brandNames = [],
+  domain, country, topicCap = 0, brandNames = [],
 }, log) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
@@ -212,25 +220,55 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // so a prompt is classified identically no matter how it is written.
   const needles = needlesFromNames(Array.isArray(brandNames) ? brandNames : []);
 
-  const promptsByText = {};
-  selected.forEach((t) => {
-    const topic = topicTag(t.topic);
-    (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
+  // Dedupe by text FIRST: an identical prompt under two topics is one prompt, and
+  // its classification depends only on its text, so the winner is unambiguous.
+  const texts = new Set();
+  for (const t of selected) {
+    for (const p of (Array.isArray(t.prompts) ? t.prompts : [])) {
       if (hasText(p)) {
-        promptsByText[p] = [topic, ...standardTags, classifyBrandedTag(p, needles)];
+        texts.add(p);
       }
-    });
-  });
-
-  const promptCount = Object.keys(promptsByText).length;
-  if (promptCount === 0) {
+    }
+  }
+  if (texts.size === 0) {
     log?.info?.('generateAndAttachPrompts: no prompts generated', {
       workspaceId, projectId, domain, country,
     });
     return { topicCount: 0, promptCount: 0 };
   }
-  await transport.createTaggedPrompts(workspaceId, projectId, promptsByText);
-  return { topicCount: selected.length, promptCount };
+
+  // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
+  // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
+  const { roots, values } = await provisionDimensionTree(transport, workspaceId, projectId, log);
+  const standardIds = STANDARD_PROMPT_TAG_VALUES
+    .map(({ dimension, name }) => values.get(dimension)?.get(name))
+    .filter((id) => typeof id === 'string' && id);
+  if (standardIds.length !== STANDARD_PROMPT_TAG_VALUES.length || !roots.get(DIMENSION.TYPE)) {
+    throw new Error('generateAndAttachPrompts: could not resolve the standard prompt tag ids');
+  }
+  const typeValues = values.get(DIMENSION.TYPE);
+
+  /** @type {Map<string, string[]>} bare type value → prompt texts */
+  const byTypeValue = new Map();
+  for (const text of texts) {
+    const value = classifyBrandedTag(text, needles);
+    const bucket = byTypeValue.get(value);
+    if (bucket) {
+      bucket.push(text);
+    } else {
+      byTypeValue.set(value, [text]);
+    }
+  }
+
+  for (const [value, items] of byTypeValue) {
+    const typeId = typeValues?.get(value);
+    if (!typeId) {
+      throw new Error(`generateAndAttachPrompts: unresolved type tag id for "${value}"`);
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]);
+  }
+  return { topicCount: selected.length, promptCount: texts.size };
 }
 
 /**
@@ -258,23 +296,19 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * @param {string[]} [options.modelIds=[]] - AI models (LLMs) to attach to the
  *   project before publishing. A project needs models to track anything.
  * @param {boolean} [options.generateTopics=false] - generate topics+prompts from
- *   `body.brandDomain` + `body.market` and attach them, tagged `topic:<NAME>` +
- *   `standardTags`.
+ *   `body.brandDomain` + `body.market` and attach them, carrying the standard
+ *   closed-dimension values and a branded / non-branded `type` value.
  * @param {number} [options.topicCap=0] - keep only the top N generated topics by
  *   search volume (0 = keep all).
- * @param {string[]} [options.standardTags=[]] - tags added to every generated
- *   prompt in addition to its `topic:<NAME>` and branded `type:` tag.
  * @param {Array<string|{name: string, regions?: string[]}>} [options.brandAliases=[]]
  *   - brand aliases; brand-level names the brand is also known by. Region-clamped
  *   to THIS market (a region-scoped alias only applies to the markets it lists;
  *   region-less / 'ww' apply everywhere; a bare string is treated as region-less).
  *   The market-applicable names are added to the project's `brand_names`
  *   (alongside the primary name) so the project carries them, and — together with
- *   the brand name(s) — used to classify each generated prompt as `type:branded`
- *   (text mentions a name/alias as a whole word, diacritic-folded) or
- *   `type:non-branded`.
- * @param {string[]} [options.projectTags=[]] - project-level tag taxonomy to
- *   register on the project (via createProjectTags) independent of any prompt.
+ *   the brand name(s) — used to classify each generated prompt's `type` value as
+ *   `branded` (text mentions a name/alias as a whole word, diacritic-folded) or
+ *   `non-branded`.
  * @param {object} [options.brandUrlSources=null] - the brand's URL sources
  *   ({ urls, socialAccounts, earnedContent }, V2 shape) to push onto this
  *   market's project benchmark. Brand `urls` go to every market; social/earned
@@ -307,9 +341,7 @@ export async function handleCreateMarketSubworkspace(
     modelIds = [],
     generateTopics = false,
     topicCap = 0,
-    standardTags = [],
     brandAliases = [],
-    projectTags = [],
     brandUrlSources = null,
     competitors = [],
     publishMode = 'require',
@@ -373,11 +405,12 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
-  // Register the standard tag taxonomy on the project (independent of prompts),
-  // so classification can later apply intent/source/type values per prompt.
-  if (Array.isArray(projectTags) && projectTags.length > 0) {
-    await transport.createProjectTags(workspaceId, projectId, projectTags);
-  }
+  // Provision the dimension-root taxonomy on the project (independent of prompts),
+  // so classification can later apply intent/source/type values per prompt and the
+  // Categories surface has a `category` root to hang customer categories under.
+  // Idempotent (resolve-before-create), and unconditional: every project carries
+  // exactly the four dimension roots, whether or not it has prompts yet.
+  await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /
   // publishing — a project with no models can't track anything. Stage only
@@ -407,7 +440,6 @@ export async function handleCreateMarketSubworkspace(
         domain: body.brandDomain,
         country: body.market,
         topicCap,
-        standardTags,
         // Branded classification needles: the brand's own name(s) + the
         // market-applicable aliases.
         brandNames: [
@@ -578,6 +610,11 @@ export async function handleDeleteMarketSubworkspace(
  * unexpectedly huge set — mirroring `listTagsForProject`'s prompt-page walk so
  * standalone categories beyond the first page are not silently dropped.
  *
+ * Reads the DRAFT view. Tag writes land in the project's draft layer and the
+ * live view hides them until the project is published, so a default (live) read
+ * cannot see a category this proxy just created — which is the one thing this
+ * function exists to surface.
+ *
  * @param {any} transport - Serenity transport.
  * @param {string} workspaceId - Semrush (sub-)workspace id.
  * @param {string} projectId - AIO project id.
@@ -591,7 +628,9 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
   let page = 1;
   while (page <= PAGE_LIMIT) {
     // eslint-disable-next-line no-await-in-loop
-    const resp = await transport.listProjectTags(workspaceId, projectId, { page, limit: LIMIT });
+    const resp = await transport.listProjectTags(workspaceId, projectId, {
+      page, limit: LIMIT, draft: true,
+    });
     const batch = Array.isArray(resp?.items) ? resp.items : [];
     items.push(...batch);
     if (batch.length < LIMIT) {
@@ -659,27 +698,40 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
         return { items: [] };
       }),
   ]);
-  const byName = new Map();
+  // Merge by ID, not by name. Names are unique only per (project, parent), so a
+  // sub-category `human` and the `source` value `human` are two distinct tags —
+  // keying by name silently drops one of them.
+  const byId = new Map();
+  // Both sources back-fill a missing upstream id with the tag's own name (a
+  // prompt can carry a tag as a bare string, and a standalone row can predate its
+  // id). Such an entry is a name-shaped PLACEHOLDER, recognisable by `id === name`
+  // — an upstream id never equals the bare name it labels. Hold placeholders aside
+  // so a canonical id for the same name can supersede them.
+  const synthetic = new Map();
   // listTagsForProject and listStandaloneProjectTags (and its catch) each always
   // resolve `{ items: [...] }`, so no defensive `?.`/`|| []` is needed here.
   const all = [...fromPrompts.items, ...standalone.items];
   for (const t of all) {
     if (t && hasText(t.name)) {
       const id = hasText(t.id) ? String(t.id) : t.name;
-      const existing = byName.get(t.name);
-      if (!existing) {
-        byName.set(t.name, { id, name: t.name });
-      } else if (existing.id === existing.name && id !== t.name) {
-        // Upgrade a synthetic (id === name) entry — e.g. a prompt-derived tag that
-        // arrived as a bare string — to the canonical upstream id once the
-        // standalone listing supplies it, regardless of merge order. Prevents a
-        // synthetic id from shadowing the real one just because the prompt-derived
-        // entry was seen first.
-        existing.id = id;
+      if (id === t.name) {
+        if (!synthetic.has(t.name)) {
+          synthetic.set(t.name, { id, name: t.name });
+        }
+      } else if (!byId.has(id)) {
+        byId.set(id, { id, name: t.name });
       }
     }
   }
-  return { items: [...byName.values()] };
+  // Drop a placeholder once a real, id-carrying tag of the same name exists, so
+  // the canonical id never sits beside a name-shaped stand-in for it.
+  const realNames = new Set([...byId.values()].map((t) => t.name));
+  for (const [name, entry] of synthetic) {
+    if (!realNames.has(name)) {
+      byId.set(entry.id, entry);
+    }
+  }
+  return { items: [...byId.values()] };
 }
 
 /**
