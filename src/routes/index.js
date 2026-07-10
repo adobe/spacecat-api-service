@@ -488,6 +488,7 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-url/:url': scrapeJobController.getScrapeUrlByProcessingType,
 
     // Fixes
+    'GET /sites/:siteId/fixes': (c) => fixesController.getAllForSite(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),

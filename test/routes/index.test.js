@@ -249,6 +249,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockFixesController = {
+    getAllForSite: () => null,
     getAllForOpportunity: () => null,
     getByStatus: () => null,
     getByID: () => null,
@@ -1126,6 +1127,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'GET /tools/scrape/jobs/by-url/:url/:processingType',
       'GET /tools/scrape/jobs/by-url/:url',
+      'GET /sites/:siteId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
