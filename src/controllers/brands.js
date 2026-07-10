@@ -401,7 +401,7 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, brandId } = context.params || {};
     const {
       limit, page, categoryId, topicId, status,
-      search, region, origin, sort, order,
+      search, region, origin, source, sort, order,
     } = getQueryParams(context);
 
     try {
@@ -449,6 +449,7 @@ function BrandsController(ctx, log, env) {
         search,
         region,
         origin,
+        source,
         sort,
         order,
         limit,
