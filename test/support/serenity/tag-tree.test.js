@@ -22,6 +22,8 @@ import {
   provisionDimensionTree,
   ensureClosedValue,
   resolveTypeValueInjection,
+  findTagInTree,
+  assertParentWithinDimension,
 } from '../../../src/support/serenity/tag-tree.js';
 import {
   TAG_IDS,
@@ -203,6 +205,49 @@ describe('serenity tag-tree', () => {
       const { byName } = await ensureChildren(transport, WS, PROJECT, '', ['category'], fakeLog());
       expect(byName.get('category')).to.equal('r-cat');
     });
+
+    it('502s when the create answers 2xx but the draft re-read still lacks the name', async () => {
+      // The live draft-layer failure: a 201 that echoes nothing and changes nothing.
+      // Returning a map with a hole here is what let a caller answer 200 with an
+      // `undefined` tag id and `created: true`.
+      const listProjectTags = sinon.stub().resolves({ items: [] });
+      const transport = { listProjectTags, createProjectTags: sinon.stub().resolves([]) };
+      const err = await ensureChildren(transport, WS, PROJECT, '', ['category'], fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/did not persist the tag\(s\): category/);
+    });
+
+    it('resolves rather than fails when a concurrent writer minted the names first', async () => {
+      // Upstream answers 500 on a duplicate (parent, name). Resolve-before-create is
+      // not atomic, so the loser of a race must re-read and resolve, not blow up.
+      const listProjectTags = sinon.stub();
+      listProjectTags.onFirstCall().resolves({ items: [] });
+      listProjectTags.onSecondCall().resolves({
+        items: [{ id: 'raced-cat', name: 'category', children_count: 0 }],
+      });
+      const transport = {
+        listProjectTags,
+        createProjectTags: sinon.stub().rejects(new Error('upstream 500: duplicate tag')),
+      };
+      const log = fakeLog();
+      const { byName, createdNames } = await ensureChildren(transport, WS, PROJECT, '', ['category'], log);
+      expect(byName.get('category')).to.equal('raced-cat');
+      // We did not mint it, so we must not claim we did.
+      expect(createdNames).to.deep.equal([]);
+      expect(log.info).to.have.been.calledWithMatch(/lost a create race/);
+    });
+
+    it('rethrows the create failure when the re-read does not explain it', async () => {
+      const listProjectTags = sinon.stub().resolves({ items: [] });
+      const transport = {
+        listProjectTags,
+        createProjectTags: sinon.stub().rejects(new Error('upstream 503: unavailable')),
+      };
+      await expect(ensureChildren(transport, WS, PROJECT, '', ['category'], fakeLog()))
+        .to.be.rejectedWith(/upstream 503: unavailable/);
+    });
   });
 
   describe('ensureDimensionRoots', () => {
@@ -257,9 +302,10 @@ describe('serenity tag-tree', () => {
         .to.equal('created:created::intent:Navigational');
     });
 
-    it('warns and skips a dimension whose root upstream failed to return', async () => {
+    it('502s rather than return a values map missing a dimension', async () => {
       // Upstream drift: the roots read answers without the `type` root, and the
-      // create echoes nothing back for it either.
+      // create echoes nothing back for it either. A caller must never receive a
+      // map it has to re-check.
       const listProjectTags = makeListProjectTagsStub({
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
@@ -277,10 +323,23 @@ describe('serenity tag-tree', () => {
             .map((n) => ({ id: `made-${n}`, name: n, parent_id: opts.parentId || null })),
         )),
       };
-      const log = fakeLog();
-      const { values } = await provisionDimensionTree(transport, WS, PROJECT, log);
-      expect(values.has('type')).to.equal(false);
-      expect(log.warn).to.have.been.calledWithMatch(/dimension root missing after ensure/);
+      const err = await provisionDimensionTree(transport, WS, PROJECT, fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/did not persist the tag\(s\): type/);
+    });
+
+    it('resolves the three closed vocabularies concurrently, one level read each', async () => {
+      const listProjectTags = makeListProjectTagsStub();
+      const transport = { listProjectTags, createProjectTags: sinon.stub() };
+      const { roots, values } = await provisionDimensionTree(transport, WS, PROJECT, fakeLog());
+      expect([...roots.keys()]).to.have.members(['category', 'intent', 'source', 'type']);
+      expect(values.get('source')?.get('ai')).to.equal(TAG_IDS.sourceAi);
+      expect(values.get('type')?.get('branded')).to.equal(TAG_IDS.typeBranded);
+      // The open `category` root is provisioned but its children are customer content.
+      expect(values.has('category')).to.equal(false);
+      expect(transport.createProjectTags).to.not.have.been.called;
     });
   });
 
@@ -312,14 +371,16 @@ describe('serenity tag-tree', () => {
       });
     });
 
-    it('degrades to an undefined id when the dimension root cannot be resolved', async () => {
+    it('502s rather than hand back an undefined id when the root cannot be resolved', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub({ '': [] }),
         // The create echoes nothing, so no root id is ever learned.
         createProjectTags: sinon.stub().resolves([]),
       };
-      const res = await ensureClosedValue(transport, WS, PROJECT, 'source', 'ai', fakeLog());
-      expect(res).to.deep.equal({ id: undefined, rootId: undefined, created: false });
+      const err = await ensureClosedValue(transport, WS, PROJECT, 'source', 'ai', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
     });
   });
 
@@ -344,13 +405,17 @@ describe('serenity tag-tree', () => {
       expect(res.typeTagIds).to.deep.equal(['created:created::type:branded']);
     });
 
-    it('skips injection (no computedId) when the type root cannot be resolved', async () => {
+    it('502s rather than skip injection when the type root cannot be resolved', async () => {
+      // A prompt written without the server-computed `type` tag stays unclassified
+      // forever: the client may not set that dimension itself. Fail the write.
       const transport = {
         listProjectTags: makeListProjectTagsStub({ '': [] }),
         createProjectTags: sinon.stub().resolves([]),
       };
-      const res = await resolveTypeValueInjection(transport, WS, PROJECT, 'branded', fakeLog());
-      expect(res).to.deep.equal({ computedId: undefined, typeTagIds: [] });
+      const err = await resolveTypeValueInjection(transport, WS, PROJECT, 'branded', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
     });
 
     it('propagates a transport failure while reading the tag tree', async () => {
@@ -361,6 +426,110 @@ describe('serenity tag-tree', () => {
       await expect(resolveTypeValueInjection(transport, WS, PROJECT, 'branded', fakeLog()))
         .to.be.rejectedWith(/listProjectTags 502/);
       expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+
+  describe('findTagInTree', () => {
+    it('reports a dimension root as a root, with its own name as the dimension', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const found = await findTagInTree(transport, WS, PROJECT, TAG_IDS.intentRoot, fakeLog());
+      expect(found).to.deep.equal({ kind: 'root', parentId: null, rootName: 'intent' });
+    });
+
+    it('reports a depth-3 sub-category with the dimension it descends from', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const sub = TAG_IDS.subCategoryHuman;
+      const found = await findTagInTree(transport, WS, PROJECT, sub, fakeLog());
+      expect(found.kind).to.equal('descendant');
+      expect(found.parentId).to.equal(TAG_IDS.categoryRunningShoes);
+      // The bare name `human` also exists under the `source` root. Ancestry, not
+      // the name, decides the dimension.
+      expect(found.rootName).to.equal('category');
+    });
+
+    it('reports the same bare name under a different root as that other dimension', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const found = await findTagInTree(transport, WS, PROJECT, TAG_IDS.sourceHuman, fakeLog());
+      expect(found.rootName).to.equal('source');
+    });
+
+    it('reports an id absent from the tree as unknown', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const found = await findTagInTree(transport, WS, PROJECT, 'no-such-tag', fakeLog());
+      expect(found).to.deep.equal({ kind: 'unknown', parentId: null, rootName: null });
+    });
+
+    it('terminates on an upstream parentage cycle instead of walking forever', async () => {
+      // `a` claims a child `b`, and `b` claims `a` right back.
+      const transport = {
+        listProjectTags: makeListProjectTagsStub({
+          '': [{ id: 'a', name: 'category', children_count: 1 }],
+          a: [{
+            id: 'b', name: 'B', parent_id: 'a', children_count: 1,
+          }],
+          b: [{
+            id: 'a', name: 'category', parent_id: 'b', children_count: 1,
+          }],
+        }),
+      };
+      const found = await findTagInTree(transport, WS, PROJECT, 'no-such-tag', fakeLog());
+      expect(found.kind).to.equal('unknown');
+    });
+
+    it('502s rather than page a tree larger than the read budget', async () => {
+      // A wide single level: one root, 250 children each claiming children of
+      // their own. Bounding total reads (not per-level width) means an existing
+      // tag is never reported absent — the walk refuses instead.
+      const children = Array.from({ length: 250 }, (_, i) => ({
+        id: `c${i}`, name: `C${i}`, parent_id: 'r-cat', children_count: 1,
+      }));
+      const levels = {
+        '': [{ id: 'r-cat', name: 'category', children_count: 250 }],
+        'r-cat': children,
+      };
+      for (const c of children) {
+        levels[c.id] = [];
+      }
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const err = await findTagInTree(transport, WS, PROJECT, 'no-such-tag', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/tag tree too large to resolve/);
+    });
+  });
+
+  describe('assertParentWithinDimension', () => {
+    it('accepts the dimension root itself as a parent', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      await expect(assertParentWithinDimension(transport, WS, PROJECT, 'category', TAG_IDS.categoryRoot, fakeLog())).to.eventually.be.fulfilled;
+    });
+
+    it('accepts a descendant of the dimension root as a parent', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      await expect(assertParentWithinDimension(transport, WS, PROJECT, 'category', TAG_IDS.categoryRunningShoes, fakeLog())).to.eventually.be.fulfilled;
+    });
+
+    it('400s on a parent that roots in a DIFFERENT dimension', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const err = await assertParentWithinDimension(transport, WS, PROJECT, 'category', TAG_IDS.intentRoot, fakeLog()).then(() => null, (e) => e);
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/must be the "category" dimension root or one of its descendants/);
+    });
+
+    it('400s on a parent nested UNDER a closed root, not just on the root id', async () => {
+      // The cheap check — comparing against the three closed root ids — passes here.
+      // Ancestry is what catches it.
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const err = await assertParentWithinDimension(transport, WS, PROJECT, 'category', TAG_IDS.sourceHuman, fakeLog()).then(() => null, (e) => e);
+      expect(err.status).to.equal(400);
+    });
+
+    it('400s on a parent that does not resolve on this market', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const err = await assertParentWithinDimension(transport, WS, PROJECT, 'category', 'not-a-tag', fakeLog()).then(() => null, (e) => e);
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/does not resolve to a tag on this market/);
     });
   });
 });

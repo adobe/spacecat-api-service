@@ -1357,16 +1357,17 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // Attaching a prompt to a guessed id is the failure these prevent:
   // `createPromptsByIds` is ATOMIC on an unresolvable id — it 500s and writes
   // nothing — so the handler must fail before it builds the call, not after.
-  it('generateAndAttachPrompts: throws when the standard prompt tag ids cannot be resolved', async () => {
+  it('generateAndAttachPrompts: 502s when the standard prompt tag ids cannot be resolved', async () => {
     // The four roots exist; no closed value under any of them does, and the
-    // create echoes nothing back.
+    // create echoes nothing back. `provisionDimensionTree` fails closed, so the
+    // handler never reaches a prompt write holding an unresolved id.
     const transport = makeTransport({
       listProjectTags: makeListProjectTagsStub({ '': dimensionTreeLevels()[''] }),
       createProjectTags: sinon.stub().resolves([]),
       getBrandTopics: sinon.stub().resolves([{ topic: 'T', volume: 10, prompts: ['plain text'] }]),
     });
 
-    await expect(handleCreateMarketSubworkspace(
+    const err = await handleCreateMarketSubworkspace(
       transport,
       makeBrand(),
       PARENT,
@@ -1375,16 +1376,18 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       null,
       null,
       { generateTopics: true, publishMode: 'skip' },
-    )).to.be.rejectedWith(/could not resolve the standard prompt tag ids/);
+    ).then(() => null, (e) => e);
 
-    // Nothing was attached — the guard runs before any prompt write.
+    expect(err.status).to.equal(502);
+    expect(err.message).to.match(/did not persist the tag\(s\)/);
+    // Nothing was attached — the seam fails before any prompt write is built.
     expect(transport.createPromptsByIds).to.have.not.been.called;
   });
 
-  it('generateAndAttachPrompts: throws when the classified type value has no tag id', async () => {
-    // `source`/`intent` resolve, and the `type` root exists — but its level holds
-    // only `branded`, so the `non-branded` prompt below classifies to a value the
-    // tree cannot supply an id for.
+  it('generateAndAttachPrompts: 502s when the type vocabulary cannot be provisioned', async () => {
+    // The `type` root exists but its level holds only `branded`, and the create
+    // that would add `non-branded` echoes nothing. The prompt below classifies to
+    // `non-branded`, so a tolerant seam would have written it untyped.
     const levels = dimensionTreeLevels();
     const typeLevel = levels[TAG_IDS.typeRoot].filter((t) => t.name === 'branded');
     const transport = makeTransport({
@@ -1393,7 +1396,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       getBrandTopics: sinon.stub().resolves([{ topic: 'T', volume: 10, prompts: ['plain text'] }]),
     });
 
-    await expect(handleCreateMarketSubworkspace(
+    const err = await handleCreateMarketSubworkspace(
       transport,
       makeBrand(),
       PARENT,
@@ -1402,8 +1405,10 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       null,
       null,
       { generateTopics: true, publishMode: 'skip' },
-    )).to.be.rejectedWith(/unresolved type tag id for "non-branded"/);
+    ).then(() => null, (e) => e);
 
+    expect(err.status).to.equal(502);
+    expect(err.message).to.match(/did not persist the tag\(s\): non-branded/);
     expect(transport.createPromptsByIds).to.have.not.been.called;
   });
 });

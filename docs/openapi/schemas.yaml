@@ -10982,9 +10982,10 @@ SerenityPromptTag:
 
     Upstream serializes a tag identically wherever it appears — embedded on a
     prompt, or listed by the tag tree read — so a prompt's tags carry their own
-    `parentId` and `path`. What varies is DEPTH, not endpoint: a dimension root
-    omits both, a descendant carries both. A tag with no `path` is therefore a
-    root, and its own `name` is its dimension.
+    parentage. What varies is DEPTH, not endpoint: upstream omits `parent_id` and
+    `path` on a dimension root and carries both on a descendant. This API
+    normalizes that absence to `null`, so a tag whose `path` is `null` is a
+    dimension root and its own `name` is its dimension.
   required: [id, name]
   properties:
     id:

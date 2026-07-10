@@ -141,12 +141,12 @@ export async function handleCreatePromptsSubworkspace(
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const input = normalizePromptInput(raw);
+    const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
       return {
         skipped: {
           text: String(raw?.text || ''),
-          reason: 'text, languageCode, and geoTargetId are required',
+          reason: /** @type {string} */ (reason),
         },
       };
     }

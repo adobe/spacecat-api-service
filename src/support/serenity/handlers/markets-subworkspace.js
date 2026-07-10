@@ -239,14 +239,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
 
   // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
   // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
-  const { roots, values } = await provisionDimensionTree(transport, workspaceId, projectId, log);
-  const standardIds = STANDARD_PROMPT_TAG_VALUES
-    .map(({ dimension, name }) => values.get(dimension)?.get(name))
-    .filter((id) => typeof id === 'string' && id);
-  if (standardIds.length !== STANDARD_PROMPT_TAG_VALUES.length || !roots.get(DIMENSION.TYPE)) {
-    throw new Error('generateAndAttachPrompts: could not resolve the standard prompt tag ids');
-  }
-  const typeValues = values.get(DIMENSION.TYPE);
+  // `provisionDimensionTree` resolves every closed value or throws a 502, so the
+  // standard values and the whole `type` vocabulary are present here by construction.
+  const { values } = await provisionDimensionTree(transport, workspaceId, projectId, log);
+  const standardIds = STANDARD_PROMPT_TAG_VALUES.map(
+    ({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)),
+  );
+  const typeValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.TYPE));
 
   /** @type {Map<string, string[]>} bare type value → prompt texts */
   const byTypeValue = new Map();
@@ -261,10 +260,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   }
 
   for (const [value, items] of byTypeValue) {
-    const typeId = typeValues?.get(value);
-    if (!typeId) {
-      throw new Error(`generateAndAttachPrompts: unresolved type tag id for "${value}"`);
-    }
+    // `branded` / `non-branded` are the classifier's only outputs and both are in
+    // the `type` vocabulary provisioned above.
+    const typeId = /** @type {string} */ (typeValues.get(value));
     // eslint-disable-next-line no-await-in-loop
     await transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]);
   }

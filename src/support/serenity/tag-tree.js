@@ -31,14 +31,36 @@
  *    LIVE view. Reads here go through {@link listProjectTagTree}, which passes
  *    `draft: true`, so a tag this module just created is visible to the tag
  *    resolution that follows it.
+ *
+ * Resolve-before-create is not atomic, so a concurrent writer can mint a name
+ * between the read and the create — including a second in-flight resolution
+ * inside this same request. {@link ensureChildren} therefore treats a rejected
+ * create as a possible lost race and re-reads before giving up, which is what
+ * makes every export here idempotent rather than merely usually-idempotent.
+ *
+ * The seam FAILS CLOSED. A name that is still unresolved after the create and
+ * the re-read is a 502, never a hole in the returned map: a caller that receives
+ * a map has every name it asked for, so no consumer can answer 2xx for a write
+ * that did not land.
  */
 
+import { ErrorWithStatusCode } from '../utils.js';
 import { listProjectTagTree } from './handlers/markets.js';
 import {
+  DIMENSION,
   DIMENSION_ROOT_NAMES,
   CLOSED_DIMENSION_VALUES,
   CLOSED_DIMENSIONS,
 } from './prompt-tags.js';
+
+/**
+ * Ceiling on the level reads one tree walk may perform. The tree has no upstream
+ * depth or width limit, so an unresolvable id would otherwise cost one sequential
+ * read per node against Semrush's shared rate limit. Bounds total reads rather
+ * than per-level width: truncating a level would report a tag that exists as
+ * absent, which is a wrong answer rather than a slow one.
+ */
+const MAX_TREE_READS = 200;
 
 /**
  * Lists one level of the tree and indexes it by bare name. Uniqueness is per
@@ -78,7 +100,11 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
  *
  * `createdNames` reports which of `wanted` this call actually minted, so a caller
  * can tell a create apart from a resolve without a second read. It is empty when
- * every name already existed.
+ * every name already existed, and it never names a tag this call did not create —
+ * a name another writer minted first, or one the upstream echoed but did not
+ * persist, is resolved, not claimed.
+ *
+ * Fails closed: throws a 502 rather than returning a map missing a wanted name.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
@@ -102,31 +128,62 @@ export async function ensureChildren(
   if (missing.length === 0) {
     return { byName: existing, createdNames: [] };
   }
-  const created = await transport.createProjectTags(
-    semrushWorkspaceId,
-    projectId,
-    missing,
-    parentId ? { parentId } : {},
-  );
+
+  let echoed;
+  try {
+    echoed = await transport.createProjectTags(
+      semrushWorkspaceId,
+      projectId,
+      missing,
+      parentId ? { parentId } : {},
+    );
+  } catch (e) {
+    // Upstream answers 500 on a duplicate (parent, name). Between our read and
+    // our create, a concurrent writer — possibly another resolution inside this
+    // same request — may have minted exactly the names we asked for. Re-read
+    // before deciding this is a failure. The batch is all-or-nothing upstream,
+    // so one collision also fails the names we were not racing on.
+    const reread = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+    if (!missing.every((name) => reread.has(name))) {
+      throw e;
+    }
+    log?.info?.('ensureChildren: lost a create race; resolved the names a concurrent writer minted', {
+      semrushWorkspaceId, projectId, parentId, resolved: missing,
+    });
+    return { byName: reread, createdNames: [] };
+  }
+
   // createProjectTags resolves to a LIST of the created nodes, in request order.
-  const nodes = Array.isArray(created) ? created : [];
+  const nodes = Array.isArray(echoed) ? echoed : [];
   for (const node of nodes) {
     if (node && typeof node.id === 'string' && node.id && typeof node.name === 'string') {
       existing.set(node.name, node.id);
     }
   }
-  // A node the upstream did not echo back leaves a hole; re-read the level rather
-  // than hand the caller a map that silently omits a name it asked for.
-  if (missing.some((name) => !existing.has(name))) {
-    log?.warn?.('ensureChildren: upstream create echoed fewer nodes than requested; re-reading level', {
-      semrushWorkspaceId, projectId, parentId, requested: missing.length, echoed: nodes.length,
-    });
-    return {
-      byName: await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log),
-      createdNames: missing,
-    };
+  if (missing.every((name) => existing.has(name))) {
+    return { byName: existing, createdNames: missing };
   }
-  return { byName: existing, createdNames: missing };
+
+  // A node the upstream did not echo back leaves a hole. Re-read rather than hand
+  // back a map that silently omits a name the caller asked for.
+  log?.warn?.('ensureChildren: upstream create echoed fewer nodes than requested', {
+    semrushWorkspaceId,
+    projectId,
+    parentId,
+    unechoed: missing.filter((name) => !existing.has(name)),
+  });
+  const byName = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+  const unresolved = missing.filter((name) => !byName.has(name));
+  if (unresolved.length > 0) {
+    // The create answered 2xx and the draft-layer re-read still does not see the
+    // name. Returning here would let a caller answer 2xx for a write that did not
+    // land, handing it an `undefined` tag id.
+    throw new ErrorWithStatusCode(
+      `upstream did not persist the tag(s): ${unresolved.join(', ')}`,
+      502,
+    );
+  }
+  return { byName, createdNames: missing };
 }
 
 /**
@@ -153,6 +210,128 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
 }
 
 /**
+ * The id of one dimension root out of an {@link ensureDimensionRoots} result.
+ *
+ * `ensureChildren` fails closed, so a map it returned carries every name that was
+ * asked for — all four roots. The assertion records that invariant for the type
+ * checker instead of re-testing it at runtime.
+ *
+ * @param {Map<string, string>} roots - the resolved root name → id map.
+ * @param {string} dimension - one of the four dimension root names.
+ * @returns {string}
+ */
+function rootIdOf(roots, dimension) {
+  return /** @type {string} */ (roots.get(dimension));
+}
+
+/**
+ * Locates `tagId` in the project's draft tag tree and reports where it sits,
+ * including the DIMENSION it belongs to — the name of its root ancestor.
+ *
+ * There is no upstream "get tag by id", so this walks the tree a level at a time:
+ * the roots first, then the children of every node that has any. A `visited` set
+ * makes an upstream parentage cycle terminate, and {@link MAX_TREE_READS} bounds
+ * the total reads. Nothing here caps a level's width: dropping the tail of a
+ * level would report an existing tag as absent, and callers turn `unknown` into
+ * a 404.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the upstream id to locate.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ kind: 'root' | 'descendant' | 'unknown',
+ *   parentId: string | null, rootName: string | null }>} `rootName` is the tag's
+ *   dimension: its own name when it IS a root, else `path[0]`.
+ */
+export async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  const asRoot = roots.items.find((t) => t.id === tagId);
+  if (asRoot) {
+    return { kind: 'root', parentId: null, rootName: asRoot.name };
+  }
+  const visited = new Set();
+  let reads = 1;
+  let frontier = roots.items
+    .filter((r) => r.childrenCount > 0)
+    .map((r) => ({ node: r, rootName: r.name }));
+  while (frontier.length > 0) {
+    const next = [];
+    for (const { node, rootName } of frontier) {
+      if (!visited.has(node.id)) {
+        visited.add(node.id);
+        reads += 1;
+        if (reads > MAX_TREE_READS) {
+          throw new ErrorWithStatusCode('tag tree too large to resolve', 502);
+        }
+        // Sequential by design: stop at the first node whose children contain the
+        // target rather than fanning out every node's children concurrently.
+        // eslint-disable-next-line no-await-in-loop
+        const children = await listProjectTagTree(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          node.id,
+          log,
+        );
+        const found = children.items.find((t) => t.id === tagId);
+        if (found) {
+          return {
+            kind: 'descendant',
+            parentId: found.parentId ?? node.id,
+            rootName: found.path?.[0]?.name ?? rootName,
+          };
+        }
+        next.push(...children.items
+          .filter((t) => t.childrenCount > 0)
+          .map((child) => ({ node: child, rootName })));
+      }
+    }
+    frontier = next;
+  }
+  return { kind: 'unknown', parentId: null, rootName: null };
+}
+
+/**
+ * Throws unless `parentId` names the `dimension` root itself or one of its
+ * descendants.
+ *
+ * A tag's dimension is its root ancestor, so an unchecked `parentId` is the one
+ * edge that can move a tag into a dimension its caller never named — filing a
+ * customer-authored value under `intent`, where the fixed vocabulary is supposed
+ * to be the only content. Membership must be tested by ANCESTRY, not by comparing
+ * against the three closed root ids: a parent nested under a closed root is one
+ * level deeper and would pass that test.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} dimension - the dimension the new/edited tag belongs to.
+ * @param {string} parentId - the caller-supplied parent id.
+ * @param {object} [log] - logger.
+ * @returns {Promise<void>}
+ */
+export async function assertParentWithinDimension(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  dimension,
+  parentId,
+  log,
+) {
+  const parent = await findTagInTree(transport, semrushWorkspaceId, projectId, parentId, log);
+  if (parent.kind === 'unknown') {
+    throw new ErrorWithStatusCode('parentId does not resolve to a tag on this market', 400);
+  }
+  if (parent.rootName !== dimension) {
+    throw new ErrorWithStatusCode(
+      `parentId must be the "${dimension}" dimension root or one of its descendants`,
+      400,
+    );
+  }
+}
+
+/**
  * Resolves (provisioning as needed) the full fixed taxonomy: the four roots plus
  * every closed dimension's child vocabulary. The open `category` root is created
  * but left empty — its children are customer content.
@@ -169,28 +348,19 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
  */
 export async function provisionDimensionTree(transport, semrushWorkspaceId, projectId, log) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const values = new Map();
-  for (const dimension of CLOSED_DIMENSIONS) {
-    const rootId = roots.get(dimension);
-    if (!rootId) {
-      // ensureDimensionRoots guarantees every root, so a hole here is upstream drift.
-      log?.warn?.('provisionDimensionTree: dimension root missing after ensure', {
-        semrushWorkspaceId, projectId, dimension,
-      });
-      // eslint-disable-next-line no-continue
-      continue;
-    }
-    // eslint-disable-next-line no-await-in-loop
-    const { byName } = await ensureChildren(
-      transport,
-      semrushWorkspaceId,
-      projectId,
-      rootId,
-      CLOSED_DIMENSION_VALUES[/** @type {keyof CLOSED_DIMENSION_VALUES} */ (dimension)],
-      log,
-    );
-    values.set(dimension, byName);
-  }
+  // The three closed dimensions hang off different parents and their vocabularies
+  // are disjoint, so nothing orders these against each other.
+  const resolved = await Promise.all(CLOSED_DIMENSIONS.map((dimension) => ensureChildren(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    rootIdOf(roots, dimension),
+    CLOSED_DIMENSION_VALUES[/** @type {keyof CLOSED_DIMENSION_VALUES} */ (dimension)],
+    log,
+  )));
+  const values = new Map(
+    CLOSED_DIMENSIONS.map((dimension, i) => [dimension, resolved[i].byName]),
+  );
   return { roots, values };
 }
 
@@ -205,8 +375,9 @@ export async function provisionDimensionTree(transport, semrushWorkspaceId, proj
  * @param {string} dimension - a closed dimension (`intent` / `source` / `type`).
  * @param {string} value - a bare value from that dimension's fixed vocabulary.
  * @param {object} [log] - logger.
- * @returns {Promise<{ id: string | undefined, rootId: string | undefined,
- *   created: boolean }>} `created` is true only when THIS call minted the value.
+ * @returns {Promise<{ id: string, rootId: string, created: boolean }>} `created`
+ *   is true only when THIS call minted the value. Both ids are always resolved —
+ *   {@link ensureChildren} throws rather than leave a hole.
  */
 export async function ensureClosedValue(
   transport,
@@ -217,10 +388,7 @@ export async function ensureClosedValue(
   log,
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const rootId = roots.get(dimension);
-  if (!rootId) {
-    return { id: undefined, rootId: undefined, created: false };
-  }
+  const rootId = rootIdOf(roots, dimension);
   const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
@@ -229,7 +397,11 @@ export async function ensureClosedValue(
     [value],
     log,
   );
-  return { id: byName.get(value), rootId, created: createdNames.includes(value) };
+  return {
+    id: /** @type {string} */ (byName.get(value)),
+    rootId,
+    created: createdNames.includes(value),
+  };
 }
 
 /**
@@ -243,7 +415,9 @@ export async function ensureClosedValue(
  * @param {string} projectId
  * @param {string} wantValue - the computed bare `type` value (`branded` / `non-branded`).
  * @param {object} [log] - logger.
- * @returns {Promise<{ computedId: string | undefined, typeTagIds: string[] }>}
+ * @returns {Promise<{ computedId: string, typeTagIds: string[] }>} `computedId` is
+ *   always resolved — {@link ensureChildren} throws rather than leave a hole, so a
+ *   prompt can never be written with the server-computed `type` tag missing.
  */
 export async function resolveTypeValueInjection(
   transport,
@@ -253,10 +427,7 @@ export async function resolveTypeValueInjection(
   log,
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const typeRootId = roots.get('type');
-  if (!typeRootId) {
-    return { computedId: undefined, typeTagIds: [] };
-  }
+  const typeRootId = rootIdOf(roots, DIMENSION.TYPE);
   const { byName } = await ensureChildren(
     transport,
     semrushWorkspaceId,
@@ -266,7 +437,7 @@ export async function resolveTypeValueInjection(
     log,
   );
   return {
-    computedId: byName.get(wantValue),
+    computedId: /** @type {string} */ (byName.get(wantValue)),
     typeTagIds: [...byName.values()],
   };
 }

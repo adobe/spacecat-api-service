@@ -276,23 +276,41 @@ function sanitizeTagIds(raw) {
  * resolve to a non-empty array; a `tags` key is rejected outright rather than
  * silently ignored, so a stale caller fails loudly instead of writing
  * phantom root tags.
+ *
+ * Returns the rejection REASON alongside the value. The three ways an input can
+ * be refused are not interchangeable, and a caller told its `geoTargetId` was
+ * missing when it actually sent a retired `tags` key has been misinformed, not
+ * informed.
+ *
+ * @param {object} input - one raw row of the bulk-create request.
+ * @returns {{ value: { text: string, languageCode: string, geoTargetId: number,
+ *   tagIds: string[] } | null, reason: string | null }}
  */
 export function normalizePromptInput(input) {
   const text = String(input?.text || '').trim();
   const languageCode = normalizeLanguageCode(input?.languageCode);
   const geoTargetId = normalizeGeoTargetId(Number(input?.geoTargetId));
   if (!text || languageCode === null || geoTargetId === null) {
-    return null;
+    return { value: null, reason: 'text, languageCode, and geoTargetId are required' };
   }
   if (input?.tags !== undefined) {
-    return null;
+    return {
+      value: null,
+      reason: 'tags is retired: address tags by upstream id via tagIds',
+    };
   }
   const tagIds = sanitizeTagIds(input?.tagIds);
   if (tagIds.length === 0) {
-    return null;
+    return {
+      value: null,
+      reason: 'tagIds must be a non-empty array of upstream tag ids',
+    };
   }
   return {
-    text, languageCode, geoTargetId, tagIds,
+    value: {
+      text, languageCode, geoTargetId, tagIds,
+    },
+    reason: null,
   };
 }
 
@@ -343,10 +361,17 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * dimension is its root, and a sub-category could legitimately be named
  * `branded` without being a `type` value.
  *
- * Resolution ({@link resolveTypeValueInjection}, one tag-tree read per distinct
- * `type` value per project) is memoized for the request, so a bulk create fans
- * out at most two tag-tree reads per project regardless of item count. A
- * non-function `classifyPromptType` (defensive) is a pass-through.
+ * Resolution ({@link resolveTypeValueInjection}, two tag-tree reads per distinct
+ * `type` value per project — the root level plus the `type` root's children) is
+ * memoized for the request, so a bulk create fans out over the distinct computed
+ * values rather than over the items. A non-function `classifyPromptType`
+ * (defensive) is a pass-through.
+ *
+ * `resolveTypeValueInjection` resolves or throws, so the computed tag is always
+ * attached. It must never be dropped: `type` is the one dimension a client may
+ * not set, so a prompt written without it stays unclassified forever, and the
+ * caller sees a 2xx. Failing the write instead is free — the upstream bulk create
+ * is atomic and has not run yet.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
@@ -357,7 +382,7 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
  */
 export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptType, log) {
-  /** @type {Map<string, Promise<{ computedId: string | undefined, typeTagIds: string[] }>>} */
+  /** @type {Map<string, Promise<{ computedId: string, typeTagIds: string[] }>>} */
   const cache = new Map();
   return async function injectComputedType(projectId, input) {
     if (typeof classifyPromptType !== 'function') {
@@ -372,7 +397,7 @@ export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptTy
     }
     const { computedId, typeTagIds } = await pending;
     const stripped = input.tagIds.filter((id) => !typeTagIds.includes(id));
-    return { ...input, tagIds: computedId ? [...stripped, computedId] : stripped };
+    return { ...input, tagIds: [...stripped, computedId] };
   };
 }
 
@@ -482,12 +507,12 @@ export async function handleCreatePrompts(
   );
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const input = normalizePromptInput(raw);
+    const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
       return {
         skipped: {
           text: String(raw?.text || ''),
-          reason: 'text, languageCode, and geoTargetId are required',
+          reason: /** @type {string} */ (reason),
         },
       };
     }
