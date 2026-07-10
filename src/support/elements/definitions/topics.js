@@ -10,19 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
-import { DEFAULT_ELEMENT_MODEL, ELEMENT_MODELS } from '../constants.js';
+import { resolveElementModel } from '../constants.js';
 
 /**
  * Builds the payload for the Topics (Tags) filter-dimensions element (row 3).
  * Returns all available topic and category tags — powers the Topics/Tags filter dropdown.
  *
  * @param {object} [params]
- * @param {string} [params.model] - AI model filter value. Must be one of {@link ELEMENT_MODELS};
- *   falls back to {@link DEFAULT_ELEMENT_MODEL} if omitted or unrecognised.
+ * @param {string} [params.model] - AI model (Semrush engine name or SpaceCat/UI platform code).
+ *   Translated to a Semrush model + validated via {@link resolveElementModel} (default search-gpt).
+ * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} [params.projectId] - Semrush project UUID to scope tags to a specific market.
  */
-export function buildTopicsPayload({ model, projectId } = {}) {
-  const resolvedModel = ELEMENT_MODELS.includes(model) ? model : DEFAULT_ELEMENT_MODEL;
+export function buildTopicsPayload({ model, platform, projectId } = {}) {
+  const resolvedModel = resolveElementModel(model || platform);
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',

@@ -10,18 +10,19 @@
  * governing permissions and limitations under the License.
  */
 
-import { DEFAULT_ELEMENT_MODEL, ELEMENT_MODELS } from '../constants.js';
+import { resolveElementModel } from '../constants.js';
 
 /**
  * Builds the payload for the Brands filter-dimensions element (row 1).
  * Returns the list of all available brands in the workspace — powers the brand selector dropdown.
  *
  * @param {object} [params]
- * @param {string} [params.model] - AI model filter value. Must be one of {@link ELEMENT_MODELS};
- *   falls back to {@link DEFAULT_ELEMENT_MODEL} if omitted or unrecognised.
+ * @param {string} [params.model] - AI model (Semrush engine name or SpaceCat/UI platform code).
+ *   Translated to a Semrush model + validated via {@link resolveElementModel} (default search-gpt).
+ * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  */
-export function buildBrandsPayload({ model } = {}) {
-  const resolvedModel = ELEMENT_MODELS.includes(model) ? model : DEFAULT_ELEMENT_MODEL;
+export function buildBrandsPayload({ model, platform } = {}) {
+  const resolvedModel = resolveElementModel(model || platform);
   return {
     comparison_data_formatting: 'union',
     filters: {
