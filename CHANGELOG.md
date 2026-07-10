@@ -1,3 +1,10 @@
+## [1.638.1](https://github.com/adobe/spacecat-api-service/compare/v1.638.0...v1.638.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **serenity:** match regular plurals and possessives in the branded classifier ([#2789](https://github.com/adobe/spacecat-api-service/issues/2789)) ([2516410](https://github.com/adobe/spacecat-api-service/commit/2516410f9229a49e82b469d9b9a42c91e01e9e45)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.638.0](https://github.com/adobe/spacecat-api-service/compare/v1.637.3...v1.638.0) (2026-07-10)
 
 
