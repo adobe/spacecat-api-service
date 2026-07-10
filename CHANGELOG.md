@@ -1,3 +1,10 @@
+## [1.637.1](https://github.com/adobe/spacecat-api-service/compare/v1.637.0...v1.637.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* rejected the demo/internal domains ([#2613](https://github.com/adobe/spacecat-api-service/issues/2613)) ([75ca49e](https://github.com/adobe/spacecat-api-service/commit/75ca49e394286f50ed671605458e0ac31012b7bb))
+
 # [1.637.0](https://github.com/adobe/spacecat-api-service/compare/v1.636.0...v1.637.0) (2026-07-09)
 
 
