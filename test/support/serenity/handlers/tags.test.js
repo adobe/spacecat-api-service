@@ -132,6 +132,31 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(res.body).to.include({ id: 'new-cat', parentId: 'r-category' });
     });
 
+    // Upstream tag writes land in the project's DRAFT layer while a default read
+    // serves the LIVE view, so a root create can answer 201, echo nothing, and
+    // leave the re-read of the root level exactly as empty as it was. The open
+    // dimension then has no root to hang the new category under. Hanging it at
+    // the root level instead would mint a fifth root that looks like a customer
+    // category, so this fails the request rather than guessing a parent.
+    it('502s when the open dimension root cannot be resolved after provisioning', async () => {
+      const transport = makeEmptyTreeTransport({
+        createProjectTags: sinon.stub().resolves([]),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+
+      const err = await handler
+        .handleCreateTag(transport, dataAccess, BRAND, WORKSPACE, validBody, fakeLog())
+        .then(() => null, (e) => e);
+
+      expect(err, 'the handler must reject').to.not.equal(null);
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/could not resolve the "category" dimension root/);
+      // The roots were attempted; the category itself never was.
+      expect(transport.createProjectTags).to.have.been.calledOnce;
+      expect(transport.createProjectTags.firstCall.args[2])
+        .to.deep.equal(['category', 'intent', 'source', 'type']);
+    });
+
     it('falls back to an undefined id when the upstream create response has no usable node (defensive)', async () => {
       const transport = makeTransport({ createProjectTags: sinon.stub().resolves([{}]) });
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });

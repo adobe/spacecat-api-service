@@ -27,7 +27,7 @@ import {
 } from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
-import { TAG_IDS, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
+import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -1345,5 +1345,65 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     // 'real deal' contains 'real' → branded; 'plain text' → non-branded.
     expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['real deal'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
     expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
+  });
+
+  // The two guards below both fire when the tag tree, freshly provisioned, still
+  // does not contain a name we asked for. That is not hypothetical: upstream tag
+  // writes land in the project's DRAFT layer while a default read serves the LIVE
+  // view, so a create can answer 201 and echo nothing while the re-read still
+  // shows the level as it was. `createProjectTags` resolving `[]` over a level
+  // that stays empty is exactly that sequence.
+  //
+  // Attaching a prompt to a guessed id is the failure these prevent:
+  // `createPromptsByIds` is ATOMIC on an unresolvable id — it 500s and writes
+  // nothing — so the handler must fail before it builds the call, not after.
+  it('generateAndAttachPrompts: throws when the standard prompt tag ids cannot be resolved', async () => {
+    // The four roots exist; no closed value under any of them does, and the
+    // create echoes nothing back.
+    const transport = makeTransport({
+      listProjectTags: makeListProjectTagsStub({ '': dimensionTreeLevels()[''] }),
+      createProjectTags: sinon.stub().resolves([]),
+      getBrandTopics: sinon.stub().resolves([{ topic: 'T', volume: 10, prompts: ['plain text'] }]),
+    });
+
+    await expect(handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      { generateTopics: true, publishMode: 'skip' },
+    )).to.be.rejectedWith(/could not resolve the standard prompt tag ids/);
+
+    // Nothing was attached — the guard runs before any prompt write.
+    expect(transport.createPromptsByIds).to.have.not.been.called;
+  });
+
+  it('generateAndAttachPrompts: throws when the classified type value has no tag id', async () => {
+    // `source`/`intent` resolve, and the `type` root exists — but its level holds
+    // only `branded`, so the `non-branded` prompt below classifies to a value the
+    // tree cannot supply an id for.
+    const levels = dimensionTreeLevels();
+    const typeLevel = levels[TAG_IDS.typeRoot].filter((t) => t.name === 'branded');
+    const transport = makeTransport({
+      listProjectTags: makeListProjectTagsStub({ ...levels, [TAG_IDS.typeRoot]: typeLevel }),
+      createProjectTags: sinon.stub().resolves([]),
+      getBrandTopics: sinon.stub().resolves([{ topic: 'T', volume: 10, prompts: ['plain text'] }]),
+    });
+
+    await expect(handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      { generateTopics: true, publishMode: 'skip' },
+    )).to.be.rejectedWith(/unresolved type tag id for "non-branded"/);
+
+    expect(transport.createPromptsByIds).to.have.not.been.called;
   });
 });
