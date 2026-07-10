@@ -29,9 +29,7 @@ use(sinonChai);
  * orchestration tests in llmo-onboarding.test.js.
  */
 describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
-  const GENERIC_ERROR = "We couldn't onboard this domain right now. Please use our "
-    + 'domain onboarding guide instead: https://experienceleague.adobe.com/en/docs/'
-    + 'llm-optimizer/using/essentials/quick-start#step-1-onboard-your-domain';
+  const GENERIC_ERROR = "We couldn't onboard this domain right now. Please contact support.";
   // Header-safe range enforced by cleanupHeaderValue() / Node's http header validation
   // (this is the exact class of char — em dash, curly quotes — that previously crashed
   // the response with a 500 "Invalid character in header content [\"x-error\"]").
