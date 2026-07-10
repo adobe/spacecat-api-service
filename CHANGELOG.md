@@ -1,3 +1,10 @@
+## [1.637.3](https://github.com/adobe/spacecat-api-service/compare/v1.637.2...v1.637.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* crashing x-error header in onboard-site generic error ([#2787](https://github.com/adobe/spacecat-api-service/issues/2787)) ([f75c8ab](https://github.com/adobe/spacecat-api-service/commit/f75c8abbbb9149430f442de4743ed61330d955af))
+
 ## [1.637.2](https://github.com/adobe/spacecat-api-service/compare/v1.637.1...v1.637.2) (2026-07-10)
 
 
