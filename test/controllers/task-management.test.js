@@ -506,10 +506,7 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(200);
       const [t] = await res.json();
       expect(t.id).to.equal(TICKET_ID);
-      expect(t.suggestions).to.deep.equal([{
-        suggestionId: SUGGESTION_ID,
-        opportunityId: OPPORTUNITY_ID,
-      }]);
+      expect(t.suggestions).to.deep.equal([SUGGESTION_ID]);
     });
 
     it('returns tickets with empty suggestions when bridge load fails', async () => {
@@ -689,7 +686,7 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(200);
       const [t] = await res.json();
       expect(t.id).to.equal(TICKET_ID);
-      expect(t.suggestions).to.deep.equal([{ suggestionId: SUGGESTION_ID, opportunityId: OPPORTUNITY_ID }]);
+      expect(t.suggestions).to.deep.equal([SUGGESTION_ID]);
     });
 
     it('returns multiple tickets for same opportunity', async () => {

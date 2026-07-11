@@ -340,10 +340,7 @@ function TaskManagementController(context) {
             if (!bridgeMap.has(row.ticket_id)) {
               bridgeMap.set(row.ticket_id, []);
             }
-            bridgeMap.get(row.ticket_id).push({
-              suggestionId: row.suggestion_id,
-              opportunityId: row.opportunity_id,
-            });
+            bridgeMap.get(row.ticket_id).push(row.suggestion_id);
           });
         }
       } catch (err) {
@@ -482,10 +479,7 @@ function TaskManagementController(context) {
             if (!bridgeMap.has(row.ticket_id)) {
               bridgeMap.set(row.ticket_id, []);
             }
-            bridgeMap.get(row.ticket_id).push({
-              suggestionId: row.suggestion_id,
-              opportunityId: row.opportunity_id,
-            });
+            bridgeMap.get(row.ticket_id).push(row.suggestion_id);
           });
         }
       } catch (err) {
