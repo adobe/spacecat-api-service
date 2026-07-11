@@ -1253,7 +1253,12 @@ describe('SerenityController', () => {
       // so topic generation defaults off (today's behavior is unchanged). brandUuid
       // is already a persisted row (loadBrand), so dataAccess is threaded through
       // for the mapping-row upsert (mapping-rows.js).
-      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7])
+      // writeDeadline is a request-scoped epoch-ms deadline (dynamic) — asserted
+      // as a number, then dropped before the deep-equal.
+      const { writeDeadline, ...marketOptions } = handlers.handleCreateMarketSubworkspace
+        .firstCall.args[7];
+      expect(writeDeadline).to.be.a('number');
+      expect(marketOptions)
         .to.deep.equal({
           generateTopics: false,
           topicCap: 0,
@@ -1866,8 +1871,15 @@ describe('SerenityController', () => {
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
-      expect(firstCall.args[7]).to.deep.equal(expectedOpts);
-      expect(secondCall.args[7]).to.deep.equal(expectedOpts);
+      // writeDeadline is computed ONCE at activate entry, so every market in the
+      // batch receives the SAME dynamic epoch-ms deadline — assert that, then
+      // drop it before comparing the rest of the options bag.
+      const { writeDeadline: dl1, ...opts1 } = firstCall.args[7];
+      const { writeDeadline: dl2, ...opts2 } = secondCall.args[7];
+      expect(dl1).to.be.a('number');
+      expect(dl2).to.equal(dl1);
+      expect(opts1).to.deep.equal(expectedOpts);
+      expect(opts2).to.deep.equal(expectedOpts);
     });
 
     it('activate reads the brand URL sources once and applies them to every market', async () => {

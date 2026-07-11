@@ -32,6 +32,7 @@ import {
   MAX_TAG_IDS,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
+  validateDeferPublish,
 } from './prompts.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
@@ -138,6 +139,7 @@ export async function handleCreatePromptsSubworkspace(
       400,
     );
   }
+  const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
@@ -215,7 +217,10 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
-  if (body?.deferPublish === true) {
+  if (deferPublish) {
+    log?.info?.('serenity create-prompts (subworkspace): deferPublish set — prompts written as draft, publish skipped', {
+      workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
+    });
     return {
       created, skipped, failed, published: false,
     };

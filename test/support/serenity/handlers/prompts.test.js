@@ -841,6 +841,42 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(transport.publishProject).to.not.have.been.called;
   });
 
+  it('logs a structured line (observability) when deferPublish fires', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'ok', geoTargetId: 2840, languageCode: 'en', tags: [],
+      }],
+      deferPublish: true,
+    }, log);
+
+    expect(log.info).to.have.been.calledWithMatch(
+      /deferPublish set/,
+      sinon.match({
+        brandId: BRAND, created: 1, skipped: 0, failed: 0,
+      }),
+    );
+  });
+
+  it('400s when deferPublish is present but not a boolean', async () => {
+    const dataAccess = makeDataAccess([]);
+    await expect(handleCreatePrompts(({}), dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'ok', geoTargetId: 2840, languageCode: 'en', tags: [],
+      }],
+      deferPublish: 'yes',
+    }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode, /deferPublish must be a boolean/);
+  });
+
   it('publishes and reports published:true when body.deferPublish is absent', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',

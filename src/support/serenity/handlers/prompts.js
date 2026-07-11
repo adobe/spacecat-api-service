@@ -50,6 +50,24 @@ export const BULK_CREATE_CONCURRENCY = 8;
 // of them. Defense-in-depth, not a correctness gate.
 export const BULK_PROMPTS_MAX_ITEMS = 500;
 
+/**
+ * Validates the optional `deferPublish` body flag (serenity-docs#32 CSV-chunking).
+ * Present-but-non-boolean is a hard 400 (so a caller typo like `"yes"`/`1` is
+ * rejected at the write boundary rather than silently treated as "publish");
+ * absent, `false`, or `true` are all accepted. Returns the resolved boolean
+ * (absent → false).
+ *
+ * @param {object} body - request body.
+ * @returns {boolean} whether the caller asked to skip the trailing publish.
+ */
+export function validateDeferPublish(body) {
+  const deferPublish = body?.deferPublish;
+  if (deferPublish !== undefined && typeof deferPublish !== 'boolean') {
+    throw new ErrorWithStatusCode('deferPublish must be a boolean', 400);
+  }
+  return deferPublish === true;
+}
+
 // Builds { tagName → semrushTagId } from the upstream prompt item.
 // Object-form tags (the normal Semrush shape) carry both name and id.
 // String-form tags (defensive fallback) are included with an empty id so
@@ -488,6 +506,7 @@ export async function handleCreatePrompts(
       400,
     );
   }
+  const deferPublish = validateDeferPublish(body);
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   const projectsBySlice = new Map();
@@ -587,7 +606,10 @@ export async function handleCreatePrompts(
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
 
-  if (body?.deferPublish === true) {
+  if (deferPublish) {
+    log?.info?.('serenity create-prompts: deferPublish set — prompts written as draft, publish skipped', {
+      brandId, created: created.length, skipped: skipped.length, failed: failed.length,
+    });
     return {
       created, skipped, failed, published: false,
     };

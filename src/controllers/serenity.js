@@ -653,6 +653,10 @@ function SerenityController(context, log, env) {
 
   const createMarket = async (ctx) => {
     try {
+      // Shared write-budget deadline, computed once at request entry so intent
+      // classification during topic/prompt generation budgets against the true
+      // request start (serenity-docs#32).
+      const writeDeadline = computeWriteDeadline();
       const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
@@ -699,6 +703,7 @@ function SerenityController(context, log, env) {
             brandUrlSources,
             competitors,
             env: ctx.env,
+            writeDeadline,
             // auth.brandUuid is an already-persisted brand row here (loadBrand
             // above), so the mapping-row upsert's FK to brands is satisfied —
             // see mapping-rows.js upsertMappingRow doc.
@@ -1021,6 +1026,11 @@ function SerenityController(context, log, env) {
    */
   const activate = async (ctx) => {
     try {
+      // Shared write-budget deadline, computed once at request entry so intent
+      // classification during per-market topic/prompt generation budgets against
+      // the true request start rather than per-market function entry
+      // (serenity-docs#32).
+      const writeDeadline = computeWriteDeadline();
       const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
@@ -1226,6 +1236,7 @@ function SerenityController(context, log, env) {
               brandUrlSources,
               competitors,
               env: ctx.env,
+              writeDeadline,
               // `brand` was loaded via loadBrand above — an already-persisted
               // row, so the mapping-row upsert's FK to brands is satisfied.
               // Narrowed to the one model the mapping-row helpers touch — see

@@ -19,6 +19,7 @@ import { createSerenityTransport, SerenityTransportError } from './rest-transpor
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
+import { computeWriteDeadline } from './intent-classification.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from './prompt-tags.js';
 
 // Re-exported for callers/tests that drive brand provisioning. The tag
@@ -81,6 +82,10 @@ export function initialMarketProjectName(market, languageCode) {
  * @param {object[]} [params.competitors] - the brand's competitors ("other
  *   brands to track") tracked as region-filtered project benchmarks (domain-only).
  *   Best-effort: a failed sync is logged and skipped, never aborts provisioning.
+ * @param {number} [params.writeDeadline] - shared request-write deadline (epoch
+ *   ms), computed once at controller entry and threaded down so intent
+ *   classification budgets against the true request start (serenity-docs#32);
+ *   defaults to a fresh {@link computeWriteDeadline} for direct/test callers.
  * @param {object} [log]
  * @returns {Promise<{
  *   semrushSubWorkspaceId: string,
@@ -103,7 +108,7 @@ export function initialMarketProjectName(market, languageCode) {
 export async function provisionBrandSubworkspace(context, {
   spaceCatId, brandId, brandName, market, languageCode, brandDomain,
   modelIds = [], brandAliases = [], brandUrlSources = null, competitors = [],
-  generateTopics = true,
+  generateTopics = true, writeDeadline = computeWriteDeadline(),
 }, log = console) {
   if (!hasText(brandName)) {
     throw new ErrorWithStatusCode('brandName is required for Semrush provisioning', 400);
@@ -199,6 +204,7 @@ export async function provisionBrandSubworkspace(context, {
         brandAliases,
         projectTags: [...PROJECT_STANDARD_TAGS],
         env: context.env,
+        writeDeadline,
         brandUrlSources,
         competitors,
         // A project with neither models nor generated prompts would publish

@@ -188,8 +188,11 @@ describe('provisionBrandSubworkspace', () => {
     expect(body.brandDomain).to.equal('acme.com');
     expect(body.brandNames).to.deep.equal(['Acme']);
     // Brand-create attaches LLMs, generates+attaches topic-tagged prompts, then
-    // publishes best-effort.
-    expect(options).to.deep.equal({
+    // publishes best-effort. writeDeadline is a request-scoped epoch-ms deadline
+    // (dynamic) — asserted as a number, then dropped before the deep-equal.
+    const { writeDeadline, ...restOptions } = options;
+    expect(writeDeadline).to.be.a('number');
+    expect(restOptions).to.deep.equal({
       modelIds: ['m-1', 'm-2'],
       generateTopics: true,
       topicCap: MAX_TOPICS_ON_CREATE,
@@ -205,6 +208,18 @@ describe('provisionBrandSubworkspace', () => {
     expect(brandStub.getName()).to.equal('Acme');
     expect(brandStub.getId()).to.equal('brand-1');
     expect(brandStub.getSemrushSubWorkspaceId()).to.equal(undefined);
+  });
+
+  it('forwards a caller-supplied writeDeadline to the create handler (computed once at request entry, not defaulted here)', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    // A deadline far in the future so it is unmistakably the passed-in value,
+    // not a fresh computeWriteDeadline() default (which would be ~now + 12s).
+    const writeDeadline = Date.now() + 999999;
+    await provisionBrandSubworkspace(buildContext(), { ...baseParams, writeDeadline });
+    const options = handleCreateMarketSubworkspace.firstCall.args[7];
+    expect(options.writeDeadline).to.equal(writeDeadline);
   });
 
   it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {

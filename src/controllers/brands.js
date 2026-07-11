@@ -63,6 +63,7 @@ import {
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
@@ -1444,6 +1445,12 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId } = context.params || {};
     const brandData = context.data;
 
+    // One shared write-budget deadline for the whole request, computed at the
+    // true request entry (before auth/loadBrand/provisioning) so intent
+    // classification during provisioning budgets against the real request start
+    // rather than function-entry time deep in the call stack (serenity-docs#32).
+    const writeDeadline = computeWriteDeadline();
+
     // Hoisted above the try so the catch can run compensation: if a Semrush
     // sub-workspace was provisioned but the brand row failed to persist, the
     // catch releases the orphaned allocation (see below).
@@ -1644,6 +1651,7 @@ function BrandsController(ctx, log, env) {
             // market's CI competitor list. Like URLs, they come from the create
             // payload (the brand row isn't written yet).
             competitors: brandData.competitors,
+            writeDeadline,
           }, log);
           provisionedWorkspaceId = provisioned.semrushSubWorkspaceId;
           provisionedInitialMarket = {

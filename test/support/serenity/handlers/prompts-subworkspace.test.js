@@ -22,6 +22,7 @@ import {
   handleBulkDeletePromptsSubworkspace,
 } from '../../../../src/support/serenity/handlers/prompts-subworkspace.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -260,6 +261,33 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.created).to.have.length(1);
       expect(result.published).to.equal(false);
       expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    it('logs a structured line (observability) when deferPublish fires', async () => {
+      const transport = makeTransport();
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+      await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+        deferPublish: true,
+      }, spyLog);
+      expect(spyLog.info).to.have.been.calledWithMatch(
+        /deferPublish set/,
+        sinon.match({
+          workspaceId: WS, created: 1, skipped: 0, failed: 0,
+        }),
+      );
+    });
+
+    it('400s when deferPublish is present but not a boolean', async () => {
+      const transport = makeTransport();
+      await expect(handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+        deferPublish: 'yes',
+      }, log)).to.be.rejectedWith(ErrorWithStatusCode, /deferPublish must be a boolean/);
     });
 
     it('publishes and reports published:true when body.deferPublish is absent', async () => {
