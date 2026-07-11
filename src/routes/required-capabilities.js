@@ -201,9 +201,6 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/permission/audit-logs',
   'GET /product/capabilities',
   'GET /user/capabilities/:resourceId',
-
-  // Prerender Validation — internal audit-worker only, not for S2S consumers
-  'POST /prerender-validation/compare',
 ];
 
 /**

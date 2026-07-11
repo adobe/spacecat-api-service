@@ -110,7 +110,6 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
- * @param {Object} prerenderValidationController - Prerender validation compare controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -178,7 +177,6 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   redirectsController,
-  prerenderValidationController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -800,9 +798,6 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt-research/brands-export': aiVisibilityController.getV1PromptResearchBrandsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': aiVisibilityController.getV1PromptResearchSourceDomainsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/topics-export': aiVisibilityController.getV1PromptResearchTopicsExport,
-
-    // Prerender Validation — internal audit-worker only, authenticated via S2S token
-    'POST /prerender-validation/compare': prerenderValidationController.compare,
   };
 
   // Initialization of static and dynamic routes

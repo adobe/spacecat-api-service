@@ -245,9 +245,6 @@ const routeFacsCapabilities = {
     'PATCH /consumers/:consumerId', // admin
     'POST /consumers/:consumerId/revoke', // admin
     'POST /consumers/register', // admin
-
-    // Prerender Validation — internal audit-worker only
-    'POST /prerender-validation/compare',
   ],
 
   PRODUCTS_ROUTES: {
