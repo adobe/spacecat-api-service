@@ -110,6 +110,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} profilesController - Custom AI-generated profiles controller.
+ * @param {Object} workflowsController - Profile workflows controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -177,11 +179,24 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   redirectsController,
+  profilesController,
+  workflowsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
+    'POST /sites/:siteId/profiles/chat': profilesController.createFromChat,
+    'POST /sites/:siteId/profiles': profilesController.createEmpty,
+    'GET /sites/:siteId/profiles': profilesController.list,
+    'GET /sites/:siteId/profiles/:profileId': profilesController.getById,
+    'POST /sites/:siteId/profiles/:profileId/copy': profilesController.copyById,
+    'DELETE /sites/:siteId/profiles/:profileId': profilesController.deleteById,
+    'GET /sites/:siteId/profiles/:profileId/workflows': workflowsController.list,
+    'POST /sites/:siteId/profiles/:profileId/workflows': workflowsController.create,
+    'PATCH /sites/:siteId/profiles/:profileId/workflows/:workflowId': workflowsController.updateStatus,
+    'DELETE /sites/:siteId/profiles/:profileId/workflows/:workflowId': workflowsController.deleteById,
+    'POST /sites/:siteId/profiles/:profileId/workflows/:workflowId/run': workflowsController.run,
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,

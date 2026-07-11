@@ -606,6 +606,22 @@ describe('getRouteHandlers', () => {
     getRedirects: sinon.stub(),
   };
 
+  const mockProfilesController = {
+    createFromChat: sinon.stub(),
+    createEmpty: sinon.stub(),
+    list: sinon.stub(),
+    getById: sinon.stub(),
+    copyById: sinon.stub(),
+    deleteById: sinon.stub(),
+  };
+
+  const mockWorkflowsController = {
+    list: sinon.stub(),
+    create: sinon.stub(),
+    updateStatus: sinon.stub(),
+    deleteById: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -672,6 +688,8 @@ describe('getRouteHandlers', () => {
       mockElementsController,
       mockProxyController,
       mockRedirectsController,
+      mockProfilesController,
+      mockWorkflowsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -1287,6 +1305,16 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'POST /sites/:siteId/profiles/chat',
+      'POST /sites/:siteId/profiles',
+      'GET /sites/:siteId/profiles',
+      'GET /sites/:siteId/profiles/:profileId',
+      'POST /sites/:siteId/profiles/:profileId/copy',
+      'DELETE /sites/:siteId/profiles/:profileId',
+      'GET /sites/:siteId/profiles/:profileId/workflows',
+      'POST /sites/:siteId/profiles/:profileId/workflows',
+      'PATCH /sites/:siteId/profiles/:profileId/workflows/:workflowId',
+      'DELETE /sites/:siteId/profiles/:profileId/workflows/:workflowId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
