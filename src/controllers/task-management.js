@@ -446,35 +446,57 @@ function TaskManagementController(context) {
       return denied;
     }
 
-    // v1: one ticket per opportunity (optional FK via Ticket.opportunityId).
-    // TicketSuggestion has no index on opportunityId — query via the Ticket FK directly.
-    // v2 will relax the 1:1 constraint when multi-suggestion grouped tickets land.
-    let ticket;
+    // Fetch all tickets for the org then filter by opportunityId in-memory.
+    // (No allByOpportunityId on the model; allByOrganizationId is the closest bulk accessor.)
+    let tickets;
     try {
-      ticket = await Ticket.findByOpportunityId(opportunityId);
+      const orgTickets = await Ticket.allByOrganizationId(organizationId);
+      tickets = orgTickets.filter((t) => t.getOpportunityId?.() === opportunityId);
     } catch (err) {
-      log.error({ organizationId, opportunityId, err }, 'Failed to find ticket for opportunity');
+      log.error({ organizationId, opportunityId, err }, 'Failed to list tickets for opportunity');
       return createResponse({ message: 'Failed to list tickets' }, STATUS_INTERNAL_SERVER_ERROR);
     }
 
-    if (!ticket || ticket.getOrganizationId() !== organizationId) {
+    if (tickets.length === 0) {
       return createResponse([], STATUS_OK);
     }
 
-    // Load bridge rows for the ticket (may be 0 when no suggestions linked in v1).
-    let suggestions = [];
-    try {
-      const bridges = await TicketSuggestion.allByTicketId(ticket.getId());
-      suggestions = bridges.map((b) => ({
-        suggestionId: b.getSuggestionId(),
-        opportunityId: b.getOpportunityId(),
-      }));
-    } catch (bridgeErr) {
-      // Bridge load failure does not fail the list — return empty suggestions array.
-      log.warn({ ticketId: ticket.getId(), opportunityId, err: bridgeErr }, 'Failed to load bridge rows for ticket');
+    // Bulk-load bridge rows for all matching tickets.
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    const bridgeMap = new Map();
+    if (postgrestClient) {
+      const ticketIds = tickets.map((t) => t.getId());
+      const BRIDGE_LOAD_CHUNK = 50;
+      try {
+        for (let i = 0; i < ticketIds.length; i += BRIDGE_LOAD_CHUNK) {
+          const chunk = ticketIds.slice(i, i + BRIDGE_LOAD_CHUNK);
+          // eslint-disable-next-line no-await-in-loop
+          const { data, error } = await postgrestClient
+            .from('ticket_suggestions')
+            .select('ticket_id,suggestion_id,opportunity_id')
+            .in('ticket_id', chunk);
+          if (error) {
+            throw error;
+          }
+          (data || []).forEach((row) => {
+            if (!bridgeMap.has(row.ticket_id)) {
+              bridgeMap.set(row.ticket_id, []);
+            }
+            bridgeMap.get(row.ticket_id).push({
+              suggestionId: row.suggestion_id,
+              opportunityId: row.opportunity_id,
+            });
+          });
+        }
+      } catch (err) {
+        log.warn({ opportunityId, err }, 'Failed to bulk-load bridge rows; response will omit suggestion links');
+      }
     }
 
-    return createResponse([serializeTicket(ticket, suggestions)], STATUS_OK);
+    return createResponse(
+      tickets.map((t) => serializeTicket(t, bridgeMap.get(t.getId()) || [])),
+      STATUS_OK,
+    );
   }
 
   // ─── Ticket creation ──────────────────────────────────────────────────────

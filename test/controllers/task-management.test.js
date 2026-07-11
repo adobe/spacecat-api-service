@@ -644,24 +644,25 @@ describe('TaskManagementController', () => {
     });
 
     it('returns 500 on ticket lookup error', async () => {
-      const ctx = makeContext();
-      ctx.dataAccess.Ticket.findByOpportunityId.rejects(new Error('db error'));
+      const ctx = makeContext({
+        dataAccess: { Ticket: { allByOrganizationId: sinon.stub().rejects(new Error('db error')) } },
+      });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
       const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
       expect(res.status).to.equal(500);
     });
 
-    it('returns empty array when no ticket found', async () => {
+    it('returns empty array when no tickets found', async () => {
       const { listTicketsByOpportunity } = TaskManagementController(makeContext());
       const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
       expect(res.status).to.equal(200);
       expect(await res.json()).to.deep.equal([]);
     });
 
-    it('returns empty array on org mismatch', async () => {
-      const ticket = makeTicket({ getOrganizationId: () => 'other-org-id-1234-aaaa-bbbbbbbbbbbb' });
+    it('filters out tickets with a different opportunityId', async () => {
+      const otherTicket = makeTicket({ getOpportunityId: () => 'ffffffff-aaaa-bbbb-cccc-dddddddddddd' });
       const ctx = makeContext({
-        dataAccess: { Ticket: { findByOpportunityId: sinon.stub().resolves(ticket) } },
+        dataAccess: { Ticket: { allByOrganizationId: sinon.stub().resolves([otherTicket]) } },
       });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
       const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
@@ -669,13 +670,18 @@ describe('TaskManagementController', () => {
       expect(await res.json()).to.deep.equal([]);
     });
 
-    it('returns ticket with suggestions via Ticket.findByOpportunityId (not TicketSuggestion.allByOpportunityId)', async () => {
+    it('returns all matching tickets with suggestions via postgrestClient', async () => {
       const ticket = makeTicket();
-      const bridge = makeBridge();
+      const bridgeRow = { ticket_id: TICKET_ID, suggestion_id: SUGGESTION_ID, opportunity_id: OPPORTUNITY_ID };
+      const pgClient = makePostgrestClient();
+      pgClient.from.returns({
+        ...pgClient.from(),
+        select: sinon.stub().returns({ in: sinon.stub().resolves({ data: [bridgeRow], error: null }) }),
+      });
       const ctx = makeContext({
         dataAccess: {
-          Ticket: { findByOpportunityId: sinon.stub().resolves(ticket) },
-          TicketSuggestion: { allByTicketId: sinon.stub().resolves([bridge]) },
+          Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
+          services: { postgrestClient: pgClient },
         },
       });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
@@ -686,12 +692,40 @@ describe('TaskManagementController', () => {
       expect(t.suggestions).to.deep.equal([{ suggestionId: SUGGESTION_ID, opportunityId: OPPORTUNITY_ID }]);
     });
 
-    it('returns ticket with empty suggestions when bridge load fails', async () => {
-      const ticket = makeTicket();
+    it('returns multiple tickets for same opportunity', async () => {
+      const TICKET_ID_2 = 'dddddddd-eeee-ffff-0000-aaaaaaaaaaaa';
+      const ticket1 = makeTicket();
+      const ticket2 = makeTicket({ getId: () => TICKET_ID_2 });
+      const pgClient = makePostgrestClient();
+      pgClient.from.returns({
+        ...pgClient.from(),
+        select: sinon.stub().returns({ in: sinon.stub().resolves({ data: [], error: null }) }),
+      });
       const ctx = makeContext({
         dataAccess: {
-          Ticket: { findByOpportunityId: sinon.stub().resolves(ticket) },
-          TicketSuggestion: { allByTicketId: sinon.stub().rejects(new Error('bridge err')) },
+          Ticket: { allByOrganizationId: sinon.stub().resolves([ticket1, ticket2]) },
+          services: { postgrestClient: pgClient },
+        },
+      });
+      const { listTicketsByOpportunity } = TaskManagementController(ctx);
+      const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.have.length(2);
+      expect(body.map((t) => t.id)).to.deep.equal([TICKET_ID, TICKET_ID_2]);
+    });
+
+    it('returns tickets with empty suggestions when bridge load fails', async () => {
+      const ticket = makeTicket();
+      const pgClient = makePostgrestClient();
+      pgClient.from.returns({
+        ...pgClient.from(),
+        select: sinon.stub().returns({ in: sinon.stub().resolves({ data: null, error: { message: 'bridge err' } }) }),
+      });
+      const ctx = makeContext({
+        dataAccess: {
+          Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
+          services: { postgrestClient: pgClient },
         },
       });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
