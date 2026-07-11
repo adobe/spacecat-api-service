@@ -1002,6 +1002,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/page-relationships/search',
       'POST /sites/:siteId/opportunities',
       'PATCH /sites/:siteId/opportunities/:opportunityId',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/prerender-validation',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor',
