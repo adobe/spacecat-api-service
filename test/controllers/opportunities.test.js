@@ -759,7 +759,7 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(200);
     // other data fields preserved
     expect(mockOpptyEntity.getData().additionalInfo).to.equal('info');
-    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({ status: 'in_progress' });
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({ status: 'in_progress', reason: null });
     const updated = await response.json();
     expect(updated).to.have.property('id', OPPORTUNITY_ID);
     expect(updated).to.have.property('updatedBy', 'test@test.com');
@@ -774,7 +774,7 @@ describe('Opportunities Controller', () => {
     });
 
     expect(response.status).to.equal(200);
-    expect(mockOpptyEntity.getData()).to.deep.equal({ prerenderValidation: { status: 'in_progress' } });
+    expect(mockOpptyEntity.getData()).to.deep.equal({ prerenderValidation: { status: 'in_progress', reason: null } });
   });
 
   it('sets startedAt and completedAt when provided and merges with existing prerenderValidation', async () => {
@@ -793,6 +793,7 @@ describe('Opportunities Controller', () => {
       status: 'completed_success',
       startedAt: '2026-07-03T10:00:00.000Z',
       completedAt: '2026-07-03T11:40:00.000Z',
+      reason: null,
     });
   });
 
@@ -808,6 +809,43 @@ describe('Opportunities Controller', () => {
       status: 'in_progress',
       startedAt: '2026-07-03T10:00:00.000Z',
       completedAt: null,
+      reason: null,
+    });
+  });
+
+  it('sets reason when provided (e.g. bot-block)', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_fail', completedAt: '2026-07-03T11:40:00.000Z', reason: 'waf_block_homepage:cloudflare' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'completed_fail',
+      completedAt: '2026-07-03T11:40:00.000Z',
+      reason: 'waf_block_homepage:cloudflare',
+    });
+  });
+
+  it('clears a stale reason from a previous failed run when the new run succeeds without one', async () => {
+    opptys[0].data = {
+      additionalInfo: 'info',
+      prerenderValidation: {
+        status: 'completed_fail', completedAt: '2026-07-03T09:00:00.000Z', reason: 'waf_block_homepage:cloudflare',
+      },
+    };
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success', completedAt: '2026-07-03T11:40:00.000Z' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'completed_success',
+      completedAt: '2026-07-03T11:40:00.000Z',
+      reason: null,
     });
   });
 
@@ -894,6 +932,47 @@ describe('Opportunities Controller', () => {
     });
     expect(response.status).to.equal(400);
     expect((await response.json()).message).to.match(/status must be one of/);
+  });
+
+  it('returns bad request for prerender-validation if startedAt is not a valid ISO date string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', startedAt: 'not-a-date' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'startedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if startedAt is not a string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', startedAt: 12345 },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'startedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if completedAt is not a valid ISO date string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success', completedAt: 'not-a-date' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'completedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('accepts null for startedAt and completedAt', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {
+        status: 'in_progress', startedAt: null, completedAt: null,
+      },
+    });
+    expect(response.status).to.equal(200);
   });
 
   it('returns bad request for prerender-validation on a validation error', async () => {

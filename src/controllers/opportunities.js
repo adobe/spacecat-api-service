@@ -399,9 +399,18 @@ function OpportunitiesController(ctx) {
       return badRequest('No updates provided');
     }
 
-    const { status, startedAt, completedAt } = context.data;
+    const {
+      status, startedAt, completedAt, reason,
+    } = context.data;
     if (!hasText(status) || !PRERENDER_VALIDATION_STATUSES.includes(status)) {
       return badRequest(`status must be one of: ${PRERENDER_VALIDATION_STATUSES.join(', ')}`);
+    }
+    const isValidTimestamp = (v) => v === null || (typeof v === 'string' && !Number.isNaN(Date.parse(v)));
+    if (startedAt !== undefined && !isValidTimestamp(startedAt)) {
+      return badRequest('startedAt must be a valid ISO 8601 date string or null');
+    }
+    if (completedAt !== undefined && !isValidTimestamp(completedAt)) {
+      return badRequest('completedAt must be a valid ISO 8601 date string or null');
     }
 
     try {
@@ -413,6 +422,10 @@ function OpportunitiesController(ctx) {
       if (completedAt !== undefined) {
         prerenderValidation.completedAt = completedAt;
       }
+      // Unlike startedAt/completedAt, reason is tied to the CURRENT status, not
+      // something to carry over — always set it (to null when absent) so a stale
+      // failure reason from a previous run can't leak into a later success.
+      prerenderValidation.reason = reason !== undefined ? reason : null;
 
       opportunity.setData({ ...currentData, prerenderValidation });
       opportunity.setUpdatedBy(profile.email || 'system');
