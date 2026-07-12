@@ -1002,7 +1002,7 @@ function TaskManagementController(context) {
         log.warn({ saveErr }, 'Failed to update connection metadata after batch');
       });
 
-      const batchResponseBody = { results };
+      const batchResponseBody = { mode, results };
       if (hasSuccess) {
         await markIdempotencyDone(batchResponseBody, 207);
       } else {
@@ -1144,6 +1144,7 @@ function TaskManagementController(context) {
       }
 
       const groupedResponseBody = {
+        mode,
         ...serializeTicket(groupedTicket),
         suggestionIds,
         ...(linkWarnings.length > 0 ? { linkWarnings } : {}),
@@ -1303,6 +1304,7 @@ function TaskManagementController(context) {
     }
 
     const responseBody = {
+      mode,
       ...serializeTicket(ticket),
       suggestionId: primarySuggestionId ?? undefined,
       ...(attachmentWarning ? { attachmentWarning } : {}),
