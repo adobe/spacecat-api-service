@@ -964,6 +964,36 @@ describe('Opportunities Controller', () => {
     expect((await response.json())).to.have.property('message', 'completedAt must be a valid ISO 8601 date string or null');
   });
 
+  it('returns bad request for prerender-validation if completedAt is not a string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success', completedAt: 12345 },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'completedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if startedAt is a non-ISO date-like string (e.g. a weekday name)', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', startedAt: 'Tuesday' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'startedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if reason is not a string or null', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_fail', reason: 12345 },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'reason must be a string or null');
+  });
+
   it('accepts null for startedAt and completedAt', async () => {
     const response = await opportunitiesController.patchPrerenderValidation({
       ...defaultAuthAttributes,

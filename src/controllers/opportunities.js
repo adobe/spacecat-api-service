@@ -405,12 +405,19 @@ function OpportunitiesController(ctx) {
     if (!hasText(status) || !PRERENDER_VALIDATION_STATUSES.includes(status)) {
       return badRequest(`status must be one of: ${PRERENDER_VALIDATION_STATUSES.join(', ')}`);
     }
-    const isValidTimestamp = (v) => v === null || (typeof v === 'string' && !Number.isNaN(Date.parse(v)));
+    // Matches full ISO 8601 date-time with a timezone designator (Z or ±HH:mm) — Date.parse
+    // alone is too permissive (accepts "Tuesday", "1", etc.), so the regex gates it first.
+    const ISO_8601_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+    const isValidTimestamp = (v) => v === null
+      || (typeof v === 'string' && ISO_8601_REGEX.test(v) && !Number.isNaN(Date.parse(v)));
     if (startedAt !== undefined && !isValidTimestamp(startedAt)) {
       return badRequest('startedAt must be a valid ISO 8601 date string or null');
     }
     if (completedAt !== undefined && !isValidTimestamp(completedAt)) {
       return badRequest('completedAt must be a valid ISO 8601 date string or null');
+    }
+    if (reason !== undefined && reason !== null && typeof reason !== 'string') {
+      return badRequest('reason must be a string or null');
     }
 
     try {
