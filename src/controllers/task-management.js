@@ -118,8 +118,10 @@ function serializeTicket(ticket, suggestions) {
  *     model: ticket creation succeeds even when attachment upload fails, with a
  *     warning in the response body.
  *   - Idempotency-Key header is enforced in v1 (not deferred). The idempotency_keys
- *     table (DB PR #720) is used with a 24-hour TTL. Status machine: processing →
- *     completed | failed. Duplicate requests return the cached response.
+ *     table (DB PR #720) is used with a 2-minute TTL (in-flight lock window only;
+ *     bridge-row presence is the permanent deduplication guard after expiry).
+ *     Status machine: processing → completed | failed. Duplicate requests return
+ *     the cached response.
  *   - connectionId in POST body: required. Caller must specify which connection to use.
  *   - Ticket summary and description come from the request body (client-provided).
  *     Spec §7 step 5 shows the server building the ADF description server-side from
@@ -514,7 +516,8 @@ function TaskManagementController(context) {
    * ```
    *
    * Requires an `Idempotency-Key` request header (spec §Idempotent Ticket Creation).
-   * Deduplication is enforced via the `idempotency_keys` table with a 24-hour window.
+   * Deduplication is enforced via the `idempotency_keys` table with a 2-minute in-flight
+ * lock window; bridge-row presence is the permanent deduplication guard after expiry.
    */
   async function createTicket(requestContext) {
     const { params, data, attributes } = requestContext;
