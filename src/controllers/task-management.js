@@ -526,7 +526,7 @@ function TaskManagementController(context) {
     const { params, data, attributes } = requestContext;
 
     const callerProfile = attributes?.authInfo?.getProfile?.();
-    const createdBy = callerProfile?.user_id ?? callerProfile?.sub ?? 'unknown';
+    const createdBy = callerProfile?.sub ?? 'unknown';
     const { organizationId, provider } = params;
 
     // --- Input validation ---------------------------------------------------
