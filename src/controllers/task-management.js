@@ -32,6 +32,8 @@ import AccessControlUtil from '../support/access-control-util.js';
 const STATUS_CONFLICT = 409;
 const STATUS_FORBIDDEN = 403;
 
+const SUPPORTED_PROVIDERS = new Set(['jira_cloud']);
+
 // Ticket creation modes.
 // 'individual': one ticket per suggestion (N→N). N>1 returns 207 Multi-Status.
 // 'grouped': all suggestions into a single ticket (M→1). Returns 201.
@@ -534,6 +536,13 @@ function TaskManagementController(context) {
 
     if (!hasText(provider)) {
       return createResponse({ message: 'provider is required' }, STATUS_BAD_REQUEST);
+    }
+
+    if (!SUPPORTED_PROVIDERS.has(provider)) {
+      return createResponse(
+        { message: `Unsupported provider '${provider}'. Supported: ${[...SUPPORTED_PROVIDERS].join(', ')}` },
+        STATUS_BAD_REQUEST,
+      );
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
