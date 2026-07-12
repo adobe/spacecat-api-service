@@ -31,6 +31,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 
 const STATUS_CONFLICT = 409;
 const STATUS_FORBIDDEN = 403;
+const STATUS_MULTI_STATUS = 207;
 
 const SUPPORTED_PROVIDERS = new Set(['jira_cloud']);
 
@@ -1013,11 +1014,11 @@ function TaskManagementController(context) {
 
       const batchResponseBody = { mode, results };
       if (hasSuccess) {
-        await markIdempotencyDone(batchResponseBody, 207);
+        await markIdempotencyDone(batchResponseBody, STATUS_MULTI_STATUS);
       } else {
         await markIdempotencyFailed();
       }
-      return createResponse(batchResponseBody, 207);
+      return createResponse(batchResponseBody, STATUS_MULTI_STATUS);
     }
 
     // ─── Grouped path: M suggestionIds → 1 Jira ticket ───────────────────────
