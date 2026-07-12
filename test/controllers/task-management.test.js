@@ -767,6 +767,14 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 when provider is unsupported', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({ params: { organizationId: ORG_ID, provider: 'linear' } }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('Unsupported provider');
+    });
+
     it('returns 404 when organization not found', async () => {
       const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
       const { createTicket } = TaskManagementController(ctx);
