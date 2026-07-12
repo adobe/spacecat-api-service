@@ -45,8 +45,9 @@ Body:
 ```json
 {
   "status": "in_progress | completed_success | completed_fail | error",
-  "startedAt": "2026-07-03T10:00:00.000Z",   // optional ISO string
-  "completedAt": "2026-07-03T11:40:00.000Z"   // optional ISO string or null
+  "startedAt": "2026-07-03T10:00:00.000Z",   // optional ISO 8601 string or null
+  "completedAt": "2026-07-03T11:40:00.000Z",  // optional ISO 8601 string or null
+  "reason": "waf_block:403"                    // optional string or null
 }
 ```
 
@@ -56,22 +57,31 @@ Handler (`opportunitiesController.patchPrerenderValidation`):
 2. `Site.findById` → 404 if missing; access-control check → 403.
 3. `Opportunity.findById` → 404 if missing or `siteId` mismatch.
 4. Validate `status` is one of the enum values → 400 otherwise.
-5. **Merge**: `setData({ ...getData(), prerenderValidation: { ...existing, status, startedAt?, completedAt? } })`.
-6. `save()` → 200 with the updated opportunity DTO.
+5. Validate `startedAt`/`completedAt`, if provided, are `null` or a full ISO 8601
+   date-time string (regex-gated, then `Date.parse`-checked) → 400 otherwise.
+6. Validate `reason`, if provided, is a `string` or `null` → 400 otherwise.
+7. **Merge**: `setData({ ...getData(), prerenderValidation: { ...existing, status, startedAt?, completedAt?, reason } })`.
+   Unlike `startedAt`/`completedAt` (only updated when the caller sends them),
+   `reason` is **always** overwritten — set to `null` when absent — since it
+   describes the *current* status, not something to carry over. This prevents a
+   stale failure reason from a previous run leaking into a later success.
+8. `save()` → 200 with the updated opportunity DTO.
 
 The `prerenderValidation` shape stored on `opportunity.data`:
 
 ```json
-{ "status": "...", "startedAt": "<ISO>", "completedAt": "<ISO|null>" }
+{ "status": "...", "startedAt": "<ISO|null>", "completedAt": "<ISO|null>", "reason": "<string|null>" }
 ```
 
 ## Lifecycle (written by the tool)
 
 - Run begins → `{ status: "in_progress", startedAt: now, completedAt: null }`
-- Run ends → `{ status: "completed_success|completed_fail|error", completedAt: now }`
+- Run ends successfully → `{ status: "completed_success", completedAt: now }` (reason cleared to `null`)
+- Run ends in failure (e.g. bot/WAF block detected) → `{ status: "completed_fail", completedAt: now, reason: "waf_block:<code>" }`
 
 ## Success Criteria
 
 - Endpoint updates only `data.prerenderValidation`; other `data` fields preserved.
-- Invalid status → 400; unknown site/opp → 404; unauthorized → 403.
+- Invalid status → 400; invalid `startedAt`/`completedAt`/`reason` → 400;
+  unknown site/opp → 404; unauthorized → 403.
 - 100% coverage on the new controller method.

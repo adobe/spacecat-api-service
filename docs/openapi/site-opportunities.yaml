@@ -194,6 +194,48 @@ site-opportunity:
     security:
       - ims_key: [ ]
 
+site-opportunity-prerender-validation:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  patch:
+    operationId: updateSiteOpportunityPrerenderValidation
+    summary: |
+      Update the prerender-validation lifecycle state on a prerender opportunity
+    description: |
+      Server-side merge into the opportunity's `data.prerenderValidation` field only —
+      other `data` keys are left untouched. Intended for internal/S2S callers (e.g. the
+      tokowaka prerender-validation cron/on-demand runner), not general opportunity edits.
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/PrerenderValidationUpdate'
+    responses:
+      '200':
+        description: Opportunity updated with the new prerender-validation state
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Opportunity'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-suggestions:
   parameters:
     - $ref: './parameters.yaml#/siteId'

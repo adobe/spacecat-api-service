@@ -283,6 +283,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunities-by-status'
   /sites/{siteId}/opportunities/{opportunityId}:
     $ref: './site-opportunities.yaml#/site-opportunity'
+  /sites/{siteId}/opportunities/{opportunityId}/prerender-validation:
+    $ref: './site-opportunities.yaml#/site-opportunity-prerender-validation'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/paged/{limit}:
