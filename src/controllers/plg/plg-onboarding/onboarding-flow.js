@@ -423,16 +423,21 @@ async function handlePreonboardedFastPath({
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
-const NON_PROD_LABEL_PATTERN = /(?:^|-)(qa|stage|staging|dev|development)(\d+)?(?:-|$)/i;
+const NON_PROD_LABEL_PATTERN = /(?:^|-)(qa|stage|staging|dev|development|author|publish)(\d+)?(?:-|$)/i;
+const HLX_DELIVERY_PATTERN = /\.(aem\.live|aem\.page|hlx\.live|hlx\.page)$/i;
 
 /**
- * Returns true if the domain contains a non-production subdomain label (qa, stage, staging,
- * dev, development), including hyphenated variants like experience-qa or dev-preview.
- * Only non-TLD labels are checked to avoid false-positives on legitimate production TLDs
- * like .dev or .stage.
+ * Returns true if the domain is a non-production domain. Two checks:
+ * 1. Any non-TLD label matches a non-prod keyword (qa, stage, dev, author, publish, etc.)
+ *    including hyphenated/numbered variants. TLD is excluded to avoid false-positives on
+ *    legitimate gTLDs like .dev.
+ * 2. The domain is an hlx/AEM delivery URL (*.aem.live, *.aem.page, *.hlx.live, *.hlx.page).
  */
 function isNonProdDomain(domain) {
   const hostPart = domain.split('/')[0];
+  if (HLX_DELIVERY_PATTERN.test(hostPart)) {
+    return true;
+  }
   const labels = hostPart.split('.');
   // Exclude the TLD (last label) — .dev is a valid production gTLD
   const subdomainLabels = labels.slice(0, -1);

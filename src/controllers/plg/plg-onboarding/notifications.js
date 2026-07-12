@@ -22,7 +22,7 @@ export const REVIEW_REASONS = {
 
 export const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 export const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
-export const NON_PROD_DOMAIN = 'appears to be a non-production domain (contains qa, stage, or dev subdomain).';
+export const NON_PROD_DOMAIN = 'appears to be a non-production domain (contains qa, stage, dev, author, or publish subdomain, or is an hlx/AEM delivery URL).';
 
 /**
  * Derives the review check key from the onboarding record's current state.

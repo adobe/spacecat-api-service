@@ -1356,6 +1356,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
     });
 
     const NON_PROD_DOMAINS = [
+      // non-prod subdomain keywords
       'qa.example.com',
       'stage.example.com',
       'staging.example.com',
@@ -1370,6 +1371,16 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       'newweb-qa2.infineon.cn',
       'stage2.example.com',
       'dev3-preview.example.com',
+      // author/publish keywords
+      'author-mls-prod-65a.adobecqms.net',
+      'publish-lottretail.corp.tlclimited.com',
+      'author.example.com',
+      'publish.example.com',
+      // hlx/AEM delivery URLs
+      'main--notice--softbankbtob.aem.page',
+      'bundled-journey-qa-1--forms-engine-qa--hdfc-forms.aem.live',
+      'main--mysite--owner.hlx.live',
+      'main--mysite--owner.hlx.page',
     ];
 
     for (const domain of NON_PROD_DOMAINS) {
