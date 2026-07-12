@@ -587,11 +587,8 @@ export async function handleBrandTopBrands(sp, clients) {
     const name = topBrandsByDomainEntryName(b);
     const mentions = topBrandsByDomainEntryCount(b);
     return {
-      domain: slugHostFromBrandName(name),
       name,
       mentions,
-      visibility: Math.min(95, Math.round(Math.log10(mentions + 10) * 28)),
-      citedPages: Math.min(500, Math.round(mentions / 200)),
       ...(sliceCountry ? { country: sliceCountry } : {}),
     };
   }).sort((a, b) => {

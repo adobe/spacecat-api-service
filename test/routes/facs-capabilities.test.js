@@ -15,7 +15,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { expect } from 'chai';
 
-import routeFacsCapabilities from '../../src/routes/facs-capabilities.js';
+import routeFacsCapabilities, { isFacsRebacResource } from '../../src/routes/facs-capabilities.js';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(testDir, '..', '..');
@@ -347,6 +347,37 @@ describe('routeFacsCapabilities', () => {
       }
     });
 
+    // Guard against an invented resource KEY. The other tests validate the
+    // alias arrays (params) but never the resource key itself, so a typo or a
+    // parallel entity (e.g. LLMO: { website: ['siteId'] } instead of reusing
+    // `site`) would pass silently and be queried against a state layer that
+    // stores no rows under that resource_type. This allow-list is the set of
+    // resource types each product actually ReBAC-scopes; adding a genuinely new
+    // ReBAC entity is a deliberate act that must update this list too.
+    it('each product only declares resource keys from its allowed ReBAC set', () => {
+      const ALLOWED_RESOURCE_KEYS = {
+        LLMO: ['brand'],
+        ASO: ['site'],
+        ACO: [],
+      };
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES)
+        .forEach(([product, resourceMap]) => {
+          const allowed = ALLOWED_RESOURCE_KEYS[product];
+          expect(
+            allowed,
+            `no allowed ReBAC resource set defined for product '${product}' — `
+            + 'add it to ALLOWED_RESOURCE_KEYS in this test when a product gains ReBAC scope',
+          ).to.be.an('array');
+          const unexpected = Object.keys(resourceMap).filter((k) => !allowed.includes(k));
+          expect(
+            unexpected,
+            `${product} declares unexpected ReBAC resource key(s): ${unexpected.join(', ')}. `
+            + 'Reuse the existing entity key (LLMO → brand, ASO → site) instead of inventing one; '
+            + 'if this is a genuinely new ReBAC entity, add it to ALLOWED_RESOURCE_KEYS here too.',
+          ).to.deep.equal([]);
+        });
+    });
+
     it('PRODUCTS_FACS_RESOURCE_PARAM_ALIASES and FACS_NON_RESOURCE_PARAMS are disjoint', () => {
       const claimedByAnyProduct = unionOfProductAliases();
       const nonResource = new Set(routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS);
@@ -394,6 +425,30 @@ describe('routeFacsCapabilities', () => {
         stale,
         `FACS_NON_RESOURCE_PARAMS contains params not used in any route: ${stale.join(', ')}`,
       ).to.deep.equal([]);
+    });
+  });
+
+  describe('isFacsRebacResource', () => {
+    it('LLMO ReBAC-scopes brand but not site (cross-product bypass for sites)', () => {
+      expect(isFacsRebacResource('LLMO', 'brand')).to.be.true;
+      expect(isFacsRebacResource('LLMO', 'site')).to.be.false;
+    });
+
+    it('ASO ReBAC-scopes site but not brand (cross-product bypass for brands)', () => {
+      expect(isFacsRebacResource('ASO', 'site')).to.be.true;
+      expect(isFacsRebacResource('ASO', 'brand')).to.be.false;
+    });
+
+    it('is case-insensitive on the product code', () => {
+      expect(isFacsRebacResource('llmo', 'brand')).to.be.true;
+      expect(isFacsRebacResource('aso', 'site')).to.be.true;
+    });
+
+    it('returns false for unknown products and nullish input', () => {
+      expect(isFacsRebacResource('ACO', 'site')).to.be.false;
+      expect(isFacsRebacResource('NOPE', 'site')).to.be.false;
+      expect(isFacsRebacResource(undefined, 'site')).to.be.false;
+      expect(isFacsRebacResource('LLMO', undefined)).to.be.false;
     });
   });
 });

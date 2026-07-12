@@ -15,6 +15,7 @@
 import { randomUUID } from 'crypto';
 
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import {
   badRequest,
   notFound,
@@ -25,12 +26,13 @@ import {
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
+  composeBaseURL,
   hasText,
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserToken, getImsUserTokenStrict } from '../support/utils.js';
+import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import {
   STATUS_BAD_REQUEST,
@@ -58,8 +60,11 @@ import {
   getBrandBySite,
   getBrandCompetitors,
 } from '../support/brands-storage.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
+import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
@@ -75,6 +80,8 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
+import { postLlmoAlert } from './llmo/llmo-onboarding.js';
+import { hasPaidLlmoEntitlement } from '../support/llmo-paid-gate.js';
 import { createIntentClassifier } from '../support/intent-classifier.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
@@ -394,7 +401,7 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, brandId } = context.params || {};
     const {
       limit, page, categoryId, topicId, status,
-      search, region, origin, sort, order,
+      search, region, origin, source, sort, order,
     } = getQueryParams(context);
 
     try {
@@ -442,6 +449,7 @@ function BrandsController(ctx, log, env) {
         search,
         region,
         origin,
+        source,
         sort,
         order,
         limit,
@@ -995,6 +1003,29 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const brands = await listBrands(spaceCatId, postgrestClient, { status });
+
+      // ReBAC collection filter. When facsWrapper marks this session as
+      // FACS-enrolled and resource-scoped (no org-wide can_view — see
+      // context.attributes.facs), narrow the listed brands to those the caller
+      // may view via a state-layer grant. Absent flag (admin / internal org /
+      // non-ReBAC org / org-wide viewer) => full list.
+      //
+      // Cross-product bypass: only filter when the current product actually
+      // ReBAC-scopes `brand` (LLMO). Under ASO, `brand` is not a ReBAC resource
+      // (ASO scopes `site`), so the state layer holds no per-brand grants and
+      // filtering would wrongly hide every brand — return the full list instead.
+      const facs = context.attributes?.facs;
+      const hasFACSCapability = facs?.enabled
+        && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+      if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'brand')) {
+        const viewable = await listViewableResourceIds(postgrestClient, {
+          imsOrgId: organization.getImsOrgId(),
+          product: facs.product,
+          resourceType: 'brand',
+          subjectId: facs.subjectId,
+        });
+        return createResponse({ brands: brands.filter((brand) => viewable.has(brand.id)) }, 200);
+      }
       return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
@@ -1462,6 +1493,10 @@ function BrandsController(ctx, log, env) {
       // The initial market's domain, resolved once during provisioning and reused
       // by the site-mirror hook below (avoids re-deriving from the payload).
       let provisionedBrandDomain = null;
+      // The initial market's identity, captured for the mapping-row write below
+      // (must happen AFTER the brand row exists — provisionBrandSubworkspace
+      // runs before it does, see brand-provisioning.js's return doc).
+      let provisionedInitialMarket = null;
       // A pending (draft) brand defers ALL Semrush provisioning: no
       // sub-workspace, no project, and crucially no primary URL required. The
       // wizard's "Save as pending" path lands here so a user can stash a brand
@@ -1521,7 +1556,7 @@ function BrandsController(ctx, log, env) {
           // project later (stored in brands.pending_semrush_provisioning). The primary
           // URL otherwise lives only on the Semrush side, so a site-less draft
           // would have nowhere to keep it. The row lands as 'pending' because it
-          // has no anchor (no site_id, no semrush_workspace_id) — see
+          // has no anchor (no site_id, no semrush_sub_workspace_id) — see
           // upsertBrand's anchor check.
           const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
             .map((u) => (typeof u === 'string' ? u : u?.value))
@@ -1611,7 +1646,12 @@ function BrandsController(ctx, log, env) {
             // payload (the brand row isn't written yet).
             competitors: brandData.competitors,
           }, log);
-          provisionedWorkspaceId = provisioned.semrushWorkspaceId;
+          provisionedWorkspaceId = provisioned.semrushSubWorkspaceId;
+          provisionedInitialMarket = {
+            projectId: provisioned.projectId,
+            geoTargetId: provisioned.geoTargetId,
+            languageCode: provisioned.languageCode,
+          };
         }
       }
 
@@ -1641,8 +1681,22 @@ function BrandsController(ctx, log, env) {
         updatedBy,
         log,
         forceBrandId: provisionedBrandId,
-        semrushWorkspaceId: provisionedWorkspaceId,
+        semrushSubWorkspaceId: provisionedWorkspaceId,
       });
+
+      // When a Semrush sub-workspace + initial market were provisioned, write the
+      // brand_to_semrush_projects mapping row for it NOW that the brand row exists
+      // (its brand_id FK requires a persisted row — provisionBrandSubworkspace ran
+      // before this, against a throwaway id, so it could not write it itself; see
+      // brand-provisioning.js's return doc). Best-effort, like every mapping write.
+      if (provisionedInitialMarket && hasText(provisionedInitialMarket.projectId)) {
+        await upsertMappingRow(context.dataAccess, {
+          brandId: provisionedBrandId,
+          semrushProjectId: provisionedInitialMarket.projectId,
+          geoTargetId: provisionedInitialMarket.geoTargetId,
+          languageCode: provisionedInitialMarket.languageCode,
+        }, log);
+      }
 
       // When a Semrush sub-workspace + initial market were provisioned, mirror that
       // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -1652,7 +1706,7 @@ function BrandsController(ctx, log, env) {
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
       // contract (its own catch-all swallows + logs), so this holds.
       if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
-        await ensureMarketSite(context, {
+        const linkedSiteId = await ensureMarketSite(context, {
           organizationId: spaceCatId,
           brandId: provisionedBrandId ?? undefined,
           // The initial market's domain, resolved during provisioning above.
@@ -1660,6 +1714,7 @@ function BrandsController(ctx, log, env) {
           updatedBy,
           log,
         });
+        await linkSiteToLiveRows(context.dataAccess, provisionedBrandId, linkedSiteId, log);
       }
 
       return createResponse(created, 201);
@@ -1763,7 +1818,7 @@ function BrandsController(ctx, log, env) {
       // aliases re-syncs onto the brand's Semrush projects (the block near the end
       // of this handler), but ONLY for a sub-workspace brand. While serenity is
       // inactive for the org that re-sync must not run — even if a
-      // semrush_workspace_id was backfilled for rollout prep — so reject the edit
+      // semrush_sub_workspace_id was backfilled for rollout prep — so reject the edit
       // (rather than silently skip the sync and let the brand drift) when it would
       // touch Semrush. A flat-mode brand (no workspace) edits the same fields as
       // plain backend data and is unaffected; the brand read only happens on the
@@ -1775,7 +1830,7 @@ function BrandsController(ctx, log, env) {
         || aliasesTouched;
       if (touchesSemrushSync && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
         const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
-        if (hasText(current?.semrushWorkspaceId)) {
+        if (hasText(current?.semrushSubWorkspaceId)) {
           return forbidden('Serenity is not active for this organization');
         }
       }
@@ -1825,8 +1880,8 @@ function BrandsController(ctx, log, env) {
       // When the competitor guard below lists a Semrush brand's projects pre-write,
       // it stashes the listing here so the post-commit re-sync can reuse it instead
       // of listing the same workspace a second time — the project set is stable
-      // across the brand-row write (which never re-points semrush_workspace_id), so
-      // a single competitor edit lists projects ONCE across both the guard and sync.
+      // across the brand-row write (which never re-points semrush_sub_workspace_id),
+      // so a single competitor edit lists projects ONCE across both the guard and sync.
       let prefetchedProjects = null;
       if (competitorsToGuard) {
         const brandState = await getBrandById(spaceCatId, brandUuid, postgrestClient);
@@ -1835,12 +1890,12 @@ function BrandsController(ctx, log, env) {
         const brandOwnUrls = [brandState?.baseUrl, ...websiteUrls];
 
         let reservedDomains;
-        if (hasText(brandState?.semrushWorkspaceId)) {
+        if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
-          const imsToken = getImsUserTokenStrict(context);
+          const imsToken = await resolveSemrushImsToken(context, log, 'brands');
           const transport = createSerenityTransport({ env: context.env, imsToken });
-          prefetchedProjects = await resolveProjects(transport, brandState.semrushWorkspaceId);
+          prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
           reservedDomains = buildReservedDomains(
             prefetchedProjects.map((p) => p?.domain),
             brandOwnUrls,
@@ -1890,11 +1945,12 @@ function BrandsController(ctx, log, env) {
       // benchmarks), surfaced on the response so the UI can warn the operator.
       const rejectedAliases = [];
       if ((urlsTouched || competitorsTouched || aliasesTouched)
-        && hasText(updated.semrushWorkspaceId)) {
+        && hasText(updated.semrushSubWorkspaceId)) {
         // Forward only an IMS user token upstream (matches the create path +
         // the rest of /serenity/*): PATCH /brands is organization:write and thus
-        // S2S-reachable, so refuse a non-IMS bearer rather than proxy it.
-        const imsToken = getImsUserTokenStrict(context);
+        // S2S-reachable, so prefer an x-promise-token exchange and otherwise
+        // refuse a non-IMS bearer rather than proxy it.
+        const imsToken = await resolveSemrushImsToken(context, log, 'brands');
         const transport = createSerenityTransport({ env: context.env, imsToken });
         try {
           // List the sub-workspace's projects ONCE and share the result across the
@@ -1909,7 +1965,7 @@ function BrandsController(ctx, log, env) {
           // breadcrumb below rather than escaping to the generic outer catch.
           const sharedProjects = await resolveProjects(
             transport,
-            updated.semrushWorkspaceId,
+            updated.semrushSubWorkspaceId,
             prefetchedProjects,
           );
           if (urlsTouched) {
@@ -1920,7 +1976,7 @@ function BrandsController(ctx, log, env) {
                 socialAccounts: updated.socialAccounts,
                 earnedContent: updated.earnedContent,
               },
-              updated.semrushWorkspaceId,
+              updated.semrushSubWorkspaceId,
               log,
               sharedProjects,
             );
@@ -1931,7 +1987,7 @@ function BrandsController(ctx, log, env) {
               transport,
               updated.competitors,
               removed,
-              updated.semrushWorkspaceId,
+              updated.semrushSubWorkspaceId,
               log,
               // Reserve the brand's own website URLs (every market/project domain
               // is reserved from the project listing) so a competitor can't be one
@@ -1946,7 +2002,7 @@ function BrandsController(ctx, log, env) {
               transport,
               updated.brandAliases,
               updated.name,
-              updated.semrushWorkspaceId,
+              updated.semrushSubWorkspaceId,
               log,
               sharedProjects,
             );
@@ -1959,7 +2015,7 @@ function BrandsController(ctx, log, env) {
           // diagnosable, then rethrow to the handler's catch.
           log.error('serenity: brand-edit Semrush re-sync failed after row commit', {
             brandId,
-            semrushWorkspaceId: updated.semrushWorkspaceId,
+            semrushSubWorkspaceId: updated.semrushSubWorkspaceId,
             urlsTouched,
             competitorsTouched,
             aliasesTouched,
@@ -1975,7 +2031,7 @@ function BrandsController(ctx, log, env) {
         // which aliases are not being tracked.
         log.warn('serenity: Semrush rejected some brand/competitor aliases on re-sync', {
           brandId,
-          semrushWorkspaceId: updated.semrushWorkspaceId,
+          semrushSubWorkspaceId: updated.semrushSubWorkspaceId,
           rejected: rejectedAliases,
         });
         return ok({ ...updated, semrushRejectedAliases: rejectedAliases });
@@ -2035,6 +2091,279 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Activates a brand: sets it `active` with a resolved `baseSiteId` in the SAME
+   * write, optionally generates AI prompts (a direct `prompt_generation_base_url`
+   * DRS job with `source: 'brand-activation'` — never Brandalf, never the
+   * `llmo-customer-analysis` cascade), and ensures the recurring brand-presence
+   * schedule when prompts exist. Explicit, customer-triggered (LLMO-5605).
+   *
+   * The brand must already exist (create it first via POST .../brands). Returns
+   * `200` quickly: the brand is `active` synchronously; prompts generate
+   * asynchronously (the `200` carries `promptGenerationJobId`, not finished prompts).
+   *
+   * @param {object} context - The request context (`params`, `data.generatePrompts`).
+   * @returns {Promise<Response>} 200 `{ brandId, status, baseSiteId,
+   *   promptGenerationJobId?, scheduleId? }`; 400/403/404/409 per the contract.
+   */
+  const activateBrandForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const { generatePrompts } = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (typeof generatePrompts !== 'boolean') {
+        return badRequest('generatePrompts is required and must be a boolean');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+
+      // Auth — same gate as Piece 1: membership + explicit PAID. PAID is stricter
+      // than the platform's any-tier "LLMO-enabled" bar; entitlements have no status
+      // column (getStatus() is an unbacked stub; revocation = row delete), so a PAID
+      // row is the "paying" signal. No separate admin requirement — mirrors Piece 1,
+      // which omits it so paying non-admin members aren't 403'd.
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      if (!await hasPaidLlmoEntitlement(context, organization)) {
+        return forbidden('A paid LLMO entitlement is required to activate a brand');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // brandId is UUID-validated by the shared param guard in index.js before the
+      // controller runs, so resolveBrandUuid's name-lookup branch is unreachable here —
+      // fetch directly. getBrandById org-scopes (organization_id + id) and returns null
+      // → 404 (the safety net even if that validation were bypassed), so no resolve is
+      // needed.
+      const brand = await getBrandById(spaceCatId, brandId, postgrestClient);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      // Do not resurrect a soft-deleted brand via activation (parity with the /status
+      // sibling, which guards the same with .neq('status', 'deleted')). Treat deleted
+      // as gone.
+      if (brand.status === 'deleted') {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+      const brandUuid = brand.id;
+
+      // Idempotent / one-shot: activating an already-active brand is a no-op. Return the
+      // current state without re-running updateBrand, prompt-gen, or the schedule — a
+      // genuine retry after a COMPLETED prompt-gen job would otherwise submit a dup
+      // (listJobs dedup only catches QUEUED/RUNNING). Activate is promote-only.
+      if (brand.status === 'active') {
+        return createResponse({
+          brandId: brandUuid,
+          status: 'active',
+          baseSiteId: brand.baseSiteId,
+        }, 200);
+      }
+
+      // Promote-only: only a pending brand can be activated. deleted → 404 and active →
+      // 200 no-op are handled above; reject any other state explicitly (e.g. a future
+      // suspended/draft) rather than silently activating it.
+      if (brand.status !== 'pending') {
+        return badRequest(`Cannot activate a brand in status '${brand.status}'`);
+      }
+
+      // 1) Resolve the brand's onboarded primary site — the prompt-gen base URL and
+      // the baseSiteId to anchor on. An already-sited brand carries baseSiteId (and
+      // usually baseUrl); a pending brand resolves from its stashed Semrush primary URL.
+      // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
+      // not a declared activation anchor, so guessing one would be wrong.
+      let { baseSiteId, baseUrl } = brand;
+      if (!hasText(baseSiteId)) {
+        const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
+        const site = hasText(primaryUrl)
+          ? await Site.findByBaseURL(composeBaseURL(primaryUrl))
+          : null;
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
+        baseSiteId = site.getId();
+        baseUrl = site.getBaseURL();
+      } else if (!hasText(baseUrl)) {
+        // baseSiteId is set but the base_site embed didn't carry a URL — re-look up the
+        // site by id so prompt-gen never submits with an empty base_url.
+        const site = await Site.findById(baseSiteId);
+        if (!site) {
+          return badRequest('Brand has no onboarded primary site');
+        }
+        baseUrl = site.getBaseURL();
+      }
+
+      // 2) Activate — set status=active + baseSiteId in a SINGLE atomic write.
+      // updateBrand supports promote-to-active directly: its status guard refuses only
+      // active→pending demotions (#2637, LLMO-5587), never a promotion, and the
+      // active-has-site invariant is satisfied because baseSiteId is set in the same
+      // patch. A brands_base_site_unique violation throws with status 409 (mapped by
+      // createErrorResponse).
+      const updated = await updateBrand({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        updates: { status: 'active', baseSiteId },
+        postgrestClient,
+        updatedBy,
+      });
+      if (!updated) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      // The brand is now active (committed above). Prompt generation and the
+      // brand-presence schedule are best-effort async side-effects — a DRS failure must
+      // NOT fail the activation. We run EVERYTHING after the commit in a guarded block
+      // (DRS client construction included): on error we degrade to 200 with the brand
+      // active (plus whatever ids succeeded) and alert ops with the real error so it's
+      // never lost (#4). Keeping DRS errors inside this block also means they never reach
+      // createErrorResponse, so raw upstream detail can't leak to the client (#5).
+      let promptGenerationJobId;
+      let scheduleId;
+      let sideEffectError;
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        const drsConfigured = drsClient.isConfigured();
+        // 3) Optional prompt generation (async). Best-effort dedup: reuse any in-flight
+        // brand-activation prompt-gen job for this site rather than submitting a dup.
+        // This listJobs → status check is NOT atomic (TOCTOU) — two truly-concurrent
+        // activations could both submit; acceptable since a human double-click sees the
+        // first as RUNNING, and the weekly schedule has real 409 dedup. Note the
+        // source='brand-activation' filter depends on the DRS source-filter deploy;
+        // until it lands, dedup widens to all base-url prompt-gen jobs for the site.
+        if (generatePrompts) {
+          if (drsConfigured) {
+            const inFlight = await drsClient.listJobs({
+              siteId: baseSiteId,
+              providerId: 'prompt_generation_base_url',
+              source: 'brand-activation',
+            });
+            const existing = (inFlight || []).find(
+              (job) => job.status === 'QUEUED' || job.status === 'RUNNING',
+            );
+            if (existing) {
+              promptGenerationJobId = existing.job_id;
+              log.info(`Reusing in-flight prompt-gen job ${existing.job_id} (brand ${brandUuid})`);
+            } else {
+              const region = Array.isArray(brand.region) ? brand.region[0] : undefined;
+              const job = await drsClient.submitPromptGenerationJob({
+                baseUrl,
+                brandName: brand.name,
+                // DRS defaults audience to "General Consumers" when absent; pass it
+                // explicitly to satisfy the required PromptGenerationParams type without
+                // changing behaviour.
+                audience: 'General Consumers',
+                siteId: baseSiteId,
+                imsOrgId: organization.getImsOrgId(),
+                ...(hasText(region) ? { region } : {}),
+                source: 'brand-activation',
+              });
+              promptGenerationJobId = job?.job_id;
+            }
+          } else {
+            log.warn('DRS client not configured; skipping prompt generation');
+          }
+        }
+
+        // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
+        // when prompts were generated now or the brand already has prompts (a promptless
+        // schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule POSTs and
+        // tolerates a 409 dedup.
+        let hasExistingPrompts = false;
+        if (!generatePrompts && drsConfigured) {
+          // Only worth computing when we could actually schedule — skip the DB roundtrip
+          // when DRS is unavailable (no schedule would be created regardless).
+          const stats = await getPromptStats({
+            organizationId: spaceCatId,
+            brandUuid,
+            postgrestClient,
+          });
+          hasExistingPrompts = (stats.branded + stats.unbranded) > 0;
+        }
+        if ((generatePrompts || hasExistingPrompts) && drsConfigured) {
+          const schedule = await drsClient.createBrandPresenceSchedule({
+            siteId: baseSiteId,
+            brandId: brandUuid,
+            orgId: spaceCatId,
+          });
+          scheduleId = schedule?.scheduleId;
+        }
+      } catch (error) {
+        sideEffectError = error;
+        log.error(
+          `Brand ${brandUuid} activated, but prompt-gen/schedule failed for org ${spaceCatId}:`,
+          error,
+        );
+      }
+
+      const responseBody = {
+        brandId: brandUuid,
+        status: 'active',
+        baseSiteId,
+        ...(promptGenerationJobId ? { promptGenerationJobId } : {}),
+        ...(scheduleId ? { scheduleId } : {}),
+      };
+
+      // The activation alert is also best-effort. postLlmoAlert already swallows its own
+      // Slack errors, but we wrap it defensively so an alert failure can never escape to
+      // the outer catch and turn an already-committed activation into a 5xx.
+      try {
+        if (sideEffectError) {
+          // Activation succeeded; only the async side-effects failed. Surface the real
+          // error to ops (the offending party) — the client still gets 200 (#4).
+          await postLlmoAlert(
+            `:warning: Brand activated, but prompt-gen/schedule failed — ${brand.name} `
+            + `(${brandUuid}) in org ${spaceCatId} [site=${baseSiteId}, `
+            + `generatePrompts=${generatePrompts}]: ${sideEffectError.message}`,
+            context,
+          );
+        } else {
+          await postLlmoAlert(
+            `:white_check_mark: Brand activated — ${brand.name} (${brandUuid}) in org ${spaceCatId} `
+            + `[site=${baseSiteId}, generatePrompts=${generatePrompts}, `
+            + `job=${promptGenerationJobId || 'none'}, schedule=${scheduleId || 'none'}]`,
+            context,
+          );
+        }
+      } catch (alertError) {
+        log.error(`Brand ${brandUuid} activated; activation alert failed:`, alertError);
+      }
+
+      return createResponse(responseBody, 200);
+    } catch (error) {
+      log.error(`Error activating brand ${brandId} for organization ${spaceCatId}:`, error);
+      // Guard the failure alert too: postLlmoAlert already swallows its own Slack errors,
+      // but we never want an alert failure on the error path to replace the intended
+      // status (e.g. a 409/400) with an unhandled-rejection 500.
+      try {
+        await postLlmoAlert(
+          `:x: Brand activation failed — brand ${brandId} in org ${spaceCatId}: ${error.message}`,
+          context,
+        );
+      } catch (alertError) {
+        log.error(`Failed to post activation-failure alert for brand ${brandId}:`, alertError);
+      }
       return createErrorResponse(error);
     }
   };
@@ -2116,6 +2445,7 @@ function BrandsController(ctx, log, env) {
     createBrandForOrg,
     updateBrandForOrg,
     deleteBrandForOrg,
+    activateBrandForOrg,
     transitionBrandStatusForOrg,
     listPromptsByBrand,
     getPromptByBrandAndId,

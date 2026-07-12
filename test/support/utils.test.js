@@ -15,6 +15,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import nock from 'nock';
+import esmock from 'esmock';
 
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { AUTHORING_TYPES, DELIVERY_TYPES } from '@adobe/spacecat-shared-utils';
@@ -1552,6 +1553,125 @@ describe('utils', () => {
       expect(() => getImsUserTokenStrict(context))
         .to.throw('IMS authentication required')
         .with.property('status', 401);
+    });
+
+    it('returns the bearer for a non-IMS caller when SERENITY_ALLOW_NON_IMS_AUTH is set (local/E2E escape hatch)', () => {
+      const context = { ...buildContext({ getType: () => 'jwt' }), env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } };
+      expect(getImsUserTokenStrict(context)).to.equal('ims-user-token');
+    });
+
+    it('still requires an Authorization header even with the escape hatch set', () => {
+      const context = { attributes: { authInfo: {} }, pathInfo: { headers: {} }, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } };
+      expect(() => getImsUserTokenStrict(context)).to.throw('Missing Authorization header');
+    });
+
+    it('hard-disables the escape hatch in production (AWS_ENV=prod) — a non-IMS caller 401s', () => {
+      const context = {
+        ...buildContext({ getType: () => 'jwt' }),
+        env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', AWS_ENV: 'prod' },
+      };
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+
+    it('hard-disables the escape hatch in production (ENV=prod) — a non-IMS caller 401s', () => {
+      const context = {
+        ...buildContext({ getType: () => 'jwt' }),
+        env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', ENV: 'prod' },
+      };
+      expect(() => getImsUserTokenStrict(context))
+        .to.throw('IMS authentication required')
+        .with.property('status', 401);
+    });
+  });
+
+  describe('resolveSemrushImsToken', () => {
+    let resolveSemrushImsToken;
+    let exchangeTokenStub;
+
+    beforeEach(async () => {
+      exchangeTokenStub = sinon.stub();
+      ({ resolveSemrushImsToken } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            createFrom: () => ({ exchangeToken: exchangeTokenStub }),
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      }));
+    });
+
+    function buildContext(promiseTokenHeader) {
+      return {
+        pathInfo: {
+          headers: promiseTokenHeader ? { 'x-promise-token': promiseTokenHeader } : {},
+        },
+      };
+    }
+
+    it('exchanges the promise token for an IMS access token when present', async () => {
+      exchangeTokenStub.resolves({ access_token: 'exchanged-token' });
+      const context = buildContext('raw-promise-token');
+
+      const token = await resolveSemrushImsToken(context, { error: sinon.stub() }, 'label');
+
+      expect(token).to.equal('exchanged-token');
+      expect(exchangeTokenStub).to.have.been.calledWith('raw-promise-token', false);
+    });
+
+    it('falls back to the raw header value when decodeURIComponent throws on malformed input', async () => {
+      exchangeTokenStub.resolves({ access_token: 'exchanged-token' });
+      const context = buildContext('%E0%A4%A');
+
+      const token = await resolveSemrushImsToken(context, { error: sinon.stub() }, 'label');
+
+      expect(token).to.equal('exchanged-token');
+      expect(exchangeTokenStub).to.have.been.calledWith('%E0%A4%A', false);
+    });
+
+    it('throws a 401 and logs when the promise token exchange fails', async () => {
+      exchangeTokenStub.rejects(new Error('boom'));
+      const log = { error: sinon.stub() };
+      const context = buildContext('raw-promise-token');
+
+      await expect(resolveSemrushImsToken(context, log, 'mylabel'))
+        .to.be.rejectedWith('Invalid or expired promise token')
+        .that.eventually.has.property('status', 401);
+      expect(log.error).to.have.been.calledWith(
+        'mylabel: promise token exchange failed',
+        { error: 'boom' },
+      );
+    });
+
+    it('does not crash when log is absent and the promise token exchange fails', async () => {
+      exchangeTokenStub.rejects(new Error('boom'));
+      const context = buildContext('raw-promise-token');
+
+      await expect(resolveSemrushImsToken(context, null, 'mylabel'))
+        .to.be.rejectedWith('Invalid or expired promise token');
+    });
+
+    it('calls the fallback when no promise-token header is present', async () => {
+      const fallback = sinon.stub().returns('fallback-token');
+      const context = buildContext(null);
+
+      const token = await resolveSemrushImsToken(context, { error: sinon.stub() }, 'label', fallback);
+
+      expect(token).to.equal('fallback-token');
+      expect(fallback).to.have.been.calledWith(context);
+      expect(exchangeTokenStub).to.not.have.been.called;
+    });
+
+    it('defaults to getImsUserTokenStrict when no fallback is provided and no promise token is present', async () => {
+      const context = {
+        pathInfo: { headers: { authorization: 'Bearer ims-token' } },
+        attributes: { authInfo: { getType: () => 'ims' } },
+      };
+
+      const token = await resolveSemrushImsToken(context, { error: sinon.stub() }, 'label');
+
+      expect(token).to.equal('ims-token');
     });
   });
 });

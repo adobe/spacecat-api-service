@@ -3822,9 +3822,18 @@ Brand:
       readOnly: true
     semrushWorkspaceId:
       description: >-
-        Read-only. The brand's own Semrush sub-workspace id (dual-mode). Null
-        for brands still in flat mode (no sub-workspace minted yet). Used to
-        scope per-brand Semrush views to the sub-workspace.
+        Read-only. DEPRECATED — kept for backward compatibility only, mirrored
+        from semrushSubWorkspaceId (below). Prefer semrushSubWorkspaceId; this
+        field will be removed once every direct consumer has migrated.
+      type: [string, 'null']
+      readOnly: true
+      deprecated: true
+    semrushSubWorkspaceId:
+      description: >-
+        Read-only. The brand's own Semrush sub-workspace id (dual-mode) — the
+        canonical, correctly-named field. Null for brands still in flat mode
+        (no sub-workspace minted yet). Used to scope per-brand Semrush views
+        to the sub-workspace.
       type: [string, 'null']
       readOnly: true
     pendingSemrushProvisioning:
@@ -7877,6 +7886,64 @@ V2BrandListResponse:
       items:
         $ref: '#/V2Brand'
 
+V2BrandActivateInput:
+  type: object
+  description: |
+    Request body for activating a brand. Promotes an existing pending brand to
+    active (sets baseSiteId from the brand's onboarded primary site and flips
+    status to active), optionally generates AI prompts, and ensures a
+    brand-presence schedule.
+  required:
+    - generatePrompts
+  properties:
+    generatePrompts:
+      type: boolean
+      description: |
+        When `true`, asynchronous AI prompt generation is triggered for the
+        brand and the response includes a `promptGenerationJobId`.
+  example:
+    generatePrompts: true
+
+V2BrandActivateResponse:
+  type: object
+  description: |
+    Result of activating a brand: the brand is now active with its base site
+    resolved. Includes a `promptGenerationJobId` when prompt generation was
+    triggered and a `scheduleId` when a brand-presence schedule was ensured.
+  required:
+    - brandId
+    - status
+    - baseSiteId
+  properties:
+    brandId:
+      type: string
+      format: uuid
+      description: Brand UUID
+    status:
+      type: string
+      enum: [active]
+      description: Brand status after activation (always `active`)
+    baseSiteId:
+      type: string
+      format: uuid
+      description: ID of the brand's onboarded primary site, now set as its base site
+    promptGenerationJobId:
+      type: string
+      description: |
+        Identifier of the asynchronous AI prompt-generation job. Present only
+        when `generatePrompts` was `true`.
+    scheduleId:
+      type: string
+      description: |
+        Identifier of the brand-presence schedule that was created or ensured.
+        Present only when a schedule was created or already existed.
+  example:
+    brandId: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    status: 'active'
+    baseSiteId: 'b2c3d4e5-6789-01ab-cdef-2345678901ab'
+    promptGenerationJobId: 'c3d4e5f6-7890-12ab-cdef-3456789012ab'
+    scheduleId: 'd4e5f6a7-8901-23ab-cdef-4567890123ab'
+
 V2Category:
   type: object
   description: A category in the normalized categories table
@@ -9011,6 +9078,14 @@ UrlInspectorStats:
 UrlInspectorOwnedUrlRow:
   type: object
   properties:
+    urlId:
+      type: string
+      description: >-
+        Real source_urls.id for this URL, used by the URL Details "Prompt
+        Analysis" drilldown to key rpc_url_inspector_url_prompts on a genuine
+        uuid (LLMO-5992). Empty string when an older RPC build has not yet
+        shipped the column.
+      example: '44444444-4444-4444-4444-444444444444'
     url:
       type: string
       format: uri
@@ -10880,6 +10955,24 @@ SerenityPrompt:
         Tag names are assumed unique per Semrush project; if duplicates exist,
         only the last entry is retained.
       example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
+    tags:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the tag NAMES this prompt was created/updated with via the
+        legacy name-based write path (`SerenityPromptInput.tags` /
+        `SerenityUpdatePromptRequest.tags`). Only present on a create/update
+        response (`SerenityCreatePromptsResponse.created`, the
+        `updateSerenityPrompt` 200); absent on `GET /serenity/prompts` list
+        items, which carry `tagMap` instead.
+    tagIds:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the upstream tag ids this prompt was created/updated with via
+        the id-based write path (serenity-docs#24). Only present when the
+        request used `tagIds` rather than `tags` — mutually exclusive with a
+        non-empty `tags` on the same response.
 
 SerenityPromptListResponse:
   type: object
@@ -10894,7 +10987,12 @@ SerenityPromptListResponse:
 
 SerenityPromptInput:
   type: object
-  description: One row in a bulk-create prompts request.
+  description: |
+    One row in a bulk-create prompts request. `tags` (names, via the legacy
+    name-based upstream write path) and `tagIds` (upstream tag ids from a
+    prior tags list/create, via the id-based write path — serenity-docs#24)
+    are mutually exclusive: supply at most one. `tagIds`, when present, must
+    be non-empty.
   required: [text, geoTargetId, languageCode]
   properties:
     text: { type: string }
@@ -10902,6 +11000,12 @@ SerenityPromptInput:
       type: array
       items: { type: string }
       default: []
+      description: Tag NAMES. Mutually exclusive with tagIds.
+    tagIds:
+      type: array
+      items: { type: string }
+      minItems: 1
+      description: Upstream tag ids. Mutually exclusive with tags.
     geoTargetId:
       type: integer
       minimum: 1
@@ -10951,11 +11055,13 @@ SerenityUpdatePromptRequest:
   description: |
     Replace the prompt's text and tags. Carries the owning slice in
     `geoTargetId` + `languageCode` so the server can resolve the upstream
-    project without scanning. All four fields are required — the upstream
-    provider's API has no in-place update or GET-by-id, so the server runs
-    DELETE-old + POST-new and treats the body as the full next state.
-    Pass `tags: []` to clear tags.
-  required: [geoTargetId, languageCode, text, tags]
+    project without scanning. `geoTargetId`, `languageCode`, and `text` are
+    always required — the upstream provider's API has no in-place update or
+    GET-by-id, so the server runs DELETE-old + POST-new and treats the body
+    as the full next state. Exactly one of `tags` (pass `[]` to clear) or
+    `tagIds` (non-empty, id-based write path — serenity-docs#24) must also be
+    present; they are mutually exclusive.
+  required: [geoTargetId, languageCode, text]
   properties:
     geoTargetId:
       type: integer
@@ -10967,6 +11073,12 @@ SerenityUpdatePromptRequest:
     tags:
       type: array
       items: { type: string }
+      description: Tag NAMES. Mutually exclusive with tagIds.
+    tagIds:
+      type: array
+      items: { type: string }
+      minItems: 1
+      description: Upstream tag ids. Mutually exclusive with tags.
 
 SerenityBulkDeletePromptsRequest:
   type: object
@@ -11255,6 +11367,27 @@ SerenityTag:
   properties:
     id: { type: string }
     name: { type: string }
+    parentId:
+      type: [string, 'null']
+      description: |
+        Parent tag id when this tag is a nested child, else null. Only populated
+        by the nested TREE read (GET /serenity/tags?parentId=...); absent on the
+        flat, prompt-derived listing.
+    childrenCount:
+      type: integer
+      description: |
+        Number of direct children under this tag. Populated by the TREE read
+        (typically non-zero only on root categories).
+    path:
+      type: [array, 'null']
+      description: |
+        Ancestor breadcrumb (root → ... ) for a nested child, populated by the
+        TREE read when listing a parent's children; null for a root/flat tag.
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
 
 SerenityTagListResponse:
   type: object
@@ -11827,6 +11960,64 @@ ReferralTrafficWeeks:
   required:
     - weeks
 
+SuggestionReview:
+  type: object
+  description: |
+    A human-review feedback event for a suggestion (Learning Agent feedback loop,
+    SITES-43974). Composed at read time from the feedback_event store. Raw patch
+    fields are omitted unless explicitly requested via ?include=reviews,patches.
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-supplied idempotency key for the review.
+    eventTime:
+      type: string
+      format: date-time
+      description: When the review action happened (server-stamped).
+    source:
+      type: string
+      enum: [backoffice, aso_ui, aemy_pr]
+      description: Capture surface (derived server-side from the route).
+    verdict:
+      type: string
+      enum: [up, down]
+      description: The reviewer's verdict.
+    signal:
+      type: string
+      enum: [positive, negative]
+      description: Persisted training label, derived from the verdict.
+    reviewerId:
+      type: string
+      description: >-
+        Server-derived, opaque IMS user identifier (e.g. <id>@<authSrc>) — NOT a
+        mailbox. Stable per user (reviewer-continuity signal). Null when not set.
+    detailMarkdown:
+      type: string
+      description: Sanitised ESE rationale. Null when not provided.
+    rejectionCategory:
+      type: string
+      enum: [product_bug, bad_recommendation, other]
+      description: Optional reject category. Null when not set.
+    stateTransition:
+      type: string
+      description: The accompanying suggestion state transition. Null when not set.
+    tier:
+      type: string
+      enum: [paid, free]
+    previousFix:
+      type: object
+      description: Patch snapshot at review time (only when ?include=...,patches).
+    editedFix:
+      type: object
+      description: ESE-edited patch (only when ?include=...,patches).
+  required:
+    - eventId
+    - eventTime
+    - source
+    - verdict
+    - signal
+    - tier
 StateAccessMapping:
   type: object
   description: |
@@ -11975,6 +12166,92 @@ UserCapabilitiesResponse:
         items:
           type: string
           enum: [jwt, 'state:user', 'state:org']
+
+FacsAuditEvent:
+  type: object
+  description: |
+    One row from the `facs_access_mapping_audit_events` log — a single
+    state-mapping operation (create / patch / delete / revoke) with its
+    outcome. Shape is intentionally flat so the admin UI can render whichever
+    fields it needs. Fields describing the affected binding (`mappingId`,
+    `binding*`, `resource*`, `grantedCapabilities`, `revokeReason`) are null
+    for operations that did not touch a specific row.
+  required:
+    - id
+    - createdAt
+    - imsOrgId
+    - actorId
+    - operation
+    - outcome
+  properties:
+    id: { $ref: '#/Id' }
+    createdAt: { $ref: '#/DateTime' }
+    requestId:
+      type: [string, 'null']
+      description: Correlates the audit event with the originating request.
+    imsOrgId:
+      type: string
+      example: ABC123@AdobeOrg
+    actorId:
+      type: string
+      description: IMS ident of the caller who performed the operation.
+      example: admin@AdobeID
+    operation:
+      type: string
+      description: The attempted state-mapping operation.
+      example: create
+    outcome:
+      type: string
+      description: Whether the operation was allowed and applied, or denied.
+      example: allowed
+    denialReason:
+      type: [string, 'null']
+      description: Populated when `outcome` is a denial.
+    statusCode:
+      type: [integer, 'null']
+      description: HTTP status the operation returned.
+      example: 201
+    errorMessage:
+      type: [string, 'null']
+    mappingId:
+      type: [string, 'null']
+      description: ID of the affected `facs_access_mappings` row, when applicable.
+    bindingSubjectType:
+      oneOf:
+        - { $ref: '#/StateAccessMappingSubjectType' }
+        - type: 'null'
+    bindingSubjectId:
+      type: [string, 'null']
+      example: someone@AdobeID
+    resourceType:
+      oneOf:
+        - { $ref: '#/StateAccessMappingResourceType' }
+        - type: 'null'
+    resourceId:
+      type: [string, 'null']
+      example: '11111111-2222-4333-9444-555555555555'
+    product:
+      type: [string, 'null']
+      enum: [LLMO, ASO, ACO, null]
+      example: LLMO
+    grantedCapabilities:
+      oneOf:
+        - type: array
+          items: { $ref: '#/StateGrantedCapability' }
+        - type: 'null'
+    revokeReason:
+      type: [string, 'null']
+
+FacsAuditLogsResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/FacsAuditEvent' }
+    cursor:
+      type: [string, 'null']
+      description: Opaque cursor for fetching the next page, or null when the result is the final page.
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
 

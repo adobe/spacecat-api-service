@@ -335,6 +335,37 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * POST /v2/.../aio/prompts — bulk-creates prompts by ID-BASED tag
+     * references (as opposed to {@link createTaggedPrompts}'s name-keyed
+     * shape). Body: { items: [text, ...], tag_ids: [id, ...] } — ONE shared
+     * `tag_ids` array applies to every text in `items` (unlike the name-based
+     * endpoint, there is no per-prompt tag list on this call).
+     *
+     * Response is a paginated LIST WRAPPER — `{ page, total, items: [{id,
+     * name}, ...], existing_count }` — NOT the vendored public swagger's
+     * single `model.StringIDName` (a known spec/live drift, verified live
+     * 2026-07-02). ATOMIC on an unresolvable tag id: live 500s and creates
+     * NOTHING, so every id in `tagIds` must already be a known-good upstream
+     * tag id (resolved/created by the caller first, never guessed).
+     * Text-dedupe mirrors `createTaggedPrompts`: a text already present is
+     * folded into `existing_count`, not re-created.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} items - prompt texts.
+     * @param {string[]} tagIds - upstream tag ids attached to EVERY item.
+     */
+    async createPromptsByIds(semrushWorkspaceId, projectId, items, tagIds) {
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items, tag_ids: tagIds },
+        },
+      ));
+    },
+
+    /**
      * DELETE /v2/.../aio/prompts — deletes prompts by their Semrush ids in
      * this project. Body shape: { ids: [...] }.
      */
@@ -398,17 +429,121 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/aio/tags — creates project-level
-     * AIO tags (the standard taxonomy: intent/source/type) independent of any
-     * prompt. Body shape: { names: string[] } (model.TreeNodeListRequest; flat —
-     * `parent_id` omitted). Tags already attached to prompts are reused by name,
-     * so pre-creating a tag that a later prompt also carries does not duplicate.
+     * AIO tags (the standard taxonomy: intent/source/type, plus `category:`
+     * values) independent of any prompt. Body shape: { names: string[],
+     * parent_id?: string } (model.TreeNodeListRequest). Tags already attached to
+     * prompts are reused by name, so pre-creating a tag that a later prompt also
+     * carries does not duplicate.
+     *
+     * NESTING (1-level category tree): pass `parentId` to create the names as
+     * CHILDREN of that upstream tag id — a single call, no separate re-parent
+     * needed (verified live 2026-07-01 against adobe-hackathon.semrush.com: the
+     * child comes back with `parent_id` set and lists under the parent). The one
+     * `parent_id` applies to every name in the batch. Omit for a flat/root tag.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} names
+     * @param {object} [opts]
+     * @param {string} [opts.parentId] - upstream tag id to nest the names under.
      */
-    async createProjectTags(semrushWorkspaceId, projectId, names) {
+    async createProjectTags(semrushWorkspaceId, projectId, names, { parentId } = {}) {
       return unwrap('POST', await projects.POST(
         '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
-          body: { names },
+          // Only send parent_id when nesting — an empty string is a no-op
+          // upstream and needlessly widens the flat-create wire. (typeof narrows
+          // `string | undefined` → `string`; hasText does not, per ADR-005.)
+          body: typeof parentId === 'string' && parentId !== ''
+            ? { names, parent_id: parentId }
+            : { names },
+        },
+      ));
+    },
+
+    /**
+     * GET /v2/workspaces/{ws}/projects/{pid}/aio/tags — lists the project's
+     * STANDALONE AIO tags (the ones `createProjectTags` registers), independent of
+     * whether any prompt carries them. This is the only read that surfaces a tag
+     * with no carrying prompt — e.g. a freshly-created, still-empty `category:<NAME>`
+     * — so the Categories surface can round-trip it. `parent_id` + `search` are
+     * required by the upstream contract; pass empty strings to list all.
+     *
+     * TREE-AWARE: `parentId` filters the level returned — '' (default) lists the
+     * ROOTS (each carrying `children_count`), a non-empty id lists that tag's
+     * CHILDREN (each carrying a `path[]` breadcrumb up to its root). `draft=true`
+     * reads the DRAFT view so a just-created, still-unpublished category is
+     * visible (the live view hides it until the project is published — verified
+     * live 2026-07-01).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {object} [opts]
+     * @param {string} [opts.parentId] - level to list ('' = roots, id = children).
+     * @param {string} [opts.search]
+     * @param {number} [opts.page]
+     * @param {number} [opts.limit]
+     * @param {boolean} [opts.draft] - read the draft view (see unpublished tags).
+     */
+    async listProjectTags(
+      semrushWorkspaceId,
+      projectId,
+      {
+        parentId = '', search = '', page = 1, limit = 100, draft,
+      } = {},
+    ) {
+      return unwrap('GET', await projects.GET(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: {
+              parent_id: parentId, search, page, limit, ...(draft ? { draft: true } : {}),
+            },
+          },
+        },
+      ));
+    },
+
+    /**
+     * PATCH /v2/workspaces/{ws}/projects/{pid}/aio/tags/{tag_id} — renames and/or
+     * re-parents a single tag in place (model.TreeNodeRequest body). Returns the
+     * updated tag (200); an unknown `tagId` returns 404 `{message:'not found'}`
+     * (both verified live 2026-07-01).
+     *
+     * `name` is required by the upstream contract. `parentId` has three
+     * meanings, all live-verified 2026-07-02 (serenity-docs#24 §3.1 gate 1):
+     * a non-empty string RE-PARENTS; explicit `null` PROMOTES a child to root
+     * (sent upstream as literal JSON `null`); `undefined` (or an empty string)
+     * OMITS `parent_id` from the body entirely, a no-op that preserves the
+     * current parent. Explicit `null` and omission are NOT interchangeable —
+     * only the former promotes.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} tagId - upstream tag id to update.
+     * @param {object} update
+     * @param {string} update.name - the tag's (possibly renamed) full name.
+     * @param {string | null} [update.parentId] - re-parent target, `null` to
+     *   promote to root, or omit to leave the current parent unchanged.
+     */
+    async updateProjectTag(semrushWorkspaceId, projectId, tagId, { name, parentId }) {
+      const body = { name };
+      if (parentId === null) {
+        body.parent_id = null;
+      } else if (typeof parentId === 'string' && parentId !== '') {
+        body.parent_id = parentId;
+      }
+      // parentId undefined or '' → parent_id omitted from body (no-op, preserves
+      // the current parent).
+      return unwrap('PATCH', await projects.PATCH(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags/{tag_id}',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId, tag_id: tagId },
+          },
+          body,
         },
       ));
     },
@@ -502,6 +637,23 @@ export function createSerenityTransport({ env, imsToken }) {
       return unwrap('GET', await projects.GET(
         '/v1/ai_models',
         { params: { query: { page, limit } } },
+      ));
+    },
+
+    /**
+     * GET /v1/url/resolve — canonicalize a raw URL to the form Semrush stores as
+     * a brand URL. Returns `{ domain, primary_url, is_valid }`: `primary_url`
+     * strips the scheme and a leading `www.` (subdomain + path preserved),
+     * `domain` is the registrable apex. Unresolvable/garbage input comes back
+     * `{ domain: '', primary_url: '', is_valid: false }` at HTTP 200 (NOT an
+     * error), so callers MUST check `is_valid` and never write the empty value.
+     * Used to normalize brand URLs before writing them so the value matches the
+     * canonical benchmark Semrush already holds (avoids www-vs-apex duplicates).
+     */
+    async resolveUrl(primaryUrl) {
+      return unwrap('GET', await projects.GET(
+        '/v1/url/resolve',
+        { params: { query: { primary_url: primaryUrl } } },
       ));
     },
 

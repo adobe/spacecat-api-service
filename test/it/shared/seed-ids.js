@@ -47,6 +47,16 @@ export const MARKET_SITE_1_BASE_URL = 'https://semrush-market.example.fr';
 
 export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
 
+// ── Brand Presence (topic-prompts intent enrichment) ──
+// A prompt row carrying an `intent`, plus a brand_presence_executions row that
+// references it, so the topic-prompts endpoint can be asserted to enrich
+// `userIntent` from the prompts table. See seed-data/prompts.js +
+// seed-data/brand-presence-executions.js.
+export const BP_PROMPT_1_ID = 'b9111111-1111-4111-b111-111111111111';
+export const BP_EXECUTION_1_ID = 'be111111-1111-4111-b111-111111111111';
+export const BP_TOPIC_1_NAME = 'IntentITTopic';
+export const BP_PROMPT_1_INTENT = 'informational';
+
 // Serenity Semrush vendor-mock seed alignment. BRAND_1 is in subworkspace mode
 // (brands.semrush_workspace_id set); pointing it at the workspace the Project
 // Engine / User Manager mocks seed (`MOCK_SEED=workspace-with-data` /
@@ -84,6 +94,7 @@ export const AUDIT_4_AUDITED_AT = '2025-01-17T10:00:00.000Z'; // SITE_3 cwv (den
 export const OPPTY_1_ID = 'aa111111-1111-4111-b111-111111111111'; // SITE_1, code-suggestions, NEW
 export const OPPTY_2_ID = 'aa222222-2222-4222-a222-222222222222'; // SITE_1, broken-backlinks, RESOLVED
 export const OPPTY_3_ID = 'aa333333-3333-4333-b333-333333333333'; // SITE_3 (denied), code-suggestions, NEW
+export const OPPTY_4_ID = 'aa444444-4444-4444-a444-444444444444'; // SITE_1, structured-data, IN_PROGRESS — second oppty with a fix, for site-wide aggregation
 
 // ── Suggestions (all under OPPTY_1) ──
 
@@ -98,6 +109,7 @@ export const FIX_1_EXECUTED_AT = '2025-01-20T12:00:00.000Z'; // deterministic da
 export const FIX_1_CREATED_DATE = '2025-01-20'; // fixEntityCreatedDate derived from executedAt
 export const FIX_2_ID = 'cc222222-2222-4222-a222-222222222222'; // CODE_CHANGE, DEPLOYED
 export const FIX_3_ID = 'cc333333-3333-4333-b333-333333333333'; // CODE_CHANGE, DEPLOYED — no junction entry
+export const FIX_4_ID = 'cc444444-4444-4444-a444-444444444444'; // under OPPTY_4, CODE_CHANGE, FAILED
 
 // ── Experiments (under SITE_1) ──
 
@@ -197,6 +209,15 @@ export const ORG_3_IMS_ORG_IDENT = 'GGGGGGGGHHHHHHHHIIIIIIII';
 
 export const SITE_4_ID = '44400000-4444-4444-b444-000000000444';
 export const SITE_4_BASE_URL = 'https://site4-delegate.example.com';
+
+// ── Activate-brand IT fixtures (ORG_3, PAID) ──
+// Two pending brands for the promote-path IT (test/it/shared/tests/
+// activate-brand-for-org.js), both tied to the existing ORG_3 site SITE_4 (reused
+// so the fixtures don't change the global site counts other ITs assert on): one
+// anchored brand that promotes to active, and one unanchored brand that resolves
+// to SITE_4 and hits the brands_base_site_unique 409.
+export const ACTIVATE_PENDING_BRAND_ID = 'ac000000-b000-4000-8000-000000000001';
+export const ACTIVATE_CONFLICT_BRAND_ID = 'ac000000-b000-4000-8000-000000000002';
 
 // ── ENTITLEMENT_3 (LLMO, PAID, ORG_3) ──
 

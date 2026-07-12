@@ -1870,7 +1870,7 @@ describe('PlgOnboardingController - update', function () {
     const waitlistedRecord = createMockOnboarding({
       status: 'WAITLISTED',
       domain: 'qa.example.com',
-      waitlistReason: 'Domain qa.example.com appears to be a non-production domain (contains qa, stage, or dev subdomain).',
+      waitlistReason: 'Domain qa.example.com appears to be a non-production domain (contains qa, stage, dev, author, or publish subdomain, or is an hlx/AEM delivery URL).',
     });
     const rerunRecord = createMockOnboarding({
       status: 'ONBOARDED',

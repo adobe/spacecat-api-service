@@ -29,6 +29,9 @@ import {
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 
 /**
  * Projects controller. Provides methods to create, read, update and delete projects.
@@ -51,7 +54,7 @@ function ProjectsController(ctx, env) {
     throw new Error('Environment object required');
   }
 
-  const { Project, Site } = dataAccess;
+  const { Project, Site, Organization } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
@@ -232,6 +235,30 @@ function ProjectsController(ctx, env) {
     }
 
     const sites = await Site.allByProjectId(projectId);
+
+    // Cross-product bypass: only filter when the current product ReBAC-scopes
+    // `site` (ASO). Under LLMO, `site` is not a ReBAC resource, so skip the
+    // filter and return the project's full site list.
+    const facs = context.attributes?.facs;
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
+      const unavailable = requirePostgrestForFacsMappings(context);
+      if (unavailable) {
+        return unavailable;
+      }
+      const org = await Organization.findById(project.getOrganizationId());
+      const viewable = await listViewableResourceIds(
+        context.dataAccess.services.postgrestClient,
+        {
+          imsOrgId: org.getImsOrgId(),
+          product: facs.product,
+          resourceType: 'site',
+          subjectId: facs.subjectId,
+        },
+      );
+      return ok(sites.filter((s) => viewable.has(s.getId())).map((s) => SiteDto.toJSON(s)));
+    }
 
     return ok(sites.map((site) => SiteDto.toJSON(site)));
   };
