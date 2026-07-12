@@ -1409,10 +1409,10 @@ function TaskManagementController(context) {
    * numeric ID, not the project key.
    */
   async function listIssueTypes(requestContext) {
-    const { params, pathInfo } = requestContext;
+    const { params } = requestContext;
     const { organizationId, connectionId } = params;
-    const projectId = new URLSearchParams(pathInfo?.suffix?.split('?')[1] ?? '').get('projectId')
-      ?? requestContext.data?.projectId;
+    const rawQueryString = requestContext.invocation?.event?.rawQueryString;
+    const projectId = new URLSearchParams(rawQueryString ?? '').get('projectId');
 
     if (!isValidUUID(organizationId)) {
       return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);

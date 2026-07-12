@@ -3343,7 +3343,7 @@ describe('TaskManagementController', () => {
     function makeReqCtx(overrides = {}) {
       return {
         params: { organizationId: ORG_ID, connectionId: CONN_ID, ...(overrides.params ?? {}) },
-        pathInfo: { suffix: `?projectId=${PROJECT_ID}`, ...(overrides.pathInfo ?? {}) },
+        invocation: { event: { rawQueryString: `projectId=${PROJECT_ID}`, ...(overrides.invocation?.event ?? {}) } },
       };
     }
 
@@ -3361,7 +3361,7 @@ describe('TaskManagementController', () => {
 
     it('returns 400 when projectId is missing', async () => {
       const { listIssueTypes } = TaskManagementController(makeContext());
-      const res = await listIssueTypes(makeReqCtx({ pathInfo: { suffix: '' } }));
+      const res = await listIssueTypes(makeReqCtx({ invocation: { event: { rawQueryString: '' } } }));
       expect(res.status).to.equal(400);
     });
 
