@@ -576,7 +576,7 @@ function TaskManagementController(context) {
     }
     if (mode === TICKET_MODE_GROUPED && suggestionIds.length === 0) {
       return createResponse(
-        { message: "mode 'grouped' requires at least one suggestionId" },
+        { message: "Mode 'grouped' requires at least one suggestionId" },
         STATUS_BAD_REQUEST,
       );
     }
@@ -602,7 +602,7 @@ function TaskManagementController(context) {
     const attachments = Array.isArray(data.attachments) ? data.attachments : [];
     if (attachments.length > 1) {
       return createResponse(
-        { message: 'attachments may contain at most 1 item per request' },
+        { message: 'Attachments may contain at most 1 item per request' },
         STATUS_BAD_REQUEST,
       );
     }
@@ -619,7 +619,7 @@ function TaskManagementController(context) {
       }
       const decoded = Buffer.from(att.content, 'base64');
       if (decoded.length === 0) {
-        return createResponse({ message: 'attachment content must not be empty' }, STATUS_BAD_REQUEST);
+        return createResponse({ message: 'Attachment content must not be empty' }, STATUS_BAD_REQUEST);
       }
       if (decoded.length > ATTACHMENT_MAX_BYTES) {
         return createResponse(
