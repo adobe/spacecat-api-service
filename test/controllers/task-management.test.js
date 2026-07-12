@@ -2283,10 +2283,11 @@ describe('TaskManagementController', () => {
     });
 
     // ── Branch 10b: markRequiresReauth rejects in individual batch mode ──────────
-    // The controller awaits markRequiresReauth() directly inside the batch loop
-    // with no surrounding try/catch — a rejection propagates out of createTicket().
-    // This test documents that behaviour (the outer promise rejects).
-    it('individual batch: createTicket rejects when markRequiresReauth throws', async () => {
+    // markRequiresReauth() failure is swallowed via .catch() — the batch still
+    // short-circuits and returns 207 with connection_reauth_required for all items.
+    // Uses 2 suggestions to exercise the batch loop (length > 1 required).
+    it('individual batch: returns 207 when markRequiresReauth throws (DB error swallowed)', async () => {
+      const sid2 = 'dddddddd-eeee-ffff-aaaa-bbbbbbbbbbbc';
       const conn = makeConnection({
         markRequiresReauth: sinon.stub().rejects(new Error('DB down')),
       });
@@ -2314,24 +2315,25 @@ describe('TaskManagementController', () => {
       })).default;
 
       const { createTicket } = Ctrl(ctx);
-      // markRequiresReauth is awaited without a surrounding try/catch in the batch
-      // loop — the rejection propagates out of createTicket entirely.
-      let thrown;
-      try {
-        await createTicket(makeReqCtx({
-          data: {
-            summary: 'Reauth reject',
-            projectKey: 'PROJ',
-            connectionId: CONN_ID,
-            suggestionIds: [SUGGESTION_ID],
-            opportunityId: OPPORTUNITY_ID,
-          },
-        }));
-      } catch (err) {
-        thrown = err;
-      }
-      expect(thrown).to.be.instanceOf(Error);
-      expect(thrown.message).to.equal('DB down');
+      // markRequiresReauth rejection is caught via .catch() — createTicket resolves normally.
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Reauth reject',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          suggestionIds: [SUGGESTION_ID, sid2],
+          opportunityId: OPPORTUNITY_ID,
+        },
+      }));
+      expect(res.status).to.equal(207);
+      const body = await res.json();
+      expect(body.results).to.have.lengthOf(2);
+      body.results.forEach((r) => {
+        expect(r.status).to.equal(409);
+        expect(r.error).to.equal('connection_reauth_required');
+      });
+      // markRequiresReauth was attempted once (for first suggestion) and failed silently
+      expect(conn.markRequiresReauth).to.have.been.calledOnce;
     });
 
     it('individual batch: short-circuits remaining suggestions after grant revocation', async () => {
