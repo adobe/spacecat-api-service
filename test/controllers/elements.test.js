@@ -27,7 +27,7 @@ const SUB_WORKSPACE_ID = 'sub-ws-uuid-456';
 const IMS_TOKEN = 'test-ims-token';
 const ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' };
 
-const BRANDS_RESULT = [{ id: null, label: 'Adobe', spacecat_brand_id: 'brand-1' }];
+const BRANDS_RESULT = [{ id: 'Adobe', label: 'Adobe', spacecat_brand_id: 'brand-1' }];
 const MARKETS_RESULT = [{ id: 'US', label: 'US-en', semrush_project_id: 'proj-1' }];
 const URL_INSPECTOR_RESULT = {
   brands: BRANDS_RESULT,

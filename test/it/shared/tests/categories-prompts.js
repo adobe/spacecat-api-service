@@ -230,6 +230,50 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
       });
     });
 
+    describe('Prompt-list source filter narrows by exact source', () => {
+      before(() => resetData());
+
+      it('returns only prompts with the requested source, and 0 for an unknown source', async () => {
+        const http = getHttpClient();
+
+        // Two gsc-sourced prompts and one config-sourced prompt.
+        const created = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+          [
+            { prompt: 'First GSC prompt', source: 'gsc' },
+            { prompt: 'Second GSC prompt', source: 'gsc' },
+            { prompt: 'A config prompt', source: 'config' },
+          ],
+        );
+        expect(created.status).to.equal(201);
+        expect(created.body.created).to.equal(3);
+
+        // source=gsc returns only the two gsc rows.
+        const filtered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?source=gsc`,
+        );
+        expect(filtered.status).to.equal(200);
+        expect(filtered.body.total).to.equal(2);
+        expect(filtered.body.items).to.have.lengthOf(2);
+        expect(filtered.body.items.every((p) => p.source === 'gsc')).to.equal(true);
+
+        // No filter returns all three — proving the filter narrowed the set.
+        const unfiltered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+        );
+        expect(unfiltered.status).to.equal(200);
+        expect(unfiltered.body.total).to.equal(3);
+
+        // Fail-loud guard: an unknown source must return 0, proving the param is
+        // honored and not silently ignored (a two-stage-deploy inflation risk).
+        const unknown = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?source=__nonexistent__`,
+        );
+        expect(unknown.status).to.equal(200);
+        expect(unknown.body.total).to.equal(0);
+      });
+    });
+
     // ── Multibyte / non-ASCII-only names (LLMO-5515) ──
 
     describe('Category creation with an all-multibyte name (no explicit id)', () => {

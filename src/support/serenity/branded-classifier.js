@@ -20,14 +20,24 @@ import { collectAliasNames } from './brand-aliases.js';
  * on every path that writes a Serenity (Semrush sub-workspace) prompt: manual
  * create / edit, CSV import (which reuses the create path), AI generation, and
  * onboarding/provisioning seeding. A prompt is `type:branded` when its text
- * mentions the brand name or an applicable alias as a WHOLE WORD (diacritics
- * folded); otherwise `type:non-branded`.
+ * mentions the brand name or an applicable alias as a WHOLE WORD — allowing the
+ * regular English plural of that word (diacritics folded); otherwise
+ * `type:non-branded`.
  *
  * This replaces the earlier AI-only substring matcher (`brandedTypeTag`): the
  * match is now word-boundary + diacritic-folding, and it is shared everywhere so
  * the classification is identical no matter how the prompt got in. The behaviour
  * change (substring → whole-word) is forward-only — existing prompts are not
  * reclassified (serenity-docs#31, decisions 1/2/6).
+ *
+ * Plurals and possessives are handled morphologically, NOT by relaxing the match
+ * to a substring test. Proper nouns only ever take the regular plural in English
+ * — `the Buicks`, `the Kennedys`, `the Bosches` — never the irregular stem
+ * changes that common nouns take (no `Buickies`, no `Bosch → *Bosches` via
+ * `-ves`/`-ies`). So the classifier admits exactly two suffixes on the needle's
+ * final token, `-s` and (after a sibilant) `-es`, and strips the possessive
+ * clitic `'s` from BOTH sides before matching. `Ace` therefore still does not
+ * match `surface` or `spaces`, but does match `Aces`.
  */
 
 // Latin letters that carry a diacritic/ligature but have NO canonical NFD
@@ -42,12 +52,32 @@ const NON_DECOMPOSING_FOLDS = Object.freeze({
 const NON_DECOMPOSING_RE = new RegExp(`[${Object.keys(NON_DECOMPOSING_FOLDS).join('')}]`, 'g');
 
 /**
+ * The English possessive clitic: an apostrophe (straight or typographic) + `s`,
+ * at a token end. Dropped from both sides so `Kellogg's` ≡ `Kellogg` — otherwise
+ * the alias `Kellogg's` normalizes to the two-token needle `kellogg s`, which
+ * matches only a literal possessive and never the bare brand name. Runs after
+ * `toLowerCase` (so only lower-case `s`) and before punctuation collapse (which
+ * would otherwise turn the apostrophe into a token gap). The bare trailing
+ * apostrophe of a plural possessive (`Buicks'`) is left to the plural rule.
+ */
+const POSSESSIVE_RE = /['’]s(?=[^\p{L}\p{N}]|$)/gu;
+
+/**
+ * Needle endings after which the regular English plural is spelled `-es` rather
+ * than `-s` (the sibilants): `Lexus → Lexuses`, `Bosch → Bosches`, `Fox → Foxes`.
+ * Restricting `-es` to these keeps the suffix set from admitting non-words like
+ * `Buickes` as a match.
+ */
+const SIBILANT_RE = /(?:[sxz]|ch|sh)$/;
+
+/**
  * Normalizes one side of the match (needle OR haystack) into a canonical,
  * space-delimited token stream:
  *   - fold diacritics (NFD decomposition, strip combining marks) so `café` ≈ `cafe`;
  *   - lower-case (case-insensitive match);
  *   - fold the non-decomposing accented/ligature letters (`ø→o`, `æ→ae`, `ß→ss`,
  *     …) that the NFD strip leaves intact, so `Ørsted` ≈ `Orsted`;
+ *   - drop the possessive clitic `'s`, so `Kellogg's` ≡ `Kellogg`;
  *   - replace every run of non-alphanumeric characters (Unicode letters/numbers)
  *     with a single space, so punctuation/whitespace collapses to token gaps;
  *   - trim.
@@ -65,6 +95,7 @@ export function normalizeMatch(value) {
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
     .replace(NON_DECOMPOSING_RE, (ch) => NON_DECOMPOSING_FOLDS[ch])
+    .replace(POSSESSIVE_RE, '')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
@@ -110,11 +141,32 @@ export function brandNeedles(brandName, aliases, market) {
 }
 
 /**
+ * Tests one normalized needle against an already space-padded, normalized
+ * haystack. The needle must occupy whole tokens: it matches bare, or with the
+ * regular English plural suffix on its FINAL token only (`-s` always, `-es`
+ * after a sibilant). Leading/trailing spaces anchor both ends, so this stays a
+ * word-boundary test rather than a substring test — `ace` matches `aces` but
+ * not `spaces`, and the multi-word `le creuset` matches `le creusets` but not
+ * `les creuset`.
+ *
+ * @param {string} haystack - normalized prompt text, padded with a leading and
+ *   trailing space.
+ * @param {string} needle - a normalized, non-empty needle.
+ * @returns {boolean}
+ */
+function needleMatches(haystack, needle) {
+  return haystack.includes(` ${needle} `)
+    || haystack.includes(` ${needle}s `)
+    || (SIBILANT_RE.test(needle) && haystack.includes(` ${needle}es `));
+}
+
+/**
  * Classifies a prompt as `type:branded` when its text contains any needle as a
- * whole word (or contiguous whole-word run for a multi-word needle), else
- * `type:non-branded`. Both sides are normalized via {@link normalizeMatch}; the
- * haystack is padded with spaces so a needle wrapped in spaces matches only on
- * token boundaries. Empty `needles` ⇒ `type:non-branded`.
+ * whole word — or that word's regular English plural — else `type:non-branded`.
+ * A multi-word needle must match as a contiguous whole-word run. Both sides are
+ * normalized via {@link normalizeMatch} (which also strips the possessive `'s`,
+ * so `Buick's` and `Buicks'` both classify as branded). Empty `needles` ⇒
+ * `type:non-branded`.
  *
  * @param {string} promptText - the prompt text.
  * @param {string[]} needles - normalized needles from {@link brandNeedles} /
@@ -127,7 +179,7 @@ export function classifyBrandedTag(promptText, needles) {
     return TYPE_TAG.NON_BRANDED;
   }
   const haystack = ` ${normalizeMatch(promptText)} `;
-  return list.some((n) => n && haystack.includes(` ${n} `))
+  return list.some((n) => n && needleMatches(haystack, n))
     ? TYPE_TAG.BRANDED
     : TYPE_TAG.NON_BRANDED;
 }

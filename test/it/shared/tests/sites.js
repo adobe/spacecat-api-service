@@ -172,6 +172,79 @@ export default function siteTests(getHttpClient, resetData) {
         const page1Ids = new Set(page1.body.sites.map((s) => s.id));
         page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
       });
+
+      // ── baseUrlContains substring search (SITES-47203, ADR-006) ──
+      // These exercise the REAL PostgREST `ilike` path end-to-end (not a stub):
+      // the where-builder, deterministic ordering, N+1 hasMore, offset paging, and
+      // DB-level wildcard escaping against actual seeded rows.
+      it('admin: baseUrlContains returns only matching sites in the search envelope with the echo', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, baseUrlContains: 'semrush' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: baseUrlContains honors limit and reports hasMore (N+1 against real rows)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&limit=2');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(res.body.pagination).to.include({ limit: 2, hasMore: true, baseUrlContains: 'example.com' });
+        // every returned row genuinely matches the substring (proves real ilike filtering)
+        res.body.sites.forEach((s) => expect(s.baseURL.toLowerCase()).to.include('example.com'));
+      });
+
+      it('admin: baseUrlContains pages by offset and returns a non-overlapping page', async () => {
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=0');
+        expect(page1.status).to.equal(200);
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({
+          limit: 2, offset: 0, hasMore: true, baseUrlContains: 'example.com',
+        });
+
+        const page2 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=2');
+        expect(page2.status).to.equal(200);
+        expect(page2.body.pagination).to.include({
+          limit: 2, offset: 2, baseUrlContains: 'example.com',
+        });
+        // The two offset pages must not overlap (proves offset actually advanced).
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
+      });
+
+      it('admin: baseUrlContains escapes LIKE wildcards so user % cannot widen the match', async () => {
+        // '%example' is escaped to a literal; no base_url literally contains "%example",
+        // so the result is empty. If escaping were broken it would behave like
+        // '%%example%' and match every *.example.com site.
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites?baseUrlContains=${encodeURIComponent('%example')}`);
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(0);
+        expect(res.body.pagination).to.include({ hasMore: false });
+      });
+
+      it('admin: baseUrlContains shorter than 3 chars is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=ab');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: baseUrlContains with a negative offset is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&offset=-1');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: baseUrlContains still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /sites/:siteId', () => {
