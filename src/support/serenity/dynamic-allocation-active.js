@@ -62,24 +62,30 @@ export function isDynamicAllocationEnabled(env) {
  * @param {any} transport - Serenity transport.
  * @param {object} opts
  * @param {boolean} opts.enabled - the global kill-switch value for this request.
- * @param {string} [opts.childId] - the sub-workspace being written to (`auth.workspaceId`).
- * @param {string} [opts.masterId] - the org parent/master workspace (`auth.parentWorkspaceId`).
+ * @param {string} [opts.subWorkspaceId] - the sub-workspace being written to (`auth.workspaceId`).
+ * @param {string} [opts.parentWorkspaceId] - the org parent workspace (`auth.parentWorkspaceId`).
  * @param {import('./resource-manager.js').Blocks} [opts.ceiling] - per-brand ceiling (optional).
  * @param {import('./resource-manager.js').Blocks} [opts.blocks] - grace blocks (optional).
  * @param {any} [log]
  * @returns {HeadroomGuard}
  */
 export function createHeadroomGuard(transport, {
-  enabled, childId, masterId, ceiling, blocks,
+  enabled, subWorkspaceId, parentWorkspaceId, ceiling, blocks,
 }, log) {
   // Disabled path: a no-op guard. Also taken when ON but the ids needed to top up are missing — a
   // wiring/misconfiguration we must NOT let block a customer write; log it (a PR-4 pre-flip guard
   // will assert the ids are present before the flag can be flipped on for real).
-  // `!childId`/`!masterId` first narrows away undefined/'' (hasText is not a TS type guard — see
-  // this dir's CLAUDE.md), so hasText only guards whitespace-only and both are `string` below.
-  if (!enabled || !childId || !masterId || !hasText(childId) || !hasText(masterId)) {
+  // The `!id` checks first narrow away undefined/'' (hasText is not a TS type guard — see this
+  // dir's CLAUDE.md), so hasText only guards whitespace-only and both are `string` below.
+  const idsMissing = !subWorkspaceId || !parentWorkspaceId
+    || !hasText(subWorkspaceId) || !hasText(parentWorkspaceId);
+  if (!enabled || idsMissing) {
     if (enabled) {
-      log?.warn?.('[serenity] dynamic allocation ON but childId/masterId missing — skipping JIT top-up for this request', { childId, masterId });
+      log?.warn?.(
+        '[serenity] dynamic allocation ON but subWorkspaceId/parentWorkspaceId missing '
+        + '— skipping JIT top-up for this request',
+        { subWorkspaceId, parentWorkspaceId },
+      );
     }
     return {
       enabled: false,
@@ -89,9 +95,9 @@ export function createHeadroomGuard(transport, {
   return {
     enabled: true,
     ensure: (need = {}, { includeDrafted = false } = {}) => withResourceLock(
-      childId,
+      subWorkspaceId,
       () => ensureAiHeadroom(transport, {
-        childId, masterId, need, ceiling, blocks, includeDrafted,
+        subWorkspaceId, parentWorkspaceId, need, ceiling, blocks, includeDrafted,
       }, log),
     ),
   };

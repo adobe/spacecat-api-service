@@ -86,10 +86,21 @@ describe('resource-manager — pure helpers', () => {
 });
 
 describe('resource-manager — ensureAiHeadroom', () => {
+  it('fails LOUD on a missing/blank subWorkspaceId or parentWorkspaceId — no transport call', async () => {
+    const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 800)) });
+    await expect(ensureAiHeadroom(t, {
+      subWorkspaceId: '', parentWorkspaceId: MASTER, need: { prompts: 100 },
+    }, log)).to.be.rejectedWith(/requires a non-empty subWorkspaceId/);
+    await expect(ensureAiHeadroom(t, {
+      subWorkspaceId: CHILD, parentWorkspaceId: '   ', need: { prompts: 100 },
+    }, log)).to.be.rejectedWith(/requires a non-empty parentWorkspaceId/);
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
   it('hot path: already covered → no transfer, no poll', async () => {
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 800)) });
     const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { projects: 1, prompts: 100 },
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { projects: 1, prompts: 100 },
     }, log);
     expect(r.toppedUp).to.equal(false);
     expect(t.transferWorkspaceResources).to.not.have.been.called;
@@ -98,7 +109,9 @@ describe('resource-manager — ensureAiHeadroom', () => {
 
   it('need = 0 (or absent) is a true no-op — zero transport writes', async () => {
     const t = makeTransport({ child: resources(dim(2, 0, 2), dim(800, 0, 800)) });
-    const r = await ensureAiHeadroom(t, { childId: CHILD, masterId: MASTER, need: {} }, log);
+    const r = await ensureAiHeadroom(t, {
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: {},
+    }, log);
     expect(r.toppedUp).to.equal(false);
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
@@ -110,7 +123,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       master: resources(dim(0, 0, 100), dim(0, 0, 800)),
     });
     const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { projects: 0, prompts: 20 }, poll,
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { projects: 0, prompts: 20 }, poll,
     }, log);
     expect(r).to.deep.equal({ toppedUp: true, newTotal: { projects: 2, prompts: 100 } });
     expect(t.transferWorkspaceResources).to.have.been.calledOnceWith(CHILD, ai(2, 100));
@@ -122,7 +135,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       master: resources(dim(2, 0, 13), dim(0, 0, 800)),
     });
     const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { projects: 1 }, poll,
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { projects: 1 }, poll,
     }, log);
     expect(r.newTotal.projects).to.equal(3); // roundUpToBlock(3, 1)
     expect(t.transferWorkspaceResources).to.have.been.calledWith(CHILD, ai(3, 100));
@@ -131,7 +144,11 @@ describe('resource-manager — ensureAiHeadroom', () => {
   it('throws brandAiLimit (409) when the top-up would exceed the per-brand ceiling', async () => {
     const t = makeTransport({ child: resources(dim(2, 0, 2), dim(0, 0, 100)) });
     const p = ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { projects: 3 }, ceiling: { projects: 3 }, poll,
+      subWorkspaceId: CHILD,
+      parentWorkspaceId: MASTER,
+      need: { projects: 3 },
+      ceiling: { projects: 3 },
+      poll,
     }, log);
     await expect(p).to.be.rejectedWith(ErrorWithStatusCode);
     const e = await p.catch((x) => x);
@@ -149,7 +166,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       master: resources(dim(2, 0, 13), dim(760, 0, 800)), // prompts free = 40 < 100
     });
     const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 100 },
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { prompts: 100 },
     }, { ...log, warn });
     expect(r.toppedUp).to.equal(true);
     expect(t.transferWorkspaceResources).to.have.been.calledOnce; // proceeded despite the low gauge
@@ -163,7 +180,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       transfer: sinon.stub().rejects(poolFull()),
     });
     const e = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 10 }, poll,
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { prompts: 10 }, poll,
     }, log).catch((x) => x);
     expect(e.code).to.equal('orgPoolExhausted');
   });
@@ -176,7 +193,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       transfer,
     });
     const e = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 10 },
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { prompts: 10 },
     }, log).catch((x) => x);
     expect(e.status).to.equal(503);
     expect(e.code).to.equal('workspaceBusy');
@@ -192,7 +209,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       master: resources(dim(0, 0, 100), dim(0, 0, 800)),
     });
     const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 10 },
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { prompts: 10 },
     }, log);
     expect(r.toppedUp).to.equal(true);
     expect(t.transferWorkspaceResources).to.have.callCount(1);
@@ -208,7 +225,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       master: resources(dim(0, 0, 100), dim(0, 0, 800)),
     });
     const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: {}, includeDrafted: true,
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: {}, includeDrafted: true,
     }, log);
     expect(r.toppedUp).to.equal(true);
     expect(t.transferWorkspaceResources).to.have.been.calledWith(CHILD, ai(5, 200));
@@ -220,7 +237,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       master: resources(dim(0, 0, 100), dim(0, 0, 800)),
     });
     const r = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: {}, includeDrafted: true,
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: {}, includeDrafted: true,
     }, log);
     expect(r.toppedUp).to.equal(false);
     expect(t.transferWorkspaceResources).to.not.have.been.called;
@@ -233,7 +250,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
       transfer: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
     });
     const e = await ensureAiHeadroom(t, {
-      childId: CHILD, masterId: MASTER, need: { prompts: 10 }, poll,
+      subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { prompts: 10 }, poll,
     }, log).catch((x) => x);
     expect(e).to.be.instanceOf(SerenityTransportError);
     expect(e.status).to.equal(500);
@@ -243,7 +260,7 @@ describe('resource-manager — ensureAiHeadroom', () => {
 describe('resource-manager — releaseAiSurplus', () => {
   it('no-op when nothing frees a whole block', async () => {
     const t = makeTransport({ child: resources(dim(2, 0, 2), dim(90, 0, 100)) });
-    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, log);
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, log);
     expect(r).to.deep.equal({ released: false, reason: 'nothing-to-release' });
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
@@ -254,7 +271,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     // must NOT falsely report released:true — it flags requires-decommission and warns instead.
     const warn = sinon.spy();
     const t = makeTransport({ child: resources(dim(0, 0, 1), dim(0, 0, 100)) });
-    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, { ...log, warn });
     expect(r).to.deep.equal({ released: false, reason: 'requires-decommission' });
     expect(t.transferWorkspaceResources).to.not.have.been.called;
     expect(warn).to.have.been.calledWithMatch('needs decommission');
@@ -265,7 +282,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     // → target floors to 0 (unreclaimable via transfer) so it stays at its current total (1). The
     // emitted payload keeps BOTH dims non-zero — never a partial object, never a newly-added 0.
     const t = makeTransport({ child: resources(dim(0, 0, 1), dim(150, 0, 500)) });
-    const r = await releaseAiSurplus(t, { childId: CHILD, failFast: true }, log);
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, failFast: true }, log);
     expect(r.released).to.equal(true);
     expect(t.transferWorkspaceResources).to.have.been.calledOnceWith(CHILD, ai(1, 200));
   });
@@ -273,7 +290,7 @@ describe('resource-manager — releaseAiSurplus', () => {
   it('lowers totals to rounded used, never below the floor', async () => {
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)) });
     const r = await releaseAiSurplus(t, {
-      childId: CHILD, floor: { projects: 1, prompts: 0 }, poll,
+      subWorkspaceId: CHILD, floor: { projects: 1, prompts: 0 }, poll,
     }, log);
     // projects → max(1, roundUp(1))=1 < 5; prompts → max(0, roundUp(50)=100)=100 < 400
     expect(r.released).to.equal(true);
@@ -283,7 +300,7 @@ describe('resource-manager — releaseAiSurplus', () => {
   it('respects a floor above rounded used', async () => {
     const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
     const r = await releaseAiSurplus(t, {
-      childId: CHILD, floor: { projects: 2, prompts: 200 }, poll,
+      subWorkspaceId: CHILD, floor: { projects: 2, prompts: 200 }, poll,
     }, log);
     expect(t.transferWorkspaceResources).to.have.been.calledOnceWith(CHILD, ai(2, 200));
     expect(r.target).to.deep.equal({ projects: 2, prompts: 200 });
@@ -293,7 +310,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const warn = sinon.spy();
     const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
     t.getWorkspaceResources.withArgs(CHILD).rejects(new SerenityTransportError(503, 'transport boom'));
-    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, { ...log, warn });
     expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(warn).to.have.been.called;
   });
@@ -301,7 +318,8 @@ describe('resource-manager — releaseAiSurplus', () => {
   it('propagates an UNEXPECTED error (e.g. a bug) rather than hiding it', async () => {
     const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
     t.getWorkspaceResources.withArgs(CHILD).rejects(new TypeError('undefined is not a function'));
-    await expect(releaseAiSurplus(t, { childId: CHILD, poll }, log)).to.be.rejectedWith(TypeError);
+    await expect(releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, log))
+      .to.be.rejectedWith(TypeError);
   });
 
   it('release path (async/reconciler) retries the transient "workspace not ready" 422 then settles', async () => {
@@ -311,7 +329,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     transfer.onCall(0).rejects(notReady());
     transfer.onCall(1).resolves();
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
-    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, log);
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, log);
     expect(r.released).to.equal(true);
     expect(transfer).to.have.callCount(2);
   });
@@ -319,7 +337,7 @@ describe('resource-manager — releaseAiSurplus', () => {
   it('release path surfaces workspaceBusy (503) as an EXPECTED best-effort failure when not-ready never clears', async () => {
     const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
-    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, log);
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, log);
     // Best-effort: the ErrorWithStatusCode(503) is swallowed and reported as released:false.
     expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(transfer).to.have.callCount(4); // 1 initial + NOT_READY_RETRIES(3)
@@ -332,7 +350,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const warn = sinon.spy();
     const transfer = sinon.stub().rejects(poolFull());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
-    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, { ...log, warn });
     expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(warn).to.have.been.calledWithMatch('SERENITY_ALLOC org pool exhausted on transfer');
   });
@@ -341,7 +359,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)) });
     t.getWorkspaceStatus = sinon.stub().resolves({ status: 'not ready' });
     const r = await releaseAiSurplus(t, {
-      childId: CHILD, poll: { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() },
+      subWorkspaceId: CHILD, poll: { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() },
     }, log);
     expect(r).to.deep.equal({ released: false, reason: 'error' });
   });
@@ -350,7 +368,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     // projects at floor (used 5 / total 5, no surplus); prompts used dropped to 50 after a removal
     // republish, total 400 → release lowers prompts to roundUp(50)=100, projects untouched.
     const t = makeTransport({ child: resources(dim(5, 0, 5), dim(50, 0, 400)) });
-    const r = await releaseAiSurplus(t, { childId: CHILD, failFast: true }, log);
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, failFast: true }, log);
     expect(r.released).to.equal(true);
     expect(t.transferWorkspaceResources).to.have.been.calledOnceWith(CHILD, ai(5, 100));
     expect(t.getWorkspaceStatus).to.not.have.been.called; // no settle poll on the fail-fast path
@@ -359,7 +377,7 @@ describe('resource-manager — releaseAiSurplus', () => {
   it('failFast: a transient "workspace not ready" is swallowed best-effort (503 not thrown)', async () => {
     const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
-    const r = await releaseAiSurplus(t, { childId: CHILD, failFast: true }, log);
+    const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, failFast: true }, log);
     expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(transfer).to.have.callCount(1); // one attempt, no retry loop
   });

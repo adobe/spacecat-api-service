@@ -105,6 +105,22 @@ export function roundUpToBlock(n, block) {
 export const modelChangeUnits = (publishedTexts, deltaModels) => Math.max(0, publishedTexts)
   * Math.max(0, deltaModels);
 
+/**
+ * Fail-loud guard for the workspace ids the allocator needs. A missing/blank id means a caller
+ * didn't thread the resolved auth ids into the fronting seam — a wiring bug, not a client error, so
+ * this throws a plain Error (→ 500, surfaced in monitoring) rather than a mapped 4xx.
+ * @param {string} fn calling function name (for the message)
+ * @param {Record<string, unknown>} ids id name → value
+ * @returns {void}
+ */
+function requireWorkspaceId(fn, ids) {
+  for (const [name, value] of Object.entries(ids)) {
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new Error(`resource-manager: ${fn} requires a non-empty ${name}`);
+    }
+  }
+}
+
 // ---- reads --------------------------------------------------------------------------------------
 
 /**
@@ -243,13 +259,13 @@ async function transferOnce(transport, workspaceId, totals, log) {
 // ---- entry points -------------------------------------------------------------------------------
 
 /**
- * Ensure `childId` has headroom for `need` before a metered op. Hot path (already covered) does a
- * single read and returns without a transfer. Otherwise tops up in whole blocks, gating on the
- * per-brand ceiling and the org pool (read from the MASTER's own `/resources`).
+ * Ensure `subWorkspaceId` has headroom for `need` before a metered op. Hot path (already covered)
+ * does a single read and returns without a transfer. Otherwise tops up in whole blocks, gating on
+ * the per-brand ceiling and the org pool (read from the parent workspace's own `/resources`).
  * @param {any} transport
  * @param {object} opts
- * @param {string} opts.childId the sub-workspace being written to
- * @param {string} opts.masterId the parent/master workspace (units source; the org pool)
+ * @param {string} opts.subWorkspaceId the sub-workspace being written to
+ * @param {string} opts.parentWorkspaceId the parent/master workspace (units source; the org pool)
  * @param {Dims} opts.need per-dimension units the imminent op will consume
  * @param {Partial<Blocks>} [opts.ceiling] per-brand max `total` per dim (default: no ceiling)
  * @param {Blocks} [opts.blocks] grace blocks (default {@link DEFAULT_BLOCKS})
@@ -263,9 +279,15 @@ async function transferOnce(transport, workspaceId, totals, log) {
  * @returns {Promise<{ toppedUp: boolean, newTotal: { projects: number, prompts: number } }>}
  */
 export async function ensureAiHeadroom(transport, {
-  childId, masterId, need, ceiling = {}, blocks = DEFAULT_BLOCKS, includeDrafted = false,
+  subWorkspaceId, parentWorkspaceId, need,
+  ceiling = {}, blocks = DEFAULT_BLOCKS, includeDrafted = false,
 }, log) {
-  const child = readAiTotals(await transport.getWorkspaceResources(childId));
+  // Fail LOUD on a missing sub-/parent-workspace id: an empty id is a fronting/wiring bug (the
+  // caller failed to thread auth.workspaceId / auth.parentWorkspaceId), and silently reading `''`
+  // would either drain the wrong pool or throw an opaque transport error. Surface it as a 500.
+  requireWorkspaceId('ensureAiHeadroom', { subWorkspaceId, parentWorkspaceId });
+
+  const child = readAiTotals(await transport.getWorkspaceResources(subWorkspaceId));
 
   /** @type {{ projects: number, prompts: number }} */
   const newTotal = { projects: child.projects.total, prompts: child.prompts.total };
@@ -278,7 +300,7 @@ export async function ensureAiHeadroom(transport, {
       const cap = ceiling[dim];
       if (typeof cap === 'number' && target > cap) {
         log?.warn?.('SERENITY_ALLOC brand ceiling reached', {
-          childId, dim, target, cap,
+          subWorkspaceId, dim, target, cap,
         });
         throw brandAiLimit();
       }
@@ -297,21 +319,21 @@ export async function ensureAiHeadroom(transport, {
   // it isn't. So we do NOT throw on it — a low reading is logged (a greppable pool-free signal for
   // the observability follow-up) and we PROCEED to the transfer, whose `422 insufficient units` is
   // the single authoritative exhaustion signal (mapped to orgPoolExhausted in transferOnce).
-  const master = readAiTotals(await transport.getWorkspaceResources(masterId));
+  const master = readAiTotals(await transport.getWorkspaceResources(parentWorkspaceId));
   for (const dim of DIMS) {
     const delta = newTotal[dim] - child[dim].total;
     const free = master[dim].total - master[dim].used;
     if (delta > 0 && free < delta) {
       log?.warn?.('SERENITY_ALLOC advisory pool-free low (proceeding; transfer 422 is authoritative)', {
-        childId, dim, free, delta,
+        subWorkspaceId, dim, free, delta,
       });
     }
   }
 
   // FAIL-FAST: one transfer attempt, no settle poll (serenity-docs#22). A still-settling child
   // returns a retryable 503 immediately rather than blocking the request on a poll.
-  log?.info?.('SERENITY_ALLOC top-up', { childId, newTotal });
-  await transferOnce(transport, childId, newTotal, log);
+  log?.info?.('SERENITY_ALLOC top-up', { subWorkspaceId, newTotal });
+  await transferOnce(transport, subWorkspaceId, newTotal, log);
   return { toppedUp: true, newTotal };
 }
 
@@ -331,7 +353,7 @@ export async function ensureAiHeadroom(transport, {
  * this same inline best-effort shape — do not introduce a queue or worker for it.
  * @param {any} transport
  * @param {object} opts
- * @param {string} opts.childId
+ * @param {string} opts.subWorkspaceId
  * @param {Partial<Blocks>} [opts.floor] minimum `total` per dim to retain (default 0)
  * @param {Blocks} [opts.blocks]
  * @param {PollOpts} [opts.poll]
@@ -350,10 +372,10 @@ export async function ensureAiHeadroom(transport, {
  *   transfer; see below), or `error` (a swallowed best-effort transport failure).
  */
 export async function releaseAiSurplus(transport, {
-  childId, floor = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL, failFast = false,
+  subWorkspaceId, floor = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL, failFast = false,
 }, log) {
   try {
-    const child = readAiTotals(await transport.getWorkspaceResources(childId));
+    const child = readAiTotals(await transport.getWorkspaceResources(subWorkspaceId));
     /** @type {{ projects: number, prompts: number }} */
     const target = { projects: child.projects.total, prompts: child.prompts.total };
     let lowered = false;
@@ -382,15 +404,15 @@ export async function releaseAiSurplus(transport, {
     if (!lowered) {
       if (requiresDecommission) {
         log?.warn?.('SERENITY_ALLOC releaseAiSurplus: surplus cannot be reclaimed via transfer '
-          + `(target floors to 0) — needs decommission for ${childId}`);
+          + `(target floors to 0) — needs decommission for ${subWorkspaceId}`);
         return { released: false, reason: 'requires-decommission' };
       }
       return { released: false, reason: 'nothing-to-release' };
     }
     if (failFast) {
-      await transferOnce(transport, childId, target, log);
+      await transferOnce(transport, subWorkspaceId, target, log);
     } else {
-      await transferAndSettle(transport, childId, target, poll, log);
+      await transferAndSettle(transport, subWorkspaceId, target, poll, log);
     }
     return { released: true, target };
   } catch (e) {
@@ -400,7 +422,7 @@ export async function releaseAiSurplus(transport, {
     if (!(e instanceof SerenityTransportError) && !(e instanceof ErrorWithStatusCode)) {
       throw e;
     }
-    log?.warn?.(`SERENITY_ALLOC releaseAiSurplus best-effort failure for ${childId}: ${e?.message}`);
+    log?.warn?.(`SERENITY_ALLOC releaseAiSurplus best-effort failure for ${subWorkspaceId}: ${e?.message}`);
     return { released: false, reason: 'error' };
   }
 }

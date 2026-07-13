@@ -302,8 +302,8 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, JIT
  *   top-up fronts the project-create and publish seams (fail-fast) and the flat re-grant in
  *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
- * @param {string} [options.masterId=''] - the org parent/master workspace id (the units pool),
- *   needed to size JIT top-ups when `dynamicAllocation` is on.
+ *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
+ *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -325,7 +325,6 @@ export async function handleCreateMarketSubworkspace(
     publishMode = 'require',
     dataAccess = null,
     dynamicAllocation = false,
-    masterId = '',
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -362,11 +361,11 @@ export async function handleCreateMarketSubworkspace(
       { dynamicAllocation },
     );
 
-  // JIT top-up choke point. childId is only known after ensureSubworkspace resolves it; OFF (or a
-  // missing master) yields a no-op guard so the flag-OFF path issues zero headroom reads.
+  // JIT top-up choke point. The sub-workspace id is only known after ensureSubworkspace resolves
+  // it; OFF (or a missing parent) yields a no-op guard so the flag-OFF path issues zero reads.
   const headroom = createHeadroomGuard(
     transport,
-    { enabled: dynamicAllocation, childId: workspaceId, masterId },
+    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
     log,
   );
 
@@ -768,14 +767,14 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  *   SIGNED net model delta: top up (`publishedTexts × netDelta`) before the sync's publish on a net
  *   ADD, and release the freed units after it on a net REMOVAL. Lives at this mode-guarded caller,
  *   NOT inside the shared `syncModelsForProject`, so flat mode is untouched (byte-for-byte).
- * @param {string} [options.masterId=''] - org parent/master workspace id (units pool).
+ * @param {string} [options.parentWorkspaceId=''] - org parent/master workspace id (units pool).
  */
 export async function handleUpdateModelsSubworkspace(
   transport,
   workspaceId,
   body,
   log,
-  { dynamicAllocation = false, masterId = '' } = {},
+  { dynamicAllocation = false, parentWorkspaceId = '' } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -807,7 +806,7 @@ export async function handleUpdateModelsSubworkspace(
   // that are handed back after it. No-op when OFF (guarded on `enabled` → zero extra reads).
   const headroom = createHeadroomGuard(
     transport,
-    { enabled: dynamicAllocation, childId: workspaceId, masterId },
+    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
     log,
   );
   let netDelta = 0;
@@ -822,11 +821,13 @@ export async function handleUpdateModelsSubworkspace(
     netDelta = finalModelCount - current.items.length;
     if (netDelta > 0) {
       const publishedTexts = await countPublishedPrompts(transport, workspaceId, projectId, log);
-      // OPEN QUESTION (serenity-docs#22, Rainer 2026-07-08): the sync's publish also converts this
-      // project's DRAFTED prompts to `used`, yet this seam does NOT pass `includeDrafted` (the
-      // create-market/bulk-prompt seams do). Whether that under-provisions depends on whether
-      // Semrush re-checks the prompt dimension at publish or only at the write (§2 asserts
-      // write-only). NOT guessed here — deferred to the live-gateway canary (§8) to settle.
+      // RESOLVED (serenity-docs#22 §2, write-only metering): the prompt dimension is consumed at
+      // prompt WRITE, not re-gated at publish, so the sync's publish converting this project's
+      // DRAFTED prompts to `used` triggers NO prompt-dimension quota check — only the published
+      // texts re-meter against the added models. Sizing `publishedTexts × netDelta` is therefore
+      // correct, and this seam deliberately does NOT pass `includeDrafted` (unlike the
+      // create/bulk-prompt seams — theirs guards read-staleness of a SUBSEQUENT op's `used`, a
+      // different concern from a publish-time gate). The §8 canary confirms §2 empirically.
       await headroom.ensure({ prompts: modelChangeUnits(publishedTexts, netDelta) });
     }
   }
@@ -843,14 +844,14 @@ export async function handleUpdateModelsSubworkspace(
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then
   // the child's `used` reflects the removal, so releaseAiSurplus reads it and lowers `total` to it
   // (ordering §3 requires: publish → read → release). Fail-fast (one transfer, no settle poll) +
-  // best-effort per the release scope decision; childId is guaranteed present (headroom.enabled).
+  // best-effort per the release scope decision; the sub-workspace id is present (headroom.enabled).
   if (headroom.enabled && netDelta < 0) {
     // Non-zero floor is the PRIMARY guard against the all-zero-transfer no-op: a release target of
     // 0 for any dim is silently ignored by the gateway (only workspace delete reclaims to zero).
     // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
     // transfer (which it would refuse anyway — this just keeps the request off that path).
     await releaseAiSurplus(transport, {
-      childId: workspaceId,
+      subWorkspaceId: workspaceId,
       floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
       failFast: true,
     }, log);

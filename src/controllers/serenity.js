@@ -510,7 +510,7 @@ function SerenityController(context, log, env) {
           classifyPromptType,
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
-            masterId: auth.parentWorkspaceId ?? '',
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
           },
         )
         : await handleCreatePrompts(
@@ -702,10 +702,9 @@ function SerenityController(context, log, env) {
             // in depth: this options bag flows into markets-subworkspace.js and
             // shouldn't carry access to unrelated tables).
             dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
-            // Dynamic-allocation kill-switch + the org parent as the JIT top-up units pool
-            // (masterId). auth.parentWorkspaceId is the org parent resolved by authorize().
+            // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
+            // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
-            masterId: auth.parentWorkspaceId ?? '',
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -1003,7 +1002,7 @@ function SerenityController(context, log, env) {
           log,
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
-            masterId: auth.parentWorkspaceId ?? '',
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
           },
         )
         : await handleUpdateModels(
@@ -1241,8 +1240,8 @@ function SerenityController(context, log, env) {
               // Narrowed to the one model the mapping-row helpers touch — see
               // the single-market create call site for the same rationale.
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+              // JIT units pool = the org parent passed positionally above; not duplicated here.
               dynamicAllocation: dynamicAllocationEnabled(ctx),
-              masterId: auth.parentWorkspaceId ?? '',
             },
           );
         } catch (e) {

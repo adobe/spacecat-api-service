@@ -360,11 +360,11 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       await createUsMarket();
       const parent = await createTag('Footwear');
       const child = await createTag('Sneakers', parent.body.id);
-      const childId = child.body.id;
+      const subWorkspaceId = child.body.id;
 
       // Rename-only: parentId omitted — the proxy must re-send the child's current parent itself
       // (gate 5) so the child stays nested, not promoted to root.
-      const renamed = await getHttpClient().admin.patch(`${base}/tags/${childId}`, {
+      const renamed = await getHttpClient().admin.patch(`${base}/tags/${subWorkspaceId}`, {
         name: 'Boots', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(renamed.status).to.equal(200);
@@ -372,7 +372,7 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(renamed.body.parentId).to.equal(parent.body.id);
 
       // Promote to root: explicit parentId: null (gate 1).
-      const promoted = await getHttpClient().admin.patch(`${base}/tags/${childId}`, {
+      const promoted = await getHttpClient().admin.patch(`${base}/tags/${subWorkspaceId}`, {
         name: 'Boots', parentId: null, geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(promoted.status).to.equal(200);

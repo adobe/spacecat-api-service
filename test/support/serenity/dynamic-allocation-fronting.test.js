@@ -114,7 +114,7 @@ describe('dynamic-allocation fronting — create-market', () => {
   it('ON: fronts the project seam before createProject and the publish seam before publishProject', async () => {
     const t = makeTransport();
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
-      dynamicAllocation: true, masterId: MASTER, publishMode: 'require',
+      dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require',
     });
     // Child headroom read happened (guard is live), and BEFORE the metered ops it fronts.
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
@@ -125,7 +125,7 @@ describe('dynamic-allocation fronting — create-market', () => {
   it('ON + covered child: NO transfer at all — proves the flat re-grant carve is skipped', async () => {
     const t = makeTransport();
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
-      dynamicAllocation: true, masterId: MASTER, publishMode: 'require',
+      dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require',
     });
     // With the flag ON, ensureSubworkspace skips the flat resourceAllocation re-grant AND the
     // covered child needs no JIT top-up → zero transfers.
@@ -135,7 +135,7 @@ describe('dynamic-allocation fronting — create-market', () => {
   it('OFF: byte-for-byte — the flat re-grant transfer still runs and NO headroom read happens', async () => {
     const t = makeTransport();
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
-      dynamicAllocation: false, masterId: MASTER, publishMode: 'require',
+      dynamicAllocation: false, parentWorkspaceId: MASTER, publishMode: 'require',
     });
     // Flag OFF: the pre-PR flat re-grant transfer runs, and the guard is a genuine no-op.
     expect(t.transferWorkspaceResources).to.have.been.called;
@@ -148,7 +148,7 @@ describe('dynamic-allocation fronting — create-market', () => {
     getWorkspaceResources.withArgs(MASTER).resolves(AMPLE_MASTER);
     const t = makeTransport({ getWorkspaceResources });
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
-      dynamicAllocation: true, masterId: MASTER, publishMode: 'require',
+      dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require',
     });
     // A projects top-up (0 → 1 block) fired, and before the project was created.
     expect(t.transferWorkspaceResources).to.have.been.called;
@@ -174,7 +174,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType (tag-dimension path — not under test here)
-      { dynamicAllocation: true, masterId: MASTER },
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
     expect(t.getWorkspaceResources.calledBefore(t.publishProject)).to.equal(true);
@@ -192,7 +192,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType
-      { dynamicAllocation: false, masterId: MASTER },
+      { dynamicAllocation: false, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
   });
@@ -223,7 +223,7 @@ describe('dynamic-allocation fronting — update-models', () => {
       WS,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1', 'm2'] },
       log,
-      { dynamicAllocation: true, masterId: MASTER },
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
     // Top-up ran before the model add/publish (headroom precedes the metered change).
@@ -246,7 +246,7 @@ describe('dynamic-allocation fronting — update-models', () => {
       WS,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['m2'] },
       log,
-      { dynamicAllocation: true, masterId: MASTER },
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     // No top-up (net 0) and no release (net not < 0) → zero resource transfers.
     expect(t.transferWorkspaceResources).to.not.have.been.called;
@@ -272,7 +272,7 @@ describe('dynamic-allocation fronting — update-models', () => {
       WS,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
       log,
-      { dynamicAllocation: true, masterId: MASTER },
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     // Exactly one transfer (the release), and it ran AFTER the publish (publish → read → release).
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
@@ -291,7 +291,7 @@ describe('dynamic-allocation fronting — update-models', () => {
       WS,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
       log,
-      { dynamicAllocation: true, masterId: MASTER },
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
   });
@@ -303,7 +303,7 @@ describe('dynamic-allocation fronting — update-models', () => {
       WS,
       { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1', 'm2'] },
       log,
-      { dynamicAllocation: false, masterId: MASTER },
+      { dynamicAllocation: false, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
   });
@@ -331,7 +331,7 @@ describe('dynamic-allocation — enforcement choke point', () => {
         log,
         null,
         null,
-        { dynamicAllocation: true, masterId: MASTER, publishMode: 'require' },
+        { dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require' },
       ),
     },
     {
@@ -347,7 +347,7 @@ describe('dynamic-allocation — enforcement choke point', () => {
         },
         log,
         undefined, // classifyPromptType
-        { dynamicAllocation: true, masterId: MASTER },
+        { dynamicAllocation: true, parentWorkspaceId: MASTER },
       ),
     },
     {
@@ -361,7 +361,7 @@ describe('dynamic-allocation — enforcement choke point', () => {
         WS,
         { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1', 'm2'] },
         log,
-        { dynamicAllocation: true, masterId: MASTER },
+        { dynamicAllocation: true, parentWorkspaceId: MASTER },
       ),
     },
   ];

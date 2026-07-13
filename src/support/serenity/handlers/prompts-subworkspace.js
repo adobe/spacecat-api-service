@@ -124,7 +124,7 @@ export async function handleCreatePromptsSubworkspace(
   body,
   log,
   classifyPromptType,
-  { dynamicAllocation = false, masterId = '' } = {},
+  { dynamicAllocation = false, parentWorkspaceId = '' } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -215,7 +215,7 @@ export async function handleCreatePromptsSubworkspace(
   if (affectedProjectIds.length > 0) {
     const headroom = createHeadroomGuard(
       transport,
-      { enabled: dynamicAllocation, childId: workspaceId, masterId },
+      { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
       log,
     );
     await headroom.ensure({}, { includeDrafted: true });

@@ -63,7 +63,11 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
 
   it('OFF: a genuine no-op — enabled=false and ZERO transport calls', async () => {
     const t = makeTransport();
-    const guard = createHeadroomGuard(t, { enabled: false, childId: CHILD, masterId: MASTER }, log);
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: false, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
     expect(guard.enabled).to.equal(false);
     const r = await guard.ensure({ prompts: 100 }, { includeDrafted: true });
     expect(r).to.deep.equal({ toppedUp: false });
@@ -76,7 +80,11 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
     });
-    const guard = createHeadroomGuard(t, { enabled: true, childId: CHILD, masterId: MASTER }, log);
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
     expect(guard.enabled).to.equal(true);
     const r = await guard.ensure({ projects: 1 });
     expect(r.toppedUp).to.equal(true);
@@ -84,10 +92,10 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
   });
 
-  it('ON but missing childId/masterId: no-op guard + a warn (never blocks the write)', async () => {
+  it('ON but missing subWorkspaceId/parentWorkspaceId: no-op guard + a warn (never blocks the write)', async () => {
     const warn = sinon.spy();
     const t = makeTransport();
-    const guard = createHeadroomGuard(t, { enabled: true, childId: CHILD, masterId: '' }, { ...log, warn });
+    const guard = createHeadroomGuard(t, { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: '' }, { ...log, warn });
     expect(guard.enabled).to.equal(false);
     await guard.ensure({ projects: 1 });
     expect(t.getWorkspaceResources).to.not.have.been.called;
@@ -112,7 +120,11 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
       }
       return null;
     });
-    const guard = createHeadroomGuard(t, { enabled: true, childId: CHILD, masterId: MASTER }, log);
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
     await Promise.all([guard.ensure({ projects: 1 }), guard.ensure({ projects: 1 })]);
     expect(t.transferWorkspaceResources).to.have.callCount(1);
     expect(childState.projects.total).to.equal(1);
