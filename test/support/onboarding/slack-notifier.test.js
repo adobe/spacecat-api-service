@@ -91,4 +91,18 @@ describe('notifyOnboarding', () => {
       .to.be.rejected
       .and.eventually.have.property('status', 502);
   });
+
+  it('does not leak the webhook URL when the network error message contains it', async () => {
+    fetchStub.rejects(new Error(`redirect to ${WEBHOOK_URL}?foo=bar`));
+
+    let thrown;
+    try {
+      await notifyOnboarding({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload);
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown).to.have.property('status', 502);
+    expect(thrown.message).to.not.contain(WEBHOOK_URL);
+  });
 });
