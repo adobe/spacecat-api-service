@@ -48,7 +48,8 @@ export default function OnboardingController(context, log, env) {
       return forbidden('User does not have access to this organization');
     }
 
-    const email = ctx.attributes?.authInfo?.getProfile?.()?.email;
+    const profile = ctx.attributes?.authInfo?.getProfile?.();
+    const email = profile?.trial_email || profile?.email;
     if (!hasText(email)) {
       return badRequest('Unable to determine customer email from the request identity');
     }
