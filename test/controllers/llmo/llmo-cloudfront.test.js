@@ -14,7 +14,6 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 use(sinonChai);
 
@@ -343,62 +342,6 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('12-digit');
-    });
-
-    it('reuses the org-persisted external ID when one already exists (no mint/save)', async () => {
-      const EXISTING = '11111111-1111-1111-1111-111111111111';
-      mockSite.getOrganizationId = sinon.stub().returns('org-1');
-      const orgConfig = Config({ edgeOptimizeConfig: { externalId: EXISTING } });
-      const mockOrg = {
-        getConfig: () => orgConfig, setConfig: sinon.stub(), save: sinon.stub().resolves(),
-      };
-      const Organization = { findById: sinon.stub().resolves(mockOrg) };
-
-      const result = await controller.createBootstrapUrl({
-        ...bootstrapContext,
-        dataAccess: { ...mockDataAccess, Organization },
-      });
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.externalId).to.equal(EXISTING);
-      expect(mockOrg.save.called).to.equal(false); // reused, not minted
-    });
-
-    it('mints + persists an org external ID on first bootstrap, then reuses it', async () => {
-      mockSite.getOrganizationId = sinon.stub().returns('org-1');
-      const orgConfig = Config({}); // no externalId yet
-      const mockOrg = {
-        getConfig: () => orgConfig, setConfig: sinon.stub(), save: sinon.stub().resolves(),
-      };
-      const Organization = { findById: sinon.stub().resolves(mockOrg) };
-
-      const result = await controller.createBootstrapUrl({
-        ...bootstrapContext,
-        dataAccess: { ...mockDataAccess, Organization },
-      });
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.externalId).to.match(/^[0-9a-f-]{36}$/); // minted UUID
-      expect(mockOrg.setConfig).to.have.been.called;
-      expect(mockOrg.save).to.have.been.called;
-      // persisted on the org config → the quick-create link carries the same id
-      expect(orgConfig.getEdgeOptimizeConfig().externalId).to.equal(body.externalId);
-    });
-
-    it('falls back to a fresh external ID when the org cannot be resolved', async () => {
-      mockSite.getOrganizationId = sinon.stub().returns('org-missing');
-      const Organization = { findById: sinon.stub().resolves(null) };
-
-      const result = await controller.createBootstrapUrl({
-        ...bootstrapContext,
-        dataAccess: { ...mockDataAccess, Organization },
-      });
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.externalId).to.match(/^[0-9a-f-]{36}$/);
     });
 
     it('returns 400 when template hosting is not configured (no S3 client)', async () => {

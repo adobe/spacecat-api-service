@@ -23,7 +23,6 @@ import TokowakaClient, {
   verifyRouting as verifyAwsRouting,
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { getHostnameWithoutWww, probeSiteAndResolveDomain } from '../../support/edge-routing-utils.js';
 
@@ -65,36 +64,6 @@ const TARGETED_PATHS_MAX_ENTRY_LENGTH = 256;
  */
 function LlmoCloudFrontController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
-
-  // The connector external ID is owned by the org (not the client): persisted once so every
-  // domain/account under the org reuses one connector role. Reads the persisted value; with
-  // { mint: true } (bootstrap) lazily creates + persists it, then re-reads so concurrent
-  // first-bootstraps for the org converge on one value.
-  const resolveOrgConnectorExternalId = async (site, context, { mint = false } = {}) => {
-    const { Organization } = context.dataAccess;
-    const orgId = site.getOrganizationId?.();
-    if (!hasText(orgId)) {
-      return null;
-    }
-    const org = await Organization.findById(orgId);
-    if (!org) {
-      return null;
-    }
-    const existing = org.getConfig()?.getEdgeOptimizeConfig?.()?.externalId;
-    if (hasText(existing) || !mint) {
-      return existing || null;
-    }
-    const config = org.getConfig();
-    config.updateEdgeOptimizeConfig({
-      ...(config.getEdgeOptimizeConfig?.() || {}),
-      externalId: crypto.randomUUID(),
-    });
-    org.setConfig(Config.toDynamoItem(config));
-    await org.save();
-    // Re-read so concurrent first-bootstraps for the same org converge on the persisted value.
-    const fresh = await Organization.findById(orgId);
-    return fresh?.getConfig()?.getEdgeOptimizeConfig?.()?.externalId || null;
-  };
 
   /**
    * POST /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url
@@ -146,10 +115,7 @@ function LlmoCloudFrontController(ctx) {
       // shrinks the exposure window if the URL leaks (it only grants GetObject on this
       // one template object until expiry — see security notes). Override via env.
       const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 900);
-      // Reuse the org's persisted connector external ID (mint on first use) so the org's domains
-      // share one connector role; fall back to a fresh id if the site has no org (defensive).
-      const externalId = await resolveOrgConnectorExternalId(site, context, { mint: true })
-        || crypto.randomUUID();
+      const externalId = crypto.randomUUID();
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
       // The Adobe principal allowed to assume the customer's connector role — per-environment,
       // from Vault (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN).
