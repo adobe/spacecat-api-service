@@ -96,24 +96,44 @@ function buildByDateEntry(year, month, slice) {
   };
 }
 
+// Per-endpoint documented `sortBy` allow-lists (see OpenAPI ai-visibility-api.yaml).
+// cited-pages sorts via SOURCES_REQUEST_ORDER_BY_ENUM; cited-sources and
+// source-opportunities both sort via DOMAINS_REQUEST_ORDER_BY_ENUM (which carries
+// extra 6–8 members those endpoints do not document).
+const CITED_PAGES_SORT_KEYS = ['URL', 'PROMPTS_COUNT'];
+const DOMAINS_SORT_KEYS = ['DOMAIN', 'MENTIONS', 'SOURCES_COUNT', 'PROMPTS_COUNT', 'ORGANIC_TRAFFIC'];
+
 /**
  * Resolves gRPC list ordering from `sortBy`/`sortDirection` query params.
- * `sortBy` is matched against the given order-by enum's member names (e.g.
- * `PROMPTS_COUNT`, `URL`, `DOMAIN`); unknown or `UNSPECIFIED` values fall back
- * to `defaultBy`. Direction defaults to DESC (matching the previous fixed order
- * the client displayed via its now-removed client-side sort). Returns a
- * `{ by, direction }` object for the request `order`.
+ * `sortBy` is matched against `allowedKeys` (the per-endpoint set of documented
+ * order-by member names, e.g. `PROMPTS_COUNT`, `URL`, `DOMAIN`); unknown,
+ * undocumented, or `UNSPECIFIED` values fall back to `defaultBy`. `direction`
+ * is only set when the caller supplies `sortDirection`; when it is omitted the
+ * returned order carries no `direction` field so the backend applies its own
+ * default ordering — preserving the exact pre-sort wire behavior for callers
+ * that never send the param (an explicitly-forced default would silently flip
+ * their order if the backend default were not DESC). Returns an `order` object
+ * (`{ by }`, plus `direction` when a `sortDirection` was provided).
  */
-function resolveGrpcSortOrder(sp, orderByEnum, defaultBy) {
+function resolveGrpcSortOrder(sp, orderByEnum, defaultBy, allowedKeys) {
   // Unlike `resolveFtsSort` in topics.js (which 400s on an unrecognized sort value),
   // this deliberately falls back to the default — matched by the OpenAPI docs
   // ("Unknown values fall back to the default"). Keep it lenient; don't "fix" it to throw.
   // `sortBy` is matched case-insensitively (enum member names are uppercase).
+  // `allowedKeys` is an explicit per-endpoint allow-list so that enum members the
+  // endpoint does NOT document (e.g. the DOMAINS enum's 6–8 members not in the
+  // cited-sources/source-opportunities OpenAPI set) fall back to the default rather
+  // than reaching the backend — and so a future ai-seo-ts regeneration can't silently
+  // widen the accepted set.
   const byKey = sp.get('sortBy')?.trim()?.toUpperCase();
-  const mappedBy = byKey ? orderByEnum[byKey] : undefined;
+  const mappedBy = (byKey && allowedKeys.includes(byKey)) ? orderByEnum[byKey] : undefined;
   const by = (typeof mappedBy === 'number' && mappedBy > 0) ? mappedBy : defaultBy;
+  // Only attach `direction` when the caller actually sent `sortDirection`. Omitting it
+  // otherwise leaves the backend's own default ordering intact (pre-sort behavior). An
+  // unrecognized value still falls back to DESC — the caller opted into a direction.
   const dirKey = sp.get('sortDirection')?.trim()?.toUpperCase();
-  const mappedDir = dirKey ? ORDER_DIRECTION_ENUM[dirKey] : undefined;
+  if (!dirKey) { return { by }; }
+  const mappedDir = ORDER_DIRECTION_ENUM[dirKey];
   const direction = (typeof mappedDir === 'number' && mappedDir > 0)
     ? mappedDir : ORDER_DIRECTION_ENUM.DESC;
   return { by, direction };
@@ -462,7 +482,7 @@ export async function handleBrandCitedPages(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
-  const order = resolveGrpcSortOrder(sp, SOURCES_REQUEST_ORDER_BY_ENUM, SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT);
+  const order = resolveGrpcSortOrder(sp, SOURCES_REQUEST_ORDER_BY_ENUM, SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, CITED_PAGES_SORT_KEYS);
   const monthYm = parseMonthYM(sp);
   const monthRaw = sp.get('month')?.trim();
   const listReq = {
@@ -646,7 +666,7 @@ export async function handleBrandCitedSources(sp, clients) {
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
   const listReq = {
-    country, llm: llmEnum, target, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT), range: { limit, offset },
+    country, llm: llmEnum, target, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, DOMAINS_SORT_KEYS), range: { limit, offset },
   };
   const totalsReq = { country, llm: llmEnum, target };
 
@@ -726,7 +746,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
     target: brandTarget(domain),
     competitors,
     kind: kinds,
-    order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC),
+    order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC, DOMAINS_SORT_KEYS),
     range: { limit: rangeLimit, offset },
   };
   if (snapshotDate) { listBody.date = snapshotDate; }

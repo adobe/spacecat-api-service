@@ -626,14 +626,15 @@ describe('AI Visibility – brands handlers', () => {
       expect(res.body.total).to.equal(10);
     });
 
-    it('defaults order to PROMPTS_COUNT DESC when no sort params', async () => {
+    it('defaults order.by to PROMPTS_COUNT and omits direction when no sort params', async () => {
       clients.sourceClient.sources.resolves({ source: [] });
       clients.voSourcesClient.sourcesTotals.resolves({ totals: [] });
       const sp = new URLSearchParams('domain=example.com');
       await handleBrandCitedPages(sp, clients);
+      // No sortDirection sent → no `direction` field, so the backend keeps its own
+      // default ordering (preserves pre-sort wire behavior for direct-API consumers).
       expect(clients.sourceClient.sources.firstCall.args[0].order).to.deep.equal({
         by: SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT,
-        direction: ORDER_DIRECTION_ENUM.DESC,
       });
     });
 
@@ -1227,7 +1228,6 @@ describe('AI Visibility – brands handlers', () => {
       await handleBrandCitedSources(new URLSearchParams('domain=example.com'), clients);
       expect(clients.sourceClient.sourceDomains.firstCall.args[0].order).to.deep.equal({
         by: DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT,
-        direction: ORDER_DIRECTION_ENUM.DESC,
       });
       clients.sourceClient.sourceDomains.resetHistory();
       await handleBrandCitedSources(new URLSearchParams('domain=example.com&sortBy=DOMAIN&sortDirection=ASC'), clients);
@@ -1235,6 +1235,17 @@ describe('AI Visibility – brands handlers', () => {
         by: DOMAINS_REQUEST_ORDER_BY_ENUM.DOMAIN,
         direction: ORDER_DIRECTION_ENUM.ASC,
       });
+    });
+
+    it('falls back to default for an undocumented DOMAINS enum member (not in the allow-list)', async () => {
+      clients.sourceClient.sourceDomains.resolves({ domains: [] });
+      clients.voSourcesClient.domainsTotals.resolves({ totals: [] });
+      // MENTIONS_COUNT_BY_BRAND (6) is a real DOMAINS_REQUEST_ORDER_BY_ENUM member but is
+      // NOT documented for cited-sources, so it must fall back to the default rather than
+      // reaching the backend.
+      await handleBrandCitedSources(new URLSearchParams('domain=example.com&sortBy=MENTIONS_COUNT_BY_BRAND'), clients);
+      expect(clients.sourceClient.sourceDomains.firstCall.args[0].order.by)
+        .to.equal(DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT);
     });
 
     it('returns 200 with domains list', async () => {
@@ -1342,7 +1353,6 @@ describe('AI Visibility – brands handlers', () => {
       await handleBrandSourceOpportunities(new URLSearchParams('domain=example.com'), clients);
       expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].order).to.deep.equal({
         by: DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC,
-        direction: ORDER_DIRECTION_ENUM.DESC,
       });
       clients.sourceClient.gapSourceDomains.resetHistory();
       await handleBrandSourceOpportunities(new URLSearchParams('domain=example.com&sortBy=MENTIONS&sortDirection=ASC'), clients);
@@ -1350,6 +1360,17 @@ describe('AI Visibility – brands handlers', () => {
         by: DOMAINS_REQUEST_ORDER_BY_ENUM.MENTIONS,
         direction: ORDER_DIRECTION_ENUM.ASC,
       });
+    });
+
+    it('falls back to default for an undocumented DOMAINS enum member (not in the allow-list)', async () => {
+      clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
+      clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
+      clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
+      // TOTAL_COMPETITOR_MENTIONS (8) is a real DOMAINS_REQUEST_ORDER_BY_ENUM member but is
+      // NOT documented for source-opportunities, so it must fall back to the default.
+      await handleBrandSourceOpportunities(new URLSearchParams('domain=example.com&sortBy=TOTAL_COMPETITOR_MENTIONS'), clients);
+      expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].order.by)
+        .to.equal(DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC);
     });
 
     it('returns 200 with gap source domains', async () => {
