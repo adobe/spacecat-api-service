@@ -4625,6 +4625,43 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
     });
 
+    it('forwards source param through to the prompts query as an exact filter', async () => {
+      // Recording client so the assertion fails if source stops being forwarded
+      // from the controller through to listPrompts' `.eq('source', ...)`.
+      const eqCalls = [];
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().callsFake((column, value) => {
+              eqCalls.push({ column, value });
+              return chain;
+            }),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            or: sandbox.stub().returnsThis(),
+            contains: sandbox.stub().returnsThis(),
+            overlaps: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+            maybeSingle: sandbox.stub().callsFake(() => (table === 'brands'
+              ? Promise.resolve({ data: { id: BRAND_UUID }, error: null })
+              : Promise.resolve({ data: null, error: null }))),
+          };
+          return chain;
+        }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'source=gsc' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      expect(eqCalls).to.deep.include({ column: 'source', value: 'gsc' });
+    });
+
     it('returns prompt items from normalized tables', async () => {
       const response = await brandsController.listPromptsByBrand({
         ...context,

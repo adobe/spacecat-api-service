@@ -453,6 +453,7 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
+ * @param {string} [params.source] - Filter by source (e.g. gsc, semrush, base_url, config)
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
  * status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
@@ -470,6 +471,7 @@ export async function listPrompts({
   search,
   region,
   origin,
+  source,
   sort,
   order,
   limit = 100,
@@ -579,6 +581,10 @@ export async function listPrompts({
 
     if (hasText(origin)) {
       baseQuery = baseQuery.eq('origin', origin);
+    }
+
+    if (hasText(source)) {
+      baseQuery = baseQuery.eq('source', source);
     }
 
     if (hasText(region)) {
