@@ -25,6 +25,7 @@ import {
 import {
   DOMAIN_ALREADY_ASSIGNED,
   DOMAIN_ALREADY_ONBOARDED_IN_ORG,
+  NON_PROD_DOMAIN,
   persistAndNotify,
   postPlgOnboardingNotification,
 } from './notifications.js';
@@ -423,6 +424,27 @@ async function handlePreonboardedFastPath({
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
+const NON_PROD_LABEL_PATTERN = /(?:^|-)(qa|stage|staging|dev|development|author|publish)(\d+)?(?:-|$)/i;
+const HLX_DELIVERY_PATTERN = /\.(aem\.live|aem\.page|hlx\.live|hlx\.page)$/i;
+
+/**
+ * Returns true if the domain is a non-production domain. Two checks:
+ * 1. Any non-TLD label matches a non-prod keyword (qa, stage, dev, author, publish, etc.)
+ *    including hyphenated/numbered variants. TLD is excluded to avoid false-positives on
+ *    legitimate gTLDs like .dev.
+ * 2. The domain is an hlx/AEM delivery URL (*.aem.live, *.aem.page, *.hlx.live, *.hlx.page).
+ */
+function isNonProdDomain(domain) {
+  const hostPart = domain.split('/')[0];
+  if (HLX_DELIVERY_PATTERN.test(hostPart)) {
+    return true;
+  }
+  const labels = hostPart.split('.');
+  // Exclude the TLD (last label) — .dev is a valid production gTLD
+  const subdomainLabels = labels.slice(0, -1);
+  return subdomainLabels.some((label) => NON_PROD_LABEL_PATTERN.test(label));
+}
+
 export async function performAsoPlgOnboarding({
   domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
@@ -499,6 +521,14 @@ export async function performAsoPlgOnboarding({
   onboarding.setUpdatedBy(callerIdentity);
   if (isFromAsoUI(context)) {
     onboarding.setCreatedBy(callerIdentity);
+  }
+
+  if (!onboarding.getSteps()?.nonProdCheckBypassed && isNonProdDomain(domain)) {
+    log.info(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    await persistAndNotify(onboarding, context);
+    return onboarding;
   }
 
   const terminalFromGuard = await handleExistingOnboardedDomain({
