@@ -1,3 +1,10 @@
+# [1.640.0](https://github.com/adobe/spacecat-api-service/compare/v1.639.0...v1.640.0) (2026-07-12)
+
+
+### Features
+
+* added waitlisted reason for non-prod domains ([#2684](https://github.com/adobe/spacecat-api-service/issues/2684)) ([924c48f](https://github.com/adobe/spacecat-api-service/commit/924c48f43737cf3567e55e9810e2f6436baf7469))
+
 # [1.639.0](https://github.com/adobe/spacecat-api-service/compare/v1.638.1...v1.639.0) (2026-07-10)
 
 
