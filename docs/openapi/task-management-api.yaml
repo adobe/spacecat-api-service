@@ -1,0 +1,367 @@
+task-management-connections:
+  get:
+    tags:
+      - task-management
+    summary: List task-management connections for an organization
+    description: |
+      Returns all Jira connections configured for the given organization.
+      Optionally filter by provider using the `?provider=` query parameter.
+    operationId: listTaskManagementConnections
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: provider
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [jira_cloud]
+    responses:
+      '200':
+        description: List of connections
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/TaskManagementConnection'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - api_key: []
+
+task-management-connection-by-id:
+  get:
+    tags:
+      - task-management
+    summary: Get a task-management connection by ID
+    operationId: getTaskManagementConnection
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: connectionId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+    responses:
+      '200':
+        description: Connection object
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/TaskManagementConnection'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - api_key: []
+
+task-management-connection-projects:
+  get:
+    tags:
+      - task-management
+    summary: List Jira projects for a connection
+    description: |
+      Returns all Jira projects accessible via the given connection.
+      Used by the UI project picker when creating a ticket.
+    operationId: listTaskManagementProjects
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: connectionId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+    responses:
+      '200':
+        description: List of Jira projects
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projects:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      key:
+                        type: string
+                      name:
+                        type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - api_key: []
+
+task-management-connection-issue-types:
+  get:
+    tags:
+      - task-management
+    summary: List Jira issue types for a project
+    description: |
+      Returns non-subtask issue types for the given Jira project.
+      `projectId` is the numeric Jira project ID (returned by the projects endpoint).
+    operationId: listTaskManagementIssueTypes
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: connectionId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: projectId
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: '^\d+$'
+        description: Numeric Jira project ID
+    responses:
+      '200':
+        description: List of issue types
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueTypes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      subtask:
+                        type: boolean
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - api_key: []
+
+task-management-tickets:
+  get:
+    tags:
+      - task-management
+    summary: List tickets for an organization
+    operationId: listTickets
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+    responses:
+      '200':
+        description: List of tickets
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Ticket'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - api_key: []
+
+task-management-create-ticket:
+  post:
+    tags:
+      - task-management
+    summary: Create a Jira ticket
+    description: |
+      Creates one or more Jira tickets for an opportunity or suggestion set.
+
+      **Modes:**
+      - `individual` (default): one ticket per suggestion (up to 15). Returns 207 Multi-Status when N > 1.
+      - `grouped`: all suggestions collapsed into a single ticket (up to 1500). Returns 201.
+
+      Requires an `Idempotency-Key` header derived server-side from opportunityId + suggestionIds.
+    operationId: createTicket
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [jira_cloud]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/TicketCreateRequest'
+    responses:
+      '201':
+        description: Ticket created (single or grouped mode)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Ticket'
+      '207':
+        description: Multi-status — individual batch result per suggestion
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      suggestionId:
+                        type: string
+                      status:
+                        type: integer
+                      ticket:
+                        $ref: './schemas.yaml#/Ticket'
+                      error:
+                        type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: Duplicate request (idempotency) or connection requires re-authorization
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+    security:
+      - api_key: []
+
+ticket-by-suggestion:
+  get:
+    tags:
+      - task-management
+    summary: Get the ticket linked to a suggestion
+    operationId: getTicketBySuggestion
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: suggestionId
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Ticket linked to the suggestion
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Ticket'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - api_key: []
+
+tickets-by-opportunity:
+  get:
+    tags:
+      - task-management
+    summary: List tickets for an opportunity
+    operationId: listTicketsByOpportunity
+    parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: opportunityId
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      '200':
+        description: List of tickets for the opportunity
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Ticket'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - api_key: []
