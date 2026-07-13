@@ -181,6 +181,13 @@ function makeContext(overrides = {}) {
       warn: sinon.stub(),
       error: sinon.stub(),
     },
+    // smClient is injected by smClientWrapper middleware in production.
+    sm: {
+      smClient: {
+        getSecretValue: sinon.stub().resolves({}),
+        putSecretValue: sinon.stub().resolves({}),
+      },
+    },
     // AccessControlUtil.fromContext() requires pathInfo.headers and attributes.authInfo.
     // Default to an admin identity so hasAccess() returns true without any DB lookups.
     pathInfo: { method: 'GET', suffix: '/', headers: {} },
@@ -191,18 +198,9 @@ function makeContext(overrides = {}) {
 
 describe('TaskManagementController', () => {
   let TaskManagementController;
-  let mockSmSend;
 
   beforeEach(async () => {
-    mockSmSend = sinon.stub().resolves({});
-
     TaskManagementController = (await esmock('../../src/controllers/task-management.js', {
-      '@aws-sdk/client-secrets-manager': {
-        SecretsManagerClient: class {
-          // eslint-disable-next-line class-methods-use-this
-          send(...args) { return mockSmSend(...args); }
-        },
-      },
       '@adobe/spacecat-shared-ticket-client': {
         TicketClientFactory: {
           create: sinon.stub().returns({
@@ -3346,7 +3344,7 @@ describe('TaskManagementController', () => {
   });
 
   describe('listIssueTypes', () => {
-    const PROJECT_ID = 'PROJ';
+    const PROJECT_ID = '10001';
 
     function makeReqCtx(overrides = {}) {
       return {
@@ -3371,6 +3369,14 @@ describe('TaskManagementController', () => {
       const { listIssueTypes } = TaskManagementController(makeContext());
       const res = await listIssueTypes(makeReqCtx({ invocation: { event: { rawQueryString: '' } } }));
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when projectId is not numeric', async () => {
+      const { listIssueTypes } = TaskManagementController(makeContext());
+      const res = await listIssueTypes(makeReqCtx({ invocation: { event: { rawQueryString: 'projectId=PROJ' } } }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('numeric');
     });
 
     it('returns 404 when organization not found', async () => {
