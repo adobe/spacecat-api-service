@@ -31,6 +31,7 @@ import {
   assertParentPlacement,
   assertParentWithinDimension,
 } from '../tag-tree.js';
+import { republishBestEffort } from '../brand-urls.js';
 
 /**
  * POST /serenity/tags — create a prompt TAG on a single market.
@@ -391,6 +392,13 @@ export async function handleCreateTag(
     log?.info?.('handleCreateTag: resolved closed-dimension value', {
       brandId, geoTargetId, languageCode, type, name, created,
     });
+    // A create leaves the project in `live_with_unpublished_updates`; publish so
+    // the new value is live (only when we actually seeded one). Best-effort:
+    // republishBestEffort swallows the quota-405 disguise, matching the brand-URL
+    // / alias / benchmark write paths.
+    if (created) {
+      await republishBestEffort(transport, semrushWorkspaceId, projectId, log);
+    }
     return {
       status: 200,
       body: {
@@ -422,6 +430,9 @@ export async function handleCreateTag(
   log?.info?.('handleCreateTag: registered tag', {
     brandId, geoTargetId, languageCode, name, parentId: targetParentId,
   });
+  // Publish so the newly created tag is live rather than left as a draft
+  // (`live_with_unpublished_updates`). Best-effort — see the closed-path note.
+  await republishBestEffort(transport, semrushWorkspaceId, projectId, log);
   return {
     status: 201,
     body: {
@@ -473,6 +484,10 @@ export async function handleCreateTagSubworkspace(
     log?.info?.('handleCreateTagSubworkspace: resolved closed-dimension value', {
       geoTargetId, languageCode, type, name, created,
     });
+    // Publish the seeded value so it is live (best-effort). See handleCreateTag.
+    if (created) {
+      await republishBestEffort(transport, workspaceId, projectId, log);
+    }
     return {
       status: 200,
       body: {
@@ -499,6 +514,8 @@ export async function handleCreateTagSubworkspace(
   log?.info?.('handleCreateTagSubworkspace: registered tag', {
     geoTargetId, languageCode, name, parentId: targetParentId,
   });
+  // Publish so the newly created tag is live rather than a draft (best-effort).
+  await republishBestEffort(transport, workspaceId, projectId, log);
   return {
     status: 201,
     body: {
@@ -738,6 +755,8 @@ export async function handleUpdateTag(
   log?.info?.('handleUpdateTag: updated tag', {
     brandId, geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
   });
+  // Publish so the rename / re-parent is live rather than a draft (best-effort).
+  await republishBestEffort(transport, semrushWorkspaceId, projectId, log);
   return {
     status: 200,
     body: {
@@ -798,6 +817,8 @@ export async function handleUpdateTagSubworkspace(
   log?.info?.('handleUpdateTagSubworkspace: updated tag', {
     geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
   });
+  // Publish so the rename / re-parent is live rather than a draft (best-effort).
+  await republishBestEffort(transport, workspaceId, projectId, log);
   return {
     status: 200,
     body: {

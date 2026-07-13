@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
+import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -42,6 +43,7 @@ function makeTransport(overrides = {}) {
       id: TAG_IDS.categoryRunningShoes, name: 'Footwear', parent_id: TAG_IDS.categoryRoot,
     }),
     listProjectTags: makeListProjectTagsStub(),
+    publishProject: sinon.stub().resolves({}),
     ...overrides,
   };
 }
@@ -100,6 +102,43 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       // "at the root level" — the root level is reserved for the four roots.
       expect(transport.createProjectTags)
         .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['Footwear'], { parentId: TAG_IDS.categoryRoot });
+      // A create leaves the project in `live_with_unpublished_updates`; the
+      // handler republishes so the new tag is live, not a stranded draft.
+      expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
+    });
+
+    it('still returns 201 when the post-create republish 405s on quota (left as draft)', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(405, 'quota')),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        validBody,
+        fakeLog(),
+      );
+      // The quota-405 disguise is swallowed by republishBestEffort — the create
+      // itself must not fail just because the follow-up publish was rejected.
+      expect(res.status).to.equal(201);
+      expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('propagates a non-405 republish failure (create hard-fails)', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        validBody,
+        fakeLog(),
+      )).to.be.rejectedWith('boom');
     });
 
     it('provisions the four dimension roots on a project that predates the taxonomy', async () => {
