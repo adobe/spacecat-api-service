@@ -259,6 +259,7 @@ export function createElementsService(transport) {
      * @param {Array<{region?: string, projectId?: string}>} [params.projects] -
      *   Projects to query. Empty → one unscoped (workspace-wide) fetch.
      * @param {string} params.hostname - Registered domain to drill into (required).
+     * @param {string} [params.channel] - Content-type filter, applied client-side.
      * @param {string} [params.model] / [params.platform] - AI model filter.
      * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD.
      * @param {string} [params.category] - Category tag filter.
@@ -267,7 +268,8 @@ export function createElementsService(transport) {
      */
     /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
     async getDomainUrls(workspaceId, {
-      projects = [], hostname, model, platform, startDate, endDate, category, page, pageSize,
+      projects = [], hostname, channel, model, platform, startDate, endDate, category,
+      page, pageSize,
     }) {
       const scopes = projects.length > 0 ? projects : [{}];
       // Bound the per-project fan-out (mirrors owned-urls) so a brand with many
@@ -287,7 +289,9 @@ export function createElementsService(transport) {
           return { region, stats };
         },
       );
-      return transformDomainUrlsResponse(projectResults, { hostname, page, pageSize });
+      return transformDomainUrlsResponse(projectResults, {
+        hostname, channel, page, pageSize,
+      });
     },
     /* c8 ignore stop */
   };

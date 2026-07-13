@@ -714,6 +714,7 @@ export default function ElementsController(context, log, env) {
       const result = await service.getDomainUrls(workspaceId, {
         projects,
         hostname,
+        channel: query.channel || query.selectedChannel,
         model: query.model || query.platform,
         startDate,
         endDate,

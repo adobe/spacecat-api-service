@@ -114,17 +114,20 @@ function parsePagination({ page, pageSize } = {}) {
  * type), NOT arrays like owned-urls.
  *
  * Only rows whose `source` host matches `hostname` (host-or-subdomain, see
- * {@link hostMatches}) are kept. Semrush has no server-side pagination, so after
- * filtering we sort by citations desc and slice client-side; `totalCount` is the
- * post-filter, pre-slice URL count.
+ * {@link hostMatches}) are kept. An optional `channel` (content-type) filter is then
+ * applied client-side on `contentType` (case-insensitive) — the element has no
+ * server-side content-type filter, so this mirrors cited-domains + the legacy RPC's
+ * `p_channel`. Semrush has no server-side pagination, so after filtering we sort by
+ * citations desc and slice client-side; `totalCount` is the post-filter, pre-slice count.
  *
  * @param {Array<{region?: string, stats: object}>} projectResults
- * @param {object} params - { hostname (required), page, pageSize }.
+ * @param {object} params - { hostname (required), channel, page, pageSize }.
  * @returns {{ urls: Array<object>, totalCount: number }}
  */
 export function transformDomainUrlsResponse(projectResults = [], params = {}) {
   const { page, pageSize } = parsePagination(params);
   const hostname = String(params.hostname ?? '').replace(/^www\./, '').toLowerCase();
+  const channel = typeof params.channel === 'string' ? params.channel.trim() : '';
   const byUrl = new Map();
 
   for (const { region, stats } of projectResults) {
@@ -158,15 +161,24 @@ export function transformDomainUrlsResponse(projectResults = [], params = {}) {
     }
   }
 
-  const urls = [...byUrl.values()].map((e) => ({
+  let urls = [...byUrl.values()].map((e) => ({
     urlId: '', // no Semrush source_urls.id (gap — see LLMO-6160 / cf LLMO-6086)
     url: e.url,
     contentType: e.contentType,
     citations: e.citations,
     promptsCited: e.promptsCited,
     categories: '', // no per-URL category source on the element (Semrush gap)
-    regions: [...e.regions].sort().join(', '),
+    // Legacy `regions` was a comma-joined string_agg with NO space — match it for
+    // exact drop-in parity. Sorted for determinism (string_agg order is arbitrary).
+    regions: [...e.regions].sort().join(','),
   }));
+
+  // `channel` = content-type filter, applied client-side (element ignores it
+  // server-side), mirroring cited-domains + the legacy RPC's `p_channel`.
+  if (channel) {
+    const wanted = channel.toLowerCase();
+    urls = urls.filter((u) => u.contentType.toLowerCase() === wanted);
+  }
 
   urls.sort((a, b) => b.citations - a.citations);
 

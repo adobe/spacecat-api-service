@@ -422,6 +422,7 @@ Phase 2 of the URL Inspector **"Cited Third Party URLs"** expandable tree: expan
 | `startDate` / `start_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing, malformed, or after `endDate` |
 | `endDate` / `end_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing or malformed |
 | `categoryId` / `category` | query | ❌ | Category label → tag `category:<label>` (server-side, stats element) |
+| `channel` / `selectedChannel` | query | ❌ | Content-type filter (e.g. `Other`, `Social`) applied client-side on `contentType`, case-insensitive. Mirrors the legacy `p_channel` |
 | `region` | query | ❌ | Region code (e.g. `US`). Resolved to the market's Semrush **project**. `all`/absent → all the brand's markets (queried per-project) |
 | `page` | query | ❌ | 0-based page index (default `0`) |
 | `pageSize` | query | ❌ | Rows per page (default `50`, clamped to `[1, 1000]`) |
@@ -436,11 +437,11 @@ Scoped by top-level `project_id` + date + `CBF_model`. The endpoint fans out **p
 
 ### What it returns
 
-The element has **no server-side domain filter** (verified live: `CBF_domain`/`cbf_domain`/`CBF_source`, `eq` + `contains`, all return the full project table), so `hostname` is applied **client-side** — the same pattern Owned URLs uses for `domain_type='Owned'`. Cited Domains reports the **registered domain** (e.g. `openai.com`), but `source` hosts are often subdomains (`help.openai.com`), so a row matches when its host **equals `hostname` or is a subdomain of it** (`host === hostname || host.endsWith('.'+hostname)`, `www.`-stripped, lowercased). Exact-host matching would miss most URLs — e.g. `cambridge.org` is only ever cited via `dictionary.cambridge.org`. URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full post-filter count. Field mapping:
+The element has **no server-side domain filter** (verified live: `CBF_domain`/`cbf_domain`/`CBF_source`, `eq` + `contains`, all return the full project table), so `hostname` is applied **client-side** — the same pattern Owned URLs uses for `domain_type='Owned'`. Cited Domains reports the **registered domain** (e.g. `openai.com`), but `source` hosts are often subdomains (`help.openai.com`), so a row matches when its host **equals `hostname` or is a subdomain of it** (`host === hostname || host.endsWith('.'+hostname)`, `www.`-stripped, lowercased). Exact-host matching would miss most URLs — e.g. `cambridge.org` is only ever cited via `dictionary.cambridge.org`. An optional `channel` (content-type) filter is then applied client-side on `contentType`. URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full post-filter count. Field mapping:
 
 - **`url`** ← `source`; **`citations`** ← `citations`; **`promptsCited`** ← `prompts_with_citation`
 - **`contentType`** ← `domain_type`
-- **`regions`** ← the region code(s) of the project(s) the URL appears in, joined (string)
+- **`regions`** ← the region code(s) of the project(s) the URL appears in, comma-joined (string, no space — matches the legacy `string_agg`)
 - **`urlId`** → `''`, **`categories`** → `''` (see gaps)
 
 ### Response example
@@ -462,10 +463,31 @@ The element has **no server-side domain filter** (verified live: `CBF_domain`/`c
 }
 ```
 
-> **⚠️ Gaps (POC):**
-> 1. **No Semrush source for `urlId`, `categories`** — stubbed `''`. `urlId` has no `source_urls.id` equivalent (so a future url-prompts drilldown must key off the URL string); the stats element carries no per-URL category. *Deferred follow-up* (cf. LLMO-6086 / LLMO-6071).
-> 2. **`regions` is a string**, not an array — this endpoint follows the legacy `domain-urls` contract (and the UI `DomainUrlRow` type), unlike Owned URLs which returns `regions` as an array.
-> 3. **Region resolution is org-wide** (same best-effort caveat as Cited Domains gap 3).
+### Gaps & differences vs the legacy `rpc_url_inspector_domain_urls`
+
+The JSON shape is identical (same 7 fields + `totalCount`), so the UI is a drop-in swap. But because the backing data changes from Adobe's Postgres pipeline to Semrush, some fields lose their source and some behavior differs. Full diff:
+
+**Fields with no Semrush source (stubbed — hard gaps, cannot be fixed backend-side):**
+
+| Field | Legacy source | New | Impact |
+|---|---|---|---|
+| `urlId` | real `source_urls.id` (uuid) | `''` | The Phase-3 `url-prompts` drilldown keyed off `url_id`; on Semrush it must key off the URL **string**. Same gap as Owned URLs (LLMO-6086). |
+| `categories` | `string_agg(category_name)` | `''` | The stats element (`9af5ed83`) has no per-URL category column; the `category` param is a server-side *filter*, not a returned field. Maybe revisited under the tag→dimension work (LLMO-6130). |
+
+**Metric / vocabulary differences (inherent to re-platforming — not bugs):**
+
+| Field | Legacy | New | Note |
+|---|---|---|---|
+| `citations` | `COUNT(*)` of citation rows | Semrush `citations` | Different metric definitions; absolute counts won't match across backends. |
+| `promptsCited` | `COUNT(DISTINCT prompt\|region\|topics)` | Semrush `prompts_with_citation` | Different definitions. |
+| `contentType` | PG `content_type` | Semrush `domain_type` (`Owned`/`Other`/`Social`/`Earned`/`Benchmark Competitors`) | Different (richer) vocabulary. |
+
+**Behavioral differences:**
+
+1. **Default model.** Legacy `p_platform = NULL` meant *all models*; the Serenity endpoints default to `search-gpt`. Semrush elements return **empty without `CBF_model`**, so "all models" is not expressible — this is a platform constraint, not a choice. When the UI's platform selector is "all", counts here reflect `search-gpt` only.
+2. **Hostname matching.** Legacy matched `hostname` **exactly**; this endpoint matches **host-or-subdomain** (see above) — a required adaptation to Semrush's registered-domain granularity, so the two backends can group a domain's URLs differently.
+3. **Scoping model.** Legacy was **site-scoped** (`siteId` required + validated); this endpoint is **brand-scoped** via the Semrush sub-workspace and does not take `siteId`.
+4. **`regions` is a string** (comma-joined), not an array — matches the legacy contract + UI `DomainUrlRow` type, unlike Owned URLs which returns an array. Region resolution is org-wide (same best-effort caveat as Cited Domains gap 3).
 
 ---
 
