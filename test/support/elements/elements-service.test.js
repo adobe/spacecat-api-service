@@ -95,18 +95,18 @@ describe('createElementsService', () => {
 
     it('groups unknown prefix:value tags under their own prefix key', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.type).to.deep.equal([{ id: null, label: 'branded' }]);
+      expect(result.type).to.deep.equal([{ id: 'type:branded', label: 'branded' }]);
     });
 
     it('collects plain, prefix-less tags into the generic tags key', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.tags).to.deep.equal([{ id: null, label: 'plain-tag' }]);
+      expect(result.tags).to.deep.equal([{ id: 'plain-tag', label: 'plain-tag' }]);
     });
 
     it('brands contains filter dimensions for each brand', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
       expect(result.brands).to.have.length(2);
-      expect(result.brands[0]).to.deep.include({ id: null, label: 'Adobe' });
+      expect(result.brands[0]).to.deep.include({ id: 'Adobe', label: 'Adobe' });
     });
 
     it('regions contains transformed markets', async () => {
@@ -117,22 +117,22 @@ describe('createElementsService', () => {
 
     it('topics contains only topic:-prefixed entries', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.topics).to.deep.equal([{ id: null, label: 'SEO' }]);
+      expect(result.topics).to.deep.equal([{ id: 'topic:SEO', label: 'SEO' }]);
     });
 
     it('categories contains only category:-prefixed entries', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.categories).to.deep.equal([{ id: null, label: 'Firefly' }]);
+      expect(result.categories).to.deep.equal([{ id: 'category:Firefly', label: 'Firefly' }]);
     });
 
-    it('page_intents contains only intent:-prefixed entries with uppercased id', async () => {
+    it('page_intents contains only intent:-prefixed entries with the original tag as id', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.page_intents).to.deep.equal([{ id: 'INFORMATIONAL', label: 'Informational' }]);
+      expect(result.page_intents).to.deep.equal([{ id: 'intent:Informational', label: 'Informational' }]);
     });
 
     it('origins contains only source:-prefixed entries', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.origins).to.deep.equal([{ id: 'organic', label: 'organic' }]);
+      expect(result.origins).to.deep.equal([{ id: 'source:organic', label: 'organic' }]);
     });
 
     it('resolves spacecat_brand_id on brands when spacecatBrands are provided', async () => {

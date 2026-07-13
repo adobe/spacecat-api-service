@@ -104,12 +104,12 @@ describe('topics definitions', () => {
     it('returns only topic:-prefixed entries', () => {
       const result = transformTopicsForFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: null, label: 'SEO' },
-        { id: null, label: 'AI' },
+        { id: 'topic:SEO', label: 'SEO' },
+        { id: 'topic:AI', label: 'AI' },
         {
-          id: null,
+          id: 'topic:Furniture__Compact Shippable Furniture',
           label: 'Compact Shippable Furniture',
-          parent_id: null,
+          parent_id: 'topic:Furniture',
           parent_label: 'Furniture',
         },
       ]);
@@ -119,9 +119,9 @@ describe('topics definitions', () => {
       const raw = { blocks: { value: [{ value: 'topic:Furniture__Sofas' }] } };
       const [item] = transformTopicsForFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: null,
+        id: 'topic:Furniture__Sofas',
         label: 'Sofas',
-        parent_id: null,
+        parent_id: 'topic:Furniture',
         parent_label: 'Furniture',
       });
     });
@@ -130,17 +130,17 @@ describe('topics definitions', () => {
       const raw = { blocks: { value: [{ value: 'topic:A__B__C' }] } };
       const [item] = transformTopicsForFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: null,
+        id: 'topic:A__B__C',
         label: 'B__C',
-        parent_id: null,
+        parent_id: 'topic:A',
         parent_label: 'A',
       });
     });
 
-    it('sets id to null for each entry', () => {
+    it('sets id to the original tag value (including prefix) for each entry', () => {
       const raw = { blocks: { value: [{ value: 'topic:SEO' }] } };
       const [item] = transformTopicsForFilterDimensions(raw);
-      expect(item.id).to.be.null;
+      expect(item.id).to.equal('topic:SEO');
     });
 
     it('strips the topic: prefix from the label', () => {
@@ -165,12 +165,12 @@ describe('topics definitions', () => {
     it('returns only category:-prefixed entries', () => {
       const result = transformCategoriesToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: null, label: 'Firefly' },
-        { id: null, label: 'Experience Cloud' },
+        { id: 'category:Firefly', label: 'Firefly' },
+        { id: 'category:Experience Cloud', label: 'Experience Cloud' },
         {
-          id: null,
+          id: 'category:Modular & Configurable Sofas__Compact Shippable Furniture',
           label: 'Compact Shippable Furniture',
-          parent_id: null,
+          parent_id: 'category:Modular & Configurable Sofas',
           parent_label: 'Modular & Configurable Sofas',
         },
       ]);
@@ -180,9 +180,9 @@ describe('topics definitions', () => {
       const raw = { blocks: { value: [{ value: 'category:Sofas__Modular Sofas' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: null,
+        id: 'category:Sofas__Modular Sofas',
         label: 'Modular Sofas',
-        parent_id: null,
+        parent_id: 'category:Sofas',
         parent_label: 'Sofas',
       });
     });
@@ -191,17 +191,32 @@ describe('topics definitions', () => {
       const raw = { blocks: { value: [{ value: 'category:A__B__C' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: null,
+        id: 'category:A__B__C',
         label: 'B__C',
-        parent_id: null,
+        parent_id: 'category:A',
         parent_label: 'A',
       });
     });
 
-    it('sets id to null for each entry', () => {
+    it('sets id to the original tag value (including prefix) for each entry', () => {
       const raw = { blocks: { value: [{ value: 'category:Creative' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
-      expect(item.id).to.be.null;
+      expect(item.id).to.equal('category:Creative');
+    });
+
+    it('sets parent_id to the prefix plus the parent label', () => {
+      const raw = {
+        blocks: {
+          value: [{ value: 'category:Living Room Furniture Retail__Living Room Furniture and Sofas' }],
+        },
+      };
+      const [item] = transformCategoriesToFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: 'category:Living Room Furniture Retail__Living Room Furniture and Sofas',
+        label: 'Living Room Furniture and Sofas',
+        parent_id: 'category:Living Room Furniture Retail',
+        parent_label: 'Living Room Furniture Retail',
+      });
     });
 
     it('strips the category: prefix from the label', () => {
@@ -226,15 +241,15 @@ describe('topics definitions', () => {
     it('returns only intent:-prefixed entries', () => {
       const result = transformIntentsToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'INFORMATIONAL', label: 'Informational' },
-        { id: 'TRANSACTIONAL', label: 'Transactional' },
+        { id: 'intent:Informational', label: 'Informational' },
+        { id: 'intent:Transactional', label: 'Transactional' },
       ]);
     });
 
-    it('uppercases id but preserves original casing in label', () => {
+    it('sets id to the original tag value (including prefix) and preserves original casing in label', () => {
       const raw = { blocks: { value: [{ value: 'intent:informational' }] } };
       const [item] = transformIntentsToFilterDimensions(raw);
-      expect(item.id).to.equal('INFORMATIONAL');
+      expect(item.id).to.equal('intent:informational');
       expect(item.label).to.equal('informational');
     });
 
@@ -254,15 +269,15 @@ describe('topics definitions', () => {
     it('returns only source:-prefixed entries', () => {
       const result = transformOriginsToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'organic', label: 'organic' },
-        { id: 'paid', label: 'paid' },
+        { id: 'source:organic', label: 'organic' },
+        { id: 'source:paid', label: 'paid' },
       ]);
     });
 
-    it('sets both id and label to the stripped label value', () => {
+    it('sets id to the original tag value (including prefix) and label to the stripped value', () => {
       const raw = { blocks: { value: [{ value: 'source:direct' }] } };
       const [item] = transformOriginsToFilterDimensions(raw);
-      expect(item.id).to.equal('direct');
+      expect(item.id).to.equal('source:direct');
       expect(item.label).to.equal('direct');
     });
 
@@ -270,7 +285,7 @@ describe('topics definitions', () => {
       const raw = { blocks: { value: [{ value: 'topic:SEO' }, { value: 'source:organic' }] } };
       const result = transformOriginsToFilterDimensions(raw);
       expect(result).to.have.length(1);
-      expect(result[0].id).to.equal('organic');
+      expect(result[0].id).to.equal('source:organic');
     });
   });
 
@@ -299,10 +314,10 @@ describe('topics definitions', () => {
       };
       const result = transformOtherTagsForFilterDimensions(raw);
       expect(result.type).to.deep.equal([
-        { id: null, label: 'branded' },
-        { id: null, label: 'unbranded' },
+        { id: 'type:branded', label: 'branded' },
+        { id: 'type:unbranded', label: 'unbranded' },
       ]);
-      expect(result.abc).to.deep.equal([{ id: null, label: 'value' }]);
+      expect(result.abc).to.deep.equal([{ id: 'abc:value', label: 'value' }]);
       expect(result.tags).to.deep.equal([]);
     });
 
@@ -310,8 +325,8 @@ describe('topics definitions', () => {
       const raw = { blocks: { value: [{ value: 'abc' }, { value: 'another-plain-tag' }] } };
       const result = transformOtherTagsForFilterDimensions(raw);
       expect(result.tags).to.deep.equal([
-        { id: null, label: 'abc' },
-        { id: null, label: 'another-plain-tag' },
+        { id: 'abc', label: 'abc' },
+        { id: 'another-plain-tag', label: 'another-plain-tag' },
       ]);
     });
 
@@ -327,12 +342,12 @@ describe('topics definitions', () => {
       const result = transformOtherTagsForFilterDimensions(raw);
       expect(result.type).to.deep.equal([
         {
-          id: null, label: 'Sub', parent_id: null, parent_label: 'Branded',
+          id: 'type:Branded__Sub', label: 'Sub', parent_id: 'type:Branded', parent_label: 'Branded',
         },
       ]);
       expect(result.tags).to.deep.equal([
         {
-          id: null, label: 'Child', parent_id: null, parent_label: 'Parent',
+          id: 'Parent__Child', label: 'Child', parent_id: 'Parent', parent_label: 'Parent',
         },
       ]);
     });
@@ -340,7 +355,7 @@ describe('topics definitions', () => {
     it('ignores empty string values', () => {
       const raw = { blocks: { value: [{ value: '' }, { value: 'abc' }] } };
       const result = transformOtherTagsForFilterDimensions(raw);
-      expect(result.tags).to.deep.equal([{ id: null, label: 'abc' }]);
+      expect(result.tags).to.deep.equal([{ id: 'abc', label: 'abc' }]);
     });
 
     it('routes tags whose prefix collides with a reserved result key into tags instead of a dynamic group', () => {
@@ -365,15 +380,25 @@ describe('topics definitions', () => {
       expect(result).to.not.have.property('categories');
       expect(result).to.not.have.property('page_intents');
       expect(result).to.not.have.property('origins');
-      expect(result.type).to.deep.equal([{ id: null, label: 'branded' }]);
+      expect(result.type).to.deep.equal([{ id: 'type:branded', label: 'branded' }]);
       expect(result.tags).to.deep.equal([
-        { id: null, label: 'foo' },
-        { id: null, label: 'APAC' },
-        { id: null, label: 'x' },
-        { id: null, label: 'x' },
-        { id: null, label: 'x' },
-        { id: null, label: 'x' },
-        { id: null, label: 'x' },
+        { id: 'brands:foo', label: 'foo' },
+        { id: 'regions:APAC', label: 'APAC' },
+        { id: 'topics:x', label: 'x' },
+        { id: 'categories:x', label: 'x' },
+        { id: 'page_intents:x', label: 'x' },
+        { id: 'origins:x', label: 'x' },
+        { id: 'tags:x', label: 'x' },
+      ]);
+    });
+
+    it('reconstructs parent_id with the reserved-key prefix when a colliding tag has a Parent__Child value', () => {
+      const raw = { blocks: { value: [{ value: 'topics:Parent__Child' }] } };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result.tags).to.deep.equal([
+        {
+          id: 'topics:Parent__Child', label: 'Child', parent_id: 'topics:Parent', parent_label: 'Parent',
+        },
       ]);
     });
   });

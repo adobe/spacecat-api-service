@@ -11475,14 +11475,18 @@ SerenityFilterDimensionItem:
   type: object
   description: |
     A single id/label option for a Serenity Elements filter dropdown. `id` is
-    `null` when Semrush has no stable identifier for the value (most tag-derived
-    dimensions); `parent_id`/`parent_label` are present only when the source tag
-    encoded a "Parent__Child" hierarchy (e.g. `topic:Furniture__Sofas`).
+    the original, unmodified tag value returned by Semrush (including its
+    `prefix:` and any `Parent__Child` encoding, e.g. `topic:Furniture__Sofas`).
+    `parent_id`/`parent_label` are present only when the source tag encoded a
+    "Parent__Child" hierarchy; `parent_id` is the same `prefix:` reconstructed
+    over just the parent segment (e.g. for
+    `category:Living Room Furniture Retail__Living Room Furniture and Sofas`,
+    `parent_id` is `category:Living Room Furniture Retail`).
   required: [id, label]
   properties:
-    id: { type: [string, 'null'] }
+    id: { type: string }
     label: { type: string }
-    parent_id: { type: [string, 'null'] }
+    parent_id: { type: string }
     parent_label: { type: string }
 
 SerenityUrlInspectorFilterDimensions:
@@ -11503,14 +11507,14 @@ SerenityUrlInspectorFilterDimensions:
     brands:
       type: array
       description: |
-        Available brands in the workspace. `id` is always null (Semrush has no
+        Available brands in the workspace. `id` mirrors `label` (Semrush has no
         stable brand id); `spacecat_brand_id` resolves by case-insensitive name
         match against the org's SpaceCat brands.
       items:
         type: object
         required: [id, label]
         properties:
-          id: { type: [string, 'null'] }
+          id: { type: string }
           label: { type: string }
           spacecat_brand_id: { type: [string, 'null'] }
     regions:
@@ -11538,11 +11542,11 @@ SerenityUrlInspectorFilterDimensions:
       items: { $ref: '#/SerenityFilterDimensionItem' }
     page_intents:
       type: array
-      description: Distinct `intent:`-prefixed tags. `id` is the uppercased label.
+      description: Distinct `intent:`-prefixed tags. `id` is the original `intent:`-prefixed tag value.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     origins:
       type: array
-      description: Distinct `source:`-prefixed tags. `id` mirrors `label`.
+      description: Distinct `source:`-prefixed tags. `id` is the original `source:`-prefixed tag value.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     tags:
       type: array
