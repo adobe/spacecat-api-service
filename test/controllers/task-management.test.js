@@ -148,6 +148,8 @@ function makeDataAccess(overrides = {}) {
     },
     TicketSuggestion: {
       allByTicketId: sinon.stub().resolves([]),
+      allByTicketIds: sinon.stub().resolves([]),
+      allBySuggestionIds: sinon.stub().resolves([]),
       findBySuggestionId: sinon.stub().resolves(null),
       create: sinon.stub().resolves(),
       ...overrides.TicketSuggestion,
@@ -163,6 +165,16 @@ function makeDataAccess(overrides = {}) {
     Organization: {
       findById: sinon.stub().resolves(makeOrg()),
       ...overrides.Organization,
+    },
+    IdempotencyKey: {
+      findActiveKey: sinon.stub().resolves(null),
+      create: sinon.stub().resolves({
+        setStatus: sinon.stub().returnsThis(),
+        setResponse: sinon.stub().returnsThis(),
+        save: sinon.stub().resolves(),
+        remove: sinon.stub().resolves(),
+      }),
+      ...overrides.IdempotencyKey,
     },
     services: {
       postgrestClient: makePostgrestClient(),
@@ -481,23 +493,14 @@ describe('TaskManagementController', () => {
 
     it('returns tickets with suggestions bridge', async () => {
       const ticket = makeTicket();
-      const bridgeRow = {
-        ticket_id: TICKET_ID,
-        suggestion_id: SUGGESTION_ID,
-        opportunity_id: OPPORTUNITY_ID,
+      const bridge = {
+        getTicketId: () => TICKET_ID,
+        getSuggestionId: () => SUGGESTION_ID,
       };
-      const pgClient = makePostgrestClient();
-      pgClient.from.returns({
-        ...pgClient.from(),
-        select: sinon.stub().returns({
-          ...pgClient.from().select(),
-          in: sinon.stub().resolves({ data: [bridgeRow], error: null }),
-        }),
-      });
       const ctx = makeContext({
         dataAccess: {
           Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allByTicketIds: sinon.stub().resolves([bridge]) },
         },
       });
       const { listTickets } = TaskManagementController(ctx);
@@ -510,21 +513,10 @@ describe('TaskManagementController', () => {
 
     it('returns tickets with empty suggestions when bridge load fails', async () => {
       const ticket = makeTicket();
-      const pgClient = makePostgrestClient();
-      pgClient.from.returns({
-        ...pgClient.from(),
-        select: sinon.stub().returns({
-          ...pgClient.from().select(),
-          in: sinon.stub().resolves({
-            data: null,
-            error: { message: 'bridge error' },
-          }),
-        }),
-      });
       const ctx = makeContext({
         dataAccess: {
           Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allByTicketIds: sinon.stub().rejects(new Error('bridge error')) },
         },
       });
       const { listTickets } = TaskManagementController(ctx);
@@ -666,18 +658,13 @@ describe('TaskManagementController', () => {
       expect(await res.json()).to.deep.equal([]);
     });
 
-    it('returns all matching tickets with suggestions via postgrestClient', async () => {
+    it('returns all matching tickets with suggestions via TicketSuggestion model', async () => {
       const ticket = makeTicket();
-      const bridgeRow = { ticket_id: TICKET_ID, suggestion_id: SUGGESTION_ID, opportunity_id: OPPORTUNITY_ID };
-      const pgClient = makePostgrestClient();
-      pgClient.from.returns({
-        ...pgClient.from(),
-        select: sinon.stub().returns({ in: sinon.stub().resolves({ data: [bridgeRow], error: null }) }),
-      });
+      const bridgeRow = { getTicketId: () => TICKET_ID, getSuggestionId: () => SUGGESTION_ID };
       const ctx = makeContext({
         dataAccess: {
           Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allByTicketIds: sinon.stub().resolves([bridgeRow]) },
         },
       });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
@@ -692,15 +679,10 @@ describe('TaskManagementController', () => {
       const TICKET_ID_2 = 'dddddddd-eeee-ffff-0000-aaaaaaaaaaaa';
       const ticket1 = makeTicket();
       const ticket2 = makeTicket({ getId: () => TICKET_ID_2 });
-      const pgClient = makePostgrestClient();
-      pgClient.from.returns({
-        ...pgClient.from(),
-        select: sinon.stub().returns({ in: sinon.stub().resolves({ data: [], error: null }) }),
-      });
       const ctx = makeContext({
         dataAccess: {
           Ticket: { allByOrganizationId: sinon.stub().resolves([ticket1, ticket2]) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allByTicketIds: sinon.stub().resolves([]) },
         },
       });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
@@ -713,15 +695,10 @@ describe('TaskManagementController', () => {
 
     it('returns tickets with empty suggestions when bridge load fails', async () => {
       const ticket = makeTicket();
-      const pgClient = makePostgrestClient();
-      pgClient.from.returns({
-        ...pgClient.from(),
-        select: sinon.stub().returns({ in: sinon.stub().resolves({ data: null, error: { message: 'bridge err' } }) }),
-      });
       const ctx = makeContext({
         dataAccess: {
           Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allByTicketIds: sinon.stub().rejects(new Error('bridge err')) },
         },
       });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
@@ -908,26 +885,12 @@ describe('TaskManagementController', () => {
 
     it('returns 409 when any suggestionId is already ticketed', async () => {
       const conn = makeConnection();
-      const pgClient = makePostgrestClient();
-      // Override .in() on the select chain to return a matching bridge row
-      const bridgeInStub = sinon.stub()
-        .resolves({ data: [{ suggestion_id: SUGGESTION_ID }], error: null });
-      const origFrom = pgClient.from;
-      pgClient.from = sinon.stub().callsFake((table) => {
-        const base = origFrom(table);
-        if (table === 'ticket_suggestions') {
-          return {
-            ...base,
-            select: sinon.stub().returns({ in: bridgeInStub }),
-          };
-        }
-        return base;
-      });
+      const bridgeRow = { getSuggestionId: () => SUGGESTION_ID };
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allBySuggestionIds: sinon.stub().resolves([bridgeRow]) },
         },
       });
       const { createTicket } = TaskManagementController(ctx);
@@ -943,25 +906,11 @@ describe('TaskManagementController', () => {
 
     it('returns 500 when TicketSuggestion bridge lookup throws', async () => {
       const conn = makeConnection();
-      const pgClient = makePostgrestClient();
-      const bridgeInStub = sinon.stub()
-        .resolves({ data: null, error: { message: 'db error' } });
-      const origFrom = pgClient.from;
-      pgClient.from = sinon.stub().callsFake((table) => {
-        const base = origFrom(table);
-        if (table === 'ticket_suggestions') {
-          return {
-            ...base,
-            select: sinon.stub().returns({ in: bridgeInStub }),
-          };
-        }
-        return base;
-      });
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allBySuggestionIds: sinon.stub().rejects(new Error('db error')) },
         },
       });
       const { createTicket } = TaskManagementController(ctx);
@@ -1466,21 +1415,11 @@ describe('TaskManagementController', () => {
 
     // ── Idempotency-Key enforcement ─────────────────────────────────────────
 
-    it('returns 500 when postgrestClient unavailable', async () => {
-      const ctx = makeContext({ dataAccess: { services: { postgrestClient: null } } });
-      const { createTicket } = TaskManagementController(ctx);
-      const res = await createTicket(makeReqCtx());
-      expect(res.status).to.equal(500);
-    });
-
     it('returns 500 when idempotency key lookup fails', async () => {
       const ctx = makeContext({
         dataAccess: {
-          services: {
-            postgrestClient: makePostgrestClient({
-              lookupError: new Error('db unavailable'),
-              lookupData: null,
-            }),
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().rejects(new Error('db unavailable')),
           },
         },
       });
@@ -1491,13 +1430,15 @@ describe('TaskManagementController', () => {
 
     it('returns cached response when idempotency key is completed', async () => {
       const cachedBody = { id: TICKET_ID, ticketKey: 'PROJ-1' };
+      const cachedEntry = {
+        getStatus: () => 'completed',
+        getResponse: () => ({ statusCode: 201, body: cachedBody }),
+        getId: () => 'idem-1',
+        getCreatedAt: () => '2026-01-01T00:00:00Z',
+      };
       const ctx = makeContext({
         dataAccess: {
-          services: {
-            postgrestClient: makePostgrestClient({
-              lookupData: [{ id: 'idem-1', status: 'completed', response: { statusCode: 201, body: cachedBody } }],
-            }),
-          },
+          IdempotencyKey: { findActiveKey: sinon.stub().resolves(cachedEntry) },
         },
       });
       const { createTicket } = TaskManagementController(ctx);
@@ -1508,13 +1449,15 @@ describe('TaskManagementController', () => {
     });
 
     it('returns 409 when idempotency key is processing', async () => {
+      const processingEntry = {
+        getStatus: () => 'processing',
+        getResponse: () => null,
+        getId: () => 'idem-1',
+        getCreatedAt: () => '2026-01-01T00:00:00Z',
+      };
       const ctx = makeContext({
         dataAccess: {
-          services: {
-            postgrestClient: makePostgrestClient({
-              lookupData: [{ id: 'idem-1', status: 'processing', response: null }],
-            }),
-          },
+          IdempotencyKey: { findActiveKey: sinon.stub().resolves(processingEntry) },
         },
       });
       const { createTicket } = TaskManagementController(ctx);
@@ -1526,13 +1469,15 @@ describe('TaskManagementController', () => {
 
     it('returns cached error response when idempotency key is failed', async () => {
       const cachedBody = { message: 'Failed to create ticket' };
+      const cachedEntry = {
+        getStatus: () => 'failed',
+        getResponse: () => ({ statusCode: 500, body: cachedBody }),
+        getId: () => 'idem-1',
+        getCreatedAt: () => '2026-01-01T00:00:00Z',
+      };
       const ctx = makeContext({
         dataAccess: {
-          services: {
-            postgrestClient: makePostgrestClient({
-              lookupData: [{ id: 'idem-1', status: 'failed', response: { statusCode: 500, body: cachedBody } }],
-            }),
-          },
+          IdempotencyKey: { findActiveKey: sinon.stub().resolves(cachedEntry) },
         },
       });
       const { createTicket } = TaskManagementController(ctx);
@@ -1549,10 +1494,9 @@ describe('TaskManagementController', () => {
           TaskManagementConnection: {
             findById: sinon.stub().resolves(conn),
           },
-          services: {
-            postgrestClient: makePostgrestClient({
-              insertError: uniqueError,
-            }),
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: sinon.stub().rejects(uniqueError),
           },
         },
       });
@@ -1570,10 +1514,9 @@ describe('TaskManagementController', () => {
           TaskManagementConnection: {
             findById: sinon.stub().resolves(conn),
           },
-          services: {
-            postgrestClient: makePostgrestClient({
-              insertError: new Error('connection reset'),
-            }),
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: sinon.stub().rejects(new Error('connection reset')),
           },
         },
       });
@@ -2079,39 +2022,22 @@ describe('TaskManagementController', () => {
     it('logs warn but still returns 201 when idempotency done-update fails', async () => {
       const conn = makeConnection();
 
-      // markIdempotencyDone now calls .update({status,response,updated_at}).eq(id)
-      // Make the update chain reject so the catch-warn path fires.
-      const pgClient = {
-        from: sinon.stub().callsFake(() => ({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().returns({
-            select: sinon.stub().returns({
-              single: sinon.stub().resolves({ data: { id: 'idem-id-999' }, error: null }),
-            }),
-          }),
-          update: sinon.stub().returns({
-            eq: sinon.stub().callsFake(() => Promise.reject(new Error('PG update error'))),
-          }),
-          delete: sinon.stub().returns({
-            eq: sinon.stub().resolves({ data: null, error: null }),
-          }),
-        })),
+      const idempotencyEntry = {
+        setStatus: sinon.stub().returnsThis(),
+        setResponse: sinon.stub().returnsThis(),
+        save: sinon.stub().rejects(new Error('PG update error')),
+        remove: sinon.stub().resolves(),
       };
 
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allBySuggestionIds: sinon.stub().resolves([]) },
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: sinon.stub().resolves(idempotencyEntry),
+          },
         },
       });
 
@@ -2131,35 +2057,22 @@ describe('TaskManagementController', () => {
 
       // Single idempotency insert succeeds; ticket creation throws GRANT_REVOKED
       // which triggers markIdempotencyFailed; the delete rejects but error is swallowed.
-      const pgClient = {
-        from: sinon.stub().callsFake(() => ({
-          select: sinon.stub().returns({
-            eq: sinon.stub().returns({
-              eq: sinon.stub().returns({
-                gte: sinon.stub().returns({
-                  limit: sinon.stub().resolves({ data: [], error: null }),
-                }),
-              }),
-            }),
-            in: sinon.stub().resolves({ data: [], error: null }),
-          }),
-          insert: sinon.stub().returns({
-            select: sinon.stub().returns({
-              single: sinon.stub().resolves({ data: { id: 'idem-id-6b' }, error: null }),
-            }),
-          }),
-          update: sinon.stub().returns({ eq: sinon.stub().resolves({ data: null, error: null }) }),
-          delete: sinon.stub().returns({
-            eq: sinon.stub().callsFake(() => Promise.reject(new Error('PG delete failed'))),
-          }),
-        })),
+      const idempotencyEntry = {
+        setStatus: sinon.stub().returnsThis(),
+        setResponse: sinon.stub().returnsThis(),
+        save: sinon.stub().resolves(),
+        remove: sinon.stub().rejects(new Error('PG delete failed')),
       };
 
       const ctx = makeContext({
         dataAccess: {
           TaskManagementConnection: { findById: sinon.stub().resolves(conn) },
           Suggestion: { findById: sinon.stub().resolves(makeSuggestion()) },
-          services: { postgrestClient: pgClient },
+          TicketSuggestion: { allBySuggestionIds: sinon.stub().resolves([]) },
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: sinon.stub().resolves(idempotencyEntry),
+          },
         },
       });
 

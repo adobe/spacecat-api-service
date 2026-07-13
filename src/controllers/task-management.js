@@ -105,7 +105,7 @@ function TaskManagementController(context) {
   }
 
   const {
-    Organization, TaskManagementConnection, Ticket, TicketSuggestion, Suggestion,
+    Organization, TaskManagementConnection, Ticket, TicketSuggestion, Suggestion, IdempotencyKey,
   } = dataAccess;
 
   if (!isNonEmptyObject(TaskManagementConnection)) {
@@ -126,6 +126,10 @@ function TaskManagementController(context) {
 
   if (!isNonEmptyObject(Organization)) {
     throw new Error('Organization collection not available');
+  }
+
+  if (!isNonEmptyObject(IdempotencyKey)) {
+    throw new Error('IdempotencyKey collection not available');
   }
 
   // SecretsManagerClient is constructed here for v1 simplicity.
@@ -304,30 +308,18 @@ function TaskManagementController(context) {
       return internalServerError('Failed to list tickets');
     }
 
-    // Bulk-load all bridge rows for the org's tickets in one query (chunked at 50
-    // to stay under PostgREST URI limits), then group in-memory by ticket ID.
-    const postgrestClient = dataAccess.services?.postgrestClient;
+    // Bulk-load all bridge rows for the org's tickets in one query, then group by ticket ID.
     const bridgeMap = new Map();
-    if (tickets.length > 0 && postgrestClient) {
+    if (tickets.length > 0) {
       const ticketIds = tickets.map((t) => t.getId());
-      const BRIDGE_LOAD_CHUNK = 50;
       try {
-        for (let i = 0; i < ticketIds.length; i += BRIDGE_LOAD_CHUNK) {
-          const chunk = ticketIds.slice(i, i + BRIDGE_LOAD_CHUNK);
-          // eslint-disable-next-line no-await-in-loop
-          const { data, error } = await postgrestClient
-            .from('ticket_suggestions')
-            .select('ticket_id,suggestion_id,opportunity_id')
-            .in('ticket_id', chunk);
-          if (error) {
-            throw error;
+        const bridges = await TicketSuggestion.allByTicketIds(ticketIds);
+        for (const bridge of bridges) {
+          const tid = bridge.getTicketId();
+          if (!bridgeMap.has(tid)) {
+            bridgeMap.set(tid, []);
           }
-          (data || []).forEach((row) => {
-            if (!bridgeMap.has(row.ticket_id)) {
-              bridgeMap.set(row.ticket_id, []);
-            }
-            bridgeMap.get(row.ticket_id).push(row.suggestion_id);
-          });
+          bridgeMap.get(tid).push(bridge.getSuggestionId());
         }
       } catch (err) {
         log.warn({ err }, 'Failed to bulk-load bridge rows; response will omit suggestion links');
@@ -440,33 +432,20 @@ function TaskManagementController(context) {
       return ok([]);
     }
 
-    // Bulk-load bridge rows for all matching tickets.
-    const postgrestClient = dataAccess.services?.postgrestClient;
+    // Bulk-load bridge rows for all matching tickets, then group by ticket ID.
     const bridgeMap = new Map();
-    if (postgrestClient) {
+    try {
       const ticketIds = tickets.map((t) => t.getId());
-      const BRIDGE_LOAD_CHUNK = 50;
-      try {
-        for (let i = 0; i < ticketIds.length; i += BRIDGE_LOAD_CHUNK) {
-          const chunk = ticketIds.slice(i, i + BRIDGE_LOAD_CHUNK);
-          // eslint-disable-next-line no-await-in-loop
-          const { data, error } = await postgrestClient
-            .from('ticket_suggestions')
-            .select('ticket_id,suggestion_id,opportunity_id')
-            .in('ticket_id', chunk);
-          if (error) {
-            throw error;
-          }
-          (data || []).forEach((row) => {
-            if (!bridgeMap.has(row.ticket_id)) {
-              bridgeMap.set(row.ticket_id, []);
-            }
-            bridgeMap.get(row.ticket_id).push(row.suggestion_id);
-          });
+      const bridges = await TicketSuggestion.allByTicketIds(ticketIds);
+      for (const bridge of bridges) {
+        const tid = bridge.getTicketId();
+        if (!bridgeMap.has(tid)) {
+          bridgeMap.set(tid, []);
         }
-      } catch (err) {
-        log.warn({ opportunityId, err }, 'Failed to bulk-load bridge rows; response will omit suggestion links');
+        bridgeMap.get(tid).push(bridge.getSuggestionId());
       }
+    } catch (err) {
+      log.warn({ opportunityId, err }, 'Failed to bulk-load bridge rows; response will omit suggestion links');
     }
 
     return ok(tickets.map((t) => TicketDto.toJSON(t, bridgeMap.get(t.getId()) || [])));
@@ -599,33 +578,22 @@ function TaskManagementController(context) {
       .update(`${data.opportunityId ?? organizationId}:${[...suggestionIds].sort().join(',')}`)
       .digest('hex');
 
-    const postgrestClient = dataAccess.services?.postgrestClient;
-    if (!postgrestClient) {
-      log.error({ organizationId }, 'PostgREST client not available for idempotency check');
+    let existingEntry;
+    try {
+      existingEntry = await IdempotencyKey.findActiveKey(idempotencyKey, organizationId);
+    } catch (err) {
+      log.error({ organizationId, err }, 'Failed to look up idempotency key');
       return internalServerError('Service unavailable');
     }
 
-    const { data: existingKeys, error: lookupError } = await postgrestClient
-      .from('idempotency_keys')
-      .select('id,status,response,created_at')
-      .eq('key', idempotencyKey)
-      .eq('organization_id', organizationId)
-      .gte('expires_at', new Date().toISOString())
-      .limit(1);
-
-    if (lookupError) {
-      log.error({ organizationId, lookupError }, 'Failed to look up idempotency key');
-      return internalServerError('Service unavailable');
-    }
-
-    const existingEntry = existingKeys?.[0];
     if (existingEntry) {
-      if (existingEntry.status === 'completed' || existingEntry.status === 'failed') {
-        const cached = existingEntry.response;
+      const status = existingEntry.getStatus();
+      if (status === 'completed' || status === 'failed') {
+        const cached = existingEntry.getResponse();
         return createResponse(cached.body, cached.statusCode);
       }
       // status === 'processing'
-      log.warn({ organizationId, lockId: existingEntry.id, createdAt: existingEntry.created_at }, 'Returning 409 — idempotency lock still processing');
+      log.warn({ organizationId, lockId: existingEntry.getId(), createdAt: existingEntry.getCreatedAt() }, 'Returning 409 — idempotency lock still processing');
       return createResponse({ message: 'Request already in flight', retryAfter: 2 }, STATUS_CONFLICT);
     }
 
@@ -691,30 +659,12 @@ function TaskManagementController(context) {
     }
 
     // --- Pre-flight: verify none of the suggestions already have a ticket -------
-    // Bulk-query the bridge table with PostgREST .in() (chunks of 50) instead of
-    // N individual findBySuggestionId calls. Early-exit on first chunk with matches.
 
     if (suggestionIds.length > 0) {
-      const BRIDGE_CHECK_CHUNK = 50;
-      const alreadyTicketed = [];
+      let alreadyTicketed;
       try {
-        for (let i = 0; i < suggestionIds.length; i += BRIDGE_CHECK_CHUNK) {
-          const chunk = suggestionIds.slice(i, i + BRIDGE_CHECK_CHUNK);
-          // eslint-disable-next-line no-await-in-loop
-          const { data: bridgeRows, error: bridgeErr } = await postgrestClient
-            .from('ticket_suggestions')
-            .select('suggestion_id')
-            .in('suggestion_id', chunk);
-          if (bridgeErr) {
-            throw bridgeErr;
-          }
-          alreadyTicketed.push(
-            ...(bridgeRows || []).map((r) => r.suggestion_id),
-          );
-          if (alreadyTicketed.length > 0) {
-            break;
-          }
-        }
+        const bridges = await TicketSuggestion.allBySuggestionIds(suggestionIds);
+        alreadyTicketed = bridges.map((b) => b.getSuggestionId());
       } catch (err) {
         log.error({ err }, 'Failed to check existing ticket bridges');
         return internalServerError('Failed to validate suggestion ticket status');
@@ -733,41 +683,32 @@ function TaskManagementController(context) {
     // Connection and suggestion are validated — now commit to processing this request.
 
     const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
-    const { data: newEntry, error: insertError } = await postgrestClient
-      .from('idempotency_keys')
-      .insert({
+    let idempotencyKeyEntry;
+    try {
+      idempotencyKeyEntry = await IdempotencyKey.create({
         key: idempotencyKey,
-        organization_id: organizationId,
+        organizationId,
         endpoint: `POST /task-management/${provider}/tickets`,
         status: 'processing',
-        expires_at: expiresAt,
-      })
-      .select('id')
-      .single();
-
-    if (insertError) {
-      const isUniqueViolation = insertError.code === '23505'
-        || insertError.message?.includes('unique')
-        || insertError.message?.includes('duplicate');
+        expiresAt,
+      });
+    } catch (err) {
+      const isUniqueViolation = err.message?.includes('unique')
+        || err.message?.includes('duplicate')
+        || err.code === '23505';
       if (isUniqueViolation) {
         return createResponse({ message: 'Request already in flight' }, STATUS_CONFLICT);
       }
-      log.error({ organizationId, insertError }, 'Failed to insert idempotency key');
+      log.error({ organizationId, err }, 'Failed to insert idempotency key');
       return internalServerError('Service unavailable');
     }
 
-    const idempotencyKeyId = newEntry.id;
-
     async function markIdempotencyDone(responseBody, statusCode) {
       try {
-        await postgrestClient
-          .from('idempotency_keys')
-          .update({
-            status: 'completed',
-            response: { body: responseBody, statusCode },
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', idempotencyKeyId);
+        await idempotencyKeyEntry
+          .setStatus('completed')
+          .setResponse({ body: responseBody, statusCode })
+          .save();
       } catch (err) {
         log.warn({ err }, 'Failed to cache completed response in idempotency lock');
       }
@@ -775,10 +716,7 @@ function TaskManagementController(context) {
 
     async function markIdempotencyFailed() {
       try {
-        await postgrestClient
-          .from('idempotency_keys')
-          .delete()
-          .eq('id', idempotencyKeyId);
+        await idempotencyKeyEntry.remove();
       } catch (err) {
         log.warn({ err }, 'Failed to delete idempotency key after failure');
       }
