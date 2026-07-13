@@ -108,12 +108,16 @@ export const modelChangeUnits = (publishedTexts, deltaModels) => Math.max(0, pub
 /**
  * Fail-loud guard for the workspace ids the allocator needs. A missing/blank id means a caller
  * didn't thread the resolved auth ids into the fronting seam — a wiring bug, not a client error, so
- * this throws a plain Error (→ 500, surfaced in monitoring) rather than a mapped 4xx.
+ * this throws a plain Error (→ 500, surfaced in monitoring) rather than a mapped 4xx. Exported so
+ * {@link createHeadroomGuard} (dynamic-allocation-active.js) can enforce it at the guard's own
+ * construction point — the only place the flag-ON, ids-missing case is actually reachable from the
+ * request path (this module's own `ensureAiHeadroom`/`releaseAiSurplus` callers are only ever
+ * invoked once the guard has already decided to proceed).
  * @param {string} fn calling function name (for the message)
  * @param {Record<string, unknown>} ids id name → value
  * @returns {void}
  */
-function requireWorkspaceId(fn, ids) {
+export function requireWorkspaceId(fn, ids) {
   for (const [name, value] of Object.entries(ids)) {
     if (typeof value !== 'string' || value.trim() === '') {
       throw new Error(`resource-manager: ${fn} requires a non-empty ${name}`);
@@ -190,7 +194,7 @@ function workspaceBusy() {
  * @param {string} workspaceId
  * @param {{ projects: number, prompts: number }} totals
  * @param {PollOpts} poll
- * @param {any} log
+ * @param {any} [log]
  * @returns {Promise<void>}
  */
 async function transferAndSettle(transport, workspaceId, totals, poll, log) {
@@ -375,6 +379,12 @@ export async function releaseAiSurplus(transport, {
   subWorkspaceId, floor = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL, failFast = false,
 }, log) {
   try {
+    // Fail LOUD on a missing/blank id, same as ensureAiHeadroom: a blank id is a caller wiring bug,
+    // not a client error. Deliberately INSIDE the try — the surrounding catch only re-throws
+    // unexpected errors (this is one) and swallows expected/best-effort ones, so a wiring bug still
+    // propagates as a clear 500 rather than the opaque transport error a blank id would otherwise
+    // produce, while still going through the same instanceof re-throw gate below.
+    requireWorkspaceId('releaseAiSurplus', { subWorkspaceId });
     const child = readAiTotals(await transport.getWorkspaceResources(subWorkspaceId));
     /** @type {{ projects: number, prompts: number }} */
     const target = { projects: child.projects.total, prompts: child.prompts.total };
@@ -422,7 +432,9 @@ export async function releaseAiSurplus(transport, {
     if (!(e instanceof SerenityTransportError) && !(e instanceof ErrorWithStatusCode)) {
       throw e;
     }
-    log?.warn?.(`SERENITY_ALLOC releaseAiSurplus best-effort failure for ${subWorkspaceId}: ${e?.message}`);
+    log?.warn?.('SERENITY_ALLOC releaseAiSurplus best-effort failure', {
+      subWorkspaceId, error: e?.message,
+    });
     return { released: false, reason: 'error' };
   }
 }

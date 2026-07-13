@@ -367,11 +367,11 @@ export default function serenityTests(
       await createUsMarket();
       const parent = await createTag('Footwear');
       const child = await createTag('Sneakers', parent.body.id);
-      const subWorkspaceId = child.body.id;
+      const childTagId = child.body.id;
 
       // Rename-only: parentId omitted — the proxy must re-send the child's current parent itself
       // (gate 5) so the child stays nested, not promoted to root.
-      const renamed = await getHttpClient().admin.patch(`${base}/tags/${subWorkspaceId}`, {
+      const renamed = await getHttpClient().admin.patch(`${base}/tags/${childTagId}`, {
         name: 'Boots', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(renamed.status).to.equal(200);
@@ -379,7 +379,7 @@ export default function serenityTests(
       expect(renamed.body.parentId).to.equal(parent.body.id);
 
       // Promote to root: explicit parentId: null (gate 1).
-      const promoted = await getHttpClient().admin.patch(`${base}/tags/${subWorkspaceId}`, {
+      const promoted = await getHttpClient().admin.patch(`${base}/tags/${childTagId}`, {
         name: 'Boots', parentId: null, geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(promoted.status).to.equal(200);
@@ -582,7 +582,11 @@ export default function serenityTests(
 
     const childTotal = (dump, dim) => {
       const rec = (dump.workspace_resources || []).find((r) => r.id === CHILD);
-      return rec?.ai?.[dim]?.total;
+      // A missing record (shape mismatch / wiring regression) must fail with an ACTIONABLE message
+      // here, not surface downstream as the opaque "expected undefined to be above 0".
+      expect(rec, `expected a workspace_resources record for CHILD (${CHILD}) in the mock dump`)
+        .to.exist;
+      return rec.ai?.[dim]?.total;
     };
 
     // Skip cleanly if a wiring didn't inject the mock control routes (only the postgres harness has

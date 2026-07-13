@@ -322,6 +322,16 @@ describe('resource-manager — releaseAiSurplus', () => {
       .to.be.rejectedWith(TypeError);
   });
 
+  it('fails LOUD on a missing/blank subWorkspaceId — propagates, never swallowed as best-effort', async () => {
+    // A blank id is a caller wiring bug, not an expected/best-effort failure (transport/pool/busy)
+    // — it must surface as a clear 500, not the opaque transport error a blank id would otherwise
+    // produce, and NOT be reported as released:false the way a real best-effort failure would be.
+    const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
+    await expect(releaseAiSurplus(t, { subWorkspaceId: '', poll }, log))
+      .to.be.rejectedWith(/requires a non-empty subWorkspaceId/);
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
   it('release path (async/reconciler) retries the transient "workspace not ready" 422 then settles', async () => {
     // releaseAiSurplus keeps the settle-poll + not-ready retry loop — it is the async/reconciler
     // path, NOT the synchronous hot path (only ensureAiHeadroom fails fast).

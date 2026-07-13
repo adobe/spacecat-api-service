@@ -92,14 +92,29 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
   });
 
-  it('ON but missing subWorkspaceId/parentWorkspaceId: no-op guard + a warn (never blocks the write)', async () => {
-    const warn = sinon.spy();
+  it('ON but missing parentWorkspaceId: FAILS LOUD at construction (never silently no-ops)', () => {
+    // A silent no-op here would mean "flag ON but not actually metering" — the exact failure mode a
+    // kill-switch rollout must not have (Rainer's review). Throws BEFORE any transport call.
     const t = makeTransport();
-    const guard = createHeadroomGuard(t, { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: '' }, { ...log, warn });
-    expect(guard.enabled).to.equal(false);
-    await guard.ensure({ projects: 1 });
+    expect(() => createHeadroomGuard(t, { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: '' }, log)).to.throw(/requires a non-empty parentWorkspaceId/);
     expect(t.getWorkspaceResources).to.not.have.been.called;
-    expect(warn).to.have.been.called;
+  });
+
+  it('ON but missing subWorkspaceId: FAILS LOUD at construction', () => {
+    const t = makeTransport();
+    expect(() => createHeadroomGuard(t, { enabled: true, subWorkspaceId: '', parentWorkspaceId: MASTER }, log)).to.throw(/requires a non-empty subWorkspaceId/);
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('OFF with missing ids: still a genuine no-op (the flag gate is checked first)', async () => {
+    // Disabled must never throw regardless of id presence — OFF stays byte-for-byte a no-op even
+    // when the caller hasn't resolved a parent workspace at all (today's common case pre-rollout).
+    const t = makeTransport();
+    const guard = createHeadroomGuard(t, { enabled: false, subWorkspaceId: '', parentWorkspaceId: '' }, log);
+    expect(guard.enabled).to.equal(false);
+    const r = await guard.ensure({ projects: 1 });
+    expect(r).to.deep.equal({ toppedUp: false });
+    expect(t.getWorkspaceResources).to.not.have.been.called;
   });
 
   it('serializes concurrent ensure() calls against the same child — the 2nd reads the 1st\'s write', async () => {

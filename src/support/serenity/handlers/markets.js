@@ -974,10 +974,22 @@ export async function countPublishedPrompts(transport, semrushWorkspaceId, proje
   let count = 0;
   let page = 1;
   while (page <= PROMPT_COUNT_PAGE_LIMIT) {
-    // eslint-disable-next-line no-await-in-loop
-    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
-      tag_ids: [], page, limit: LIMIT,
-    });
+    let resp;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+        tag_ids: [], page, limit: LIMIT,
+      });
+    } catch (e) {
+      // An upstream failure MID-WALK is truncation, same as hitting the page ceiling below: return
+      // the counted-so-far (a floor) instead of propagating the rejection and failing the WHOLE
+      // metered write over a partial-page read error. The transfer 422 remains the authoritative
+      // backstop if this under-states the real need.
+      log?.warn?.('countPublishedPrompts: upstream failure mid-walk; returning counted-so-far', {
+        semrushWorkspaceId, projectId, page, error: e?.message,
+      });
+      return count;
+    }
     const items = Array.isArray(resp?.items) ? resp.items : [];
     count += items.length;
     if (items.length < LIMIT) {

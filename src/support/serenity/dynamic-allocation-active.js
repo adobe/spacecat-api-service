@@ -12,9 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
-
-import { ensureAiHeadroom } from './resource-manager.js';
+import { ensureAiHeadroom, requireWorkspaceId } from './resource-manager.js';
 import { withResourceLock } from './resource-lock.js';
 
 /**
@@ -54,10 +52,17 @@ export function isDynamicAllocationEnabled(env) {
  * single enforcement choke point for JIT top-up. Handlers ALWAYS call `guard.ensure(need, opts)`
  * before a metered `createProject` / `publishProject` / model-add publish, regardless of the flag.
  *
- * - Flag OFF (or the child/master ids are missing): `ensure` is a genuine no-op — it issues ZERO
- *   transport calls and returns immediately — so the OFF path is byte-for-byte the pre-PR behavior.
- * - Flag ON: `ensure` serializes per child (see {@link withResourceLock}) and tops up just-in-time
- *   via the FAIL-FAST {@link ensureAiHeadroom} (one transfer, no poll; 503 if still settling).
+ * - Flag OFF: `ensure` is a genuine no-op — it issues ZERO transport calls and returns immediately
+ *   — so the OFF path is byte-for-byte the pre-PR behavior.
+ * - Flag ON with the child/master ids missing: FAILS LOUD (throws) rather than silently degrading
+ *   to a no-op. A brand whose org has no parent workspace would otherwise get neither the
+ *   (now-skipped) flat carve nor a JIT top-up — its sub-workspace sits at zero AI resources and the
+ *   very next metered write fails at the Semrush gateway with an opaque error, instead of a clear
+ *   500 at the moment the misconfiguration is knowable. "Flag ON but silently not metering" is
+ *   exactly the failure mode a kill-switch rollout must not have.
+ * - Flag ON with both ids present: `ensure` serializes per child (see {@link withResourceLock}) and
+ *   tops up just-in-time via the FAIL-FAST {@link ensureAiHeadroom} (one transfer, no poll; 503 if
+ *   still settling).
  *
  * @param {any} transport - Serenity transport.
  * @param {object} opts
@@ -72,32 +77,25 @@ export function isDynamicAllocationEnabled(env) {
 export function createHeadroomGuard(transport, {
   enabled, subWorkspaceId, parentWorkspaceId, ceiling, blocks,
 }, log) {
-  // Disabled path: a no-op guard. Also taken when ON but the ids needed to top up are missing — a
-  // wiring/misconfiguration we must NOT let block a customer write; log it (a PR-4 pre-flip guard
-  // will assert the ids are present before the flag can be flipped on for real).
-  // The `!id` checks first narrow away undefined/'' (hasText is not a TS type guard — see this
-  // dir's CLAUDE.md), so hasText only guards whitespace-only and both are `string` below.
-  const idsMissing = !subWorkspaceId || !parentWorkspaceId
-    || !hasText(subWorkspaceId) || !hasText(parentWorkspaceId);
-  if (!enabled || idsMissing) {
-    if (enabled) {
-      log?.warn?.(
-        '[serenity] dynamic allocation ON but subWorkspaceId/parentWorkspaceId missing '
-        + '— skipping JIT top-up for this request',
-        { subWorkspaceId, parentWorkspaceId },
-      );
-    }
+  if (!enabled) {
+    // Disabled path: a genuine no-op, byte-for-byte the pre-PR behavior.
     return {
       enabled: false,
       ensure: async () => ({ toppedUp: false }),
     };
   }
+  // Flag ON: the ids are required from here on — fail loud (throw) rather than silently no-op.
+  requireWorkspaceId('createHeadroomGuard', { subWorkspaceId, parentWorkspaceId });
+  // requireWorkspaceId above throws unless both are non-empty strings; narrow the (JSDoc-optional)
+  // params for tsc, which cannot narrow a destructured variable through a plain function call.
+  const childId = /** @type {string} */ (subWorkspaceId);
+  const parentId = /** @type {string} */ (parentWorkspaceId);
   return {
     enabled: true,
     ensure: (need = {}, { includeDrafted = false } = {}) => withResourceLock(
-      subWorkspaceId,
+      childId,
       () => ensureAiHeadroom(transport, {
-        subWorkspaceId, parentWorkspaceId, need, ceiling, blocks, includeDrafted,
+        subWorkspaceId: childId, parentWorkspaceId: parentId, need, ceiling, blocks, includeDrafted,
       }, log),
     ),
   };

@@ -69,11 +69,20 @@ export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
 // Org-level parent workspace for ORG_1, so a subworkspace brand resolves a non-null
 // `parentWorkspaceId` — the condition the dynamic-allocation JIT guard needs to engage, and the
 // workspace whose `/resources` the allocator reads as the advisory pool gauge when a top-up fires.
-// Set to the `parent-with-child` UM-mock seed's CHILD workspace id: an EXISTING mock workspace
-// (distinct from BRAND_1's sub-workspace SERENITY_MOCK_WORKSPACE_ID) that the flag-ON IT meters via
-// `__quota` so the advisory read resolves. (Its role in the mock seed is irrelevant here — the IT
-// only needs a real, metable workspace to stand in as the units pool.)
-export const SERENITY_ORG_PARENT_WS_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
+//
+// DELIBERATELY ALIASES SERENITY_MOCK_PROJECT_ID (not a coincidence, not a new id) — the UM mock's
+// `GET .../resources` / `createSubworkspace` handlers both 403 on any id that isn't a
+// pre-registered `workspace` entity, and the loaded boot seed (`parent-with-child`) has exactly
+// TWO: the one already claimed by SERENITY_MOCK_WORKSPACE_ID (BRAND_1's own sub-workspace — can't
+// double as its own org parent) and this one. A genuinely third, distinct workspace would need
+// either reseeding the mock's whole store (`__seed` replaces the RESET BASELINE store-wide — too
+// broad a blast radius to risk for this) or the mock's internal seed-construction factories, which
+// aren't available here: the `mock/*` subpath is an in-monorepo-only export (`files: ["src"]` in
+// the package's `package.json`), so api-service, an external npm consumer, can't reach it.
+// Referencing the SAME export (not a copy-pasted literal) keeps this a single source of truth
+// instead of a silent, unexplained coincidence — its role as a PE-mock project id elsewhere is
+// irrelevant to its use here as a UM workspace id metered via `__quota`.
+export const SERENITY_ORG_PARENT_WS_ID = SERENITY_MOCK_PROJECT_ID;
 
 // ── FACS state-layer managers (hybrid-model §8.3) ──
 // The brandManager persona holds state-layer `llmo/can_manage_users` on

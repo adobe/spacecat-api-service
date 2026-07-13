@@ -42,9 +42,10 @@ function makeTransport(overrides = {}) {
   };
 }
 
-// Stubs listProjectTags so resolveTagTarget() resolves `subWorkspaceId` as a CHILD
-// of `rootId` (mirrors the live shape: children carry `parent_id`).
-function makeChildTreeTransport(rootId, subWorkspaceId, overrides = {}) {
+// Stubs listProjectTags so resolveTagTarget() resolves `childTagId` as a CHILD tag
+// of `rootId` (mirrors the live shape: children carry `parent_id`). These are TAG ids, not
+// workspace ids — unrelated to the allocator's subWorkspaceId/parentWorkspaceId vocabulary.
+function makeChildTreeTransport(rootId, childTagId, overrides = {}) {
   const listProjectTags = sinon.stub();
   listProjectTags.withArgs(sinon.match.any, sinon.match.any, sinon.match({ parentId: '' }))
     .resolves({ page: 1, total: 1, items: [{ id: rootId, name: 'category:Footwear', children_count: 1 }] });
@@ -53,7 +54,7 @@ function makeChildTreeTransport(rootId, subWorkspaceId, overrides = {}) {
       page: 1,
       total: 1,
       items: [{
-        id: subWorkspaceId, name: 'Sneakers', parent_id: rootId, path: [{ id: rootId, name: 'category:Footwear' }],
+        id: childTagId, name: 'Sneakers', parent_id: rootId, path: [{ id: rootId, name: 'category:Footwear' }],
       }],
     });
   return makeTransport({ listProjectTags, ...overrides });

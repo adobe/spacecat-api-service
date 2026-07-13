@@ -32,26 +32,60 @@
  * Queue depth is self-bounding: a key's chain is only as deep as the same-child ops in flight in
  * this container (the batch `mapLimit` fan-out is itself capped, e.g. `BULK_CREATE_CONCURRENCY`),
  * and the chain entry is evicted the moment it drains — so no explicit depth cap is needed.
+ *
+ * SAFETY VALVE (MysticatBot 2026-07-06 / 2026-07-09, Rainer 2026-07-13): the predecessor wait has
+ * no timeout of its own. If a predecessor's `task` hangs (e.g. a transport call against a hung TCP
+ * connection with no fetch-level timeout), every subsequent same-child op would otherwise queue
+ * behind it FOREVER, until the warm container recycles — a single stuck write starves the whole
+ * child. `LOCK_TIMEOUT_MS` bounds the wait: after it elapses, a waiter stops waiting on the
+ * predecessor and runs anyway, trading a bounded, rare risk of racing the eventual absolute-set
+ * from a hung predecessor for guaranteed forward progress. The predecessor's own `task` is NOT
+ * cancelled by this — it keeps running and its result is still delivered to whoever originally
+ * awaited it; only the QUEUE stops waiting on it.
  */
 
 /** @type {Map<string, Promise<void>>} tail of the in-flight chain per key. */
 const chains = new Map();
 
+/** Default safety-valve wait (see the module doc above). Exported so a caller can reason about /
+ * override it; `withResourceLock`'s own `timeoutMs` param is the per-call override point (tests use
+ * a tiny value so the timeout path doesn't need a real multi-second wait). */
+export const LOCK_TIMEOUT_MS = 10_000;
+
 /**
- * Runs `task` only after any previously-queued task for the same `key` has settled, serializing
+ * Resolves once `promise` settles OR once `ms` elapses, whichever comes first. NEVER rejects — the
+ * timeout is a safety valve, not a failure signal, so both branches resolve.
+ * @param {Promise<any>} promise
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
+function settledOrTimedOut(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    const onSettled = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    promise.then(onSettled, onSettled);
+  });
+}
+
+/**
+ * Runs `task` only after any previously-queued task for the same `key` has settled — OR after
+ * `timeoutMs` elapses, whichever comes first (see the safety-valve note above) — serializing
  * same-key work into a chain. A rejected predecessor does NOT poison the queue (the next task runs
  * regardless), and the caller still receives `task`'s own result/rejection.
  *
  * @template T
  * @param {string} key - the serialization key (the child workspace id).
  * @param {() => Promise<T>} task - the critical section to run under the lock.
+ * @param {number} [timeoutMs] - safety-valve wait cap (default {@link LOCK_TIMEOUT_MS}).
  * @returns {Promise<T>} resolves/rejects with `task`'s outcome.
  */
-export function withResourceLock(key, task) {
+export function withResourceLock(key, task, timeoutMs = LOCK_TIMEOUT_MS) {
   const prev = chains.get(key) ?? Promise.resolve();
-  // Start `task` after the predecessor settles either way — a failed predecessor must not block the
-  // queue, and its rejection is already owned by that call's own returned promise.
-  const run = prev.then(() => task(), () => task());
+  // Wait for the predecessor to settle, but never longer than timeoutMs (the safety valve).
+  const run = settledOrTimedOut(prev, timeoutMs).then(() => task());
   // The chain tail swallows settlement so (a) the next waiter starts regardless of this outcome and
   // (b) we never leave an unhandled rejection dangling on the stored tail.
   const tail = run.then(() => {}, () => {});

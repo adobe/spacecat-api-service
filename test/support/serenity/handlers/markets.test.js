@@ -1687,6 +1687,20 @@ describe('countPublishedPrompts', () => {
     const listPromptsByTags = sinon.stub().resolves({ items: [] });
     expect(await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1')).to.equal(0);
   });
+
+  it('an upstream failure MID-WALK returns the counted-so-far instead of rejecting', async () => {
+    // Page 1 succeeds (200 items); page 2 throws. Must NOT propagate — countPublishedPrompts backs
+    // resource-manager's modelChangeUnits sizing, and a rejection here would fail the whole metered
+    // write over what should only under-state the need (the transfer 422 is the real backstop).
+    const warn = sinon.spy();
+    const listPromptsByTags = sinon.stub();
+    listPromptsByTags.onCall(0).resolves({ items: new Array(200).fill({ id: 'q' }) });
+    listPromptsByTags.onCall(1).rejects(new Error('upstream 500'));
+    const count = await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1', { warn });
+    expect(count).to.equal(200);
+    expect(listPromptsByTags).to.have.callCount(2);
+    expect(warn).to.have.been.calledWithMatch('countPublishedPrompts: upstream failure mid-walk');
+  });
 });
 
 describe('listLanguageCatalog', () => {

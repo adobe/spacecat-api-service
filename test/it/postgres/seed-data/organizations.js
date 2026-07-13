@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { SERENITY_ORG_PARENT_WS_ID } from '../../shared/seed-ids.js';
+
 /**
  * Immutable baseline organizations for IT tests.
  *
@@ -26,9 +28,10 @@ export const organizations = [
     ims_org_id: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
     // Org-level Semrush parent workspace: gives subworkspace brands under ORG_1 (e.g. BRAND_1) a
     // non-null parentWorkspaceId, which the dynamic-allocation JIT guard requires to engage and
-    // reads as the advisory units pool on a top-up. Value matches SERENITY_ORG_PARENT_WS_ID
-    // (shared/seed-ids.js) — an existing UM-mock workspace the flag-ON IT meters via __quota.
-    semrush_workspace_id: 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e',
+    // reads as the advisory units pool on a top-up. Import the shared constant (not a literal) so
+    // a mock-seed change updates both sides in lock-step — see its own doc in seed-ids.js for why
+    // it deliberately aliases SERENITY_MOCK_PROJECT_ID rather than being a fresh, unique id.
+    semrush_workspace_id: SERENITY_ORG_PARENT_WS_ID,
     config: {
       handlers: {},
       slack: { channel: 'C0FAKE0ORG1', workspace: 'WORKSPACE_TEST' },
