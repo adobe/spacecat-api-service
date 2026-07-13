@@ -424,13 +424,11 @@ function TaskManagementController(context) {
 
     let tickets;
     try {
-      tickets = await Ticket.allByOrganizationId(organizationId);
+      tickets = await Ticket.allByOpportunityId(opportunityId);
     } catch (err) {
       log.error({ organizationId, opportunityId, err }, 'Failed to list tickets for opportunity');
       return internalServerError('Failed to list tickets');
     }
-
-    tickets = tickets.filter((t) => t.getOpportunityId() === opportunityId);
 
     if (tickets.length === 0) {
       return ok([]);
