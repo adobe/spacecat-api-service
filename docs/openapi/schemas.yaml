@@ -12588,3 +12588,16 @@ TicketCreateRequest:
       items:
         $ref: '#/TicketAttachment'
       maxItems: 10
+OnboardingNotificationResponse:
+  type: object
+  required:
+    - notified
+    - workspaceId
+  properties:
+    notified:
+      type: boolean
+      example: true
+    workspaceId:
+      type: [string, 'null']
+      description: The org-level Semrush workspace ID, or null if the org has none.
+      example: "ws-123"
