@@ -125,20 +125,21 @@ export function collectBrandUrlEntries(sources, market, primaryDomain) {
     // own primary domain (the benchmark already holds it — see fn docstring).
     ...urls
       .map((u) => toEntry(typeof u === 'string' ? u : u?.value, BRAND_URL_TYPE.WEBSITE))
-      .filter((e) => e === null
-        || primary === null
-        || normalizeBenchmarkDomain(e.url) !== primary),
+      .filter(Boolean)
+      .filter((e) => primary === null || normalizeBenchmarkDomain(e.url) !== primary),
     ...social
       .filter((s) => regionApplies(s?.regions, market))
-      .map((s) => toEntry(s?.url, BRAND_URL_TYPE.SOCIAL)),
+      .map((s) => toEntry(s?.url, BRAND_URL_TYPE.SOCIAL))
+      .filter(Boolean),
     ...earned
       .filter((e) => regionApplies(e?.regions, market))
-      .map((e) => toEntry(e?.url, BRAND_URL_TYPE.EARNED)),
+      .map((e) => toEntry(e?.url, BRAND_URL_TYPE.EARNED))
+      .filter(Boolean),
   ];
 
   const seen = new Set();
   return candidates.filter((e) => {
-    if (e === null || seen.has(e.url)) {
+    if (seen.has(e.url)) {
       return false;
     }
     seen.add(e.url);
@@ -342,7 +343,10 @@ export async function syncBrandUrlsAcrossMarkets(
     try {
       // The project's own domain is the primary domain — its own-brand website
       // URL is skipped so it doesn't duplicate the benchmark (skip-primary-domain).
-      const collected = collectBrandUrlEntries(sources, market, project?.domain);
+      // Entries are written/diffed verbatim (https-ful, with the project's own
+      // primary domain dropped). `listBrandUrls` returns the same stored form, so
+      // the diff is stable across re-syncs — no www-vs-apex churn.
+      const desired = collectBrandUrlEntries(sources, market, project?.domain);
       // Own-brand identity for the benchmark comes from the project itself: its
       // domain plus the brand_names (display name first, the rest are aliases).
       const ai = project?.settings?.ai || {};
@@ -370,10 +374,6 @@ export async function syncBrandUrlsAcrossMarkets(
         // eslint-disable-next-line no-continue
         continue;
       }
-      // Entries are written/diffed verbatim (https-ful, primary domain already
-      // dropped by collectBrandUrlEntries). `listBrandUrls` returns the same
-      // stored form, so the diff is stable across re-syncs — no www-vs-apex churn.
-      const desired = collected;
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
       const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];

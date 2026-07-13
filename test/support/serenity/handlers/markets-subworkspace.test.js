@@ -304,6 +304,35 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.createBrandUrls).to.have.been.calledBefore(transport.publishProject);
     });
 
+    it('skips the brand\'s own primary domain (apex and www) when pushing brand URLs', async () => {
+      const transport = makeTransport();
+      // createBody.brandDomain is 'example.com' — the project's own-brand benchmark
+      // already carries it, so neither the apex nor the www form may be written as a
+      // `website` brand URL (serenity-docs#25). A secondary site still goes through.
+      const brandUrlSources = {
+        urls: [
+          'https://example.com',
+          'https://www.example.com',
+          'https://shop.example.com',
+        ],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { brandUrlSources },
+      );
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
+        { url: 'https://shop.example.com', type: 'website' },
+      ]);
+    });
+
     it('tracks region-filtered competitors as benchmarks before publishing', async () => {
       const transport = makeTransport();
       const competitors = [
