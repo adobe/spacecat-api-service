@@ -5975,14 +5975,6 @@ site-llmo-cloudflare-routes:
 site-llmo-cloudflare-logpush:
   parameters:
     - $ref: './parameters.yaml#/siteId'
-    - name: zoneId
-      in: path
-      required: true
-      description: Cloudflare zone ID (32-character lowercase hex)
-      schema:
-        type: string
-        pattern: '^[0-9a-f]{32}$'
-        example: '0123456789abcdef0123456789abcdef'
     - name: x-cloudflare-token
       in: header
       required: true
@@ -5996,6 +5988,9 @@ site-llmo-cloudflare-logpush:
       Creates the Cloudflare Logpush job that forwards the zone's HTTP request logs into Adobe's
       cdn-logs S3 bucket, completing the Cloudflare log-forwarding onboarding flow (LLMO-5869).
 
+      Verifies the zone's registrable domain matches the site's own domain before acting on it,
+      rejecting a zoneId that belongs to an unrelated domain with `400`.
+
       Requires the site to already be provisioned for Cloudflare log forwarding (bucket, path,
       and region recorded on the site's CDN bucket config by the earlier provisioning step) —
       returns `409` with an actionable message otherwise.
@@ -6008,6 +6003,23 @@ site-llmo-cloudflare-logpush:
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:
       - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - zoneId
+            properties:
+              zoneId:
+                type: string
+                description: >-
+                  Cloudflare zone ID (32-character lowercase hex). zoneId is a Cloudflare
+                  identifier, not a SpaceCat entity, so it is supplied in the body rather than
+                  the path — matching this API's addRoute convention.
+                pattern: '^[0-9a-f]{32}$'
+                example: '0123456789abcdef0123456789abcdef'
     responses:
       '200':
         description: >-

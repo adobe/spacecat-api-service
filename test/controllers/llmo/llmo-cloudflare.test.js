@@ -80,6 +80,7 @@ describe('LlmoCloudflareController', () => {
       listLogpushJobs: sandbox.stub(),
       requestLogpushOwnership: sandbox.stub(),
       createLogpushJob: sandbox.stub(),
+      getZone: sandbox.stub(),
     };
 
     mockTokowakaClient = {
@@ -826,9 +827,13 @@ describe('LlmoCloudflareController', () => {
     });
 
     beforeEach(() => {
+      mockContext.data = { zoneId: ZONE_ID };
       mockCfClient.listLogpushJobs.resolves([]);
       mockCfClient.requestLogpushOwnership.resolves({ filename: FILENAME, valid: true });
       mockCfClient.createLogpushJob.resolves({ id: JOB_ID });
+      // Matches mockSite.getBaseURL() ('https://www.example.com') so the domain-match check
+      // passes by default; individual tests override to exercise a mismatch.
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: 'www.example.com' });
       mockFetch = okOwnershipTokenFetch();
     });
 
@@ -898,13 +903,22 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.createLogpushJob).to.have.been.called;
     });
 
-    it('falls back to siteId for the job name when the site host has no registrable domain', async () => {
+    it('returns 400 when the site host has no registrable domain (domain-match guard, not reached)', async () => {
+      // The domain-match guard computes registrableDomain from the same site.getBaseURL()
+      // used for the job name, so a site with no registrable domain is rejected before job
+      // creation is ever attempted — there is no siteId fallback to fall back to.
       mockSite.getBaseURL = () => 'https://localhost';
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('uses the site\'s registrable domain as the Logpush job name', async () => {
       const res = await controller.createLogpush(mockContext);
       expect(res.status).to.equal(200);
       expect(mockCfClient.createLogpushJob).to.have.been.calledWith(
         ZONE_ID,
-        sinon.match({ name: SITE_ID }),
+        sinon.match({ name: 'example.com' }),
       );
     });
 
@@ -940,16 +954,50 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(409);
     });
 
-    it('returns 400 when zoneId is missing', async () => {
-      mockContext.params = { siteId: SITE_ID };
+    it('returns 400 when zoneId is missing from the request body', async () => {
+      mockContext.data = {};
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the request body is missing entirely', async () => {
+      mockContext.data = undefined;
       const res = await controller.createLogpush(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when zoneId is not a 32-char hex id', async () => {
-      mockContext.params = { siteId: SITE_ID, zoneId: 'not-hex' };
+      mockContext.data = { zoneId: 'not-hex' };
       const res = await controller.createLogpush(mockContext);
       expect(res.status).to.equal(400);
+    });
+
+    it("returns 400 when the zone's domain does not match the site's domain", async () => {
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: 'unrelated-domain.com' });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include("does not belong to the site's domain");
+      expect(mockCfClient.listLogpushJobs).to.not.have.been.called;
+    });
+
+    it('accepts a zone whose domain is a subdomain of the site domain', async () => {
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: 'www.example.com' });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 400 when the zone has no resolvable domain', async () => {
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: '' });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 502 when the zone lookup fails', async () => {
+      mockCfClient.getZone.rejects(new Error('Cloudflare API returned 500 on /zones: boom'));
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.listLogpushJobs).to.not.have.been.called;
     });
 
     it('returns 400 when CF token is missing', async () => {

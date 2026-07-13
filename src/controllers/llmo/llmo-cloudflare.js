@@ -645,12 +645,31 @@ function LlmoCloudflareController(ctx) {
       return cfError;
     }
 
-    const { zoneId } = context.params;
+    const siteId = site.getId();
+
+    // zoneId is a Cloudflare identifier, not a SpaceCat entity — kept in the body, not the path,
+    // matching addRoute's existing convention in this same file.
+    const { zoneId } = context.data || {};
     if (!hasText(zoneId)) {
-      return badRequest('Missing zoneId in path');
+      return badRequest('Missing zoneId in request body');
     }
     if (!CF_ID_RE.test(zoneId)) {
       return badRequest('zoneId must be a 32-character hexadecimal Cloudflare zone ID');
+    }
+
+    const siteApex = registrableDomain(new URL(site.getBaseURL()).hostname);
+    let zone;
+    try {
+      zone = await cfClient.getZone(zoneId);
+    } catch (e) {
+      return cfErrorResponse(e, 'zone lookup', context, { siteId, zoneId });
+    }
+    const zoneApex = hasText(zone?.name) ? registrableDomain(zone.name) : null;
+    if (!zoneApex || !siteApex || zoneApex !== siteApex) {
+      log.info(auditLine(context, 'cf-logpush', 'zone-domain-mismatch', {
+        siteId, zoneId, zoneName: zone?.name, siteApex,
+      }));
+      return badRequest(`Zone '${zone?.name}' does not belong to the site's domain`);
     }
 
     const cdnBucketConfig = getCdnBucketConfig(site);
@@ -662,7 +681,6 @@ function LlmoCloudflareController(ctx) {
       }, 409);
     }
 
-    const siteId = site.getId();
     // The literal {DATE} token is Cloudflare's own daily-subfolder placeholder (expands server-side
     // to YYYYMMDD) — required, not cosmetic: auth-service's challenge-file reader scans exactly
     // this date-prefixed layout.
@@ -708,9 +726,10 @@ function LlmoCloudflareController(ctx) {
       }, 502);
     }
 
-    const jobName = registrableDomain(new URL(site.getBaseURL()).hostname) || siteId;
+    // siteApex is already validated non-null by the domain-match guard above, computed from the
+    // same site.getBaseURL() input — no fallback needed here.
     const payload = {
-      name: jobName,
+      name: siteApex,
       dataset: LOGPUSH_DATASET,
       destination_conf: destinationConf,
       ownership_challenge: ownershipToken,

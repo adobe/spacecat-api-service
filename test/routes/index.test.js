@@ -1185,7 +1185,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
-      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/logpush',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/logpush',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
