@@ -679,6 +679,15 @@ export default function ElementsController(context, log, env) {
       if (startDate > endDate) {
         return badRequest('startDate must not be after endDate');
       }
+      // Bound the span (mirrors listOwnedUrls): a multi-year range fanned across every
+      // project is needlessly expensive upstream and inflates the in-memory aggregation,
+      // gated only by FACS auth.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
 
       // hostname (aka domain) is the domain to drill into — required (the UI only
       // calls this after a domain row is expanded).
