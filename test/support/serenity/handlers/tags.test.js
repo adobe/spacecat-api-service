@@ -549,6 +549,38 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       });
       expect(transport.createProjectTags).to.not.have.been.called;
     });
+
+    it('mints an absent closed-dimension value and republishes (200, created:true)', async () => {
+      const resolveProjectStub = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const handler = await esmock('../../../../src/support/serenity/handlers/tags.js', {
+        '../../../../src/support/serenity/subworkspace-projects.js': {
+          resolveProject: resolveProjectStub,
+        },
+      });
+      // The `source` root exists but is empty, so `ai` must be minted beneath it,
+      // and a newly minted value must be published so it is live rather than draft.
+      const levels = dimensionTreeLevels();
+      levels[TAG_IDS.sourceRoot] = [];
+      const transport = makeTransport({
+        listProjectTags: makeListProjectTagsStub(levels),
+        createProjectTags: sinon.stub().resolves([
+          { id: 'tag-source-ai', name: 'ai', parent_id: TAG_IDS.sourceRoot },
+        ]),
+      });
+      const res = await handler.handleCreateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        {
+          type: 'source', name: 'ai', geoTargetId: 2840, languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({
+        type: 'source', name: 'ai', id: 'tag-source-ai', parentId: TAG_IDS.sourceRoot, created: true,
+      });
+      expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-sub-1');
+    });
   });
 
   describe('handleCreateTag — nested (parentId)', () => {
