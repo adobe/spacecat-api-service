@@ -12,25 +12,25 @@
 
 import { createHash } from 'node:crypto';
 import {
-  GetSecretValueCommand,
-  PutSecretValueCommand,
-  SecretsManagerClient,
-} from '@aws-sdk/client-secrets-manager';
-import { createResponse } from '@adobe/spacecat-shared-http-utils';
+  badRequest,
+  created,
+  createResponse,
+  forbidden,
+  internalServerError,
+  notFound,
+  ok,
+} from '@adobe/spacecat-shared-http-utils';
 import { TicketClientFactory } from '@adobe/spacecat-shared-ticket-client';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 
-import {
-  STATUS_BAD_REQUEST,
-  STATUS_CREATED,
-  STATUS_INTERNAL_SERVER_ERROR,
-  STATUS_NOT_FOUND,
-  STATUS_OK,
-} from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { TaskManagementConnectionDto } from '../dto/task-management-connection.js';
+import { TicketDto } from '../dto/ticket.js';
 
+const STATUS_CREATED = 201;
+const STATUS_NOT_FOUND = 404;
+const STATUS_INTERNAL_SERVER_ERROR = 500;
 const STATUS_CONFLICT = 409;
-const STATUS_FORBIDDEN = 403;
 const STATUS_MULTI_STATUS = 207;
 
 const SUPPORTED_PROVIDERS = new Set(['jira_cloud']);
@@ -47,56 +47,6 @@ const TICKET_MODE_GROUPED = 'grouped';
 const SUGGESTION_IDS_MAX_INDIVIDUAL = 15;
 const SUGGESTION_IDS_MAX_GROUPED = 1500;
 const ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024; // 3 MB per spec §30
-
-/**
- * Serializes a TaskManagementConnection entity to a plain response object.
- * Intentionally omits OAuth secrets — those live in AWS Secrets Manager.
- */
-function serializeConnection(conn) {
-  return {
-    id: conn.getId(),
-    organizationId: conn.getOrganizationId(),
-    provider: conn.getProvider(),
-    status: conn.getStatus(),
-    displayName: conn.getDisplayName?.(),
-    instanceUrl: conn.getInstanceUrl?.(),
-    connectedBy: conn.getConnectedBy?.(),
-    metadata: conn.getMetadata(),
-    createdAt: conn.getCreatedAt?.(),
-    updatedAt: conn.getUpdatedAt?.(),
-  };
-}
-
-/**
- * Serializes a Ticket entity to a plain response object.
- * connectionId is included per the spec response shape.
- *
- * @param {object} ticket
- * @param {Array<{suggestionId: string, opportunityId: string}>} [suggestions]
- */
-function serializeTicket(ticket, suggestions) {
-  const out = {
-    id: ticket.getId(),
-    organizationId: ticket.getOrganizationId(),
-    connectionId: ticket.getTaskManagementConnectionId?.() ?? ticket.getConnectionId?.(),
-    externalTicketId: ticket.getExternalTicketId(),
-    ticketKey: ticket.getTicketKey(),
-    ticketUrl: ticket.getTicketUrl(),
-    ticketStatus: ticket.getTicketStatus(),
-    ticketProvider: ticket.getTicketProvider(),
-    opportunityId: ticket.getOpportunityId?.() ?? null,
-    createdAt: ticket.getCreatedAt?.() ?? null,
-    statusSyncedAt: null, // v1: always null; populated by v2 webhook sync
-  };
-
-  // List endpoints include the suggestions bridge array per spec response shape.
-  // Creation endpoint uses the scalar suggestionId for backward compat.
-  if (suggestions !== undefined) {
-    out.suggestions = suggestions;
-  }
-
-  return out;
-}
 
 /**
  * TaskManagementController — manages Jira connections and tickets for an organization.
@@ -143,7 +93,7 @@ function TaskManagementController(context) {
     throw new Error('Context required');
   }
 
-  const { dataAccess, log } = context;
+  const { dataAccess, log, sm } = context;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -173,15 +123,9 @@ function TaskManagementController(context) {
     throw new Error('Organization collection not available');
   }
 
-  // AWS SDK auto-detects region from the Lambda execution environment.
-  // Constructed once per controller instance (not per request) to reuse the connection pool.
-  // ticket-client's OAuthCredentialManager expects a v2-style interface (.getSecretValue /
-  // .putSecretValue); wrap the v3 client to provide that surface.
-  const rawSmClient = new SecretsManagerClient();
-  const smClient = {
-    getSecretValue: (params) => rawSmClient.send(new GetSecretValueCommand(params)),
-    putSecretValue: (params) => rawSmClient.send(new PutSecretValueCommand(params)),
-  };
+  // smClient is the v2-style adapter injected by smClientWrapper middleware.
+  // ticket-client's OAuthCredentialManager requires .getSecretValue / .putSecretValue.
+  const { smClient } = sm;
 
   // Wrap global fetch so TicketClientFactory receives the expected { fetch } interface.
   // fetch is available globally in Node 18+ (Lambda runtime).
@@ -198,10 +142,10 @@ function TaskManagementController(context) {
   async function loadOrgWithAccess(organizationId) {
     const org = await Organization.findById(organizationId);
     if (!org) {
-      return { denied: createResponse({ message: 'Organization not found' }, STATUS_NOT_FOUND) };
+      return { denied: notFound('Organization not found') };
     }
     if (!await accessControlUtil.hasAccess(org)) {
-      return { denied: createResponse({ message: 'Forbidden' }, STATUS_FORBIDDEN) };
+      return { denied: forbidden('Forbidden') };
     }
     return { org };
   }
@@ -219,6 +163,35 @@ function TaskManagementController(context) {
     return conn;
   }
 
+  /**
+   * Constructs a TicketClient for the given connection.
+   */
+  function buildTicketClient(connection) {
+    const connectionObj = {
+      id: connection.getId(),
+      organizationId: connection.getOrganizationId(),
+      provider: connection.getProvider(),
+      // instanceUrl is required by TicketClientFactory — it merges it into config as siteUrl
+      // for the JiraCloudClient SSRF-safe gateway URL construction.
+      instanceUrl: connection.getInstanceUrl(),
+      metadata: connection.getMetadata(),
+    };
+    return TicketClientFactory.create(connectionObj, smClient, httpClient, log);
+  }
+
+  /**
+   * Classifies a provider API error into one of two auth-failure categories.
+   * Returns { isGrantRevoked, isTokenExpired }.
+   */
+  function classifyProviderError(err) {
+    const isGrantRevoked = err.code === 'GRANT_REVOKED'
+      || err.code === 'REQUIRES_REAUTH'
+      || err.message?.includes('requires re-authorization');
+    const isTokenExpired = err.status === 401
+      || err.code === 'TOKEN_REFRESH_REQUIRED';
+    return { isGrantRevoked, isTokenExpired };
+  }
+
   // ─── Connection handlers ───────────────────────────────────────────────────
 
   /**
@@ -232,7 +205,7 @@ function TaskManagementController(context) {
     const { organizationId } = params;
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -245,14 +218,14 @@ function TaskManagementController(context) {
       connections = await TaskManagementConnection.allByOrganizationId(organizationId);
     } catch (err) {
       log.error({ organizationId, err }, 'Failed to list task-management connections');
-      return createResponse({ message: 'Failed to list connections' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to list connections');
     }
 
     const filtered = qs?.provider
       ? connections.filter((c) => c.getProvider() === qs.provider)
       : connections;
 
-    return createResponse(filtered.map(serializeConnection), STATUS_OK);
+    return ok(filtered.map(TaskManagementConnectionDto.toJSON));
   }
 
   /**
@@ -265,11 +238,11 @@ function TaskManagementController(context) {
     const { organizationId, connectionId } = params;
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     if (!isValidUUID(connectionId)) {
-      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('connectionId must be a valid UUID');
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -282,14 +255,14 @@ function TaskManagementController(context) {
       connection = await loadConnectionForOrg(organizationId, connectionId);
     } catch (err) {
       log.error({ organizationId, connectionId, err }, 'Failed to load task-management connection');
-      return createResponse({ message: 'Failed to load connection' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to load connection');
     }
 
     if (!connection) {
-      return createResponse({ message: `Connection ${connectionId} not found` }, STATUS_NOT_FOUND);
+      return notFound(`Connection ${connectionId} not found`);
     }
 
-    return createResponse(serializeConnection(connection), STATUS_OK);
+    return ok(TaskManagementConnectionDto.toJSON(connection));
   }
 
   // ─── Ticket read handlers ──────────────────────────────────────────────────
@@ -306,7 +279,7 @@ function TaskManagementController(context) {
     const { organizationId } = params;
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -319,7 +292,7 @@ function TaskManagementController(context) {
       tickets = await Ticket.allByOrganizationId(organizationId);
     } catch (err) {
       log.error({ organizationId, err }, 'Failed to list tickets');
-      return createResponse({ message: 'Failed to list tickets' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to list tickets');
     }
 
     // Bulk-load all bridge rows for the org's tickets in one query (chunked at 50
@@ -352,10 +325,10 @@ function TaskManagementController(context) {
       }
     }
     const ticketsWithSuggestions = tickets.map(
-      (t) => serializeTicket(t, bridgeMap.get(t.getId()) || []),
+      (t) => TicketDto.toJSON(t, bridgeMap.get(t.getId()) || []),
     );
 
-    return createResponse(ticketsWithSuggestions, STATUS_OK);
+    return ok(ticketsWithSuggestions);
   }
 
   /**
@@ -370,11 +343,11 @@ function TaskManagementController(context) {
     const { organizationId, suggestionId } = params;
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     if (!hasText(suggestionId)) {
-      return createResponse({ message: 'suggestionId is required' }, STATUS_BAD_REQUEST);
+      return badRequest('suggestionId is required');
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -387,14 +360,11 @@ function TaskManagementController(context) {
       bridge = await TicketSuggestion.findBySuggestionId(suggestionId);
     } catch (err) {
       log.error({ organizationId, suggestionId, err }, 'Failed to look up TicketSuggestion');
-      return createResponse({ message: 'Failed to look up ticket' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to look up ticket');
     }
 
     if (!bridge) {
-      return createResponse(
-        { message: `No ticket found for suggestion ${suggestionId}` },
-        STATUS_NOT_FOUND,
-      );
+      return notFound(`No ticket found for suggestion ${suggestionId}`);
     }
 
     let ticket;
@@ -402,25 +372,19 @@ function TaskManagementController(context) {
       ticket = await Ticket.findById(bridge.getTicketId());
     } catch (err) {
       log.error({ organizationId, ticketId: bridge.getTicketId(), err }, 'Failed to load ticket');
-      return createResponse({ message: 'Failed to load ticket' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to load ticket');
     }
 
     if (!ticket || ticket.getOrganizationId() !== organizationId) {
-      return createResponse(
-        { message: `No ticket found for suggestion ${suggestionId}` },
-        STATUS_NOT_FOUND,
-      );
+      return notFound(`No ticket found for suggestion ${suggestionId}`);
     }
 
-    return createResponse(
-      {
-        ...serializeTicket(ticket),
-        suggestionId,
-        opportunityId: bridge.getOpportunityId(),
-        createdAt: ticket.getCreatedAt?.(),
-      },
-      STATUS_OK,
-    );
+    return ok({
+      ...TicketDto.toJSON(ticket),
+      suggestionId,
+      opportunityId: bridge.getOpportunityId(),
+      createdAt: ticket.getCreatedAt?.(),
+    });
   }
 
   /**
@@ -435,11 +399,11 @@ function TaskManagementController(context) {
     const { organizationId, opportunityId } = params;
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     if (!hasText(opportunityId)) {
-      return createResponse({ message: 'opportunityId is required' }, STATUS_BAD_REQUEST);
+      return badRequest('opportunityId is required');
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -449,17 +413,22 @@ function TaskManagementController(context) {
 
     // Fetch all tickets for the org then filter by opportunityId in-memory.
     // (No allByOpportunityId on the model; allByOrganizationId is the closest bulk accessor.)
+    // TODO: add Ticket.allByOpportunityId(opportunityId) index to spacecat-shared-data-access
+    // to replace this full-org scan.
     let tickets;
     try {
       const orgTickets = await Ticket.allByOrganizationId(organizationId);
+      if (orgTickets.length > 200) {
+        log.warn({ organizationId, count: orgTickets.length }, 'listTicketsByOpportunity: large org ticket count — consider adding allByOpportunityId index');
+      }
       tickets = orgTickets.filter((t) => t.getOpportunityId?.() === opportunityId);
     } catch (err) {
       log.error({ organizationId, opportunityId, err }, 'Failed to list tickets for opportunity');
-      return createResponse({ message: 'Failed to list tickets' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to list tickets');
     }
 
     if (tickets.length === 0) {
-      return createResponse([], STATUS_OK);
+      return ok([]);
     }
 
     // Bulk-load bridge rows for all matching tickets.
@@ -491,10 +460,7 @@ function TaskManagementController(context) {
       }
     }
 
-    return createResponse(
-      tickets.map((t) => serializeTicket(t, bridgeMap.get(t.getId()) || [])),
-      STATUS_OK,
-    );
+    return ok(tickets.map((t) => TicketDto.toJSON(t, bridgeMap.get(t.getId()) || [])));
   }
 
   // ─── Ticket creation ──────────────────────────────────────────────────────
@@ -532,18 +498,15 @@ function TaskManagementController(context) {
     // --- Input validation ---------------------------------------------------
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     if (!hasText(provider)) {
-      return createResponse({ message: 'provider is required' }, STATUS_BAD_REQUEST);
+      return badRequest('provider is required');
     }
 
     if (!SUPPORTED_PROVIDERS.has(provider)) {
-      return createResponse(
-        { message: `Unsupported provider '${provider}'. Supported: ${[...SUPPORTED_PROVIDERS].join(', ')}` },
-        STATUS_BAD_REQUEST,
-      );
+      return badRequest(`Unsupported provider '${provider}'. Supported: ${[...SUPPORTED_PROVIDERS].join(', ')}`);
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -552,11 +515,11 @@ function TaskManagementController(context) {
     }
 
     if (!isNonEmptyObject(data) || !hasText(data.summary)) {
-      return createResponse({ message: 'Request body with summary is required' }, STATUS_BAD_REQUEST);
+      return badRequest('Request body with summary is required');
     }
 
     if (!hasText(data.projectKey)) {
-      return createResponse({ message: 'projectKey is required' }, STATUS_BAD_REQUEST);
+      return badRequest('projectKey is required');
     }
 
     // suggestionIds — accept both array (spec) and singular form (compat).
@@ -569,16 +532,10 @@ function TaskManagementController(context) {
     // into one ticket). grouped requires at least one suggestionId.
     const mode = data.mode ?? TICKET_MODE_INDIVIDUAL;
     if (mode !== TICKET_MODE_INDIVIDUAL && mode !== TICKET_MODE_GROUPED) {
-      return createResponse(
-        { message: `Invalid mode '${mode}'. Supported values: 'individual', 'grouped'.` },
-        STATUS_BAD_REQUEST,
-      );
+      return badRequest(`Invalid mode '${mode}'. Supported values: 'individual', 'grouped'.`);
     }
     if (mode === TICKET_MODE_GROUPED && suggestionIds.length === 0) {
-      return createResponse(
-        { message: "Mode 'grouped' requires at least one suggestionId" },
-        STATUS_BAD_REQUEST,
-      );
+      return badRequest("Mode 'grouped' requires at least one suggestionId");
     }
 
     // Cap per mode: individual ≤15 (N tickets), grouped ≤1500 (1 ticket).
@@ -586,10 +543,7 @@ function TaskManagementController(context) {
       ? SUGGESTION_IDS_MAX_GROUPED
       : SUGGESTION_IDS_MAX_INDIVIDUAL;
     if (suggestionIds.length > suggestionIdsMax) {
-      return createResponse(
-        { message: `suggestionIds must contain at most ${suggestionIdsMax} items for mode '${mode}'` },
-        STATUS_BAD_REQUEST,
-      );
+      return badRequest(`suggestionIds must contain at most ${suggestionIdsMax} items for mode '${mode}'`);
     }
 
     // --- Optional attachments validation (spec §Attachment Validation) ---------
@@ -601,10 +555,7 @@ function TaskManagementController(context) {
 
     const attachments = Array.isArray(data.attachments) ? data.attachments : [];
     if (attachments.length > 1) {
-      return createResponse(
-        { message: 'Attachments may contain at most 1 item per request' },
-        STATUS_BAD_REQUEST,
-      );
+      return badRequest('Attachments may contain at most 1 item per request');
     }
 
     let attachmentBuffer;
@@ -612,20 +563,14 @@ function TaskManagementController(context) {
     if (attachments.length === 1) {
       const att = attachments[0];
       if (!hasText(att.content) || !hasText(att.mimeType) || !hasText(att.filename)) {
-        return createResponse(
-          { message: 'Each attachment must have content (base64), mimeType, and filename' },
-          STATUS_BAD_REQUEST,
-        );
+        return badRequest('Each attachment must have content (base64), mimeType, and filename');
       }
       const decoded = Buffer.from(att.content, 'base64');
       if (decoded.length === 0) {
-        return createResponse({ message: 'Attachment content must not be empty' }, STATUS_BAD_REQUEST);
+        return badRequest('Attachment content must not be empty');
       }
       if (decoded.length > ATTACHMENT_MAX_BYTES) {
-        return createResponse(
-          { message: `attachment exceeds maximum size of ${ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB` },
-          STATUS_BAD_REQUEST,
-        );
+        return badRequest(`attachment exceeds maximum size of ${ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB`);
       }
       attachmentBuffer = decoded;
       attachmentMeta = { mimeType: att.mimeType, filename: att.filename };
@@ -634,10 +579,7 @@ function TaskManagementController(context) {
     // Attachment in individual batch mode (N>1 suggestions) is not supported — each ticket
     // would need its own attachment. Upload per-ticket via the attachment endpoint instead.
     if (attachmentBuffer && mode === TICKET_MODE_INDIVIDUAL && suggestionIds.length > 1) {
-      return createResponse(
-        { message: 'Attachments are not supported when creating multiple tickets (individual batch mode). Upload attachments per-ticket via the attachment endpoint.' },
-        STATUS_BAD_REQUEST,
-      );
+      return badRequest('Attachments are not supported when creating multiple tickets (individual batch mode). Upload attachments per-ticket via the attachment endpoint.');
     }
 
     // --- Idempotency-Key enforcement (spec §Idempotent Ticket Creation) --------
@@ -651,7 +593,7 @@ function TaskManagementController(context) {
     const postgrestClient = dataAccess.services?.postgrestClient;
     if (!postgrestClient) {
       log.error({ organizationId }, 'PostgREST client not available for idempotency check');
-      return createResponse({ message: 'Service unavailable' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Service unavailable');
     }
 
     const { data: existingKeys, error: lookupError } = await postgrestClient
@@ -664,7 +606,7 @@ function TaskManagementController(context) {
 
     if (lookupError) {
       log.error({ organizationId, lookupError }, 'Failed to look up idempotency key');
-      return createResponse({ message: 'Service unavailable' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Service unavailable');
     }
 
     const existingEntry = existingKeys?.[0];
@@ -683,35 +625,29 @@ function TaskManagementController(context) {
     const { connectionId } = data;
 
     if (!connectionId) {
-      return createResponse({ message: 'connectionId is required' }, STATUS_BAD_REQUEST);
+      return badRequest('connectionId is required');
     }
 
     if (!isValidUUID(connectionId)) {
-      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('connectionId must be a valid UUID');
     }
 
     let connection;
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
       if (!conn) {
-        return createResponse(
-          { message: `Connection ${connectionId} not found for organization ${organizationId}` },
-          STATUS_NOT_FOUND,
-        );
+        return notFound(`Connection ${connectionId} not found for organization ${organizationId}`);
       }
       if (conn.getStatus() === 'requires_reauth') {
         return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
       }
       if (conn.getStatus() !== 'active') {
-        return createResponse(
-          { message: `Active ${provider} connection ${connectionId} not found for organization ${organizationId}` },
-          STATUS_NOT_FOUND,
-        );
+        return notFound(`Active ${provider} connection ${connectionId} not found for organization ${organizationId}`);
       }
       connection = conn;
     } catch (err) {
       log.error({ organizationId, provider, err }, 'Failed to load task-management connection');
-      return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to load task-management connection');
     }
 
     // --- Validate suggestion(s) exist (spec §7 step 2) -------------------------
@@ -726,17 +662,11 @@ function TaskManagementController(context) {
         const foundIds = new Set(found.map((s) => s.getId()));
         const missing = suggestionIds.find((id) => !foundIds.has(id));
         if (missing) {
-          return createResponse(
-            { message: `Suggestion ${missing} not found` },
-            STATUS_NOT_FOUND,
-          );
+          return notFound(`Suggestion ${missing} not found`);
         }
       } catch (err) {
         log.error({ err }, 'Failed to validate suggestions');
-        return createResponse(
-          { message: 'Failed to validate suggestion' },
-          STATUS_INTERNAL_SERVER_ERROR,
-        );
+        return internalServerError('Failed to validate suggestion');
       }
     } else if (primarySuggestionId) {
       let suggestion;
@@ -744,13 +674,10 @@ function TaskManagementController(context) {
         suggestion = await Suggestion.findById(primarySuggestionId);
       } catch (err) {
         log.error({ primarySuggestionId, err }, 'Failed to look up suggestion');
-        return createResponse({ message: 'Failed to validate suggestion' }, STATUS_INTERNAL_SERVER_ERROR);
+        return internalServerError('Failed to validate suggestion');
       }
       if (!suggestion) {
-        return createResponse(
-          { message: `Suggestion ${primarySuggestionId} not found` },
-          STATUS_NOT_FOUND,
-        );
+        return notFound(`Suggestion ${primarySuggestionId} not found`);
       }
     }
 
@@ -781,10 +708,7 @@ function TaskManagementController(context) {
         }
       } catch (err) {
         log.error({ err }, 'Failed to check existing ticket bridges');
-        return createResponse(
-          { message: 'Failed to validate suggestion ticket status' },
-          STATUS_INTERNAL_SERVER_ERROR,
-        );
+        return internalServerError('Failed to validate suggestion ticket status');
       }
       if (alreadyTicketed.length > 0) {
         return createResponse(
@@ -820,7 +744,7 @@ function TaskManagementController(context) {
         return createResponse({ message: 'Request already in flight' }, STATUS_CONFLICT);
       }
       log.error({ organizationId, insertError }, 'Failed to insert idempotency key');
-      return createResponse({ message: 'Service unavailable' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Service unavailable');
     }
 
     const idempotencyKeyId = newEntry.id;
@@ -853,16 +777,7 @@ function TaskManagementController(context) {
 
     // --- Create the ticket via the provider client ----------------------------
 
-    const connectionObj = {
-      id: connection.getId(),
-      organizationId: connection.getOrganizationId(),
-      provider: connection.getProvider(),
-      // instanceUrl is required by TicketClientFactory — it merges it into config as siteUrl
-      // for the JiraCloudClient SSRF-safe gateway URL construction.
-      instanceUrl: connection.getInstanceUrl(),
-      metadata: connection.getMetadata(),
-    };
-    const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
+    const ticketClient = buildTicketClient(connection);
 
     // ─── Individual batch path: N suggestionIds → N Jira tickets ─────────────
     if (mode === TICKET_MODE_INDIVIDUAL && suggestionIds.length > 1) {
@@ -908,11 +823,7 @@ function TaskManagementController(context) {
           }
 
           if (batchTicketErr) {
-            const isGrantRevoked = batchTicketErr.code === 'GRANT_REVOKED'
-              || batchTicketErr.code === 'REQUIRES_REAUTH'
-              || batchTicketErr.message?.includes('requires re-authorization');
-            const isTokenExpired = batchTicketErr.status === 401
-              || batchTicketErr.code === 'TOKEN_REFRESH_REQUIRED';
+            const { isGrantRevoked, isTokenExpired } = classifyProviderError(batchTicketErr);
 
             if (isGrantRevoked) {
               // eslint-disable-next-line no-await-in-loop
@@ -987,7 +898,7 @@ function TaskManagementController(context) {
                 results.push({
                   suggestionId: suggId,
                   status: STATUS_CREATED,
-                  ticket: serializeTicket(batchTicket),
+                  ticket: TicketDto.toJSON(batchTicket),
                 });
               } catch (err) {
                 const isDuplicate = err?.message?.includes('unique') || err?.code === '23505';
@@ -1037,11 +948,7 @@ function TaskManagementController(context) {
           parent: data.parent,
         });
       } catch (err) {
-        const isGrantRevoked = err.code === 'GRANT_REVOKED'
-          || err.code === 'REQUIRES_REAUTH'
-          || err.message?.includes('requires re-authorization');
-        const isTokenExpired = err.status === 401
-          || err.code === 'TOKEN_REFRESH_REQUIRED';
+        const { isGrantRevoked, isTokenExpired } = classifyProviderError(err);
 
         if (isGrantRevoked) {
           await connection.markRequiresReauth()
@@ -1063,7 +970,7 @@ function TaskManagementController(context) {
         log.error({ organizationId, provider, err }, 'Failed to create grouped ticket');
         const body = { message: 'Failed to create ticket' };
         await markIdempotencyFailed();
-        return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
+        return internalServerError(body.message ?? 'Internal error');
       }
 
       let groupedTicket;
@@ -1088,7 +995,7 @@ function TaskManagementController(context) {
         );
         const body = { message: 'Ticket created but could not be saved' };
         await markIdempotencyFailed();
-        return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
+        return internalServerError(body.message ?? 'Internal error');
       }
 
       log.info('Grouped ticket created successfully', {
@@ -1155,13 +1062,13 @@ function TaskManagementController(context) {
 
       const groupedResponseBody = {
         mode,
-        ...serializeTicket(groupedTicket),
+        ...TicketDto.toJSON(groupedTicket),
         suggestionIds,
         ...(linkWarnings.length > 0 ? { linkWarnings } : {}),
         ...(groupedAttachmentWarning ? { attachmentWarning: groupedAttachmentWarning } : {}),
       };
       await markIdempotencyDone(groupedResponseBody, STATUS_CREATED);
-      return createResponse(groupedResponseBody, STATUS_CREATED);
+      return created(groupedResponseBody);
     }
 
     // ─── Single ticket path (individual, ≤1 suggestion) ──────────────────────
@@ -1180,11 +1087,7 @@ function TaskManagementController(context) {
         parent: data.parent,
       });
     } catch (err) {
-      const isGrantRevoked = err.code === 'GRANT_REVOKED'
-        || err.code === 'REQUIRES_REAUTH'
-        || err.message?.includes('requires re-authorization');
-      const isTokenExpired = err.status === 401
-        || err.code === 'TOKEN_REFRESH_REQUIRED';
+      const { isGrantRevoked, isTokenExpired } = classifyProviderError(err);
 
       if (isGrantRevoked) {
         await connection.markRequiresReauth()
@@ -1207,7 +1110,7 @@ function TaskManagementController(context) {
       log.error({ organizationId, provider, err }, 'Failed to create ticket');
       const body = { message: 'Failed to create ticket' };
       await markIdempotencyFailed();
-      return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError(body.message ?? 'Internal error');
     }
 
     // --- Persist the ticket record --------------------------------------------
@@ -1243,7 +1146,7 @@ function TaskManagementController(context) {
         ticketUrl: ticketResult.ticketUrl,
       };
       await markIdempotencyFailed();
-      return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError(body.message ?? 'Internal error');
     }
 
     // Emit structured audit event per spec §Logging & Audit Events.
@@ -1289,7 +1192,7 @@ function TaskManagementController(context) {
         );
         const body = { message: 'Ticket created but suggestion link could not be saved' };
         await markIdempotencyFailed();
-        return createResponse(body, STATUS_INTERNAL_SERVER_ERROR);
+        return internalServerError(body.message ?? 'Internal error');
       }
     }
 
@@ -1315,12 +1218,12 @@ function TaskManagementController(context) {
 
     const responseBody = {
       mode,
-      ...serializeTicket(ticket),
+      ...TicketDto.toJSON(ticket),
       suggestionId: primarySuggestionId ?? undefined,
       ...(attachmentWarning ? { attachmentWarning } : {}),
     };
     await markIdempotencyDone(responseBody, STATUS_CREATED);
-    return createResponse(responseBody, STATUS_CREATED);
+    return created(responseBody);
   }
 
   // ─── Project listing ──────────────────────────────────────────────────────
@@ -1336,11 +1239,11 @@ function TaskManagementController(context) {
     const { organizationId, connectionId } = params;
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     if (!isValidUUID(connectionId)) {
-      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('connectionId must be a valid UUID');
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -1352,43 +1255,26 @@ function TaskManagementController(context) {
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
       if (!conn) {
-        return createResponse(
-          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
-          STATUS_NOT_FOUND,
-        );
+        return notFound(`Active connection ${connectionId} not found for organization ${organizationId}`);
       }
       if (conn.getStatus() === 'requires_reauth') {
         return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
       }
       if (conn.getStatus() !== 'active') {
-        return createResponse(
-          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
-          STATUS_NOT_FOUND,
-        );
+        return notFound(`Active connection ${connectionId} not found for organization ${organizationId}`);
       }
       connection = conn;
     } catch (err) {
       log.error({ organizationId, connectionId, err }, 'Failed to load connection for listProjects');
-      return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to load task-management connection');
     }
 
     let projects;
     try {
-      const connectionObj = {
-        id: connection.getId(),
-        organizationId: connection.getOrganizationId(),
-        provider: connection.getProvider(),
-        instanceUrl: connection.getInstanceUrl(),
-        metadata: connection.getMetadata(),
-      };
-      const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
+      const ticketClient = buildTicketClient(connection);
       projects = await ticketClient.listProjects();
     } catch (err) {
-      const isGrantRevoked = err.code === 'GRANT_REVOKED'
-        || err.code === 'REQUIRES_REAUTH'
-        || err.message?.includes('requires re-authorization');
-      const isTokenExpired = err.status === 401
-        || err.code === 'TOKEN_REFRESH_REQUIRED';
+      const { isGrantRevoked, isTokenExpired } = classifyProviderError(err);
 
       if (isGrantRevoked) {
         await connection.markRequiresReauth()
@@ -1406,10 +1292,10 @@ function TaskManagementController(context) {
       }
 
       log.error({ organizationId, connectionId, err }, 'Failed to list projects');
-      return createResponse({ message: 'Failed to list projects' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to list projects');
     }
 
-    return createResponse({ projects }, STATUS_OK);
+    return ok({ projects });
   }
 
   /**
@@ -1427,15 +1313,19 @@ function TaskManagementController(context) {
     const projectId = new URLSearchParams(rawQueryString ?? '').get('projectId');
 
     if (!isValidUUID(organizationId)) {
-      return createResponse({ message: 'organizationId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('organizationId must be a valid UUID');
     }
 
     if (!isValidUUID(connectionId)) {
-      return createResponse({ message: 'connectionId must be a valid UUID' }, STATUS_BAD_REQUEST);
+      return badRequest('connectionId must be a valid UUID');
     }
 
     if (!hasText(projectId)) {
-      return createResponse({ message: 'projectId query parameter is required' }, STATUS_BAD_REQUEST);
+      return badRequest('projectId query parameter is required');
+    }
+
+    if (!/^\d+$/.test(projectId)) {
+      return badRequest('projectId must be a numeric Jira project ID');
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -1447,43 +1337,26 @@ function TaskManagementController(context) {
     try {
       const conn = await loadConnectionForOrg(organizationId, connectionId);
       if (!conn) {
-        return createResponse(
-          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
-          STATUS_NOT_FOUND,
-        );
+        return notFound(`Active connection ${connectionId} not found for organization ${organizationId}`);
       }
       if (conn.getStatus() === 'requires_reauth') {
         return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
       }
       if (conn.getStatus() !== 'active') {
-        return createResponse(
-          { message: `Active connection ${connectionId} not found for organization ${organizationId}` },
-          STATUS_NOT_FOUND,
-        );
+        return notFound(`Active connection ${connectionId} not found for organization ${organizationId}`);
       }
       connection = conn;
     } catch (err) {
       log.error({ organizationId, connectionId, err }, 'Failed to load connection for listIssueTypes');
-      return createResponse({ message: 'Failed to load task-management connection' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to load task-management connection');
     }
 
     let issueTypes;
     try {
-      const connectionObj = {
-        id: connection.getId(),
-        organizationId: connection.getOrganizationId(),
-        provider: connection.getProvider(),
-        instanceUrl: connection.getInstanceUrl(),
-        metadata: connection.getMetadata(),
-      };
-      const ticketClient = TicketClientFactory.create(connectionObj, smClient, httpClient, log);
+      const ticketClient = buildTicketClient(connection);
       issueTypes = await ticketClient.listIssueTypes(projectId);
     } catch (err) {
-      const isGrantRevoked = err.code === 'GRANT_REVOKED'
-        || err.code === 'REQUIRES_REAUTH'
-        || err.message?.includes('requires re-authorization');
-      const isTokenExpired = err.status === 401
-        || err.code === 'TOKEN_REFRESH_REQUIRED';
+      const { isGrantRevoked, isTokenExpired } = classifyProviderError(err);
 
       if (isGrantRevoked) {
         await connection.markRequiresReauth()
@@ -1503,10 +1376,10 @@ function TaskManagementController(context) {
       log.error({
         organizationId, connectionId, projectId, err,
       }, 'Failed to list issue types');
-      return createResponse({ message: 'Failed to list issue types' }, STATUS_INTERNAL_SERVER_ERROR);
+      return internalServerError('Failed to list issue types');
     }
 
-    return createResponse({ issueTypes }, STATUS_OK);
+    return ok({ issueTypes });
   }
 
   return {
