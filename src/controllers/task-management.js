@@ -114,8 +114,8 @@ function serializeTicket(ticket, suggestions) {
  *   - Ticket creation modes (individual + grouped) are BOTH implemented in v1
  *     contrary to the original scope which planned grouped as v2. The architecture
  *     reviewers asked for clarity on multi-suggestion semantics; the implementation
- *     resolves this by shipping both modes with explicit caps (individual: ≤10,
- *     grouped: ≤400) and full idempotency enforcement.
+ *     resolves this by shipping both modes with explicit caps (individual: ≤15,
+ *     grouped: ≤1500) and full idempotency enforcement.
  *   - Attachment upload is included inline in POST /tickets (v1). The spec discussed
  *     attachments as an optional feature; they are implemented with a partial-success
  *     model: ticket creation succeeds even when attachment upload fails, with a
@@ -581,7 +581,7 @@ function TaskManagementController(context) {
       );
     }
 
-    // Cap per mode: individual ≤10 (N tickets), grouped ≤400 (1 ticket).
+    // Cap per mode: individual ≤15 (N tickets), grouped ≤1500 (1 ticket).
     const suggestionIdsMax = mode === TICKET_MODE_GROUPED
       ? SUGGESTION_IDS_MAX_GROUPED
       : SUGGESTION_IDS_MAX_INDIVIDUAL;
