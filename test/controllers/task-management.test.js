@@ -660,6 +660,26 @@ describe('TaskManagementController', () => {
       const [t] = await res.json();
       expect(t.suggestions).to.deep.equal([]);
     });
+
+    it('filters out tickets belonging to a different organization', async () => {
+      const matchingTicket = makeTicket();
+      const otherOrgTicket = makeTicket({
+        getId: () => 'ffffffff-0000-0000-0000-000000000000',
+        getOrganizationId: () => 'bbbbbbbb-0000-0000-0000-000000000000',
+      });
+      const ctx = makeContext({
+        dataAccess: {
+          Ticket: { allByOpportunityId: sinon.stub().resolves([matchingTicket, otherOrgTicket]) },
+          TicketSuggestion: { allByTicketIds: sinon.stub().resolves([]) },
+        },
+      });
+      const { listTicketsByOpportunity } = TaskManagementController(ctx);
+      const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.have.length(1);
+      expect(body[0].id).to.equal(TICKET_ID);
+    });
   });
 
   // ─── createTicket ─────────────────────────────────────────────────────────────
