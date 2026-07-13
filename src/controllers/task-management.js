@@ -590,7 +590,7 @@ function TaskManagementController(context) {
     // same suggestions are deduplicated regardless of which client sends them.
 
     const idempotencyKey = createHash('sha256')
-      .update(`${organizationId}:${data.opportunityId ?? ''}:${[...suggestionIds].sort().join(',')}`)
+      .update(`${data.opportunityId}:${[...suggestionIds].sort().join(',')}`)
       .digest('hex');
 
     let existingEntry;
