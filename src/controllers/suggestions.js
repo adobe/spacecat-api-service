@@ -2061,6 +2061,7 @@ function SuggestionsController(ctx, sqs, env) {
       // outer catch knows whether to compensate by deleting it if a later
       // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
+      let validSuggestionEntities = [];
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -2072,35 +2073,45 @@ function SuggestionsController(ctx, sqs, env) {
           context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
           throw new Error('Missing required environment variables');
         }
-        const domainWideSuggestionIds = new Set(
-          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
-        );
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          promptSources = [...allSuggestions]
-            .filter((s) => {
-              const data = s.getData() || {};
-              return !domainWideSuggestionIds.has(s.getId())
-                && s.getStatus() === SuggestionModel.STATUSES.NEW
-                && !data.edgeDeployed
-                && data.aiSummary
-                && data.valuable === true;
-            })
-            .sort((a, b) => {
-              const aScore = (a.getData()?.agenticTraffic || 0)
-                * (a.getData()?.contentGainRatio || 0);
-              const bScore = (b.getData()?.agenticTraffic || 0)
-                * (b.getData()?.contentGainRatio || 0);
-              return bScore - aScore;
-            })
-            .slice(0, 100);
+        const hasPatternDeploy = domainWideSuggestions.length > 0 || pathSuggestions.length > 0;
+        // A single request can select multiple pattern suggestions (e.g. several segments).
+        const patternSuggestions = [
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
+        ];
+        let experimentSuggestionIds = validSuggestionIds;
+        let measurementSuggestions = [];
+        const metadataBase = {};
+
+        if (hasPatternDeploy) {
+          const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+          if (!Array.isArray(highImpactIds) || highImpactIds.length === 0
+            || !highImpactIds.every((id) => isValidUUID(id))) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+            throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
+          }
+          const highImpactIdSet = new Set(highImpactIds);
+          measurementSuggestions = allSuggestions.filter((s) => highImpactIdSet.has(s.getId()));
+          if (measurementSuggestions.length === 0) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for pattern deploy`);
+            throw new Error('No high-impact suggestions found for the provided IDs');
+          }
+          experimentSuggestionIds = [...new Set([
+            ...validSuggestionIds,
+            ...measurementSuggestions.map((s) => s.getId()),
+          ])];
+          urls = [...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean))];
+          // Actual patterns matched ('/*' domain-wide, or e.g. '/blog/*' segment-wide) — the UI
+          // derives domain-wide vs segment-wide naming from these values instead of a separate
+          // flag. An array since a request can select multiple segment patterns at once.
+          metadataBase.patterns = patternSuggestions.map((ps) => (
+            ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+          ));
         } else {
-          promptSources = validSuggestions;
+          urls = [...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean))];
         }
-        urls = [...new Set(promptSources
-          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
-          .map((s) => s.getData()?.url)
-          .filter(Boolean))];
+        metadataBase.urls = urls;
+
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
           siteId,
@@ -2110,10 +2121,10 @@ function SuggestionsController(ctx, sqs, env) {
             || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           phase: GeoExperimentModel.PHASES.INITIATED,
-          suggestionIds: validSuggestionIds,
+          suggestionIds: experimentSuggestionIds,
           metadata: buildExperimentMetadata(
             context,
-            { urls },
+            metadataBase,
             GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
             opportunity.getType(),
           ),
@@ -2138,7 +2149,10 @@ function SuggestionsController(ctx, sqs, env) {
         });
         atomicStrategyCreated = true;
 
-        const validSuggestionEntities = [
+        // Only the selected suggestion(s) block on the experiment; the measurement set (the
+        // ~100 high-impact URLs) is covered by the pattern instead (see below), which is what
+        // hides them on the UI — they don't need EXPERIMENT_IN_PROGRESS.
+        validSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
           ...pathSuggestions.map(({ suggestion }) => suggestion),
@@ -2162,6 +2176,25 @@ function SuggestionsController(ctx, sqs, env) {
             geoExperimentId,
             errors: markFailures.map((r) => r.reason?.message),
           });
+        }
+
+        // Mark every suggestion under the opportunity that falls within each selected pattern's
+        // scope as covered (non-fatal) — not just the measurement set sent by the UI. Sequential
+        // so overlapping patterns don't race to save the same covered suggestion.
+        if (hasPatternDeploy) {
+          const tokowakaClient = TokowakaClient.createFrom(context);
+          for (const ps of patternSuggestions) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.markPatternCoveredSuggestions(
+                ps,
+                allSuggestions,
+                profile?.email || 'geo-experiment',
+              );
+            } catch (coverError) {
+              context.log.warn(`[geo-experiment-failed] Failed to mark pattern-covered suggestions for ${ps.getId()}: ${coverError.message}`, coverError);
+            }
+          }
         }
 
         const experimentResponse = {
@@ -2210,13 +2243,8 @@ function SuggestionsController(ctx, sqs, env) {
             context.log.error(`[atomic-strategy-cleanup-failed] site: ${apexBaseUrl}, Failed to delete atomic strategy ${geoExperimentId}: ${cleanupError.message}`, cleanupError);
           }
         }
-        const allSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
         await Promise.allSettled(
-          allSuggestionEntities
+          validSuggestionEntities
             .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
             .map(async (s) => {
               try {

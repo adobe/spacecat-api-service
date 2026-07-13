@@ -7398,7 +7398,7 @@ describe('Suggestions Controller', () => {
     });
 
     describe('mixed domain-wide + path-level suggestions on a subpath site (async experiment flow)', () => {
-      it('creates a geo-experiment covering domain-wide, path-level, and regular suggestions together', async () => {
+      it('creates a domain-wide/segment experiment: selected patterns deploy, UI high-impact URLs are measured', async () => {
         site.getBaseURL = sandbox.stub().returns('https://example.com/kings');
 
         const domainWideSubpathSuggestion = {
@@ -7442,9 +7442,7 @@ describe('Suggestions Controller', () => {
           save: sandbox.stub().resolves(),
         };
 
-        // Domain-wide suggestions are excluded from prompt-sourcing (they have no page of
-        // their own), so at least one non-domain-wide suggestion must carry aiSummary/valuable
-        // prompts for the batch to have anything to build the experiment from.
+        // The UI-supplied high-impact suggestion (measured, prompts generated for it).
         const regularSubpathSuggestion = {
           getId: () => SUGGESTION_IDS[2],
           getType: () => 'headings',
@@ -7469,33 +7467,301 @@ describe('Suggestions Controller', () => {
         mockSuggestion.allByOpportunityId.resolves([
           domainWideSubpathSuggestion, pathLevelSubpathSuggestion, regularSubpathSuggestion,
         ]);
+        const markCoveredStub = sandbox.stub().resolves();
+        sandbox.stub(TokowakaClient, 'createFrom')
+          .returns({ markPatternCoveredSuggestions: markCoveredStub });
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
           pathInfo: { headers: { prefer: 'respond-async' } },
           params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
           data: {
-            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+            // User selects the pattern suggestions; the UI supplies the high-impact URL to measure.
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+            metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[2]] },
           },
           env: asyncExperimentEnv,
         });
 
         expect(response.status).to.equal(207);
         const body = await response.json();
-        expect(body.metadata.failed).to.equal(0);
-        expect(body.metadata.success).to.equal(3);
-        expect(body.geoExperimentId).to.be.a('string');
-        expect(body.suggestions.map((s) => s.uuid)).to.have.members([
+        expect(body.metadata.success).to.equal(2); // response shows only the 2 selected patterns
+
+        // Every suggestion under the opportunity is checked against each selected pattern
+        // (both the domain-wide and the path-level pattern selected in this request).
+        expect(markCoveredStub).to.have.been.calledTwice;
+        const [dwPatternArg, dwAllSuggestionsArg] = markCoveredStub.firstCall.args;
+        expect(dwPatternArg.getId()).to.equal(SUGGESTION_IDS[0]);
+        expect(dwAllSuggestionsArg.map((s) => s.getId())).to.deep.equal([
           SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2],
         ]);
-        body.suggestions.forEach((s) => expect(s.statusCode).to.equal(202));
+        const [pathPatternArg] = markCoveredStub.secondCall.args;
+        expect(pathPatternArg.getId()).to.equal(SUGGESTION_IDS[1]);
+        expect(body.geoExperimentId).to.be.a('string');
+        expect(body.suggestions.map((s) => s.uuid)).to.have.members([
+          SUGGESTION_IDS[0], SUGGESTION_IDS[1],
+        ]);
 
-        // All three were marked in-progress together, not just the suggestion that fed prompts
-        [domainWideSubpathSuggestion, pathLevelSubpathSuggestion, regularSubpathSuggestion]
-          .forEach((s) => {
-            expect(s.setData.calledWithMatch({ edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS' }))
-              .to.equal(true);
-          });
+        // Experiment tracks pattern + measurement IDs, the matched patterns, and stores the URL.
+        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.suggestionIds).to.have.members([
+          SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2],
+        ]);
+        expect(createArg.metadata.patterns).to.deep.equal(['/*', '/kings/products/*']);
+        expect(createArg.metadata.urls).to.deep.equal(['https://example.com/kings/blog-post']);
+
+        // Only the 2 selected patterns are marked in-progress; the measurement suggestion is
+        // hidden from the UI via cover-marking instead (see markPatternCoveredSuggestions above).
+        [domainWideSubpathSuggestion, pathLevelSubpathSuggestion].forEach((s) => {
+          expect(s.setData.calledWithMatch({ edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS' }))
+            .to.equal(true);
+        });
+        expect(regularSubpathSuggestion.setData.calledWithMatch({
+          edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
+        })).to.equal(false);
+      });
+
+      const mkDomainWide = () => ({
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({ isDomainWide: true, allowedRegexPatterns: ['/*'], url: 'https://example.com' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      });
+
+      it('fails when a pattern deploy is missing metadata.highImpactSuggestionIds', async () => {
+        mockSuggestion.allByOpportunityId.resolves([mkDomainWide()]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] }, // no metadata
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.suggestions[0].statusCode).to.equal(500);
+        expect(body.suggestions[0].message).to.include('highImpactSuggestionIds');
+      });
+
+      it('fails when metadata.highImpactSuggestionIds contains a non-UUID', async () => {
+        mockSuggestion.allByOpportunityId.resolves([mkDomainWide()]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]], metadata: { highImpactSuggestionIds: ['not-a-uuid'] } },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.suggestions[0].message).to.include('highImpactSuggestionIds');
+      });
+
+      it('fails when the high-impact IDs resolve to no suggestions', async () => {
+        mockSuggestion.allByOpportunityId.resolves([mkDomainWide()]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+            metadata: { highImpactSuggestionIds: ['99999999-9999-4999-8999-999999999999'] },
+          },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.suggestions[0].message).to.include('No high-impact suggestions found');
+      });
+
+      it('supports a segment/path-only pattern (no domain-wide) and reports the matched pattern', async () => {
+        const pathPattern = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({ allowedRegexPatterns: ['/kings/*'], url: 'https://example.com/kings' }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        const measured = {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({ url: 'https://example.com/kings/a' }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        mockSuggestion.allByOpportunityId.resolves([pathPattern, measured]);
+        const markCoveredStub = sandbox.stub().resolves();
+        sandbox.stub(TokowakaClient, 'createFrom')
+          .returns({ markPatternCoveredSuggestions: markCoveredStub });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+            metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[1]] },
+          },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
+        expect(createArg.metadata.patterns).to.deep.equal(['/kings/*']);
+        expect(createArg.metadata.urls).to.deep.equal(['https://example.com/kings/a']);
+        // All opportunity suggestions are checked against the segment/path pattern.
+        expect(markCoveredStub.firstCall.args[0].getId()).to.equal(SUGGESTION_IDS[0]);
+        expect(markCoveredStub.firstCall.args[1].map((s) => s.getId())).to.deep.equal([
+          SUGGESTION_IDS[0], SUGGESTION_IDS[1],
+        ]);
+      });
+
+      it('supports multiple segment/path patterns selected in the same request', async () => {
+        const blogPattern = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({ allowedRegexPatterns: ['/blog/*'], url: 'https://example.com/blog' }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        const productsPattern = {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            allowedRegexPatterns: ['/products/*'],
+            url: 'https://example.com/products',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        const measured = {
+          getId: () => SUGGESTION_IDS[2],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 3,
+          getData: () => ({ url: 'https://example.com/blog/a' }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        mockSuggestion.allByOpportunityId.resolves([blogPattern, productsPattern, measured]);
+        const markCoveredStub = sandbox.stub().resolves();
+        sandbox.stub(TokowakaClient, 'createFrom')
+          .returns({ markPatternCoveredSuggestions: markCoveredStub });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+            metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[2]] },
+          },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.metadata.patterns).to.deep.equal(['/blog/*', '/products/*']);
+
+        // Each selected segment pattern is checked separately against the full opportunity.
+        expect(markCoveredStub).to.have.been.calledTwice;
+        expect(markCoveredStub.firstCall.args[0].getId()).to.equal(SUGGESTION_IDS[0]);
+        expect(markCoveredStub.secondCall.args[0].getId()).to.equal(SUGGESTION_IDS[1]);
+        [blogPattern, productsPattern].forEach((s) => {
+          expect(s.setData.calledWithMatch({ edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS' }))
+            .to.equal(true);
+        });
+      });
+
+      it('still launches the experiment when covered-marking fails (non-fatal)', async () => {
+        const measured = {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({ url: 'https://example.com/x' }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        mockSuggestion.allByOpportunityId.resolves([mkDomainWide(), measured]);
+        sandbox.stub(TokowakaClient, 'createFrom').returns({
+          markPatternCoveredSuggestions: sandbox.stub().rejects(new Error('cover boom')),
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+            metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[1]] },
+          },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.geoExperimentId).to.be.a('string'); // experiment still created
       });
     });
 
@@ -7638,175 +7904,6 @@ describe('Suggestions Controller', () => {
       // Domain-wide suggestion with allowedRegexPatterns is accepted as valid
       const accepted = body.suggestions.filter((s) => s.statusCode !== 400 && s.statusCode !== 404);
       expect(accepted.length).to.be.greaterThan(0);
-    });
-
-    it('sorts domain-wide prompt sources by agenticTraffic × contentGainRatio, falling back to 0 for missing values', async () => {
-      const domainWideSugg = {
-        getId: () => SUGGESTION_IDS[0],
-        getType: () => 'headings',
-        getOpportunityId: () => OPPORTUNITY_ID,
-        getStatus: () => 'APPROVED',
-        getData: () => ({
-          isDomainWide: true,
-          allowedRegexPatterns: ['.*\\.html'],
-        }),
-        setData: sandbox.stub(),
-        setUpdatedBy: sandbox.stub(),
-        save: sandbox.stub().resolves(),
-      };
-      // score: 10 * 5 = 50 — should sort first
-      const highScoreSugg = {
-        getId: () => SUGGESTION_IDS[1],
-        getType: () => 'headings',
-        getOpportunityId: () => OPPORTUNITY_ID,
-        getStatus: () => 'NEW',
-        getRank: () => 2,
-        getData: () => ({
-          url: 'https://example.com/high',
-          prompts: [{ prompt: 'high-score prompt', regions: ['US'] }],
-          aiSummary: 'high summary',
-          valuable: true,
-          agenticTraffic: 10,
-          contentGainRatio: 5,
-        }),
-        getKpiDeltas: () => ({}),
-        getCreatedAt: () => '2025-01-15T10:00:00Z',
-        getUpdatedAt: () => '2025-01-15T10:00:00Z',
-        getUpdatedBy: () => 'system',
-        setData: sandbox.stub().returnsThis(),
-        setUpdatedBy: sandbox.stub().returnsThis(),
-        save: sandbox.stub().resolves(),
-      };
-      // missing agenticTraffic and contentGainRatio → both fall back to 0
-      const lowScoreSugg = {
-        getId: () => SUGGESTION_IDS[2],
-        getType: () => 'headings',
-        getOpportunityId: () => OPPORTUNITY_ID,
-        getStatus: () => 'NEW',
-        getRank: () => 1,
-        getData: () => ({
-          url: 'https://example.com/low',
-          prompts: [{ prompt: 'low-score prompt', regions: ['US'] }],
-          aiSummary: 'low summary',
-          valuable: true,
-        }),
-        getKpiDeltas: () => ({}),
-        getCreatedAt: () => '2025-01-15T10:00:00Z',
-        getUpdatedAt: () => '2025-01-15T10:00:00Z',
-        getUpdatedBy: () => 'system',
-        setData: sandbox.stub().returnsThis(),
-        setUpdatedBy: sandbox.stub().returnsThis(),
-        save: sandbox.stub().resolves(),
-      };
-      // approved suggestion — should be excluded by NEW-only filter even though it passes other checks
-      const approvedSugg = {
-        getId: () => '11111111-1111-1111-1111-111111111111',
-        getStatus: () => 'APPROVED',
-        getData: () => ({
-          url: 'https://example.com/approved',
-          prompts: [{ prompt: 'approved prompt', regions: ['US'] }],
-          aiSummary: 'approved summary',
-          valuable: true,
-          agenticTraffic: 999,
-          contentGainRatio: 999,
-        }),
-      };
-      // Ordered low-before-high in allSuggestions to confirm sort reorders them
-      mockSuggestion.allByOpportunityId.resolves([
-        domainWideSugg, lowScoreSugg, highScoreSugg, approvedSugg,
-      ]);
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      // high-score suggestion's url should appear before low-score suggestion's in metadata
-      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
-      expect(createArg.metadata.urls).to.deep.equal([
-        'https://example.com/high', 'https://example.com/low',
-      ]);
-    });
-
-    it('excludes domain-wide prompt source candidates that are already deployed, missing aiSummary, or not valuable', async () => {
-      const domainWideSugg = {
-        getId: () => SUGGESTION_IDS[0],
-        getStatus: () => 'APPROVED',
-        getData: () => ({ isDomainWide: true, allowedRegexPatterns: ['.*\\.html'] }),
-        setData: sandbox.stub(),
-        setUpdatedBy: sandbox.stub(),
-        save: sandbox.stub().resolves(),
-      };
-      // eligible — should appear in uploaded prompts
-      const eligibleSugg = {
-        getId: () => SUGGESTION_IDS[1],
-        getStatus: () => 'NEW',
-        getData: () => ({
-          url: 'https://example.com/eligible',
-          prompts: [{ prompt: 'eligible prompt', regions: ['US'] }],
-          aiSummary: 'a summary',
-          valuable: true,
-        }),
-        getKpiDeltas: () => ({}),
-        getCreatedAt: () => '2025-01-15T10:00:00Z',
-        getUpdatedAt: () => '2025-01-15T10:00:00Z',
-        getUpdatedBy: () => 'system',
-        setData: sandbox.stub().returnsThis(),
-        setUpdatedBy: sandbox.stub().returnsThis(),
-        save: sandbox.stub().resolves(),
-      };
-      // already deployed — excluded by !data.edgeDeployed
-      const deployedSugg = {
-        getId: () => SUGGESTION_IDS[2],
-        getStatus: () => 'NEW',
-        getData: () => ({
-          url: 'https://example.com/deployed',
-          prompts: [{ prompt: 'deployed prompt', regions: ['US'] }],
-          aiSummary: 'a summary',
-          valuable: true,
-          edgeDeployed: 1700000000000,
-        }),
-      };
-      // missing aiSummary — excluded by data.aiSummary check
-      const noSummarySugg = {
-        getId: () => '11111111-1111-1111-1111-111111111111',
-        getStatus: () => 'NEW',
-        getData: () => ({
-          url: 'https://example.com/no-summary',
-          prompts: [{ prompt: 'no-summary prompt', regions: ['US'] }],
-          valuable: true,
-        }),
-      };
-      // valuable !== true — excluded by data.valuable === true check
-      const notValuableSugg = {
-        getId: () => '22222222-2222-2222-2222-222222222222',
-        getStatus: () => 'NEW',
-        getData: () => ({
-          url: 'https://example.com/not-valuable',
-          prompts: [{ prompt: 'not-valuable prompt', regions: ['US'] }],
-          aiSummary: 'a summary',
-          valuable: false,
-        }),
-      };
-
-      mockSuggestion.allByOpportunityId.resolves([
-        domainWideSugg, eligibleSugg, deployedSugg, noSummarySugg, notValuableSugg,
-      ]);
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: asyncExperimentEnv,
-      });
-
-      expect(response.status).to.equal(207);
-      // Only the eligible suggestion's url should survive the prompt-source filter into metadata
-      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
-      expect(createArg.metadata.urls).to.deep.equal(['https://example.com/eligible']);
     });
 
     it('logs warning and continues when domain-wide regex is invalid', async () => {
