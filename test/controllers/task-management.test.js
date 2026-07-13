@@ -91,46 +91,6 @@ function makeOrg(overrides = {}) {
   };
 }
 
-function makePostgrestClient({
-  lookupData = [],
-  lookupError = null,
-  insertData = { id: 'idem-key-id-111111' },
-  insertError = null,
-} = {}) {
-  const limitStub = sinon.stub().resolves({ data: lookupData, error: lookupError });
-  const gteStub = sinon.stub().returns({ limit: limitStub });
-  const eq2Stub = sinon.stub().returns({ gte: gteStub });
-  const eq1Stub = sinon.stub().returns({ eq: eq2Stub });
-  const inStub = sinon.stub().resolves({ data: [], error: null });
-  const selectStub = sinon.stub().returns({ eq: eq1Stub, in: inStub });
-
-  const singleStub = sinon.stub().resolves({ data: insertData, error: insertError });
-  const insertSelectStub = sinon.stub().returns({ single: singleStub });
-  const insertStub = sinon.stub().returns({ select: insertSelectStub });
-
-  const updateEqStub = sinon.stub().returns(Promise.resolve({ data: null, error: null }));
-  const updateStub = sinon.stub().returns({ eq: updateEqStub });
-
-  function makeDeleteChain() {
-    const p = Promise.resolve({ data: null, error: null });
-    const chain = Object.assign(p, {
-      eq: sinon.stub().callsFake(() => makeDeleteChain()),
-      lt: sinon.stub().callsFake(() => Promise.resolve({ data: null, error: null })),
-    });
-    return chain;
-  }
-  const deleteStub = sinon.stub().callsFake(() => makeDeleteChain());
-
-  return {
-    from: sinon.stub().returns({
-      select: selectStub,
-      insert: insertStub,
-      update: updateStub,
-      delete: deleteStub,
-    }),
-  };
-}
-
 function makeDataAccess(overrides = {}) {
   return {
     TaskManagementConnection: {
@@ -176,10 +136,6 @@ function makeDataAccess(overrides = {}) {
         remove: sinon.stub().resolves(),
       }),
       ...overrides.IdempotencyKey,
-    },
-    services: {
-      postgrestClient: makePostgrestClient(),
-      ...(overrides.services ?? {}),
     },
   };
 }
