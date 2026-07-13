@@ -1,3 +1,10 @@
+# [1.642.0](https://github.com/adobe/spacecat-api-service/compare/v1.641.0...v1.642.0) (2026-07-13)
+
+
+### Features
+
+* enhance serenity filter-dimensions for sub categories ([#2791](https://github.com/adobe/spacecat-api-service/issues/2791)) ([8cf3973](https://github.com/adobe/spacecat-api-service/commit/8cf3973dff91618406e421549131a56a0edb0f17))
+
 # [1.641.0](https://github.com/adobe/spacecat-api-service/compare/v1.640.0...v1.641.0) (2026-07-13)
 
 
