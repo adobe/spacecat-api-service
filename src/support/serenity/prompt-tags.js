@@ -25,6 +25,7 @@ export const TAG_DIMENSION = Object.freeze({
   SOURCE: 'source',
   INTENT: 'intent',
   TYPE: 'type',
+  CATEGORY: 'category',
 });
 
 // `source:<value>` — who authored the prompt.
@@ -59,10 +60,44 @@ export const TYPE_TAG = Object.freeze({
   NON_BRANDED: 'type:non-branded',
 });
 
+/** Builds the `<dimension>:<NAME>` tag string for a dimension + free-form value. */
+export function tagFor(dimension, name) {
+  return `${dimension}:${name}`;
+}
+
 /** Builds the `topic:<NAME>` tag for a topic name. */
 export function topicTag(name) {
-  return `${TAG_DIMENSION.TOPIC}:${name}`;
+  return tagFor(TAG_DIMENSION.TOPIC, name);
 }
+
+/**
+ * The tag dimensions a caller may freely create values under (the open
+ * taxonomies). The closed taxonomies — `source` / `intent` / `type` — have a
+ * fixed value enum registered as {@link PROJECT_STANDARD_TAGS}, so callers must
+ * NOT mint arbitrary values under them; only `topic` and `category` accept
+ * customer-authored values. The create-tag endpoint validates the requested
+ * `type` against this list, which is what bounds the allowed tag prefixes.
+ */
+export const CREATABLE_TAG_DIMENSIONS = Object.freeze([
+  TAG_DIMENSION.CATEGORY,
+  TAG_DIMENSION.TOPIC,
+]);
+
+/**
+ * The closed dimensions — `source` / `intent` / `type` — whose values are a
+ * fixed enum ({@link PROJECT_STANDARD_TAGS}), never customer-authored. A
+ * caller may still "create" one of these (POST /serenity/tags) to learn its
+ * upstream id, but ONLY a value already in the enum, and the create is
+ * resolve-before-create/idempotent (unlike {@link CREATABLE_TAG_DIMENSIONS}'s
+ * open dimensions, where a duplicate name is a hard upstream 500 by design —
+ * see serenity-docs#24 §3.1 gate 7). Closed-dimension tags are always roots;
+ * `parentId` is rejected for them.
+ */
+export const CLOSED_TAG_DIMENSIONS = Object.freeze([
+  TAG_DIMENSION.SOURCE,
+  TAG_DIMENSION.INTENT,
+  TAG_DIMENSION.TYPE,
+]);
 
 // Tags applied to EVERY AI-generated prompt on top of its `topic:<NAME>` tag:
 // `source:ai` (AI-authored) plus the default `intent:Informational` (the most

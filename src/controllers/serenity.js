@@ -55,17 +55,28 @@ import {
   handleUpdatePromptSubworkspace,
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
+import {
+  handleCreateTag,
+  handleCreateTagSubworkspace,
+  handleUpdateTag,
+  handleUpdateTagSubworkspace,
+} from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
+import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
+import { marketForGeoTargetId } from '../support/serenity/locations.js';
+import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors,
 } from '../support/brands-storage.js';
-import { ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
+import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
+import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -181,6 +192,13 @@ function mapError(e, log) {
  * upstream gateway only understands IMS user tokens; we refuse to forward
  * anything else.
  *
+ * NOTE — this is NOT the only path into the handlers below: `x-promise-token`
+ * (see `resolveSemrushImsToken`) is a SECOND, always-on (including production)
+ * way to reach them without passing this function's IMS-type check, by
+ * exchanging the promise token for an IMS token instead of forwarding
+ * `Authorization` directly. This function's gate — and the test-only escape
+ * hatch below — only govern the plain-bearer fallback path.
+ *
  * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
  * we forward is validated AGAIN by the real Semrush gateway on every upstream
  * call (it rejects an invalid/expired/forged token with 401/403, which the
@@ -188,8 +206,9 @@ function mapError(e, log) {
  * fail-fast + shape guard so we do not forward a token Semrush will obviously
  * reject; it never substitutes for the upstream's own validation.
  *
- * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` the
- * IMS-type check is skipped so an authenticated NON-IMS caller (e.g. the
+ * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` AND the
+ * runtime is not production, the IMS-type check is skipped so an authenticated
+ * NON-IMS caller (e.g. the
  * locally-signed JWT the integration-test harness mints) can reach the
  * handlers. This is sound because (a) production auth is unaffected — Semrush
  * still validates the forwarded token end to end — and (b) the integration
@@ -203,12 +222,22 @@ function mapError(e, log) {
  */
 function requireImsBearer(ctx) {
   const authInfo = ctx?.attributes?.authInfo;
-  const allowNonIms = ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  // Hard-disable the escape hatch in production, mirroring getImsUserTokenStrict:
+  // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env, a non-IMS
+  // caller must never reach the handlers there.
+  const isProd = ctx?.env?.AWS_ENV === 'prod' || ctx?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
   if (!allowNonIms && authInfo?.getType && authInfo.getType() !== 'ims') {
-    throw new ErrorWithStatusCode(
-      'Serenity proxy requires IMS authentication',
+    // Reached only when x-promise-token was absent (resolveSemrushImsToken checks
+    // that header first and never falls through to here when it's present) — a
+    // non-IMS caller has no other way to authenticate to Semrush, so point them
+    // at the promise-token flow instead of a bare "not authenticated" message.
+    const err = new ErrorWithStatusCode(
+      `Serenity proxy requires IMS authentication; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
       401,
     );
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
+    throw err;
   }
   const header = ctx?.pathInfo?.headers?.authorization;
   if (!hasText(header) || !header.startsWith(BEARER_PREFIX)) {
@@ -222,8 +251,8 @@ function requireImsBearer(ctx) {
 
 /**
  * Builds an async reload callback that re-reads the brand's CURRENT
- * semrush_workspace_id from the data layer. ensureSubworkspace uses it as a
- * lost-update concurrency guard so a parallel activation cannot orphan a
+ * semrush_sub_workspace_id from the data layer. ensureSubworkspace uses it as
+ * a lost-update concurrency guard so a parallel activation cannot orphan a
  * freshly-created, resourced sub-workspace.
  */
 export function brandPointerReloader(ctx, brandUuid) {
@@ -233,7 +262,7 @@ export function brandPointerReloader(ctx, brandUuid) {
       return null;
     }
     const fresh = await Brand.findById(brandUuid);
-    return fresh?.getSemrushWorkspaceId?.() ?? null;
+    return fresh?.getSemrushSubWorkspaceId?.() ?? null;
   };
 }
 
@@ -255,6 +284,33 @@ function SerenityController(context, log, env) {
   }
 
   /**
+   * Resolves the IMS access token to forward to the Semrush gateway.
+   *
+   * Preferred path: the caller sends `x-promise-token` (minted by
+   * POST /auth/v2/promise). This lets a caller authenticate to spacecat itself
+   * with a NON-IMS credential (e.g. a spacecat JWT on `Authorization`) while
+   * still supplying an IMS-exchangeable token for the upstream Semrush call —
+   * mirrors the existing pattern in edge-routing-auth.js / fixes.js. The promise
+   * token is checked FIRST and, when present, `requireImsBearer` (and its
+   * `authInfo.getType() === 'ims'` gate) is never invoked, since `Authorization`
+   * is not expected to carry an IMS token in that case. This is a SECOND,
+   * always-on (including production) bypass of that gate, distinct from the
+   * SERENITY_ALLOW_NON_IMS_AUTH test-only escape hatch above.
+   *
+   * Fallback path: no `x-promise-token` — behaves exactly as before, requiring
+   * IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+   *
+   * Delegates the promise-token decode/exchange to the shared
+   * `resolveSemrushImsToken` helper in support/utils.js (also used by
+   * elements.js and the brand create/edit/provisioning re-sync paths),
+   * passing this controller's own `requireImsBearer` as the fallback since it
+   * additionally supports the SERENITY_ALLOW_NON_IMS_AUTH test-only escape hatch.
+   */
+  async function resolveSemrushImsToken(ctx) {
+    return resolveImsTokenViaPromise(ctx, log, 'serenity', requireImsBearer);
+  }
+
+  /**
    * Verifies the caller has access to the addressed org AND the brand
    * belongs to that org, then resolves the org's upstream workspace.
    *
@@ -265,7 +321,7 @@ function SerenityController(context, log, env) {
    *
    * Returns either `{ error: Response }` or
    * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
-   *   - `mode` is 'subworkspace' when brands.semrush_workspace_id is set, else 'flat'
+   *   - `mode` is 'subworkspace' when brands.semrush_sub_workspace_id is set, else 'flat'
    *   - `workspaceId` is the workspace handlers call upstream (subworkspace ws in subworkspace
    *     mode, org parent in flat mode)
    *   - `parentWorkspaceId` is the org parent (needed for subworkspace create/activate)
@@ -304,6 +360,18 @@ function SerenityController(context, log, env) {
           503,
         ),
       };
+    }
+    // Org-wide serenity rollout gate. Serenity is "active" for an org only when
+    // its `LLMO/serenity` feature flag is ON *and* a Semrush workspace resolves
+    // for the brand (the workspace half is enforced below by
+    // resolveBrandWorkspace). While the flag is OFF the org's UI keeps reading
+    // the normal backend data — even if a `semrush_sub_workspace_id` has
+    // already been backfilled for rollout prep — so reject the serenity
+    // surface with a 404 (the same "no serenity for this org" contract the UI already handles
+    // for an org without a workspace). Checked before brand resolution so an
+    // inactive org never leaks brand existence.
+    if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
+      return { error: notFound('Serenity is not active for this organization') };
     }
     const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
     if (!brandUuid) {
@@ -366,9 +434,38 @@ function SerenityController(context, log, env) {
     return brand;
   }
 
+  /**
+   * Builds the server-side `type:branded`/`type:non-branded` classifier for the
+   * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
+   * name + aliases ONCE per request, then returns a pure
+   * `(text, geoTargetId) => TYPE_TAG` closure: each prompt's market is derived
+   * from its geoTargetId and the alias needles are region-clamped to that market
+   * (memoized per market). This is the SAME classifier the AI-generation and
+   * onboarding paths use, so a prompt is classified identically no matter how it
+   * is written; the client never controls the value.
+   */
+  async function buildPromptTypeClassifier(ctx, brandUuid) {
+    const brand = await loadBrand(ctx, brandUuid);
+    const brandName = brand.getName?.() || '';
+    const brandAliases = await getBrandAliases(
+      brandUuid,
+      ctx.dataAccess.services.postgrestClient,
+    );
+    const needlesByMarket = new Map();
+    return (text, geoTargetId) => {
+      const market = marketForGeoTargetId(geoTargetId) || '';
+      let needles = needlesByMarket.get(market);
+      if (!needles) {
+        needles = brandNeedles(brandName, brandAliases, market);
+        needlesByMarket.set(market, needles);
+      }
+      return classifyBrandedTag(text, needles);
+    };
+  }
+
   const listPrompts = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -391,14 +488,21 @@ function SerenityController(context, log, env) {
 
   const createPrompts = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       const result = auth.mode === 'subworkspace'
-        ? await handleCreatePromptsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
+        ? await handleCreatePromptsSubworkspace(
+          transport,
+          auth.workspaceId,
+          ctx.data || {},
+          log,
+          classifyPromptType,
+        )
         : await handleCreatePrompts(
           transport,
           ctx.dataAccess,
@@ -406,6 +510,7 @@ function SerenityController(context, log, env) {
           auth.workspaceId,
           ctx.data || {},
           log,
+          classifyPromptType,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -415,7 +520,7 @@ function SerenityController(context, log, env) {
 
   const updatePrompt = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const { semrushPromptId } = ctx?.params || {};
       if (!hasText(semrushPromptId)) {
         throw new ErrorWithStatusCode('Missing semrushPromptId', 400);
@@ -425,6 +530,7 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       const result = auth.mode === 'subworkspace'
         ? await handleUpdatePromptSubworkspace(
           transport,
@@ -432,6 +538,7 @@ function SerenityController(context, log, env) {
           semrushPromptId,
           ctx.data || {},
           log,
+          classifyPromptType,
         )
         : await handleUpdatePrompt(
           transport,
@@ -441,6 +548,7 @@ function SerenityController(context, log, env) {
           semrushPromptId,
           ctx.data || {},
           log,
+          classifyPromptType,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -450,7 +558,7 @@ function SerenityController(context, log, env) {
 
   const bulkDeletePrompts = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -479,7 +587,7 @@ function SerenityController(context, log, env) {
 
   const listMarkets = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -504,7 +612,7 @@ function SerenityController(context, log, env) {
       // IMS bearer is required on the whole surface. Flat mode is a pure DB
       // read (no upstream), but subworkspace mode reads the live listing, so the token
       // is captured here and a transport built only when needed.
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -532,7 +640,7 @@ function SerenityController(context, log, env) {
 
   const createMarket = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -577,13 +685,20 @@ function SerenityController(context, log, env) {
             brandAliases,
             brandUrlSources,
             competitors,
+            // auth.brandUuid is an already-persisted brand row here (loadBrand
+            // above), so the mapping-row upsert's FK to brands is satisfied —
+            // see mapping-rows.js upsertMappingRow doc.
+            // Narrowed to the one model the mapping-row helpers touch (defense
+            // in depth: this options bag flows into markets-subworkspace.js and
+            // shouldn't carry access to unrelated tables).
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
         // market's own domain, once its Semrush project is created. Best-effort:
         // never fails a live market.
         if (result?.status === 201) {
-          await ensureMarketSite(ctx, {
+          const linkedSiteId = await ensureMarketSite(ctx, {
             // Optional-chained so a missing/throwing accessor can't 500 a market
             // that is already live upstream — the mirror is best-effort.
             organizationId: brand.getOrganizationId?.(),
@@ -592,6 +707,9 @@ function SerenityController(context, log, env) {
             updatedBy: 'serenity-create-market',
             log,
           });
+          // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
+          // never overwrites an existing link.
+          await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
         }
       } else {
         result = await handleCreateMarket(
@@ -611,7 +729,7 @@ function SerenityController(context, log, env) {
 
   const deleteMarket = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -634,6 +752,9 @@ function SerenityController(context, log, env) {
           geoTargetId,
           languageCode,
           log,
+          // Narrowed to the one model the mapping-row helpers touch — see the
+          // create-market call site above for the same rationale.
+          { dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject } },
         )
         : handleDeleteMarket(
           transport,
@@ -652,7 +773,7 @@ function SerenityController(context, log, env) {
 
   const listTags = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -674,9 +795,91 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
+   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
+   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
+   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
+   * for one, is derived from the `category:` tags across a brand's markets.
+   * Dispatches by workspace mode, mirroring the tags/markets handlers.
+   */
+  const createTag = async (ctx) => {
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      // authorize() guarantees brandUuid (404s a missing brand) and, in flat
+      // mode, a non-null workspaceId (404s 'no semrush_workspace_id'); assert
+      // the invariant for the typed handler, mirroring activate().
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        )
+        : await handleCreateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * PATCH /serenity/tags/:tagId — rename and/or re-parent a single AIO tag in
+   * place (the nested Categories edit path). `tagId` is the upstream tag id from a
+   * prior tags list; the body carries the tag's full `name` (required upstream)
+   * and an optional `parentId` to re-parent. An unknown tagId surfaces upstream as
+   * a 404. Dispatches by workspace mode, mirroring createTag / updatePrompt.
+   */
+  const updateTag = async (ctx) => {
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          ctx.data || {},
+          log,
+        )
+        : await handleUpdateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const listModels = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -706,7 +909,7 @@ function SerenityController(context, log, env) {
    */
   const listOrgModels = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const spaceCatId = ctx?.params?.spaceCatId;
       if (!isValidUUID(spaceCatId)) {
         return createResponse(
@@ -742,7 +945,7 @@ function SerenityController(context, log, env) {
    */
   const listOrgLanguages = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const spaceCatId = ctx?.params?.spaceCatId;
       if (!isValidUUID(spaceCatId)) {
         return createResponse(
@@ -772,7 +975,7 @@ function SerenityController(context, log, env) {
 
   const updateModels = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -804,7 +1007,7 @@ function SerenityController(context, log, env) {
    */
   const activate = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -1008,6 +1211,11 @@ function SerenityController(context, log, env) {
               brandAliases,
               brandUrlSources,
               competitors,
+              // `brand` was loaded via loadBrand above — an already-persisted
+              // row, so the mapping-row upsert's FK to brands is satisfied.
+              // Narrowed to the one model the mapping-row helpers touch — see
+              // the single-market create call site for the same rationale.
+              dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
             },
           );
         } catch (e) {
@@ -1072,6 +1280,11 @@ function SerenityController(context, log, env) {
           log,
         });
         siteLinked = !!linkedSiteId && hasText(linkedSiteId);
+        // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
+        // never overwrites an existing link. All markets in this batch share
+        // one resolved brandDomain and thus one mirror Site, so by-brand picks
+        // up every row this batch wrote (including 409/already-live ones).
+        await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
       }
 
       let fullySucceeded = allMarketsLive && siteLinked;
@@ -1173,7 +1386,7 @@ function SerenityController(context, log, env) {
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
    * (design flow 6): delete every project and release the allocation back to
    * the parent pool, then DISCONNECT the brand by clearing its
-   * semrush_workspace_id pointer. The sub-workspace itself is NEVER deleted
+   * semrush_sub_workspace_id pointer. The sub-workspace itself is NEVER deleted
    * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
    * is left empty and unowned. Clearing the pointer flips the brand back to
    * flat mode, so a future activate allocates a fresh sub-workspace. Sets
@@ -1182,14 +1395,14 @@ function SerenityController(context, log, env) {
    */
   const deactivate = async (ctx) => {
     try {
-      const imsToken = requireImsBearer(ctx);
+      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
-      const subworkspaceId = brand.getSemrushWorkspaceId?.();
+      const subworkspaceId = brand.getSemrushSubWorkspaceId?.();
       if (hasText(subworkspaceId)) {
         await decommissionBrandWorkspace(
           transport,
@@ -1208,8 +1421,14 @@ function SerenityController(context, log, env) {
         // keep routing to the already-emptied sub-workspace for the full
         // positive-TTL window (the upstream is empty the moment decommission
         // returns).
-        brand.setSemrushWorkspaceId?.(null);
+        brand.setSemrushSubWorkspaceId?.(null);
         clearBrandWorkspaceCache();
+        // Every project the brand owned is gone now that decommission emptied
+        // the sub-workspace — tombstone the brand's live mapping rows
+        // (best-effort, spec §4.2). By-brand because decommission only knows
+        // the workspace id; also sweeps rows whose upstream project had
+        // already vanished before decommission ran.
+        await tombstoneAllForBrand(ctx.dataAccess, auth.brandUuid, log);
       }
       brand.setStatus?.('pending');
       if (typeof brand.save === 'function') {
@@ -1219,7 +1438,7 @@ function SerenityController(context, log, env) {
           // Non-atomic seam: the sub-workspace was already decommissioned
           // (emptied + allocation released) upstream, but persisting the
           // cleared pointer / pending status failed. The state is divergent —
-          // brands.semrush_workspace_id still points at the now-empty
+          // brands.semrush_sub_workspace_id still points at the now-empty
           // sub-workspace and status is not 'pending'. A re-activate converges
           // (the re-grant path re-uses the emptied workspace), so this
           // self-heals, but emit a DISTINCT, greppable token so the orphan is
@@ -1254,6 +1473,8 @@ function SerenityController(context, log, env) {
     createMarket,
     deleteMarket,
     listTags,
+    createTag,
+    updateTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

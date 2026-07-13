@@ -147,6 +147,7 @@ describe('getRouteHandlers', () => {
     getByStatus: sinon.stub(),
     getByID: sinon.stub(),
     createSuggestions: sinon.stub(),
+    createBackofficeReview: sinon.stub(),
     patchSuggestion: sinon.stub(),
     patchSuggestionsStatus: sinon.stub(),
   };
@@ -248,6 +249,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockFixesController = {
+    getAllForSite: () => null,
     getAllForOpportunity: () => null,
     getByStatus: () => null,
     getByID: () => null,
@@ -365,6 +367,15 @@ describe('getRouteHandlers', () => {
     deploy: () => null,
     plan: () => null,
     getPermissions: () => null,
+  };
+
+  const mockLlmoAkamaiController = {
+    getConfig: () => null,
+    listProperties: () => null,
+    plan: () => null,
+    deploy: () => null,
+    activate: () => null,
+    activationStatus: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -551,6 +562,7 @@ describe('getRouteHandlers', () => {
     listHistory: sinon.stub(),
     createMapping: sinon.stub(),
     patchMapping: sinon.stub(),
+    deleteMapping: sinon.stub(),
     getProductCapabilities: sinon.stub(),
     getUserCapabilities: sinon.stub(),
     getAuditLogs: sinon.stub(),
@@ -566,6 +578,10 @@ describe('getRouteHandlers', () => {
     listProjectTags: sinon.stub(),
     listProjectModels: sinon.stub(),
     listWorkspaceProjects: sinon.stub(),
+  };
+
+  const mockElementsController = {
+    listUrlInspectorFilterDimensions: sinon.stub(),
   };
 
   const mockAgenticCategoriesController = {
@@ -629,6 +645,7 @@ describe('getRouteHandlers', () => {
       mockLlmoController,
       mockLlmoCloudflareController,
       mockLlmoCloudFrontController,
+      mockLlmoAkamaiController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -661,6 +678,7 @@ describe('getRouteHandlers', () => {
       mockAgenticCategoriesController,
       mockAgenticPageTypesController,
       mockSerenityController,
+      mockElementsController,
       mockProxyController,
       mockRedirectsController,
       mockAuditPolicyController,
@@ -831,6 +849,7 @@ describe('getRouteHandlers', () => {
 
     const expectedDynamicRouteKeys = [
       'PATCH /state/access-mappings/:id',
+      'DELETE /state/access-mappings/:id',
       'GET /user/capabilities/:resourceId',
       'GET /organizations/:organizationId/permission/audit-logs',
       'GET /audits/latest/:auditType',
@@ -863,6 +882,7 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/activate',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts',
@@ -880,10 +900,18 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/languages',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
@@ -1000,6 +1028,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
@@ -1099,6 +1128,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'GET /tools/scrape/jobs/by-url/:url/:processingType',
       'GET /tools/scrape/jobs/by-url/:url',
+      'GET /sites/:siteId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
@@ -1169,6 +1199,12 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',

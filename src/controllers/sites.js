@@ -58,6 +58,10 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
+import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -140,6 +144,7 @@ const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 const DEFAULT_LIMIT = 100;
+const SEARCH_DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 
 /**
@@ -346,7 +351,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, Organization, Site,
+    Audit, Organization, PlgOnboarding, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -431,6 +436,13 @@ function SitesController(ctx, log, env) {
    * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
    * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   *
+   * Optional `baseUrlContains` query param: when provided (3-256 chars after trim),
+   * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
+   * `{ sites, pagination: { limit, offset, hasMore, baseUrlContains } }` response. The
+   * trimmed query is echoed back in `pagination.baseUrlContains` so a client can confirm
+   * its search was applied even if it hits an older deployment that ignores the param.
+   * LIKE wildcards in the input are escaped so callers cannot inject their own wildcards.
    * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
@@ -448,6 +460,94 @@ function SitesController(ctx, log, env) {
 
     const limitParam = context?.data?.limit;
     const cursor = context?.data?.cursor || null;
+
+    // Optional substring search by base URL. Runs after the authz check (so
+    // unauthorized callers still get 403) and before the cursor/legacy branches.
+    const baseUrlContains = context?.data?.baseUrlContains;
+    if (hasText(baseUrlContains) && hasText(cursor)) {
+      // The public search path paginates via offset, not the client cursor;
+      // accepting both would silently discard the cursor and mislead the client
+      // into thinking cursor pagination is active. Reject the combination explicitly.
+      return badRequest('cursor is not supported with baseUrlContains; use offset');
+    }
+    if (hasText(baseUrlContains)) {
+      const q = baseUrlContains.trim();
+      if (q.length < 3) {
+        return badRequest('baseUrlContains must be at least 3 characters');
+      }
+      if (q.length > 256) {
+        return badRequest('baseUrlContains exceeds maximum length');
+      }
+
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : SEARCH_DEFAULT_LIMIT;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+
+      const offsetParam = context?.data?.offset;
+      const offset = hasText(offsetParam) ? parseInt(offsetParam, 10) : 0;
+      if (!Number.isInteger(offset) || offset < 0) {
+        return badRequest('offset must be a non-negative integer');
+      }
+
+      // Escape LIKE special chars so user input cannot inject its own wildcards.
+      const escaped = q.replace(/([\\%_])/g, '\\$1');
+
+      // The data-access layer paginates by an offset-encoded cursor (postgrest.utils
+      // encodeCursor); it exposes no public `offset` option, so we build the same
+      // shape here. If a direct offset option is ever added upstream, switch to it.
+      const offsetCursor = Buffer.from(JSON.stringify({ offset }), 'utf-8').toString('base64');
+
+      // Fetch one extra row to detect whether more results exist beyond the limit.
+      // The data-access `where` builder passes (attrs, op): `attrs` maps model
+      // fields to DB columns, `op` carries the operators. (NOT `s => s.ilike(...)`.)
+      let rows;
+      try {
+        rows = await Site.all({}, {
+          where: (attr, op) => op.ilike(attr.baseURL, `%${escaped}%`),
+          limit: effectiveLimit + 1,
+          cursor: offsetCursor,
+          order: 'asc',
+        });
+      } catch (e) {
+        // Re-throw so the framework still returns a 500 — the point here is a
+        // searchable, prefixed log line, not swallowing the error.
+        log.error(`[sites][baseUrlContains] query failed requestId=${requestId}`, e);
+        throw e;
+      }
+      let list;
+      if (Array.isArray(rows)) {
+        list = rows;
+      } else if (Array.isArray(rows?.data)) {
+        list = rows.data;
+      } else {
+        log.warn(`[sites][baseUrlContains] unexpected Site.all shape; returning empty requestId=${requestId}`);
+        list = [];
+      }
+      const hasMore = list.length > effectiveLimit;
+      const sites = list.slice(0, effectiveLimit).map((site) => SiteDto.toListJSON(site));
+
+      if (s2sResult.allowed) {
+        log.info(`[s2s-readall] GET /sites (baseUrlContains) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+      }
+
+      // Unconditional observability for both admin and S2S paths. Never log the raw
+      // query value (URLs may be sensitive) — only its length and result counts.
+      log.info(`[sites][baseUrlContains] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
+
+      // Echo the trimmed query in the pagination so a new client can confirm its
+      // search was actually applied. An older deployment that ignores `baseUrlContains`
+      // but still honors `limit` would return the cursor envelope with unfiltered
+      // sites and no `baseUrlContains` echo — letting clients detect the version skew.
+      return ok({
+        sites,
+        pagination: {
+          limit: effectiveLimit, offset, hasMore, baseUrlContains: q,
+        },
+      });
+    }
+
     const paginated = hasText(limitParam) || hasText(cursor);
 
     if (cursor !== null) {
@@ -859,7 +959,7 @@ function SitesController(ctx, log, env) {
             postgrestClient,
             log,
           );
-          attachedToSemrushBrand = hasText(attachedBrand?.semrushWorkspaceId)
+          attachedToSemrushBrand = hasText(attachedBrand?.semrushSubWorkspaceId)
             || await isSemrushMarketMirrorSite(
               site.getOrganizationId(),
               site.getId(),
@@ -1639,6 +1739,20 @@ function SitesController(ctx, log, env) {
       { 'x-error': message },
     );
 
+    const isOrgWaitingForIpAllowlisting = async (org) => {
+      if (productCode !== ASO_PRODUCT_CODE) {
+        return false;
+      }
+      try {
+        const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
+        const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
+        return Array.isArray(records) && records.some((r) => r.getStatus() === waitingStatus);
+      } catch (e) {
+        log.warn('[resolveSite] PlgOnboarding lookup failed, treating as not waiting', e);
+        return false;
+      }
+    };
+
     // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
     // independent of which org's data is being requested via organizationId/imsOrg.
     // We translate it to a Spacecat UUID once, up front, so the per-path remap can
@@ -1658,12 +1772,80 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    const facs = context.attributes?.facs;
+    // FACS federal grant: if the JWT carries <product>/can_view, the caller has an
+    // org-wide federal view capability — no state-layer filter needed.
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    // Whether the per-site state-layer filter applies. Cross-product bypass:
+    // only filter when the current product ReBAC-scopes `site` (ASO). Under
+    // LLMO, `site` is not a ReBAC resource (LLMO scopes `brand`), so the state
+    // layer holds no per-site grants and filtering would wrongly hide sites.
+    const facsSiteFilterActive = facs?.enabled
+      && !hasFACSCapability
+      && isFacsRebacResource(facs.product, 'site');
+
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
-    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    //           OrganizationDto, SiteDto, facs, facsSiteFilterActive — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
       const args = [org, productCode, context, ctx, accessControlUtil];
+
+      // FACS path: state-layer filter active — find first site the caller can actually view.
+      if (facsSiteFilterActive) {
+        const unavailable = requirePostgrestForFacsMappings(context);
+        if (unavailable) {
+          return unavailable;
+        }
+
+        const viewable = await listViewableResourceIds(
+          context.dataAccess.services.postgrestClient,
+          {
+            imsOrgId: org.getImsOrgId(),
+            product: facs.product,
+            resourceType: 'site',
+            subjectId: facs.subjectId,
+          },
+        );
+
+        // Check admin-configured default site first; only use it if the caller can view it.
+        const defaultData = await resolveOrgDefaultSite(...args);
+        if (defaultData && viewable.has(defaultData.site.id)) {
+          return ok({ data: defaultData });
+        }
+
+        // Scan all enrolled sites and return the first one the caller can view.
+        const tierClient = TierClient.createForOrg(context, org, productCode);
+        const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+
+        if (!entitlement) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            failureDetails,
+          );
+        }
+
+        if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+          if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+            return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+          }
+          log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+        }
+
+        const firstViewableEnrollment = enrollments?.find((e) => viewable.has(e.getSiteId()));
+        if (!firstViewableEnrollment) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        const firstViewableSite = await Site.findById(firstViewableEnrollment.getSiteId());
+        if (!firstViewableSite) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        return ok({ data: await buildResolveData(org, firstViewableSite, context) });
+      }
+
+      // Non-FACS path (admin / internal / JWT federal grant / LD-off): existing logic.
       const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });
@@ -1671,6 +1853,17 @@ function SitesController(ctx, log, env) {
 
       const tierClient = TierClient.createForOrg(context, org, productCode);
       const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+      // Internal caller viewing a customer with no customer-visible entitlement
+      // (none yet, or PRE_ONBOARD) who is mid-PLG-onboarding (WAITING_FOR_IP_ALLOWLISTING):
+      // preserve no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+      const hasCustomerVisibleEntitlement = entitlement
+        && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+      if (callerIsInternal && !hasCustomerVisibleEntitlement
+        && await isOrgWaitingForIpAllowlisting(org)) {
+        log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for org=${org.getId()}`);
+        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+      }
 
       if (!entitlement) {
         if (callerIsInternal) {
@@ -1717,11 +1910,21 @@ function SitesController(ctx, log, env) {
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
               // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
-              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
-              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              // - No customer-visible entitlement (none, or PRE_ONBOARD) + WAITING:
+              //   return no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+              // - No entitlement + not WAITING: return site_not_enrolled
+              // - Non-customer tier + not WAITING: skip tier check, let enrollment decide
               //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
               // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
               // Customer callers are completely unaffected by this block.
+              const hasCustomerVisibleEntitlement = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (callerIsInternal && !hasCustomerVisibleEntitlement
+                && await isOrgWaitingForIpAllowlisting(organization)) {
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for siteId=${siteId}`);
+                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+              }
+
               if (!entitlement) {
                 if (callerIsInternal) {
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
@@ -1739,6 +1942,25 @@ function SitesController(ctx, log, env) {
 
               if (!enrollments?.length) {
                 return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+              }
+
+              if (facsSiteFilterActive) {
+                const unavailable = requirePostgrestForFacsMappings(context);
+                if (unavailable) {
+                  return unavailable;
+                }
+                const viewable = await listViewableResourceIds(
+                  context.dataAccess.services.postgrestClient,
+                  {
+                    imsOrgId: organization.getImsOrgId(),
+                    product: facs.product,
+                    resourceType: 'site',
+                    subjectId: facs.subjectId,
+                  },
+                );
+                if (!viewable.has(site.getId())) {
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                }
               }
 
               return ok({ data: await buildResolveData(organization, site, context) });

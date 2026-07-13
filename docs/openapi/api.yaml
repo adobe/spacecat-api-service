@@ -130,6 +130,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/activate:
+    $ref: './brands-v2-api.yaml#/v2-brand-for-org-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/status:
     $ref: './brands-v2-api.yaml#/v2-brand-status-for-org'
   /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
@@ -160,6 +162,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
     $ref: './serenity-api.yaml#/v2-serenity-models'
   /v2/orgs/{spaceCatId}/serenity/models:
@@ -170,6 +174,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/deactivate:
     $ref: './serenity-api.yaml#/v2-serenity-deactivate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/filter-dimensions:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -295,6 +301,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion-fixes'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/backoffice-reviews:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion-backoffice-reviews'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
@@ -483,6 +491,8 @@ paths:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/{siteId}/fixes:
+    $ref: './site-opportunities.yaml#/site-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
@@ -692,6 +702,18 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/config:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-config'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/properties:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-properties'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/plan:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activate:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activate'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activation-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activation-status'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:
@@ -811,6 +833,8 @@ paths:
     $ref: './state-access-mappings-api.yaml#/product-capabilities'
   /user/capabilities/{resourceId}:
     $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
+  /organizations/{organizationId}/permission/audit-logs:
+    $ref: './state-access-mappings-api.yaml#/permission-audit-logs'
 
 components:
   securitySchemes:

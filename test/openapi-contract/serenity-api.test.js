@@ -47,8 +47,8 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
           getId: () => BRAND,
           getName: () => 'Test Brand',
           getOrganizationId: () => ORG,
-          getSemrushWorkspaceId: () => null,
-          setSemrushWorkspaceId: sinon.stub(),
+          getSemrushSubWorkspaceId: () => null,
+          setSemrushSubWorkspaceId: sinon.stub(),
           setStatus: sinon.stub(),
           save: sinon.stub().resolves(),
         }),
@@ -199,6 +199,45 @@ const FIXTURES = {
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  createSerenityTag: {
+    expectedStatus: 201,
+    controllerMethod: 'createTag',
+    handlerName: 'handleCreateTag',
+    handlerResult: {
+      status: 201,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        type: 'category',
+        name: 'Running Shoes',
+        tag: 'category:Running Shoes',
+      },
+    },
+    data: {
+      type: 'category', name: 'Running Shoes', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
+  updateSerenityTag: {
+    expectedStatus: 200,
+    controllerMethod: 'updateTag',
+    handlerName: 'handleUpdateTag',
+    handlerResult: {
+      status: 200,
+      body: {
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagId: 'tag-1',
+        tag: 'category:Running Shoes',
+        parentId: 'tag-parent',
+      },
+    },
+    params: { tagId: 'tag-1' },
+    data: {
+      name: 'category:Running Shoes', parentId: 'tag-parent', geoTargetId: 2840, languageCode: 'en',
+    },
+  },
   listSerenityModels: {
     expectedStatus: 200,
     controllerMethod: 'listModels',
@@ -262,6 +301,27 @@ const FIXTURES = {
       items: [{ id: 'lang-en', name: 'English' }],
     },
   },
+  // Unlike the rest of this file's fixtures, this operation is served by
+  // ElementsController (src/controllers/elements.js), not SerenityController —
+  // it wraps the Semrush Brands/Markets/Topics elements directly rather than
+  // going through the serenity handlers/*.js stack. `usesElementsController`
+  // routes it through a dedicated esmock load below instead of the shared one.
+  listSerenityUrlInspectorFilterDimensions: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listUrlInspectorFilterDimensions',
+    handlerResult: {
+      brands: [{ id: 'Test Brand', label: 'Test Brand', spacecat_brand_id: BRAND }],
+      regions: [{
+        id: 'US', semrush_project_id: 'proj-1', label: 'US-en',
+      }],
+      topics: [],
+      categories: [],
+      page_intents: [],
+      origins: [],
+      tags: [],
+    },
+  },
 };
 
 function makeAjv() {
@@ -305,6 +365,55 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       const op = opsByOperationId.get(operationId);
       expect(op, `operation ${operationId} not found in spec`).to.exist;
 
+      if (fx.usesElementsController) {
+        const ElementsController = (await esmock(
+          '../../src/controllers/elements.js',
+          {
+            '../../src/support/brands-storage.js': {
+              getBrandIdentity: () => Promise.resolve({ id: BRAND, name: 'Test Brand' }),
+              getBrandBySite: sinon.stub(),
+            },
+            '../../src/support/serenity/workspace-resolver.js': {
+              resolveBrandWorkspace: () => Promise.resolve({
+                mode: 'subworkspace', workspaceId: WORKSPACE, parentWorkspaceId: 'parent-ws',
+              }),
+            },
+            '../../src/support/access-control-util.js': {
+              default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+            },
+            '../../src/support/elements/elements-service.js': {
+              createElementsService: () => ({
+                getUrlInspectorFilterDimensions: sinon.stub().resolves(fx.handlerResult),
+              }),
+            },
+          },
+        )).default;
+
+        const ctx = fakeContext({
+          params: fx.params || {},
+          data: fx.data,
+          query: fx.query || {},
+        });
+        const controller = ElementsController(ctx, fakeLog(), { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' });
+        const response = await controller[fx.controllerMethod](ctx);
+
+        expect(response.status).to.equal(fx.expectedStatus);
+
+        const responseSchema = op.responseSchema(fx.expectedStatus);
+        expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;
+
+        const body = await readJsonBody(response);
+        const ajv = makeAjv();
+        const validate = ajv.compile(responseSchema);
+        const validBody = validate(body);
+        if (!validBody) {
+          const detail = validate.errors.map((e) => `${e.instancePath || '/'} ${e.message} (${JSON.stringify(e.params)})`).join('\n  ');
+          throw new Error(`AJV validation failed for ${operationId} ${fx.expectedStatus} response:\n  ${detail}\nbody: ${JSON.stringify(body, null, 2)}`);
+        }
+        expect(validBody).to.equal(true);
+        return;
+      }
+
       const handlerStubs = {
         handleListPrompts: sinon.stub(),
         handleCreatePrompts: sinon.stub(),
@@ -315,6 +424,8 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleCreateTag: sinon.stub(),
+        handleUpdateTag: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
@@ -361,6 +472,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             listGlobalModelCatalog: handlerStubs.listGlobalModelCatalog,
             listLanguageCatalog: handlerStubs.listLanguageCatalog,
           },
+          '../../src/support/serenity/handlers/tags.js': {
+            handleCreateTag: handlerStubs.handleCreateTag,
+            handleCreateTagSubworkspace: sinon.stub(),
+            handleUpdateTag: handlerStubs.handleUpdateTag,
+            handleUpdateTagSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: sinon.stub(),
             handleGetMarketSubworkspace: sinon.stub(),
@@ -379,6 +496,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/workspace-lifecycle.js': {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
+          },
+          // Serenity is active for the org (org-wide LLMO/serenity flag ON) so
+          // the documented success shapes are exercised rather than the
+          // inactive-org 404.
+          '../../src/support/serenity/serenity-active.js': {
+            isSerenityActiveForOrg: () => Promise.resolve(true),
           },
           // activate reads brand-level aliases/URLs/competitors once per batch;
           // stub them so the contract test doesn't hit the fake postgrest client.

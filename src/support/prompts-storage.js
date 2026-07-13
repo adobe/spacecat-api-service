@@ -103,6 +103,77 @@ async function withMissingIntentFallback(postgrestClient, run) {
   return result;
 }
 
+// Bound the number of ids per `id=in.(...)` PostgREST GET so the query string
+// stays well under proxy/header URL-length limits: a full page (pageSize caps at
+// 1000) of ~36-char UUIDs would be ~37KB and risk a 414. 100 ids ≈ 3.7KB.
+const INTENT_LOOKUP_CHUNK_SIZE = 100;
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Loads `intent` for a set of prompts by their `prompts.id` (uuid) values.
+ * Used to enrich reads (e.g. brand-presence executions) that carry a `prompt_id`
+ * FK but not intent itself. Any error — including a missing `intent` column — is a
+ * non-fatal miss (empty Map) so callers never fail a request over this enrichment.
+ * No missing-column retry is needed here: this helper's only output is intent, so a
+ * column-absent environment simply yields an empty Map, same as the error path.
+ *
+ * The id list is chunked across parallel queries to bound the IN-clause URL length,
+ * and an optional `organizationId` predicate scopes the lookup for defense-in-depth
+ * (callers already pass tenant-scoped ids). A missing-`intent`-column error logs at
+ * debug (benign, older DB image); any other error logs at warn so blank intent is
+ * diagnosable — neither fails the caller.
+ *
+ * @param {object} params
+ * @param {Array<string>} params.promptIds - prompts.id (uuid) values; nullish/dupes are ignored
+ * @param {string} [params.organizationId] - scopes the lookup to this org (defense-in-depth)
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} [params.log] - logger; `debug` for benign missing-column, `warn` otherwise
+ * @returns {Promise<Map<string, string>>} Map of promptId -> intent (only non-empty intents)
+ */
+export async function getIntentsByPromptIds({
+  promptIds, organizationId, postgrestClient, log,
+}) {
+  const ids = [...new Set((promptIds || []).filter(Boolean))];
+  if (!ids.length || !postgrestClient?.from) {
+    return new Map();
+  }
+
+  const results = await Promise.all(
+    chunkArray(ids, INTENT_LOOKUP_CHUNK_SIZE).map((batch) => {
+      let query = postgrestClient.from('prompts').select('id, intent').in('id', batch);
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+      return query;
+    }),
+  );
+
+  const map = new Map();
+  results.forEach(({ data, error }) => {
+    if (error) {
+      if (isMissingIntentColumnError(error)) {
+        log?.debug?.(`getIntentsByPromptIds: prompts.intent unavailable (${error.message}); returning no intent`);
+      } else {
+        log?.warn?.(`getIntentsByPromptIds: intent lookup failed (${error.message}); returning no intent`);
+      }
+      return;
+    }
+    (data || []).forEach((r) => {
+      if (r.intent) {
+        map.set(String(r.id), r.intent);
+      }
+    });
+  });
+  return map;
+}
+
 /**
  * Resolves brandId (path param) to Postgres brands.id (uuid).
  * Tries: 1) valid uuid lookup, 2) case-insensitive name lookup.
@@ -382,6 +453,7 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
+ * @param {string} [params.source] - Filter by source (e.g. gsc, semrush, base_url, config)
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
  * status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
@@ -399,6 +471,7 @@ export async function listPrompts({
   search,
   region,
   origin,
+  source,
   sort,
   order,
   limit = 100,
@@ -508,6 +581,10 @@ export async function listPrompts({
 
     if (hasText(origin)) {
       baseQuery = baseQuery.eq('origin', origin);
+    }
+
+    if (hasText(source)) {
+      baseQuery = baseQuery.eq('source', source);
     }
 
     if (hasText(region)) {

@@ -29,6 +29,7 @@ import {
   normalizeIntent,
   isMissingIntentColumnError,
   findPromptsBlockingRegionRemoval,
+  getIntentsByPromptIds,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -389,6 +390,57 @@ describe('prompts-storage', () => {
       expect(overlapsCall.column).to.equal('regions');
       expect(overlapsCall.value).to.have.members(['us', 'US']);
       expect(overlapsCall.value).to.have.lengthOf(2);
+    });
+
+    // Records every .eq() call so the assertion fails if the `.eq('source', source)`
+    // filter is deleted — a no-op `eq: () => chain` stub would pass regardless.
+    function makeEqRecordingClient(eqCalls) {
+      const recordingChain = (result) => {
+        const chain = {
+          select: () => chain,
+          eq: (column, value) => {
+            eqCalls.push({ column, value });
+            return chain;
+          },
+          neq: () => chain,
+          order: () => chain,
+          or: () => chain,
+          contains: () => chain,
+          overlaps: () => chain,
+          in: () => chain,
+          range: () => thenable(result),
+          maybeSingle: () => thenable(result),
+          single: () => thenable(result),
+          then: (resolve) => resolve(result),
+        };
+        return chain;
+      };
+      return {
+        from: (table) => (table === 'brands'
+          ? recordingChain({ data: { id: BRAND_UUID }, error: null })
+          : recordingChain({ data: [], error: null, count: 0 })),
+      };
+    }
+
+    it('applies the source filter as an exact match when source is provided', async () => {
+      const eqCalls = [];
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        source: 'gsc',
+        postgrestClient: makeEqRecordingClient(eqCalls),
+      });
+      expect(eqCalls).to.deep.include({ column: 'source', value: 'gsc' });
+    });
+
+    it('does not apply a source filter when source is omitted', async () => {
+      const eqCalls = [];
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: makeEqRecordingClient(eqCalls),
+      });
+      expect(eqCalls.some((c) => c.column === 'source')).to.equal(false);
     });
 
     it('uses explicit limit and page values', async () => {
@@ -3252,6 +3304,90 @@ describe('prompts-storage', () => {
   // intent migration). Writing/reading `intent` there 500s with a missing-
   // column error; the storage layer detects this per-client (WeakMap) and
   // retries without intent so prompts still persist/read.
+  describe('getIntentsByPromptIds', () => {
+    const MISSING_INTENT = { code: '42703', message: 'column prompts.intent does not exist' };
+    // `.in()` result is awaitable and also chains `.eq()` (for the org predicate).
+    const clientReturning = (result, inStub) => ({
+      from: () => ({
+        select: () => ({
+          in: inStub || (() => ({ ...thenable(result), eq: () => thenable(result) })),
+        }),
+      }),
+    });
+
+    it('returns an empty Map for empty/nullish ids or no client', async () => {
+      const client = clientReturning({ data: [], error: null });
+      const sizeFor = async (args) => (await getIntentsByPromptIds(args)).size;
+      expect(await sizeFor({ promptIds: [], postgrestClient: client })).to.equal(0);
+      expect(await sizeFor({ promptIds: [null, undefined], postgrestClient: client })).to.equal(0);
+      expect(await sizeFor({ promptIds: ['p1'], postgrestClient: {} })).to.equal(0);
+    });
+
+    it('maps intent by id, dedupes ids, and skips null/empty intents', async () => {
+      const inStub = sinon.stub().returns(thenable({
+        data: [
+          { id: 'p1', intent: 'Commercial' },
+          { id: 'p2', intent: null },
+          { id: 'p3', intent: '' },
+        ],
+        error: null,
+      }));
+      const client = clientReturning(null, inStub);
+      const map = await getIntentsByPromptIds({
+        promptIds: ['p1', 'p1', 'p2', 'p3', null], postgrestClient: client,
+      });
+      expect(map.get('p1')).to.equal('Commercial');
+      expect(map.has('p2')).to.equal(false);
+      expect(map.has('p3')).to.equal(false);
+      // Deduped to the 3 distinct non-null ids.
+      expect(inStub.firstCall.args[1]).to.deep.equal(['p1', 'p2', 'p3']);
+    });
+
+    it('scopes the lookup by organizationId when provided', async () => {
+      const eqStub = sinon.stub().returns(
+        thenable({ data: [{ id: 'p1', intent: 'Commercial' }], error: null }),
+      );
+      const inStub = sinon.stub().returns({ eq: eqStub });
+      const client = clientReturning(null, inStub);
+      const map = await getIntentsByPromptIds({
+        promptIds: ['p1'], organizationId: 'org-1', postgrestClient: client,
+      });
+      expect(map.get('p1')).to.equal('Commercial');
+      expect(eqStub.calledOnceWithExactly('organization_id', 'org-1')).to.equal(true);
+    });
+
+    it('chunks large id lists into multiple bounded queries', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: [], error: null }));
+      const client = clientReturning(null, inStub);
+      const ids = Array.from({ length: 250 }, (_, i) => `p${i}`);
+      await getIntentsByPromptIds({ promptIds: ids, postgrestClient: client });
+      // 250 ids / 100 per batch → 3 queries, each within the chunk size.
+      expect(inStub.callCount).to.equal(3);
+      expect(inStub.getCalls().map((c) => c.args[1].length)).to.deep.equal([100, 100, 50]);
+    });
+
+    it('logs at debug (not warn) when the intent column is absent, and does not retry', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: null, error: MISSING_INTENT }));
+      const client = clientReturning(null, inStub);
+      const log = { debug: sinon.stub(), warn: sinon.stub() };
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client, log });
+      expect(map.size).to.equal(0);
+      expect(inStub.callCount).to.equal(1);
+      expect(log.debug.called).to.equal(true);
+      expect(log.warn.called).to.equal(false);
+    });
+
+    it('logs at warn (not debug) on a non-missing-column error, returning empty', async () => {
+      const inStub = sinon.stub().returns(thenable({ data: null, error: { message: 'timeout' } }));
+      const client = clientReturning(null, inStub);
+      const log = { debug: sinon.stub(), warn: sinon.stub() };
+      const map = await getIntentsByPromptIds({ promptIds: ['p1'], postgrestClient: client, log });
+      expect(map.size).to.equal(0);
+      expect(log.warn.called).to.equal(true);
+      expect(log.debug.called).to.equal(false);
+    });
+  });
+
   describe('intent column best-effort fallback', () => {
     const MISSING_INTENT_INSERT = {
       code: 'PGRST204',
