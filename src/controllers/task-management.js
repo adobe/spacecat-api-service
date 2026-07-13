@@ -52,6 +52,16 @@ const TICKET_MODE_GROUPED = 'grouped';
 const SUGGESTION_IDS_MAX_INDIVIDUAL = 15;
 const SUGGESTION_IDS_MAX_GROUPED = 1500;
 const ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024; // 3 MB per spec §30
+// Must stay in sync with ATTACHMENT_ALLOWED_MIME_TYPES in jira-cloud-client.js
+const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'text/csv',
+  'text/plain',
+]);
 
 /**
  * TaskManagementController — manages Jira connections and tickets for an organization.
@@ -420,6 +430,9 @@ function TaskManagementController(context) {
       return internalServerError('Failed to list tickets');
     }
 
+    // Filter to this org — allByOpportunityId is not org-scoped.
+    tickets = tickets.filter((t) => t.getOrganizationId() === organizationId);
+
     if (tickets.length === 0) {
       return ok([]);
     }
@@ -545,6 +558,16 @@ function TaskManagementController(context) {
       if (!hasText(att.content) || !hasText(att.mimeType) || !hasText(att.filename)) {
         return badRequest('Each attachment must have content (base64), mimeType, and filename');
       }
+      if (!ALLOWED_ATTACHMENT_MIME_TYPES.has(att.mimeType)) {
+        return badRequest(`Unsupported attachment mimeType '${att.mimeType}'. Allowed: ${[...ALLOWED_ATTACHMENT_MIME_TYPES].join(', ')}`);
+      }
+      // Strip path separators and control characters (mirrors jira-cloud-client sanitizeFilename).
+      const sanitizedFilename = String(att.filename)
+        .replace(/[/\\]/g, '')
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .trim()
+        .slice(0, 255) || 'attachment';
       const decoded = Buffer.from(att.content, 'base64');
       if (decoded.length === 0) {
         return badRequest('Attachment content must not be empty');
@@ -553,7 +576,7 @@ function TaskManagementController(context) {
         return badRequest(`attachment exceeds maximum size of ${ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB`);
       }
       attachmentBuffer = decoded;
-      attachmentMeta = { mimeType: att.mimeType, filename: att.filename };
+      attachmentMeta = { mimeType: att.mimeType, filename: sanitizedFilename };
     }
 
     // Attachment in individual batch mode (N>1 suggestions) is not supported — each ticket
@@ -567,7 +590,7 @@ function TaskManagementController(context) {
     // same suggestions are deduplicated regardless of which client sends them.
 
     const idempotencyKey = createHash('sha256')
-      .update(`${data.opportunityId ?? organizationId}:${[...suggestionIds].sort().join(',')}`)
+      .update(`${organizationId}:${data.opportunityId ?? ''}:${[...suggestionIds].sort().join(',')}`)
       .digest('hex');
 
     let existingEntry;
@@ -854,6 +877,7 @@ function TaskManagementController(context) {
       }
 
       const hasSuccess = results.some((r) => r.status === STATUS_CREATED);
+      const allSuccess = results.every((r) => r.status === STATUS_CREATED);
       if (hasSuccess) {
         connection.setLastUsedAt(new Date().toISOString());
         connection.setErrorMessage(null);
@@ -863,7 +887,8 @@ function TaskManagementController(context) {
       });
 
       const batchResponseBody = { mode, results };
-      if (hasSuccess) {
+      if (allSuccess) {
+        // Only cache when all items succeeded — partial failures must remain retryable.
         await markIdempotencyDone(batchResponseBody, STATUS_MULTI_STATUS);
       } else {
         await markIdempotencyFailed();
@@ -1246,10 +1271,9 @@ function TaskManagementController(context) {
    * numeric ID, not the project key.
    */
   async function listIssueTypes(requestContext) {
-    const { params } = requestContext;
+    const { params, queryStringParameters: qs } = requestContext;
     const { organizationId, connectionId } = params;
-    const rawQueryString = requestContext.invocation?.event?.rawQueryString;
-    const projectId = new URLSearchParams(rawQueryString ?? '').get('projectId');
+    const projectId = qs?.projectId ?? null;
 
     if (!isValidUUID(organizationId)) {
       return badRequest('organizationId must be a valid UUID');

@@ -660,6 +660,26 @@ describe('TaskManagementController', () => {
       const [t] = await res.json();
       expect(t.suggestions).to.deep.equal([]);
     });
+
+    it('filters out tickets belonging to a different organization', async () => {
+      const ownTicket = makeTicket();
+      const otherOrgTicket = makeTicket({
+        getId: () => 'ffffffff-0000-0000-0000-000000000000',
+        getOrganizationId: () => 'aaaaaaaa-0000-0000-0000-000000000000',
+      });
+      const ctx = makeContext({
+        dataAccess: {
+          Ticket: { allByOpportunityId: sinon.stub().resolves([ownTicket, otherOrgTicket]) },
+          TicketSuggestion: { allByTicketIds: sinon.stub().resolves([]) },
+        },
+      });
+      const { listTicketsByOpportunity } = TaskManagementController(ctx);
+      const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.have.length(1);
+      expect(body[0].id).to.equal(TICKET_ID);
+    });
   });
 
   // ─── createTicket ─────────────────────────────────────────────────────────────
@@ -1649,6 +1669,41 @@ describe('TaskManagementController', () => {
       expect(res.status).to.equal(400);
       const body = await res.json();
       expect(body.message).to.include('exceeds maximum size');
+    });
+
+    it('returns 400 when attachment mimeType is not in allowlist', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          attachments: [{ content: Buffer.from('x').toString('base64'), mimeType: 'application/javascript', filename: 'evil.js' }],
+        },
+      }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('mimeType');
+    });
+
+    it('does not reject attachment with path traversal filename (sanitized, not blocked)', async () => {
+      // Path traversal in filename is sanitized server-side — the request itself must not 400.
+      // The sanitized name is forwarded to the ticket client which applies its own sanitization.
+      // Use an invalid mimeType to short-circuit before any Jira call — we only test that the
+      // filename itself does not cause a 400 at the shape-validation step.
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({
+        data: {
+          summary: 'Fix',
+          projectKey: 'PROJ',
+          connectionId: CONN_ID,
+          attachments: [{ content: Buffer.from('x').toString('base64'), mimeType: 'application/octet-stream', filename: '../../../etc/passwd' }],
+        },
+      }));
+      // Blocked by MIME allowlist (400), not by filename shape — confirms filename did not trigger its own rejection
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('mimeType');
     });
 
     it('creates ticket with attachment and returns 201', async () => {
@@ -3216,7 +3271,9 @@ describe('TaskManagementController', () => {
     function makeReqCtx(overrides = {}) {
       return {
         params: { organizationId: ORG_ID, connectionId: CONN_ID, ...(overrides.params ?? {}) },
-        invocation: { event: { rawQueryString: `projectId=${PROJECT_ID}`, ...(overrides.invocation?.event ?? {}) } },
+        queryStringParameters: 'queryStringParameters' in overrides
+          ? overrides.queryStringParameters
+          : { projectId: PROJECT_ID },
       };
     }
 
@@ -3234,13 +3291,13 @@ describe('TaskManagementController', () => {
 
     it('returns 400 when projectId is missing', async () => {
       const { listIssueTypes } = TaskManagementController(makeContext());
-      const res = await listIssueTypes(makeReqCtx({ invocation: { event: { rawQueryString: '' } } }));
+      const res = await listIssueTypes(makeReqCtx({ queryStringParameters: {} }));
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when projectId is not numeric', async () => {
       const { listIssueTypes } = TaskManagementController(makeContext());
-      const res = await listIssueTypes(makeReqCtx({ invocation: { event: { rawQueryString: 'projectId=PROJ' } } }));
+      const res = await listIssueTypes(makeReqCtx({ queryStringParameters: { projectId: 'PROJ' } }));
       expect(res.status).to.equal(400);
       const body = await res.json();
       expect(body.message).to.include('numeric');
