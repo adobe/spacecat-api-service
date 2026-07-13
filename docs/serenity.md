@@ -137,8 +137,8 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
 | GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. tagIds is repeatable (OR semantics, max 50). | `listSerenityPrompts` |
-| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries at most one of `tags` (names) or `tagIds` (upstream ids, id-based write path) | `createSerenityPrompts` |
-| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + exactly one of `tags`/`tagIds` | `updateSerenityPrompt` |
+| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries a non-empty `tagIds` (upstream ids, id-based write path). A `tags` (name-based) key is rejected with 400. | `createSerenityPrompts` |
+| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + a non-empty `tagIds`. A `tags` (name-based) key is rejected with 400. | `updateSerenityPrompt` |
 | POST | `/serenity/prompts/bulk-delete` | Delete prompts; body is `{ prompts: [{semrushPromptId, geoTargetId, languageCode}] }` | `bulkDeleteSerenityPrompts` |
 | GET | `/serenity/markets` | List markets configured for the brand (incl. live `status`) | `listSerenityMarkets` |
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice | `createSerenityMarket` |
@@ -322,10 +322,16 @@ curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/markets" \
   -d '{ "market": "US", "languageCode": "en", "brandDomain": "adobe.com", "brandNames": ["Adobe"] }' | jq .
 
-# 3) Bulk-create prompts in that slice
+# 3) Bulk-create prompts in that slice. Prompts carry tags by UPSTREAM ID
+#    (`tagIds`); a name-based `tags` key is rejected with 400. Resolve an id from
+#    a POST /serenity/tags first (a category hangs off the `category` root).
+TAG_ID=$(curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
+  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/tags" \
+  -d '{ "type": "category", "name": "Product", "geoTargetId": 2840, "languageCode": "en" }' | jq -r .id)
+
 curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/prompts" \
-  -d '{ "prompts": [ { "text": "What is Adobe Photoshop?", "geoTargetId": 2840, "languageCode": "en", "tags": ["product"] } ] }' | jq .
+  -d "{ \"prompts\": [ { \"text\": \"What is Adobe Photoshop?\", \"geoTargetId\": 2840, \"languageCode\": \"en\", \"tagIds\": [\"${TAG_ID}\"] } ] }" | jq .
 
 # 4) List prompts (filters are REQUIRED — 400 without them)
 curl -s -H "Authorization: Bearer ${IMS}" \

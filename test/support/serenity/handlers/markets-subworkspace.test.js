@@ -906,6 +906,23 @@ describe('markets-subworkspace handlers', () => {
       ]);
     });
 
+    it('collapses two id-less same-named placeholders to one (indistinguishable without an id)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        // Two DISTINCT tags both arrive as bare strings (no upstream id) sharing a
+        // name. With no id there is nothing to tell them apart, so they collapse to
+        // one placeholder rather than emitting a duplicate `{ id: name, name }` row.
+        // The by-id merge (see the sibling test) is what preserves two same-named
+        // tags whenever either carries a real id — the common case.
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: ['human', 'human'] }],
+        }),
+        listProjectTags: sinon.stub().resolves({ items: [] }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 'human', name: 'human' }]);
+    });
+
     it('warns when the standalone tag page ceiling is hit (possible truncation)', async () => {
       const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
       const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };

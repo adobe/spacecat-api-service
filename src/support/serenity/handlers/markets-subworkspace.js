@@ -711,6 +711,14 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // id). Such an entry is a name-shaped PLACEHOLDER, recognisable by `id === name`
   // — an upstream id never equals the bare name it labels. Hold placeholders aside
   // so a canonical id for the same name can supersede them.
+  // Placeholders are keyed by name, not by a synthetic composite: an id-less
+  // entry carries ONLY its bare name (`id === name`), so two id-less tags sharing
+  // a name are indistinguishable here — there is no id to tell a `category` value
+  // `human` from a `source` value `human` once both arrive without one. Keying by
+  // `(name, source)` would just emit two identical `{ id: name, name }` rows, a
+  // duplicate that is worse than the collapse. So they intentionally collapse to
+  // one; the by-id merge above is what actually preserves two same-named tags,
+  // and it fires whenever either carries a real upstream id (the common case).
   const synthetic = new Map();
   // listTagsForProject and listStandaloneProjectTags (and its catch) each always
   // resolve `{ items: [...] }`, so no defensive `?.`/`|| []` is needed here.
