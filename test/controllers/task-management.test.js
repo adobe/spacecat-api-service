@@ -141,6 +141,7 @@ function makeDataAccess(overrides = {}) {
     },
     Ticket: {
       allByOrganizationId: sinon.stub().resolves([]),
+      allByOpportunityId: sinon.stub().resolves([]),
       findById: sinon.stub().resolves(null),
       findByOpportunityId: sinon.stub().resolves(null),
       create: sinon.stub().resolves(makeTicket()),
@@ -633,7 +634,7 @@ describe('TaskManagementController', () => {
 
     it('returns 500 on ticket lookup error', async () => {
       const ctx = makeContext({
-        dataAccess: { Ticket: { allByOrganizationId: sinon.stub().rejects(new Error('db error')) } },
+        dataAccess: { Ticket: { allByOpportunityId: sinon.stub().rejects(new Error('db error')) } },
       });
       const { listTicketsByOpportunity } = TaskManagementController(ctx);
       const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
@@ -647,23 +648,12 @@ describe('TaskManagementController', () => {
       expect(await res.json()).to.deep.equal([]);
     });
 
-    it('filters out tickets with a different opportunityId', async () => {
-      const otherTicket = makeTicket({ getOpportunityId: () => 'ffffffff-aaaa-bbbb-cccc-dddddddddddd' });
-      const ctx = makeContext({
-        dataAccess: { Ticket: { allByOrganizationId: sinon.stub().resolves([otherTicket]) } },
-      });
-      const { listTicketsByOpportunity } = TaskManagementController(ctx);
-      const res = await listTicketsByOpportunity({ params: { organizationId: ORG_ID, opportunityId: OPPORTUNITY_ID } });
-      expect(res.status).to.equal(200);
-      expect(await res.json()).to.deep.equal([]);
-    });
-
     it('returns all matching tickets with suggestions via TicketSuggestion model', async () => {
       const ticket = makeTicket();
       const bridgeRow = { getTicketId: () => TICKET_ID, getSuggestionId: () => SUGGESTION_ID };
       const ctx = makeContext({
         dataAccess: {
-          Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
+          Ticket: { allByOpportunityId: sinon.stub().resolves([ticket]) },
           TicketSuggestion: { allByTicketIds: sinon.stub().resolves([bridgeRow]) },
         },
       });
@@ -681,7 +671,7 @@ describe('TaskManagementController', () => {
       const ticket2 = makeTicket({ getId: () => TICKET_ID_2 });
       const ctx = makeContext({
         dataAccess: {
-          Ticket: { allByOrganizationId: sinon.stub().resolves([ticket1, ticket2]) },
+          Ticket: { allByOpportunityId: sinon.stub().resolves([ticket1, ticket2]) },
           TicketSuggestion: { allByTicketIds: sinon.stub().resolves([]) },
         },
       });
@@ -697,7 +687,7 @@ describe('TaskManagementController', () => {
       const ticket = makeTicket();
       const ctx = makeContext({
         dataAccess: {
-          Ticket: { allByOrganizationId: sinon.stub().resolves([ticket]) },
+          Ticket: { allByOpportunityId: sinon.stub().resolves([ticket]) },
           TicketSuggestion: { allByTicketIds: sinon.stub().rejects(new Error('bridge err')) },
         },
       });

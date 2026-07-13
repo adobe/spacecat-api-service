@@ -412,17 +412,9 @@ function TaskManagementController(context) {
       return denied;
     }
 
-    // Fetch all tickets for the org then filter by opportunityId in-memory.
-    // (No allByOpportunityId on the model; allByOrganizationId is the closest bulk accessor.)
-    // TODO: add Ticket.allByOpportunityId(opportunityId) index to spacecat-shared-data-access
-    // to replace this full-org scan.
     let tickets;
     try {
-      const orgTickets = await Ticket.allByOrganizationId(organizationId);
-      if (orgTickets.length > 200) {
-        log.warn({ organizationId, count: orgTickets.length }, 'listTicketsByOpportunity: large org ticket count — consider adding allByOpportunityId index');
-      }
-      tickets = orgTickets.filter((t) => t.getOpportunityId?.() === opportunityId);
+      tickets = await Ticket.allByOpportunityId(opportunityId);
     } catch (err) {
       log.error({ organizationId, opportunityId, err }, 'Failed to list tickets for opportunity');
       return internalServerError('Failed to list tickets');
