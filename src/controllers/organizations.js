@@ -490,6 +490,43 @@ function OrganizationsController(ctx, env) {
 
     const projects = await Project.allByOrganizationId(organizationId);
 
+    // FACS ReBAC filter (mirrors getSitesForOrganization): when the caller is
+    // FACS-enrolled and resource-scoped (no org-wide `<product>/can_view`),
+    // restrict projects to those containing at least one site the caller may
+    // view. Only applies where `site` is a ReBAC resource for the product (ASO,
+    // not LLMO which scopes `brand`) — otherwise the state layer holds no
+    // per-site grants and filtering would wrongly hide everything.
+    const facs = context.attributes?.facs;
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
+      const unavailable = requirePostgrestForFacsMappings(context);
+      if (unavailable) {
+        return unavailable;
+      }
+      const viewable = await listViewableResourceIds(
+        context.dataAccess.services.postgrestClient,
+        {
+          imsOrgId: organization.getImsOrgId(),
+          product: facs.product,
+          resourceType: 'site',
+          subjectId: facs.subjectId,
+        },
+      );
+      const orgSites = await Site.allByOrganizationId(organizationId);
+      const viewableProjectIds = new Set(
+        orgSites
+          .filter((site) => viewable.has(site.getId()))
+          .map((site) => site.getProjectId())
+          .filter(Boolean),
+      );
+      return ok(
+        projects
+          .filter((project) => viewableProjectIds.has(project.getId()))
+          .map((project) => ProjectDto.toJSON(project)),
+      );
+    }
+
     return ok(projects.map((project) => ProjectDto.toJSON(project)));
   };
 
