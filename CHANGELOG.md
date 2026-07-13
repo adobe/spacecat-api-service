@@ -1,3 +1,17 @@
+## [1.643.1](https://github.com/adobe/spacecat-api-service/compare/v1.643.0...v1.643.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **serenity:** write brand URLs verbatim https, skip the brand's own primary domain ([#2799](https://github.com/adobe/spacecat-api-service/issues/2799)) ([8b2ba6f](https://github.com/adobe/spacecat-api-service/commit/8b2ba6fde24d9ee25e56c0a27237077937eb0f57)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.643.0](https://github.com/adobe/spacecat-api-service/compare/v1.642.0...v1.643.0) (2026-07-13)
+
+
+### Features
+
+* Serenity url-inspector/domain-urls endpoint | LLMO-6160 ([#2796](https://github.com/adobe/spacecat-api-service/issues/2796)) ([b9ca700](https://github.com/adobe/spacecat-api-service/commit/b9ca7008dab55d00c1abdc541e641bbef0f8bf88))
+
 # [1.642.0](https://github.com/adobe/spacecat-api-service/compare/v1.641.0...v1.642.0) (2026-07-13)
 
 
