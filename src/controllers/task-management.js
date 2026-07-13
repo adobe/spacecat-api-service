@@ -424,14 +424,13 @@ function TaskManagementController(context) {
 
     let tickets;
     try {
-      tickets = await Ticket.allByOpportunityId(opportunityId);
+      tickets = await Ticket.allByOrganizationId(organizationId);
     } catch (err) {
       log.error({ organizationId, opportunityId, err }, 'Failed to list tickets for opportunity');
       return internalServerError('Failed to list tickets');
     }
 
-    // Filter to this org — allByOpportunityId is not org-scoped.
-    tickets = tickets.filter((t) => t.getOrganizationId() === organizationId);
+    tickets = tickets.filter((t) => t.getOpportunityId() === opportunityId);
 
     if (tickets.length === 0) {
       return ok([]);
