@@ -3182,6 +3182,31 @@ PrerenderValidationUpdate:
         previous run.
       type: [string, 'null']
       example: 'waf_block:403'
+PrerenderValidationRun:
+  type: object
+  properties:
+    maxPages:
+      description: Maximum number of pages to check (capped at 100 by the internal service)
+      type: integer
+      example: 100
+    customUrls:
+      description: Specific URLs to check instead of the default top-pages set
+      type: array
+      items:
+        type: string
+        format: uri
+      example: ['https://example.com/page-1']
+    checkAuditAge:
+      description: |
+        When true, requires the last prerender audit to have both succeeded and
+        completed within the last 24 hours. Default (false) only requires success,
+        regardless of age.
+      type: boolean
+      default: false
+    enableAiAnalysis:
+      description: Run the AI diff analyzer on unhappy pages
+      type: boolean
+      default: false
 SuggestionStatus:
   description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
   type: string

@@ -30,6 +30,7 @@ import { isValidLocale } from '../utils/validations.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
+import { getHeaderCaseInsensitive } from '../support/http-headers.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
@@ -39,6 +40,9 @@ const PRERENDER_VALIDATION_STATUSES = [
   'completed_fail',
   'error',
 ];
+// Internal llmo-prerender-api host — the service that actually runs the S3-vs-Lambda
+// comparison. Overridable via PRERENDER_VALIDATION_RUN_BASE_URL for other environments.
+const DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL = 'https://sj1010010249075.corp.adobe.com';
 
 /**
  * Opportunities controller.
@@ -443,6 +447,78 @@ function OpportunitiesController(ctx) {
     }
   };
 
+  /**
+   * Triggers a new prerender-validation comparison run for the site by forwarding
+   * to the internal llmo-prerender-api service's POST /api/compare/run. The
+   * caller's own Authorization header is forwarded as-is — this endpoint does not
+   * hold its own credential for the internal service.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} The upstream service's response, passed through.
+   */
+  const runPrerenderValidation = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can trigger its opportunities');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    const headers = context.pathInfo?.headers || {};
+    const authHeader = getHeaderCaseInsensitive(headers, 'authorization');
+    if (!hasText(authHeader)) {
+      return badRequest('Authorization header is required to trigger a run');
+    }
+
+    const {
+      maxPages, customUrls, checkAuditAge, enableAiAnalysis,
+    } = context.data || {};
+    const baseUrl = context.env?.PRERENDER_VALIDATION_RUN_BASE_URL
+      || DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL;
+
+    let upstream;
+    try {
+      upstream = await fetch(`${baseUrl}/api/compare/run`, {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          siteId,
+          ...(maxPages !== undefined ? { maxPages } : {}),
+          ...(customUrls !== undefined ? { customUrls } : {}),
+          ...(checkAuditAge !== undefined ? { checkAuditAge } : {}),
+          ...(enableAiAnalysis !== undefined ? { enableAiAnalysis } : {}),
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (e) {
+      return createResponse(
+        { error: 'prerenderValidationServiceUnreachable', message: e.message },
+        502,
+      );
+    }
+
+    const body = await upstream.json().catch(() => ({}));
+    return createResponse(body, upstream.status);
+  };
+
   return {
     createOpportunity,
     getAllForSite,
@@ -450,6 +526,7 @@ function OpportunitiesController(ctx) {
     getByStatus,
     patchOpportunity,
     patchPrerenderValidation,
+    runPrerenderValidation,
     removeOpportunity,
   };
 }
