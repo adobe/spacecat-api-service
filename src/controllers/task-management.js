@@ -224,7 +224,8 @@ function TaskManagementController(context) {
    * Query: ?provider= (optional filter)
    */
   async function listConnections(requestContext) {
-    const { params, queryStringParameters: qs } = requestContext;
+    const { params } = requestContext;
+    const qs = Object.fromEntries(new URL(requestContext.request.url).searchParams);
     const { organizationId } = params;
 
     if (!isValidUUID(organizationId)) {
@@ -1268,9 +1269,10 @@ function TaskManagementController(context) {
    * numeric ID, not the project key.
    */
   async function listIssueTypes(requestContext) {
-    const { params, queryStringParameters: qs } = requestContext;
+    const { params } = requestContext;
+    const qs = Object.fromEntries(new URL(requestContext.request.url).searchParams);
     const { organizationId, connectionId } = params;
-    const projectId = qs?.projectId ?? null;
+    const projectId = qs.projectId ?? null;
 
     if (!isValidUUID(organizationId)) {
       return badRequest('organizationId must be a valid UUID');

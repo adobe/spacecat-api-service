@@ -265,14 +265,14 @@ describe('TaskManagementController', () => {
   describe('listConnections', () => {
     it('returns 400 for invalid organizationId', async () => {
       const { listConnections } = TaskManagementController(makeContext());
-      const res = await listConnections({ params: { organizationId: 'bad-uuid' }, queryStringParameters: {} });
+      const res = await listConnections({ params: { organizationId: 'bad-uuid' }, request: { url: 'http://localhost/' } });
       expect(res.status).to.equal(400);
     });
 
     it('returns 404 when organization not found', async () => {
       const ctx = makeContext({ dataAccess: { Organization: { findById: sinon.stub().resolves(null) } } });
       const { listConnections } = TaskManagementController(ctx);
-      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: {} });
+      const res = await listConnections({ params: { organizationId: ORG_ID }, request: { url: 'http://localhost/' } });
       expect(res.status).to.equal(404);
     });
 
@@ -292,7 +292,7 @@ describe('TaskManagementController', () => {
         },
       })).default;
       const { listConnections } = ForbiddenCtrl(makeContext());
-      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: {} });
+      const res = await listConnections({ params: { organizationId: ORG_ID }, request: { url: 'http://localhost/' } });
       expect(res.status).to.equal(403);
     });
 
@@ -300,13 +300,13 @@ describe('TaskManagementController', () => {
       const ctx = makeContext();
       ctx.dataAccess.TaskManagementConnection.allByOrganizationId.rejects(new Error('db error'));
       const { listConnections } = TaskManagementController(ctx);
-      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: {} });
+      const res = await listConnections({ params: { organizationId: ORG_ID }, request: { url: 'http://localhost/' } });
       expect(res.status).to.equal(500);
     });
 
     it('returns empty array when no connections', async () => {
       const { listConnections } = TaskManagementController(makeContext());
-      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: {} });
+      const res = await listConnections({ params: { organizationId: ORG_ID }, request: { url: 'http://localhost/' } });
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body).to.deep.equal([]);
@@ -318,7 +318,7 @@ describe('TaskManagementController', () => {
         dataAccess: { TaskManagementConnection: { allByOrganizationId: sinon.stub().resolves([conn]) } },
       });
       const { listConnections } = TaskManagementController(ctx);
-      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: {} });
+      const res = await listConnections({ params: { organizationId: ORG_ID }, request: { url: 'http://localhost/' } });
       expect(res.status).to.equal(200);
       const [first] = await res.json();
       expect(first.id).to.equal(CONN_ID);
@@ -341,7 +341,7 @@ describe('TaskManagementController', () => {
       const { listConnections } = TaskManagementController(ctx);
       const res = await listConnections({
         params: { organizationId: ORG_ID },
-        queryStringParameters: {}, // no provider key — falsy path
+        request: { url: 'http://localhost/' }, // no provider key — falsy path
       });
       expect(res.status).to.equal(200);
       const body = await res.json();
@@ -357,7 +357,7 @@ describe('TaskManagementController', () => {
         },
       });
       const { listConnections } = TaskManagementController(ctx);
-      const res = await listConnections({ params: { organizationId: ORG_ID }, queryStringParameters: { provider: 'jira_cloud' } });
+      const res = await listConnections({ params: { organizationId: ORG_ID }, request: { url: 'http://localhost/?provider=jira_cloud' } });
       const body = await res.json();
       expect(body).to.have.length(1);
       expect(body[0].id).to.equal(CONN_ID);
@@ -3249,11 +3249,16 @@ describe('TaskManagementController', () => {
     const PROJECT_ID = '10001';
 
     function makeReqCtx(overrides = {}) {
+      const qs = 'queryStringParameters' in overrides
+        ? overrides.queryStringParameters
+        : { projectId: PROJECT_ID };
+      const url = new URL('http://localhost/');
+      for (const [k, v] of Object.entries(qs)) {
+        url.searchParams.set(k, v);
+      }
       return {
         params: { organizationId: ORG_ID, connectionId: CONN_ID, ...(overrides.params ?? {}) },
-        queryStringParameters: 'queryStringParameters' in overrides
-          ? overrides.queryStringParameters
-          : { projectId: PROJECT_ID },
+        request: { url: url.toString() },
       };
     }
 
