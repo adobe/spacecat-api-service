@@ -32,6 +32,7 @@ import onboard from './commands/onboard.js';
 import onboardStatus from './commands/onboard-status.js';
 import llmoOnboard from './commands/llmo-onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
+import movePlgSite from './commands/move-plg-site.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
 import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill.js';
 import backfillLlmo from './commands/backfill-llmo.js';
@@ -92,6 +93,7 @@ export default (context) => [
   onboardStatus(context),
   llmoOnboard(context),
   setSiteOrganizationCommand(context),
+  movePlgSite(context),
   toggleSiteImport(context),
   backfillLlmo(context),
   getPromptUsage(context),
