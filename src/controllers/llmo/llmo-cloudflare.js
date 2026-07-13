@@ -57,6 +57,13 @@ const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,
 // Logpush (LLMO-5869): the zone-scoped HTTP-request dataset, and the auth-service endpoint
 // (LLMO-6116) that reads back the Cloudflare ownership-challenge token from the customer's
 // cdn-logs S3 bucket — api-service never touches that bucket directly.
+//
+// env.AUTH_SERVICE_BASE_URL MUST be the LLMO gateway host with the env's /api prefix
+// (e.g. https://llmo.experiencecloud.live/api/v1). It must be the `llmo.` host, NOT `spacecat.`:
+// the Fastly edge overwrites x-product from the request Host (llmo -> LLMO, spacecat -> ASO), and
+// the auth-service endpoint rejects anything but x-product: LLMO with a 403. Routing through this
+// public gateway path is also what injects the API-Gateway auth token — a direct/internal call
+// would be rejected. See spacecat-infrastructure fastly/vcl/.../100-setup-service-request.vcl.
 const LOGPUSH_DATASET = 'http_requests';
 const AUTH_SERVICE_OWNERSHIP_TOKEN_PATH = '/auth/cdn-logs-infrastructure/cloudflare-ownership-token';
 const LLMO_PRODUCT_HEADER_VALUE = 'LLMO';
