@@ -746,7 +746,9 @@ describe('TaskManagementController', () => {
     });
 
     it('returns 400 when neither opportunityId nor suggestionIds is provided', async () => {
-      const { createTicket } = TaskManagementController(makeContext());
+      const { createTicket } = TaskManagementController(makeContext({
+        dataAccess: { TaskManagementConnection: { findById: sinon.stub().resolves(makeConnection()) } },
+      }));
       const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'P', connectionId: CONN_ID } }));
       expect(res.status).to.equal(400);
       const body = await res.json();
@@ -1401,6 +1403,7 @@ describe('TaskManagementController', () => {
     it('returns 500 when idempotency key lookup fails', async () => {
       const ctx = makeContext({
         dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(makeConnection()) },
           IdempotencyKey: {
             findActiveKey: sinon.stub().rejects(new Error('db unavailable')),
           },
@@ -1421,6 +1424,7 @@ describe('TaskManagementController', () => {
       };
       const ctx = makeContext({
         dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(makeConnection()) },
           IdempotencyKey: { findActiveKey: sinon.stub().resolves(cachedEntry) },
         },
       });
@@ -1440,6 +1444,7 @@ describe('TaskManagementController', () => {
       };
       const ctx = makeContext({
         dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(makeConnection()) },
           IdempotencyKey: { findActiveKey: sinon.stub().resolves(processingEntry) },
         },
       });
@@ -1460,6 +1465,7 @@ describe('TaskManagementController', () => {
       };
       const ctx = makeContext({
         dataAccess: {
+          TaskManagementConnection: { findById: sinon.stub().resolves(makeConnection()) },
           IdempotencyKey: { findActiveKey: sinon.stub().resolves(cachedEntry) },
         },
       });

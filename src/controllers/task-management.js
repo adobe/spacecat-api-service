@@ -587,6 +587,36 @@ function TaskManagementController(context) {
       return badRequest('Attachments are not supported when creating multiple tickets (individual batch mode). Upload attachments per-ticket via the attachment endpoint.');
     }
 
+    // --- Resolve the active connection ----------------------------------------
+
+    const { connectionId } = data;
+
+    if (!connectionId) {
+      return badRequest('connectionId is required');
+    }
+
+    if (!isValidUUIDAnyVersion(connectionId)) {
+      return badRequest('connectionId must be a valid UUID');
+    }
+
+    let connection;
+    try {
+      const conn = await loadConnectionForOrg(organizationId, connectionId);
+      if (!conn) {
+        return notFound(`Connection ${connectionId} not found for organization ${organizationId}`);
+      }
+      if (conn.getStatus() === 'requires_reauth') {
+        return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
+      }
+      if (conn.getStatus() !== 'active') {
+        return notFound(`Active ${provider} connection ${connectionId} not found for organization ${organizationId}`);
+      }
+      connection = conn;
+    } catch (err) {
+      log.error({ organizationId, provider, err }, 'Failed to load task-management connection');
+      return internalServerError('Failed to load task-management connection');
+    }
+
     // --- Idempotency-Key enforcement (spec §Idempotent Ticket Creation) --------
     // Derived server-side from the request payload so duplicate requests for the
     // same suggestions are deduplicated regardless of which client sends them.
@@ -616,36 +646,6 @@ function TaskManagementController(context) {
       // status === 'processing'
       log.warn({ organizationId, lockId: existingEntry.getId(), createdAt: existingEntry.getCreatedAt() }, 'Returning 409 — idempotency lock still processing');
       return createResponse({ message: 'Request already in flight', retryAfter: 2 }, STATUS_CONFLICT);
-    }
-
-    // --- Resolve the active connection ----------------------------------------
-
-    const { connectionId } = data;
-
-    if (!connectionId) {
-      return badRequest('connectionId is required');
-    }
-
-    if (!isValidUUIDAnyVersion(connectionId)) {
-      return badRequest('connectionId must be a valid UUID');
-    }
-
-    let connection;
-    try {
-      const conn = await loadConnectionForOrg(organizationId, connectionId);
-      if (!conn) {
-        return notFound(`Connection ${connectionId} not found for organization ${organizationId}`);
-      }
-      if (conn.getStatus() === 'requires_reauth') {
-        return createResponse({ message: 'connection_reauth_required' }, STATUS_CONFLICT);
-      }
-      if (conn.getStatus() !== 'active') {
-        return notFound(`Active ${provider} connection ${connectionId} not found for organization ${organizationId}`);
-      }
-      connection = conn;
-    } catch (err) {
-      log.error({ organizationId, provider, err }, 'Failed to load task-management connection');
-      return internalServerError('Failed to load task-management connection');
     }
 
     // --- Validate suggestion(s) exist (spec §7 step 2) -------------------------
