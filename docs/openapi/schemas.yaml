@@ -12005,12 +12005,23 @@ SuggestionReview:
     tier:
       type: string
       enum: [paid, free]
+    feedbackSubjectId:
+      type: string
+      description: >-
+        SpaceCat-internal id of the sub-item this review is about within the
+        suggestion (e.g. a CWV issue id), used to group per-issue feedback. Null
+        for whole-suggestion reviews.
     previousFix:
       type: object
-      description: Patch snapshot at review time (only when ?include=...,patches).
+      description: AI-generated patch snapshot at review time (only when ?include=...,patches).
     editedFix:
       type: object
       description: ESE-edited patch (only when ?include=...,patches).
+    guidanceMarkdown:
+      type: string
+      description: >-
+        AI-generated issue context (title + description) for the reviewed issue
+        (only when ?include=...,patches). Null when not set.
   required:
     - eventId
     - eventTime
