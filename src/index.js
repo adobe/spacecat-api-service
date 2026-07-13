@@ -62,7 +62,6 @@ import FulfillmentController from './controllers/event/fulfillment.js';
 import { FixesController } from './controllers/fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
-import { smClientWrapper } from './support/sm.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
@@ -495,7 +494,6 @@ export const main = wrappedMain
   .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)
-  .with(smClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(vaultSecrets)
