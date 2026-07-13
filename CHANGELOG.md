@@ -1,3 +1,17 @@
+# [1.643.0](https://github.com/adobe/spacecat-api-service/compare/v1.642.0...v1.643.0) (2026-07-13)
+
+
+### Features
+
+* Serenity url-inspector/domain-urls endpoint | LLMO-6160 ([#2796](https://github.com/adobe/spacecat-api-service/issues/2796)) ([b9ca700](https://github.com/adobe/spacecat-api-service/commit/b9ca7008dab55d00c1abdc541e641bbef0f8bf88))
+
+# [1.642.0](https://github.com/adobe/spacecat-api-service/compare/v1.641.0...v1.642.0) (2026-07-13)
+
+
+### Features
+
+* enhance serenity filter-dimensions for sub categories ([#2791](https://github.com/adobe/spacecat-api-service/issues/2791)) ([8cf3973](https://github.com/adobe/spacecat-api-service/commit/8cf3973dff91618406e421549131a56a0edb0f17))
+
 # [1.641.0](https://github.com/adobe/spacecat-api-service/compare/v1.640.0...v1.641.0) (2026-07-13)
 
 
