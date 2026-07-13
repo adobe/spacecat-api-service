@@ -22,6 +22,7 @@ import {
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,
   transformOriginsToFilterDimensions,
+  transformOtherTagsForFilterDimensions,
   buildWeeksPayload,
   transformWeeksResponse,
   buildPromptsPayload,
@@ -61,7 +62,7 @@ export function createElementsService(transport) {
         transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
         transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, buildMarketsPayload({})),
       ]);
-      return {
+      const result = {
         brands: transformBrandsToFilterDimensions(rawBrands, spacecatBrands),
         regions: transformMarketsToFilterDimensions(rawMarkets, brandSemrushProjects),
         topics: transformTopicsForFilterDimensions(rawTopics),
@@ -69,6 +70,27 @@ export function createElementsService(transport) {
         page_intents: transformIntentsToFilterDimensions(rawTopics),
         origins: transformOriginsToFilterDimensions(rawTopics),
       };
+      // Merge any tag types not covered above (e.g. `type:branded`) under their own
+      // prefix key, and plain prefix-less tags under `tags` — see
+      // transformOtherTagsForFilterDimensions. The reserved-key list is derived
+      // from `result`'s own keys (not hand-duplicated) so it can't drift out of
+      // sync if a key here is ever renamed or a new fixed dimension is added.
+      // `__proto__`/`constructor`/`prototype` are added on top: `result[key] = ...`
+      // below would repoint result's prototype instead of adding a property for
+      // those (rather than dropping such tags, routing them as "reserved" sends
+      // them into the generic `tags` array, same as any other collision).
+      const reservedResultKeys = [
+        ...Object.keys(result), 'tags', '__proto__', 'constructor', 'prototype',
+      ];
+      const { tags, ...otherGroups } = transformOtherTagsForFilterDimensions(
+        rawTopics,
+        reservedResultKeys,
+      );
+      Object.entries(otherGroups).forEach(([key, items]) => {
+        result[key] = items;
+      });
+      result.tags = tags;
+      return result;
     },
 
     /**
