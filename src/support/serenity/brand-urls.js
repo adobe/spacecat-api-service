@@ -63,6 +63,24 @@ function toEntry(url, type) {
   return { url: value, type };
 }
 
+// Normalizes a benchmark/brand domain for identity comparison: lowercase host,
+// no scheme, no leading `www.`, no path. Null when unparseable. Used to match an
+// existing own-brand benchmark across runs (idempotent ensure), to skip the
+// primary domain in the brand-URL set, and by the competitor-benchmark sync to
+// match/dedupe competitors by domain.
+export function normalizeBenchmarkDomain(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) {
+    return null;
+  }
+  try {
+    const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    return u.hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Builds the `{ url, type }[]` to push to a single market's project from a
  * brand's URL sources (the V2 shape: `urls`, `socialAccounts`, `earnedContent`
@@ -71,24 +89,45 @@ function toEntry(url, type) {
  *   - `socialAccounts` → type `social`, filtered to the market's region;
  *   - `earnedContent` → type `earned`, filtered to the market's region.
  *
- * Only HTTPS URLs survive. The result is de-duplicated by URL (first-seen wins,
- * so a brand site listed both as a URL and a social account keeps its `website`
- * type) — brand URLs are unique per project upstream, so duplicates would be
- * skipped anyway; de-duping here keeps the `type` we send deterministic.
+ * The brand's own primary domain is dropped from the `website` set when
+ * `primaryDomain` is given (skip-primary-domain): the project's own-brand
+ * benchmark already carries that domain (Semrush stores it scheme-less), and a
+ * `brand_urls` row must keep its `https://` scheme, so the two can never
+ * collapse — emitting it as a website URL just double-lists the domain in the UI
+ * (serenity-docs#25). The match is by normalized host, so both `https://x.com`
+ * and `https://www.x.com` are skipped when the benchmark domain is `x.com`.
+ * Every OTHER website URL (a secondary site) is kept verbatim.
+ *
+ * Only HTTPS URLs survive (`brand_urls` rejects non-https with a 400, so a stored
+ * value is written verbatim — no scheme/`www.` normalization; Semrush stores it
+ * as-is). The result is de-duplicated by URL (first-seen wins, so a brand site
+ * listed both as a URL and a social account keeps its `website` type) — brand
+ * URLs are unique per project upstream, so duplicates would be skipped anyway;
+ * de-duping here keeps the `type` we send deterministic. Note the upstream does
+ * NOT collapse `www.`-vs-apex, so two distinct https URLs that differ only by
+ * `www.` are two separate rows (as the user entered them).
  *
  * @param {object} sources - { urls?, socialAccounts?, earnedContent? }.
  * @param {string} market - ISO-2 country code of the target project.
+ * @param {string} [primaryDomain] - the project's own-brand domain; a `website`
+ *   URL whose host matches it is skipped (see above). Omit to keep all.
  * @returns {{url: string, type: string}[]}
  */
-export function collectBrandUrlEntries(sources, market) {
+export function collectBrandUrlEntries(sources, market, primaryDomain) {
   const urls = Array.isArray(sources?.urls) ? sources.urls : [];
   const social = Array.isArray(sources?.socialAccounts) ? sources.socialAccounts : [];
   const earned = Array.isArray(sources?.earnedContent) ? sources.earnedContent : [];
+  const primary = normalizeBenchmarkDomain(primaryDomain);
 
   const candidates = [
     // Brand URLs carry no region — always every market. Accept both the string
-    // and the { value } object shape the create payload may use.
-    ...urls.map((u) => toEntry(typeof u === 'string' ? u : u?.value, BRAND_URL_TYPE.WEBSITE)),
+    // and the { value } object shape the create payload may use. Skip the brand's
+    // own primary domain (the benchmark already holds it — see fn docstring).
+    ...urls
+      .map((u) => toEntry(typeof u === 'string' ? u : u?.value, BRAND_URL_TYPE.WEBSITE))
+      .filter((e) => e === null
+        || primary === null
+        || normalizeBenchmarkDomain(e.url) !== primary),
     ...social
       .filter((s) => regionApplies(s?.regions, market))
       .map((s) => toEntry(s?.url, BRAND_URL_TYPE.SOCIAL)),
@@ -105,100 +144,6 @@ export function collectBrandUrlEntries(sources, market) {
     seen.add(e.url);
     return true;
   });
-}
-
-/**
- * Normalizes the WEBSITE-type brand-URL entries to Semrush's canonical stored
- * form by resolving each raw URL through Project Engine's `url/resolve` endpoint,
- * so the value we write matches the benchmark Semrush already holds instead of
- * creating a duplicate `www.`-vs-apex entry (serenity-docs#25). The resolve
- * `primary_url` (scheme-less, subdomain + path preserved, e.g. `lovesac.com`) is
- * used as the stored value.
- *
- * Only `type: 'website'` entries are resolved: `social`/`earned` URLs are
- * identity handles (e.g. `https://instagram.com/brand`), not brand domains, so
- * apex-normalizing them would be wrong — they pass through unchanged.
- *
- * `url/resolve` returns `is_valid: false` with empty strings (still HTTP 200) for
- * unresolvable input; that (and the defensive `is_valid: true` but empty
- * `primary_url` case) is NOT an error, so on it we keep the raw (already
- * https-filtered) entry rather than writing the empty value. A transport ERROR
- * (non-2xx) is left to propagate — the caller's best-effort (CREATE) / hard-fail
- * (EDIT) wrapper then treats it exactly like any other upstream failure.
- *
- * A resolve can collapse two raw URLs (e.g. `https://www.x.com` and
- * `https://x.com`) onto one canonical value, so the result is re-de-duplicated by
- * url (first-seen wins) — {@link collectBrandUrlEntries} de-duped by the RAW url.
- * De-dup keys on `url` alone (like `collectBrandUrlEntries`): a Semrush brand URL
- * is unique by its url, and a canonicalized website (scheme-less apex) can't
- * collide with a social/earned handle (a full `https://` profile url).
- *
- * The optional `cache` (raw url → canonical string | null) is resolved-once memo
- * shared across calls: brand website `urls` are region-less, so the per-market
- * edit re-sync passes ONE cache to avoid re-resolving the same url for every
- * market. Only a cache MISS calls the transport (and warns on an unusable result),
- * so a bad url warns once, not once per market.
- *
- * @param {object} transport - Semrush transport (exposes `resolveUrl`).
- * @param {Array<{url: string, type: string}>} entries - collected brand-URL entries.
- * @param {object} [log] - optional logger ({ warn? }).
- * @param {Map<string, (string|null)>} [cache] - raw-url → canonical memo (see above).
- * @returns {Promise<{url: string, type: string}[]>} entries with website URLs
- *   canonicalized (a no-op passthrough for social/earned), re-de-duped by url.
- */
-export async function resolveWebsiteEntries(transport, entries, log, cache = new Map()) {
-  const resolved = [];
-  for (const entry of entries) {
-    if (entry.type !== BRAND_URL_TYPE.WEBSITE) {
-      resolved.push(entry);
-      // eslint-disable-next-line no-continue
-      continue;
-    }
-    let canonical;
-    if (cache.has(entry.url)) {
-      canonical = cache.get(entry.url);
-    } else {
-      // eslint-disable-next-line no-await-in-loop
-      const r = await transport.resolveUrl(entry.url);
-      // is_valid:false, OR (defensively) is_valid:true with an empty primary_url —
-      // both mean "no usable canonical value": keep the raw https value, never the
-      // empty one. Left un-normalized on purpose; the next edit re-attempts it.
-      canonical = (r?.is_valid === true && hasText(r?.primary_url)) ? r.primary_url : null;
-      cache.set(entry.url, canonical);
-      if (canonical === null) {
-        log?.warn?.('brand-urls: url/resolve returned no usable primary_url — keeping raw url', {
-          url: entry.url,
-        });
-      }
-    }
-    resolved.push(canonical === null ? entry : { ...entry, url: canonical });
-  }
-
-  const seen = new Set();
-  return resolved.filter((e) => {
-    if (seen.has(e.url)) {
-      return false;
-    }
-    seen.add(e.url);
-    return true;
-  });
-}
-
-// Normalizes a benchmark/brand domain for identity comparison: lowercase host,
-// no scheme, no leading `www.`, no path. Null when unparseable. Used to match an
-// existing own-brand benchmark across runs (idempotent ensure) and shared by the
-// competitor-benchmark sync to match/dedupe competitors by domain.
-export function normalizeBenchmarkDomain(value) {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw) {
-    return null;
-  }
-  try {
-    const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
-    return u.hostname.toLowerCase().replace(/^www\./, '');
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -312,15 +257,15 @@ export async function attachBrandUrlsToProject(
     });
     return { created: 0, skipped: true };
   }
-  // Canonicalize website URLs to Semrush's stored form before writing them, so a
-  // create doesn't seed a `www.`-vs-apex duplicate of the benchmark (#25). Done
-  // only once a benchmark exists to write to (no wasted resolve on a skip).
-  const resolvedEntries = await resolveWebsiteEntries(transport, entries, log);
-  await transport.createBrandUrls(workspaceId, projectId, benchmarkId, resolvedEntries);
+  // Entries are written verbatim (already https-filtered, and the brand's own
+  // primary domain was dropped upstream by collectBrandUrlEntries so it doesn't
+  // duplicate the benchmark — #25). The upstream stores the value as-is and
+  // silently skips URLs already present, so a re-attach is idempotent.
+  await transport.createBrandUrls(workspaceId, projectId, benchmarkId, entries);
   log?.info?.('brand-urls: attached to project benchmark', {
-    workspaceId, projectId, benchmarkId, count: resolvedEntries.length,
+    workspaceId, projectId, benchmarkId, count: entries.length,
   });
-  return { created: resolvedEntries.length };
+  return { created: entries.length };
 }
 
 // Best-effort republish after an edit-time change so the live view reflects it.
@@ -385,11 +330,6 @@ export async function syncBrandUrlsAcrossMarkets(
   let deleted = 0;
   let markets = 0;
 
-  // Website `urls` are region-less (identical across every market), so resolve
-  // each distinct one a single time and reuse the result across markets — one
-  // shared memo passed into every per-market resolveWebsiteEntries call.
-  const resolveCache = new Map();
-
   for (const project of projects) {
     const projectId = hasText(project?.id) ? String(project.id) : null;
     const market = marketOf(project);
@@ -400,7 +340,9 @@ export async function syncBrandUrlsAcrossMarkets(
     markets += 1;
 
     try {
-      const collected = collectBrandUrlEntries(sources, market);
+      // The project's own domain is the primary domain — its own-brand website
+      // URL is skipped so it doesn't duplicate the benchmark (skip-primary-domain).
+      const collected = collectBrandUrlEntries(sources, market, project?.domain);
       // Own-brand identity for the benchmark comes from the project itself: its
       // domain plus the brand_names (display name first, the rest are aliases).
       const ai = project?.settings?.ai || {};
@@ -428,12 +370,10 @@ export async function syncBrandUrlsAcrossMarkets(
         // eslint-disable-next-line no-continue
         continue;
       }
-      // Canonicalize website URLs to Semrush's stored form BEFORE diffing, so the
-      // desired set is compared against `listBrandUrls` (which returns the same
-      // canonical form) — otherwise every re-sync would churn `www.`-vs-apex (#25).
-      // The shared cache resolves each region-less website url once across markets.
-      // eslint-disable-next-line no-await-in-loop
-      const desired = await resolveWebsiteEntries(transport, collected, log, resolveCache);
+      // Entries are written/diffed verbatim (https-ful, primary domain already
+      // dropped by collectBrandUrlEntries). `listBrandUrls` returns the same
+      // stored form, so the diff is stable across re-syncs — no www-vs-apex churn.
+      const desired = collected;
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
       const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];

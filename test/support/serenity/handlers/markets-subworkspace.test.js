@@ -64,12 +64,6 @@ function makeTransport(overrides = {}) {
     deleteAiModelsByIds: sinon.stub().resolves(null),
     createProjectTags: sinon.stub().resolves(null),
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
-    // Identity url/resolve: echoes its input as a valid canonical value, so the
-    // handler's brand-URL attach behaves as before for these tests (the www→apex
-    // normalization itself is unit-tested in brand-urls.test.js).
-    resolveUrl: sinon.stub().callsFake(
-      (url) => Promise.resolve({ domain: url, primary_url: url, is_valid: true }),
-    ),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
     createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
     deleteBenchmarks: sinon.stub().resolves(null),

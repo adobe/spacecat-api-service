@@ -424,7 +424,9 @@ export async function handleCreateMarketSubworkspace(
   // region-filtered to the market. Done before publish so the URLs are part of
   // the same published version. Best-effort: URL enrichment must never abort the
   // brand create — a benchmark/URL hiccup is logged and skipped, not propagated.
-  const brandUrlEntries = collectBrandUrlEntries(brandUrlSources, body.market);
+  // Pass the brand's own domain so its own-brand website URL is skipped — the
+  // market's own-brand benchmark already carries it (skip-primary-domain, #25).
+  const brandUrlEntries = collectBrandUrlEntries(brandUrlSources, body.market, body.brandDomain);
   try {
     await attachBrandUrlsToProject(
       transport,
