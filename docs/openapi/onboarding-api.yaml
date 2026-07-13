@@ -19,7 +19,6 @@ trigger-onboarding:
     operationId: triggerOnboarding
     security:
       - ims_key: []
-      - api_key: []
     responses:
       '200':
         description: Notification sent.

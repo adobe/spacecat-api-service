@@ -27,7 +27,11 @@ describe('OnboardingController', () => {
   const buildContext = (overrides = {}) => ({
     params: { spaceCatId: ORG_ID },
     dataAccess: { Organization: { findById: sandbox.stub().resolves(mockOrg) } },
-    attributes: { authInfo: { getProfile: () => ({ email: 'jane@example.com' }) } },
+    attributes: {
+      authInfo: {
+        getProfile: () => ({ email: 'ABC123@AdobeID', trial_email: 'jane@example.com' }),
+      },
+    },
     env: { SLACK_ONBOARDING_WEBHOOK_URL: 'https://hooks.slack.test/x' },
     log: { info: sandbox.stub(), error: sandbox.stub() },
     ...overrides,
@@ -96,6 +100,21 @@ describe('OnboardingController', () => {
 
     expect(res.status).to.equal(403);
     expect(notifyStub.called).to.equal(false);
+  });
+
+  it('falls back to the alias email when trial_email is absent', async () => {
+    const ctx = buildContext({
+      attributes: { authInfo: { getProfile: () => ({ email: 'ABC123@AdobeID' }) } },
+    });
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    const res = await controller.triggerOnboarding(ctx);
+
+    expect(res.status).to.equal(200);
+    expect(notifyStub.firstCall.args[1]).to.include({
+      email: 'ABC123@AdobeID',
+      workspaceId: 'ws-123',
+      spaceCatId: ORG_ID,
+    });
   });
 
   it('returns 400 when no email can be determined from the identity', async () => {
