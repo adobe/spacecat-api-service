@@ -282,6 +282,13 @@ describe('TaskManagementController', () => {
         .to.throw('Organization collection not available');
     });
 
+    it('throws when IdempotencyKey missing', () => {
+      const ctx = makeContext();
+      delete ctx.dataAccess.IdempotencyKey;
+      expect(() => TaskManagementController(ctx))
+        .to.throw('IdempotencyKey collection not available');
+    });
+
     it('returns controller with all methods', () => {
       const ctrl = TaskManagementController(makeContext());
       expect(ctrl).to.have.all.keys(
