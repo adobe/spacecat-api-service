@@ -690,7 +690,9 @@ describe('TaskManagementController', () => {
       // so individual tests can omit fields (e.g. no summary) without the default leaking in.
       const data = overrides.data !== undefined
         ? overrides.data
-        : { summary: 'Fix the thing', projectKey: 'PROJ', connectionId: CONN_ID };
+        : {
+          summary: 'Fix the thing', projectKey: 'PROJ', connectionId: CONN_ID, opportunityId: OPPORTUNITY_ID,
+        };
       return {
         params: { organizationId: ORG_ID, provider: PROVIDER, ...(overrides.params ?? {}) },
         data,
@@ -741,6 +743,14 @@ describe('TaskManagementController', () => {
       const { createTicket } = TaskManagementController(makeContext());
       const res = await createTicket(makeReqCtx({ data: { projectKey: 'PROJ', connectionId: CONN_ID } }));
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when neither opportunityId nor suggestionIds is provided', async () => {
+      const { createTicket } = TaskManagementController(makeContext());
+      const res = await createTicket(makeReqCtx({ data: { summary: 'Fix', projectKey: 'P', connectionId: CONN_ID } }));
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include('opportunityId or suggestionIds');
     });
 
     it('returns 400 when body has no projectKey', async () => {
@@ -1531,6 +1541,7 @@ describe('TaskManagementController', () => {
           summary: 'Fix it',
           projectKey: 'PROJ',
           connectionId: CONN_ID,
+          opportunityId: OPPORTUNITY_ID,
         },
       }));
       expect(res.status).to.equal(201);
@@ -1550,6 +1561,7 @@ describe('TaskManagementController', () => {
           summary: 'Fix it',
           projectKey: 'PROJ',
           connectionId: CONN_ID,
+          opportunityId: OPPORTUNITY_ID,
         },
       }));
       expect(res.status).to.equal(404);
@@ -1967,6 +1979,7 @@ describe('TaskManagementController', () => {
           projectKey: 'PROJ',
           connectionId: CONN_ID,
           attachments: { content: 'abc', mimeType: 'image/png', filename: 'x.png' },
+          opportunityId: OPPORTUNITY_ID,
         },
       }));
       // Proceeds normally — non-array is treated as "no attachment"

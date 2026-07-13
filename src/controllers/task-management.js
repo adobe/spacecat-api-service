@@ -27,10 +27,13 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { TicketClientFactory } from '@adobe/spacecat-shared-ticket-client';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
-
 import AccessControlUtil from '../support/access-control-util.js';
 import { TaskManagementConnectionDto } from '../dto/task-management-connection.js';
 import { TicketDto } from '../dto/ticket.js';
+
+// Accepts any UUID version (matches the gateway's isValidUUIDAnyVersion check).
+const UUID_ANY_VERSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidUUIDAnyVersion = (v) => UUID_ANY_VERSION_RE.test(v);
 
 const STATUS_CREATED = 201;
 const STATUS_NOT_FOUND = 404;
@@ -265,7 +268,7 @@ function TaskManagementController(context) {
       return badRequest('organizationId must be a valid UUID');
     }
 
-    if (!isValidUUID(connectionId)) {
+    if (!isValidUUIDAnyVersion(connectionId)) {
       return badRequest('connectionId must be a valid UUID');
     }
 
@@ -498,7 +501,7 @@ function TaskManagementController(context) {
     }
 
     if (!SUPPORTED_PROVIDERS.has(provider)) {
-      return badRequest(`Unsupported provider '${provider}'. Supported: ${[...SUPPORTED_PROVIDERS].join(', ')}`);
+      return badRequest(`Unsupported provider. Supported: ${[...SUPPORTED_PROVIDERS].join(', ')}`);
     }
 
     const { denied } = await loadOrgWithAccess(organizationId);
@@ -587,9 +590,13 @@ function TaskManagementController(context) {
     // --- Idempotency-Key enforcement (spec §Idempotent Ticket Creation) --------
     // Derived server-side from the request payload so duplicate requests for the
     // same suggestions are deduplicated regardless of which client sends them.
+    // Require at least one discriminator so the key is not a constant per org.
+    if (!hasText(data.opportunityId) && suggestionIds.length === 0) {
+      return badRequest('At least one of opportunityId or suggestionIds must be provided');
+    }
 
     const idempotencyKey = createHash('sha256')
-      .update(`${data.opportunityId}:${[...suggestionIds].sort().join(',')}`)
+      .update(`${data.opportunityId ?? ''}:${[...suggestionIds].sort().join(',')}`)
       .digest('hex');
 
     let existingEntry;
@@ -619,7 +626,7 @@ function TaskManagementController(context) {
       return badRequest('connectionId is required');
     }
 
-    if (!isValidUUID(connectionId)) {
+    if (!isValidUUIDAnyVersion(connectionId)) {
       return badRequest('connectionId must be a valid UUID');
     }
 
@@ -1205,7 +1212,7 @@ function TaskManagementController(context) {
       return badRequest('organizationId must be a valid UUID');
     }
 
-    if (!isValidUUID(connectionId)) {
+    if (!isValidUUIDAnyVersion(connectionId)) {
       return badRequest('connectionId must be a valid UUID');
     }
 
@@ -1279,7 +1286,7 @@ function TaskManagementController(context) {
       return badRequest('organizationId must be a valid UUID');
     }
 
-    if (!isValidUUID(connectionId)) {
+    if (!isValidUUIDAnyVersion(connectionId)) {
       return badRequest('connectionId must be a valid UUID');
     }
 
