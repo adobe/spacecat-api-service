@@ -37,12 +37,13 @@ const PARENT = 'parent-ws';
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
 function proj({
-  id = 'p1', geo = 2840, lang = 'en', status = 'live',
+  id = 'p1', geo = 2840, lang = 'en', status = 'live', domain = undefined,
 } = {}) {
   return {
     id,
     publish_status: status,
     updated_at: '2026-06-02T00:00:00Z',
+    ...(domain === undefined ? {} : { domain }),
     settings: { ai: { location: { id: geo }, language: { name: lang } } },
   };
 }
@@ -315,6 +316,38 @@ describe('markets-subworkspace handlers', () => {
           'https://www.example.com',
           'https://shop.example.com',
         ],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { brandUrlSources },
+      );
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
+        { url: 'https://shop.example.com', type: 'website' },
+      ]);
+    });
+
+    it('skips ANOTHER market\'s primary domain when pushing brand URLs (market-mirror brand)', async () => {
+      // A sibling CA project already exists on acme.ca. Creating the US market
+      // (brandDomain example.com) must skip BOTH primaries: example.com because it
+      // is this market's own, acme.ca because it is CA's — neither may be written
+      // as a website brand URL here. Only the genuine secondary site survives.
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({
+            id: 'ca-proj', geo: 2124, lang: 'en', domain: 'acme.ca',
+          })],
+        }),
+      });
+      const brandUrlSources = {
+        urls: ['https://example.com', 'https://acme.ca', 'https://shop.example.com'],
         socialAccounts: [],
         earnedContent: [],
       };

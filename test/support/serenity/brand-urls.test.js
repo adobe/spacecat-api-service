@@ -19,6 +19,7 @@ import {
   BRAND_URL_TYPE,
   regionApplies,
   collectBrandUrlEntries,
+  primaryDomainSet,
   normalizeBenchmarkDomain,
   ensureOwnBrandBenchmark,
   attachBrandUrlsToProject,
@@ -118,7 +119,7 @@ describe('brand-urls helpers', () => {
       ]);
     });
 
-    it('skips the brand primary domain website (apex + www) when primaryDomain given', () => {
+    it('skips a market primary domain website (apex + www)', () => {
       // The benchmark already carries the primary domain (scheme-less), and a
       // brand_urls row must be https:// — so adding it would double-list it in
       // the UI. Both the apex and www forms of the primary are dropped (#25).
@@ -126,24 +127,50 @@ describe('brand-urls helpers', () => {
         urls: ['https://acme.com', 'https://www.acme.com', 'https://blog.acme.com'],
         socialAccounts: [{ url: 'https://x.com/acme', regions: [] }],
       };
-      expect(collectBrandUrlEntries(sources, 'us', 'acme.com')).to.deep.equal([
+      const primaries = primaryDomainSet(['acme.com']);
+      expect(collectBrandUrlEntries(sources, 'us', primaries)).to.deep.equal([
         { url: 'https://blog.acme.com', type: BRAND_URL_TYPE.WEBSITE },
         { url: 'https://x.com/acme', type: BRAND_URL_TYPE.SOCIAL },
       ]);
     });
 
-    it('accepts the primaryDomain in any form (scheme/www/path) via host match', () => {
-      const sources = { urls: ['https://acme.com'] };
-      expect(collectBrandUrlEntries(sources, 'us', 'https://www.acme.com/x')).to.deep.equal([]);
+    it('skips ANOTHER market primary domain too (market-mirror brand)', () => {
+      // acme.ca is CA's primary; on the US market it must not surface as a website
+      // brand URL either — the skip set is every market's primary, not just this
+      // market's. Matches the migration CLI (mysticat-data-service).
+      const sources = { urls: ['https://acme.com', 'https://acme.ca', 'https://shop.acme.com'] };
+      const primaries = primaryDomainSet(['acme.com', 'acme.ca']);
+      expect(collectBrandUrlEntries(sources, 'us', primaries)).to.deep.equal([
+        { url: 'https://shop.acme.com', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
     });
 
-    it('keeps all website urls when primaryDomain is absent/unparseable', () => {
+    it('keeps all website urls when no primary domains are given', () => {
       const sources = { urls: ['https://acme.com', 'https://www.acme.com'] };
-      // No primaryDomain → nothing skipped (both kept; www vs apex are two rows).
+      // Empty skip set → nothing skipped (both kept; www vs apex are two rows).
       expect(collectBrandUrlEntries(sources, 'us')).to.deep.equal([
         { url: 'https://acme.com', type: BRAND_URL_TYPE.WEBSITE },
         { url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE },
       ]);
+    });
+  });
+
+  describe('primaryDomainSet', () => {
+    it('normalizes each domain to a host and drops the unusable ones', () => {
+      // Accepts any form (scheme / www / path) — the project `domain` field is
+      // scheme-less, but the create payload's brandDomain may carry a scheme.
+      const set = primaryDomainSet([
+        'acme.com',
+        'https://www.acme.ca/en',
+        null,
+        '',
+        'not a domain !!!',
+      ]);
+      expect([...set].sort()).to.deep.equal(['acme.ca', 'acme.com']);
+    });
+
+    it('returns an empty set for a non-array', () => {
+      expect(primaryDomainSet(null).size).to.equal(0);
     });
   });
 

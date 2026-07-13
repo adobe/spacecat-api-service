@@ -82,6 +82,27 @@ export function normalizeBenchmarkDomain(value) {
 }
 
 /**
+ * The set of normalized hosts that are the primary domain of SOME market in the
+ * brand's sub-workspace — every one of them is skipped as a `website` brand URL
+ * (see {@link collectBrandUrlEntries}). Unparseable/empty values are dropped.
+ *
+ * @param {Array<string|null|undefined>} domains - raw project domains (plus, on
+ *   the create path, the domain of the market being created — it has no project
+ *   to read a domain from yet).
+ * @returns {Set<string>} normalized hosts (lowercase, no scheme/`www.`/path).
+ */
+export function primaryDomainSet(domains) {
+  const set = new Set();
+  (Array.isArray(domains) ? domains : []).forEach((d) => {
+    const host = normalizeBenchmarkDomain(d);
+    if (host !== null) {
+      set.add(host);
+    }
+  });
+  return set;
+}
+
+/**
  * Builds the `{ url, type }[]` to push to a single market's project from a
  * brand's URL sources (the V2 shape: `urls`, `socialAccounts`, `earnedContent`
  * — the same shape the create payload and a persisted brand both carry):
@@ -89,14 +110,17 @@ export function normalizeBenchmarkDomain(value) {
  *   - `socialAccounts` → type `social`, filtered to the market's region;
  *   - `earnedContent` → type `earned`, filtered to the market's region.
  *
- * The brand's own primary domain is dropped from the `website` set when
- * `primaryDomain` is given (skip-primary-domain): the project's own-brand
- * benchmark already carries that domain (Semrush stores it scheme-less), and a
- * `brand_urls` row must keep its `https://` scheme, so the two can never
- * collapse — emitting it as a website URL just double-lists the domain in the UI
- * (serenity-docs#25). The match is by normalized host, so both `https://x.com`
- * and `https://www.x.com` are skipped when the benchmark domain is `x.com`.
- * Every OTHER website URL (a secondary site) is kept verbatim.
+ * Every market's primary domain is dropped from the `website` set
+ * (skip-primary-domain): a project's own-brand benchmark already carries its own
+ * domain (Semrush stores it scheme-less), and a `brand_urls` row must keep its
+ * `https://` scheme, so the two can never collapse — emitting it as a website URL
+ * just double-lists the domain in the UI (serenity-docs#25). The OTHER markets'
+ * primaries are skipped too: for a market-mirror brand, `chevrolet.ca` is CA-en's
+ * primary and must not surface as a US-en brand URL. Because the skip set is the
+ * same for every market, all markets end up with the same website entries. The
+ * match is by normalized host, so both `https://x.com` and `https://www.x.com`
+ * are skipped when a market's domain is `x.com`. Every OTHER website URL (a
+ * secondary site) is kept verbatim.
  *
  * Only HTTPS URLs survive (`brand_urls` rejects non-https with a 400, so a stored
  * value is written verbatim — no scheme/`www.` normalization; Semrush stores it
@@ -109,24 +133,25 @@ export function normalizeBenchmarkDomain(value) {
  *
  * @param {object} sources - { urls?, socialAccounts?, earnedContent? }.
  * @param {string} market - ISO-2 country code of the target project.
- * @param {string} [primaryDomain] - the project's own-brand domain; a `website`
- *   URL whose host matches it is skipped (see above). Omit to keep all.
+ * @param {Set<string>} [primaryDomains] - normalized hosts that are some market's
+ *   primary domain ({@link primaryDomainSet}); a `website` URL whose host is in
+ *   the set is skipped. Omit to keep all.
  * @returns {{url: string, type: string}[]}
  */
-export function collectBrandUrlEntries(sources, market, primaryDomain) {
+export function collectBrandUrlEntries(sources, market, primaryDomains) {
   const urls = Array.isArray(sources?.urls) ? sources.urls : [];
   const social = Array.isArray(sources?.socialAccounts) ? sources.socialAccounts : [];
   const earned = Array.isArray(sources?.earnedContent) ? sources.earnedContent : [];
-  const primary = normalizeBenchmarkDomain(primaryDomain);
+  const primaries = primaryDomains instanceof Set ? primaryDomains : new Set();
 
   const candidates = [
     // Brand URLs carry no region — always every market. Accept both the string
-    // and the { value } object shape the create payload may use. Skip the brand's
-    // own primary domain (the benchmark already holds it — see fn docstring).
+    // and the { value } object shape the create payload may use. Skip every
+    // market's primary domain (the benchmarks hold them — see fn docstring).
     ...urls
       .map((u) => toEntry(typeof u === 'string' ? u : u?.value, BRAND_URL_TYPE.WEBSITE))
       .filter(Boolean)
-      .filter((e) => primary === null || normalizeBenchmarkDomain(e.url) !== primary),
+      .filter((e) => !primaries.has(normalizeBenchmarkDomain(e.url))),
     ...social
       .filter((s) => regionApplies(s?.regions, market))
       .map((s) => toEntry(s?.url, BRAND_URL_TYPE.SOCIAL))
@@ -327,6 +352,12 @@ export async function syncBrandUrlsAcrossMarkets(
   // syncs), else list here. The listing is stable across a brand-row write.
   const projects = await resolveProjects(transport, workspaceId, prefetchedProjects);
 
+  // Every market's primary domain, skipped as a website URL on EVERY market (not
+  // just its own): a market-mirror brand's `chevrolet.ca` is CA-en's primary and
+  // must not surface as a US-en brand URL. Built once — the set is the same for
+  // every market, so the website entries are identical across the fan-out.
+  const primaryDomains = primaryDomainSet(projects.map((p) => p?.domain));
+
   let created = 0;
   let deleted = 0;
   let markets = 0;
@@ -341,12 +372,10 @@ export async function syncBrandUrlsAcrossMarkets(
     markets += 1;
 
     try {
-      // The project's own domain is the primary domain — its own-brand website
-      // URL is skipped so it doesn't duplicate the benchmark (skip-primary-domain).
-      // Entries are written/diffed verbatim (https-ful, with the project's own
+      // Entries are written/diffed verbatim (https-ful, with every market's
       // primary domain dropped). `listBrandUrls` returns the same stored form, so
       // the diff is stable across re-syncs — no www-vs-apex churn.
-      const desired = collectBrandUrlEntries(sources, market, project?.domain);
+      const desired = collectBrandUrlEntries(sources, market, primaryDomains);
       // Own-brand identity for the benchmark comes from the project itself: its
       // domain plus the brand_names (display name first, the rest are aliases).
       const ai = project?.settings?.ai || {};
