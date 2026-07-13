@@ -92,14 +92,11 @@ export function normalizeBenchmarkDomain(value) {
  * @returns {Set<string>} normalized hosts (lowercase, no scheme/`www.`/path).
  */
 export function primaryDomainSet(domains) {
-  const set = new Set();
-  (Array.isArray(domains) ? domains : []).forEach((d) => {
-    const host = normalizeBenchmarkDomain(d);
-    if (host !== null) {
-      set.add(host);
-    }
-  });
-  return set;
+  return new Set(
+    (Array.isArray(domains) ? domains : [])
+      .map(normalizeBenchmarkDomain)
+      .filter((host) => host !== null),
+  );
 }
 
 /**
@@ -403,13 +400,14 @@ export async function syncBrandUrlsAcrossMarkets(
         // eslint-disable-next-line no-continue
         continue;
       }
-      // Diff against the DRAFT view, not the published one. Creates and deletes act
-      // on the draft (a publish then promotes it), so the draft is the state this
-      // sync is converging. The published view lags it whenever the project has
-      // unpublished changes — which is exactly what a swallowed quota 405 on the
-      // republish below leaves behind. Reading published there would report an
-      // EMPTY existing set, so a URL the user removed would never be deleted (and
-      // every URL would be re-submitted on each sync).
+      // Invariant: a read must target the same view the writes act on. Creates and
+      // deletes act on the DRAFT (a publish then promotes it), so the draft — not
+      // the published view — is the state this sync converges on. Published lags
+      // the draft whenever the project has unpublished changes, which is exactly
+      // what a swallowed quota 405 on the republish below leaves behind. Reading
+      // published there would report an EMPTY existing set, so a URL the user
+      // removed would never be deleted (and every URL would be re-submitted on
+      // each sync).
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(
         workspaceId,
