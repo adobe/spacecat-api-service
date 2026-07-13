@@ -341,7 +341,13 @@ export async function ensureAiHeadroom(transport, {
  *   removal just freed): honours the fail-fast hot-path rule, and is safe because release is
  *   best-effort + the transfer is absolute/idempotent and has no dependent op after it in-request.
  * @param {any} [log]
- * @returns {Promise<{ released: boolean, target?: { projects: number, prompts: number } }>}
+ * @returns {Promise<{
+ *   released: boolean,
+ *   reason?: 'nothing-to-release' | 'requires-decommission' | 'error',
+ *   target?: { projects: number, prompts: number },
+ * }>} `released:false` carries a `reason`: `nothing-to-release` (already at/below target),
+ *   `requires-decommission` (surplus exists but its target floors to 0 — unreclaimable via
+ *   transfer; see below), or `error` (a swallowed best-effort transport failure).
  */
 export async function releaseAiSurplus(transport, {
   childId, floor = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL, failFast = false,
@@ -351,15 +357,35 @@ export async function releaseAiSurplus(transport, {
     /** @type {{ projects: number, prompts: number }} */
     const target = { projects: child.projects.total, prompts: child.prompts.total };
     let lowered = false;
+    let requiresDecommission = false;
     for (const dim of DIMS) {
       const t = Math.max(Number(floor[dim]) || 0, roundUpToBlock(child[dim].used, blocks[dim]));
       if (t < child[dim].total) {
-        target[dim] = t;
-        lowered = true;
+        if (t > 0) {
+          // Only ever lower a dim to a NON-ZERO target. A transfer that sets a dim to 0 is a
+          // SILENT NO-OP (live-verified 2026-07, release-probe.mjs): the gateway ignores an
+          // all-zero (and, by extension, a to-zero) transfer. `target` deliberately keeps BOTH
+          // dims (an un-lowered dim retains its current total), so the emitted payload is always
+          // the live-verified both-dims shape — never a partial object (which the strict
+          // transferAndSettle/transferOnce type also forbids) and never a newly-introduced 0.
+          target[dim] = t;
+          lowered = true;
+        } else {
+          // Surplus exists but the target floors to 0. It CANNOT be reclaimed via transfer (the
+          // no-op above); full reclamation is via workspace delete/decommission. Leave this dim at
+          // its current total and flag the caller — do NOT emit a 0 and falsely report success
+          // (the quiet twin of the original all-zero-no-op bug).
+          requiresDecommission = true;
+        }
       }
     }
     if (!lowered) {
-      return { released: false };
+      if (requiresDecommission) {
+        log?.warn?.('SERENITY_ALLOC releaseAiSurplus: surplus cannot be reclaimed via transfer '
+          + `(target floors to 0) — needs decommission for ${childId}`);
+        return { released: false, reason: 'requires-decommission' };
+      }
+      return { released: false, reason: 'nothing-to-release' };
     }
     if (failFast) {
       await transferOnce(transport, childId, target, log);
@@ -375,6 +401,6 @@ export async function releaseAiSurplus(transport, {
       throw e;
     }
     log?.warn?.(`SERENITY_ALLOC releaseAiSurplus best-effort failure for ${childId}: ${e?.message}`);
-    return { released: false };
+    return { released: false, reason: 'error' };
   }
 }

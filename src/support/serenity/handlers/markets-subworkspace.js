@@ -36,7 +36,9 @@ import {
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
-import { modelChangeUnits, releaseAiSurplus } from '../resource-manager.js';
+import {
+  modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
+} from '../resource-manager.js';
 import { topicTag } from '../prompt-tags.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
@@ -843,7 +845,15 @@ export async function handleUpdateModelsSubworkspace(
   // (ordering §3 requires: publish → read → release). Fail-fast (one transfer, no settle poll) +
   // best-effort per the release scope decision; childId is guaranteed present (headroom.enabled).
   if (headroom.enabled && netDelta < 0) {
-    await releaseAiSurplus(transport, { childId: workspaceId, failFast: true }, log);
+    // Non-zero floor is the PRIMARY guard against the all-zero-transfer no-op: a release target of
+    // 0 for any dim is silently ignored by the gateway (only workspace delete reclaims to zero).
+    // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
+    // transfer (which it would refuse anyway — this just keeps the request off that path).
+    await releaseAiSurplus(transport, {
+      childId: workspaceId,
+      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+      failFast: true,
+    }, log);
   }
 
   return result;

@@ -244,8 +244,30 @@ describe('resource-manager — releaseAiSurplus', () => {
   it('no-op when nothing frees a whole block', async () => {
     const t = makeTransport({ child: resources(dim(2, 0, 2), dim(90, 0, 100)) });
     const r = await releaseAiSurplus(t, { childId: CHILD, poll }, log);
-    expect(r).to.deep.equal({ released: false });
+    expect(r).to.deep.equal({ released: false, reason: 'nothing-to-release' });
     expect(t.transferWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('idle child + zero floor → requires-decommission, NO all-zero transfer (regression)', async () => {
+    // A fully-idle child (used 0) with the default zero floor would floor BOTH dims to 0. A
+    // transfer to {0,0} is a live-verified silent no-op, so releaseAiSurplus must NOT emit it and
+    // must NOT falsely report released:true — it flags requires-decommission and warns instead.
+    const warn = sinon.spy();
+    const t = makeTransport({ child: resources(dim(0, 0, 1), dim(0, 0, 100)) });
+    const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
+    expect(r).to.deep.equal({ released: false, reason: 'requires-decommission' });
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+    expect(warn).to.have.been.calledWithMatch('needs decommission');
+  });
+
+  it('lowers one dim to non-zero while a zero-floored dim stays at its current total', async () => {
+    // prompts used 150 → roundUp = 200 < 500 (lowers to a NON-ZERO 200); projects used 0, floor 0
+    // → target floors to 0 (unreclaimable via transfer) so it stays at its current total (1). The
+    // emitted payload keeps BOTH dims non-zero — never a partial object, never a newly-added 0.
+    const t = makeTransport({ child: resources(dim(0, 0, 1), dim(150, 0, 500)) });
+    const r = await releaseAiSurplus(t, { childId: CHILD, failFast: true }, log);
+    expect(r.released).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.been.calledOnceWith(CHILD, ai(1, 200));
   });
 
   it('lowers totals to rounded used, never below the floor', async () => {
@@ -272,7 +294,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
     t.getWorkspaceResources.withArgs(CHILD).rejects(new SerenityTransportError(503, 'transport boom'));
     const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
-    expect(r).to.deep.equal({ released: false });
+    expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(warn).to.have.been.called;
   });
 
@@ -299,7 +321,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
     const r = await releaseAiSurplus(t, { childId: CHILD, poll }, log);
     // Best-effort: the ErrorWithStatusCode(503) is swallowed and reported as released:false.
-    expect(r).to.deep.equal({ released: false });
+    expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(transfer).to.have.callCount(4); // 1 initial + NOT_READY_RETRIES(3)
   });
 
@@ -311,7 +333,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const transfer = sinon.stub().rejects(poolFull());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
     const r = await releaseAiSurplus(t, { childId: CHILD, poll }, { ...log, warn });
-    expect(r).to.deep.equal({ released: false });
+    expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(warn).to.have.been.calledWithMatch('SERENITY_ALLOC org pool exhausted on transfer');
   });
 
@@ -321,7 +343,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const r = await releaseAiSurplus(t, {
       childId: CHILD, poll: { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() },
     }, log);
-    expect(r).to.deep.equal({ released: false });
+    expect(r).to.deep.equal({ released: false, reason: 'error' });
   });
 
   it('failFast: lowers total with ONE transfer and NO settle poll (synchronous request-path release)', async () => {
@@ -338,7 +360,7 @@ describe('resource-manager — releaseAiSurplus', () => {
     const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
     const r = await releaseAiSurplus(t, { childId: CHILD, failFast: true }, log);
-    expect(r).to.deep.equal({ released: false });
+    expect(r).to.deep.equal({ released: false, reason: 'error' });
     expect(transfer).to.have.callCount(1); // one attempt, no retry loop
   });
 
