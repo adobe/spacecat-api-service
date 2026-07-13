@@ -61,6 +61,41 @@ const LOGPUSH_DATASET = 'http_requests';
 const AUTH_SERVICE_OWNERSHIP_TOKEN_PATH = '/auth/cdn-logs-infrastructure/cloudflare-ownership-token';
 const LLMO_PRODUCT_HEADER_VALUE = 'LLMO';
 
+// Cloudflare writes the ownership-challenge file to S3 asynchronously after requestLogpushOwnership
+// returns, so the immediate read-back can race the write. Retry the read (not the challenge) a
+// bounded number of times before giving up. Delay is overridable via env (default 2s) so tests can
+// zero it and ops can tune per environment; the default needs no deploy wiring.
+const MAX_OWNERSHIP_TOKEN_RETRIES = 1;
+const DEFAULT_OWNERSHIP_TOKEN_RETRY_DELAY_MS = 2000;
+
+/**
+ * Whether a Cloudflare Logpush job's `destination_conf` targets the same S3 destination this
+ * request would create — compared component-wise (bucket + path prefix + region) rather than by
+ * exact string. Cloudflare may store/echo `destination_conf` normalized (query-param order, extra
+ * params, a resolved `{DATE}`), which would defeat an exact-string idempotency check and cause a
+ * duplicate job. Callers already filter to the http_requests dataset, so a bucket+prefix+region
+ * match is specific enough to identify "our" job. Assumes our own format keeps `region` in the
+ * query string (it always does); if Cloudflare drops it, this errs toward "not a match" (safe:
+ * worst case is an attempted create that the TOCTOU re-check catches).
+ */
+const sameLogpushDestination = (storedConf, bucketName, pathPrefix, region) => {
+  if (!hasText(storedConf)) {
+    return false;
+  }
+  const [base, query = ''] = storedConf.split('?');
+  const withoutScheme = base.replace(/^s3:\/\//i, '');
+  const slash = withoutScheme.indexOf('/');
+  if (slash === -1) {
+    return false;
+  }
+  const storedBucket = withoutScheme.slice(0, slash);
+  const storedPath = withoutScheme.slice(slash + 1);
+  const storedRegion = new URLSearchParams(query).get('region');
+  return storedBucket === bucketName
+    && storedPath.startsWith(pathPrefix)
+    && storedRegion === region;
+};
+
 /**
  * Identifies the API caller for audit logging and worker tagging. profile.email is an IMS user
  * GUID (GUID@hexOrgId.e), not an RFC-5322 address — see access-control-util.js. Returns 'unknown'
@@ -616,11 +651,10 @@ function LlmoCloudflareController(ctx) {
   };
 
   /**
-   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/logpush
+   * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/logpush
    * Creates the Cloudflare Logpush job that forwards the zone's HTTP request logs into Adobe's
    * cdn-logs S3 bucket (LLMO-5869). `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
-   * supplied as a path param here (unlike addRoute's body-supplied zoneId, per this endpoint's
-   * routing spec).
+   * supplied in the request body (matching addRoute's convention in this same file), not the path.
    *
    * Requires the site to already be provisioned for Cloudflare log forwarding (bucketName /
    * allowedPaths / region on the site's cdnBucketConfig, written by auth-service's provisioning
@@ -696,7 +730,7 @@ function LlmoCloudflareController(ctx) {
       return cfErrorResponse(e, 'logpush job listing', context, { siteId, zoneId });
     }
     const existingJob = (existingJobs || [])
-      .find((job) => job?.destination_conf === destinationConf);
+      .find((job) => sameLogpushDestination(job?.destination_conf, bucketName, pathPrefix, region));
     if (existingJob) {
       log.info(auditLine(context, 'cf-logpush', 'already-exists', { siteId, zoneId }));
       return ok({ created: false, alreadyExisted: true, jobId: existingJob.id });
@@ -710,14 +744,31 @@ function LlmoCloudflareController(ctx) {
       return cfErrorResponse(e, 'logpush ownership challenge', context, { siteId, zoneId });
     }
 
+    // Read the token back, retrying a bounded number of times to absorb the challenge-file
+    // read-after-write race (Cloudflare writes it asynchronously). We re-read the same filename —
+    // we do NOT re-trigger the ownership challenge, which would orphan extra challenge files.
+    const configuredDelay = Number(env.CF_OWNERSHIP_TOKEN_RETRY_DELAY_MS);
+    const retryDelayMs = Number.isFinite(configuredDelay) && configuredDelay >= 0
+      ? configuredDelay
+      : DEFAULT_OWNERSHIP_TOKEN_RETRY_DELAY_MS;
     let ownershipToken;
-    try {
-      ownershipToken = await fetchCloudflareOwnershipToken(context, siteId, filename);
-    } catch (e) {
-      log.error(auditLine(context, 'cf-logpush', 'ownership-token-failed', {
-        siteId, zoneId, error: e.message,
-      }));
-      return createResponse({ message: 'Failed to retrieve the Cloudflare ownership token' }, 502);
+    for (let attempt = 0; attempt <= MAX_OWNERSHIP_TOKEN_RETRIES; attempt += 1) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        ownershipToken = await fetchCloudflareOwnershipToken(context, siteId, filename);
+      } catch (e) {
+        log.error(auditLine(context, 'cf-logpush', 'ownership-token-failed', {
+          siteId, zoneId, error: e.message,
+        }));
+        return createResponse({ message: 'Failed to retrieve the Cloudflare ownership token' }, 502);
+      }
+      if (hasText(ownershipToken) || attempt === MAX_OWNERSHIP_TOKEN_RETRIES) {
+        break;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => {
+        setTimeout(resolve, retryDelayMs);
+      });
     }
     if (!hasText(ownershipToken)) {
       log.error(auditLine(context, 'cf-logpush', 'ownership-token-missing', { siteId, zoneId }));
@@ -754,8 +805,9 @@ function LlmoCloudflareController(ctx) {
       } catch (listErr) {
         return cfErrorResponse(e, 'logpush job creation', context, { siteId, zoneId });
       }
-      const raceJob = (postFailureJobs || [])
-        .find((job) => job?.destination_conf === destinationConf);
+      const raceJob = (postFailureJobs || []).find(
+        (job) => sameLogpushDestination(job?.destination_conf, bucketName, pathPrefix, region),
+      );
       if (raceJob) {
         log.info(auditLine(context, 'cf-logpush', 'conflict-race', { siteId, zoneId }));
         return ok({ created: false, alreadyExisted: true, jobId: raceJob.id });

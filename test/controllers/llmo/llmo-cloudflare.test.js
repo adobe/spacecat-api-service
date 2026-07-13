@@ -123,6 +123,7 @@ describe('LlmoCloudflareController', () => {
       env: {
         CLOUDFLARE_CLIENT_ID: CF_CLIENT_ID,
         AUTH_SERVICE_BASE_URL: 'https://auth.example.com',
+        CF_OWNERSHIP_TOKEN_RETRY_DELAY_MS: '0',
       },
       params: { siteId: SITE_ID, zoneId: ZONE_ID },
       pathInfo: {
@@ -941,6 +942,45 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.createLogpushJob).to.have.been.called;
     });
 
+    it('matches an existing job whose destination_conf Cloudflare normalized (reordered/extra query params)', async () => {
+      // Same bucket + path prefix + region, but query params reordered and an extra param added,
+      // and {DATE} resolved to a concrete date — must still be recognized as ours (idempotent).
+      const normalized = 's3://cdn-logs-adobe-dev/9E1005A551ED61CA0A490D45AdobeOrg/raw/byocdn-cloudflare/20260713?foo=bar&region=us-east-1';
+      mockCfClient.listLogpushJobs.resolves([{ id: 'existing-job', destination_conf: normalized }]);
+
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ created: false, alreadyExisted: true, jobId: 'existing-job' });
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('does NOT match a job in a different region (same bucket/prefix)', async () => {
+      const otherRegion = 's3://cdn-logs-adobe-dev/9E1005A551ED61CA0A490D45AdobeOrg/raw/byocdn-cloudflare/{DATE}?region=eu-west-1';
+      mockCfClient.listLogpushJobs.resolves([{ id: 'eu-job', destination_conf: otherRegion }]);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.createLogpushJob).to.have.been.called;
+    });
+
+    it('treats a malformed destination_conf (no bucket/key separator) as a non-match', async () => {
+      mockCfClient.listLogpushJobs.resolves([{ id: 'bad-job', destination_conf: 's3://no-slash-here' }]);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.createLogpushJob).to.have.been.called;
+    });
+
+    it('falls back to the default retry delay when the env override is unset (token ready first try, no wait)', async () => {
+      delete mockContext.env.CF_OWNERSHIP_TOKEN_RETRY_DELAY_MS;
+      // Token is available on the first read, so no setTimeout fires — the default-delay branch is
+      // computed but never awaited, keeping this test instant.
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.created).to.equal(true);
+      expect(mockFetch).to.have.been.calledOnce;
+    });
+
     it('returns 409 when the site is missing bucketName in its CDN bucket config', async () => {
       mockSite.getConfig = () => ({ getLlmoCdnBucketConfig: () => ({ allowedPaths: ['x/'], region: 'us-east-1' }) });
       const res = await controller.createLogpush(mockContext);
@@ -1053,6 +1093,28 @@ describe('LlmoCloudflareController', () => {
       const res = await controller.createLogpush(mockContext);
       expect(res.status).to.equal(502);
       expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('retries the token read once and succeeds when the challenge file lands on the second attempt', async () => {
+      // First read-back returns no token (challenge file not yet written by Cloudflare); the
+      // bounded retry re-reads the SAME filename (no new ownership challenge) and gets it.
+      mockFetch = sandbox.stub();
+      mockFetch.onFirstCall().resolves({
+        ok: true, status: 200, statusText: 'OK', json: sandbox.stub().resolves({}),
+      });
+      mockFetch.onSecondCall().resolves({
+        ok: true, status: 200, statusText: 'OK', json: sandbox.stub().resolves({ ownershipToken: 'late-token' }),
+      });
+
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ created: true, alreadyExisted: false, jobId: JOB_ID });
+      expect(mockFetch).to.have.been.calledTwice;
+      // The retry must NOT re-trigger the ownership challenge (would orphan challenge files).
+      expect(mockCfClient.requestLogpushOwnership).to.have.been.calledOnce;
+      expect(mockCfClient.createLogpushJob)
+        .to.have.been.calledWith(ZONE_ID, sinon.match({ ownership_challenge: 'late-token' }));
     });
 
     it('recovers from a create-time race by re-listing and returning alreadyExisted:true', async () => {
