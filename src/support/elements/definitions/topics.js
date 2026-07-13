@@ -139,39 +139,41 @@ export function transformOriginsToFilterDimensions(raw) {
 const KNOWN_TAG_PREFIXES = ['topic:', 'category:', 'intent:', 'source:'];
 
 /**
- * Keys already populated on the filter-dimensions result before the dynamic
- * groups are merged in (see `getUrlInspectorFilterDimensions`). A raw tag whose
- * `prefix:` matches one of these verbatim (e.g. `brands:foo`, `regions:APAC`)
- * would otherwise be grouped under that same key and merged into the
- * pre-existing array, corrupting it — so such tags are routed to the generic
- * `tags` bucket instead.
- */
-const RESERVED_RESULT_KEYS = ['brands', 'regions', 'topics', 'categories', 'page_intents', 'origins', 'tags'];
-
-/**
  * Extracts every tag NOT already covered by the known `topic:`/`category:`/
  * `intent:`/`source:` prefixes, so newly-introduced Semrush tag types (e.g.
  * `type:branded`) surface in the response without a code change per prefix.
  *
  * - `prefix:value` tags are grouped by their prefix into a dynamic key
  *   (e.g. `{ type: [{ id: 'type:branded', label: 'branded' }, ...] }`), unless
- *   `prefix` collides with a {@link RESERVED_RESULT_KEYS} entry, in which case
- *   the tag is routed to the generic `tags` array instead.
+ *   `prefix` collides with an entry in `reservedResultKeys`, in which case the
+ *   tag is routed to the generic `tags` array instead.
  * - Plain tags with no `prefix:` at all are also collected into `tags`.
  *
  * `id` is always the original, unmodified tag value as returned by the
  * Elements API. Both forms apply the same `Parent__Child` splitting as the
  * known dimensions to derive `label`/`parent_label`.
  *
+ * Tag prefixes are arbitrary strings from Semrush, so a prefix can legitimately
+ * be `constructor`, `__proto__`, etc. `groups` is created with `Object.create(null)`
+ * (not `{}`) so `groups[prefix]` never resolves to an inherited `Object.prototype`
+ * member for such a prefix — with a plain `{}`, `groups[prefix] ?? []` would
+ * silently return e.g. the `Object` constructor function instead of `undefined`,
+ * and the following `.push(...)` would throw.
+ *
  * @param {object} raw - Raw response from the Elements API.
+ * @param {string[]} [reservedResultKeys] - Keys already populated on the
+ *   caller's result object (see `elements-service.js`) that a raw tag's
+ *   `prefix:` must not collide with. Passed in by the caller — rather than
+ *   hardcoded here — so this stays in sync automatically as the caller's
+ *   result shape changes.
  * @returns {{[prefix: string]: FilterDimensionItem[], tags: FilterDimensionItem[]}}
  */
-export function transformOtherTagsForFilterDimensions(raw) {
+export function transformOtherTagsForFilterDimensions(raw, reservedResultKeys = []) {
   const values = (raw?.blocks?.value ?? [])
     .map((item) => String(item.value ?? ''))
     .filter((value) => value !== '' && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
 
-  const groups = {};
+  const groups = Object.create(null);
   const tags = [];
 
   values.forEach((value) => {
@@ -182,7 +184,7 @@ export function transformOtherTagsForFilterDimensions(raw) {
     }
     const prefix = value.slice(0, sepIdx);
     const rest = value.slice(sepIdx + 1);
-    if (RESERVED_RESULT_KEYS.includes(prefix)) {
+    if (reservedResultKeys.includes(prefix)) {
       tags.push({ id: value, ...splitParent(rest, `${prefix}:`) });
       return;
     }

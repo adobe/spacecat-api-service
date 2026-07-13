@@ -21,6 +21,13 @@ import {
 } from '../../../../src/support/elements/definitions/topics.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 
+// Mirrors the fixed keys elements-service.js's `getUrlInspectorFilterDimensions`
+// builds `result` with, plus the JS-unsafe names it also guards against.
+const RESERVED_RESULT_KEYS = [
+  'brands', 'regions', 'topics', 'categories', 'page_intents', 'origins', 'tags',
+  '__proto__', 'constructor', 'prototype',
+];
+
 const RAW_MIXED = {
   blocks: {
     value: [
@@ -373,7 +380,7 @@ describe('topics definitions', () => {
           ],
         },
       };
-      const result = transformOtherTagsForFilterDimensions(raw);
+      const result = transformOtherTagsForFilterDimensions(raw, RESERVED_RESULT_KEYS);
       expect(result).to.not.have.property('brands');
       expect(result).to.not.have.property('regions');
       expect(result).to.not.have.property('topics');
@@ -394,11 +401,41 @@ describe('topics definitions', () => {
 
     it('reconstructs parent_id with the reserved-key prefix when a colliding tag has a Parent__Child value', () => {
       const raw = { blocks: { value: [{ value: 'topics:Parent__Child' }] } };
-      const result = transformOtherTagsForFilterDimensions(raw);
+      const result = transformOtherTagsForFilterDimensions(raw, RESERVED_RESULT_KEYS);
       expect(result.tags).to.deep.equal([
         {
           id: 'topics:Parent__Child', label: 'Child', parent_id: 'topics:Parent', parent_label: 'Parent',
         },
+      ]);
+    });
+
+    it('does not throw for an Object.prototype-named prefix and does not leak the prototype value', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: 'constructor:evil' },
+            { value: 'toString:evil' },
+            { value: '__proto__:evil' },
+            { value: 'hasOwnProperty:evil' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      const protoKey = ['_', '_', 'proto', '_', '_'].join('');
+      expect(result.constructor).to.deep.equal([{ id: 'constructor:evil', label: 'evil' }]);
+      expect(result.toString).to.deep.equal([{ id: 'toString:evil', label: 'evil' }]);
+      expect(result[protoKey]).to.deep.equal([{ id: `${protoKey}:evil`, label: 'evil' }]);
+      expect(result.hasOwnProperty).to.deep.equal([{ id: 'hasOwnProperty:evil', label: 'evil' }]);
+      expect(Object.getPrototypeOf(result)).to.equal(Object.prototype);
+    });
+
+    it('routes Object.prototype-named prefixes into tags when they are reserved by the caller', () => {
+      const raw = { blocks: { value: [{ value: 'constructor:evil' }, { value: '__proto__:evil' }] } };
+      const result = transformOtherTagsForFilterDimensions(raw, RESERVED_RESULT_KEYS);
+      expect(Object.prototype.hasOwnProperty.call(result, 'constructor')).to.equal(false);
+      expect(result.tags).to.deep.equal([
+        { id: 'constructor:evil', label: 'evil' },
+        { id: '__proto__:evil', label: 'evil' },
       ]);
     });
   });

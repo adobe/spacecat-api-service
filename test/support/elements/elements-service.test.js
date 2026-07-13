@@ -155,6 +155,30 @@ describe('createElementsService', () => {
       await expect(service.getUrlInspectorFilterDimensions('ws-1', {}))
         .to.be.rejectedWith('upstream failure');
     });
+
+    it('does not throw and does not corrupt the result prototype for Object.prototype-named tag prefixes', async () => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.TOPICS, sinon.match.any).resolves({
+        blocks: {
+          value: [
+            { value: 'constructor:evil' },
+            { value: '__proto__:evil' },
+            { value: 'toString:harmless' },
+          ],
+        },
+      });
+      const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
+      // constructor/__proto__ are explicitly reserved (see getUrlInspectorFilterDimensions),
+      // so they're routed into the generic `tags` array rather than becoming their own key.
+      expect(Object.getPrototypeOf(result)).to.equal(Object.prototype);
+      expect(Object.prototype.hasOwnProperty.call(result, 'constructor')).to.equal(false);
+      expect(result.tags).to.deep.equal([
+        { id: 'constructor:evil', label: 'evil' },
+        { id: '__proto__:evil', label: 'evil' },
+      ]);
+      // toString isn't in the reserved list, so it becomes its own dynamic group —
+      // this is safe (a plain data property shadowing the inherited one), just unusual.
+      expect(result.toString).to.deep.equal([{ id: 'toString:harmless', label: 'harmless' }]);
+    });
   });
 
   describe('getPrompts', () => {
