@@ -57,7 +57,8 @@ export async function notifyOnboarding(env, payload) {
       body: JSON.stringify(buildMessage(payload)),
     });
   } catch (e) {
-    throw new ErrorWithStatusCode(`onboarding notification failed: ${e.message}`, 502);
+    const reason = e.code || e.name || 'network error';
+    throw new ErrorWithStatusCode(`onboarding notification failed: ${reason}`, 502);
   }
 
   if (!response.ok) {
