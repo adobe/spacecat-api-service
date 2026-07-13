@@ -181,13 +181,6 @@ function makeContext(overrides = {}) {
       warn: sinon.stub(),
       error: sinon.stub(),
     },
-    // smClient is injected by smClientWrapper middleware in production.
-    sm: {
-      smClient: {
-        getSecretValue: sinon.stub().resolves({}),
-        putSecretValue: sinon.stub().resolves({}),
-      },
-    },
     // AccessControlUtil.fromContext() requires pathInfo.headers and attributes.authInfo.
     // Default to an admin identity so hasAccess() returns true without any DB lookups.
     pathInfo: { method: 'GET', suffix: '/', headers: {} },
@@ -201,6 +194,14 @@ describe('TaskManagementController', () => {
 
   beforeEach(async () => {
     TaskManagementController = (await esmock('../../src/controllers/task-management.js', {
+      '@aws-sdk/client-secrets-manager': {
+        SecretsManagerClient: class {
+          // eslint-disable-next-line class-methods-use-this
+          send() { return Promise.resolve({}); }
+        },
+        GetSecretValueCommand: class {},
+        PutSecretValueCommand: class {},
+      },
       '@adobe/spacecat-shared-ticket-client': {
         TicketClientFactory: {
           create: sinon.stub().returns({

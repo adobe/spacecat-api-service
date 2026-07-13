@@ -12,6 +12,11 @@
 
 import { createHash } from 'node:crypto';
 import {
+  GetSecretValueCommand,
+  PutSecretValueCommand,
+  SecretsManagerClient,
+} from '@aws-sdk/client-secrets-manager';
+import {
   badRequest,
   created,
   createResponse,
@@ -93,7 +98,7 @@ function TaskManagementController(context) {
     throw new Error('Context required');
   }
 
-  const { dataAccess, log, sm } = context;
+  const { dataAccess, log } = context;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -123,9 +128,13 @@ function TaskManagementController(context) {
     throw new Error('Organization collection not available');
   }
 
-  // smClient is the v2-style adapter injected by smClientWrapper middleware.
+  // SecretsManagerClient is constructed here for v1 simplicity.
   // ticket-client's OAuthCredentialManager requires .getSecretValue / .putSecretValue.
-  const { smClient } = sm;
+  const rawSmClient = new SecretsManagerClient();
+  const smClient = {
+    getSecretValue: (params) => rawSmClient.send(new GetSecretValueCommand(params)),
+    putSecretValue: (params) => rawSmClient.send(new PutSecretValueCommand(params)),
+  };
 
   // Wrap global fetch so TicketClientFactory receives the expected { fetch } interface.
   // fetch is available globally in Node 18+ (Lambda runtime).
