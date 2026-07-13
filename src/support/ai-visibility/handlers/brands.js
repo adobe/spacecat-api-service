@@ -587,12 +587,11 @@ export async function handleBrandTopBrands(sp, clients) {
   const topBrandsSortBy = sp.get('sortBy')?.trim()?.toUpperCase() === 'NAME' ? 'NAME' : 'MENTIONS';
   const topBrandsSortAsc = sp.get('sortDirection')?.trim()?.toUpperCase() === 'ASC';
   const llmSingle = optionalLlmFromQuery(sp);
-  // The truncated fetch window is only correct when the final order matches the gRPC
-  // client's native mentions-desc order. For NAME or ascending sorts we must fetch the
-  // full set (1000 cap) so the JS sort + slice paginates over the whole dataset.
-  const nativeMentionsDescOrder = topBrandsSortBy === 'MENTIONS' && !topBrandsSortAsc;
-  const minForSlice = offset + limit + 1;
-  const fetchN = (offset === 0 || !nativeMentionsDescOrder) ? 1000 : Math.min(1000, minForSlice);
+  // There is no dedicated count call on the brand gRPC client for top-brands, so the
+  // returned `total` is the size of what we fetch. Always fetch the full set (1000 cap)
+  // regardless of offset/sort so `total` is stable across pages — a page-dependent window
+  // makes the pager's page-count shift as the user pages forward.
+  const fetchN = 1000;
   const brandDomain = domain.replace(/^www\./, '').toLowerCase();
   const listArgs = { country, brandDomain, limit: fetchN };
 

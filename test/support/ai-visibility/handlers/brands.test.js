@@ -1107,10 +1107,12 @@ describe('AI Visibility – brands handlers', () => {
       expect(clients.brandClient.topBrandsByDomain.firstCall.args[0].limit).to.equal(1000);
     });
 
-    it('uses a truncated fetch window for the default mentions-desc order with an offset', async () => {
+    it('fetches the full set (not a truncated window) for the default mentions-desc order with an offset', async () => {
       clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
       await handleBrandTopBrands(new URLSearchParams('domain=example.com&offset=10&limit=10'), clients);
-      expect(clients.brandClient.topBrandsByDomain.firstCall.args[0].limit).to.equal(21);
+      // Always fetch the full set so `total` is stable across pages — the returned total
+      // is the fetched-list length, so a truncated window would report a page-dependent total.
+      expect(clients.brandClient.topBrandsByDomain.firstCall.args[0].limit).to.equal(1000);
     });
 
     it('returns 200 with brands list', async () => {
