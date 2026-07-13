@@ -12409,3 +12409,120 @@ StateGrantedCapability:
   example: llmo/can_view
   pattern: '^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$'
 
+# ── Task Management schemas ────────────────────────────────────────────────────
+
+TaskManagementConnection:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+    organizationId:
+      $ref: '#/Id'
+    provider:
+      type: string
+      enum: [jira_cloud]
+    status:
+      type: string
+      enum: [active, requires_reauth, revoked]
+    displayName:
+      type: string
+    instanceUrl:
+      type: string
+      format: uri
+    connectedBy:
+      type: string
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+Ticket:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+    organizationId:
+      $ref: '#/Id'
+    connectionId:
+      $ref: '#/Id'
+    opportunityId:
+      type: string
+    ticketKey:
+      type: string
+      example: 'PROJ-42'
+    ticketUrl:
+      type: string
+      format: uri
+    ticketStatus:
+      type: string
+    ticketProvider:
+      type: string
+      enum: [jira_cloud]
+    suggestions:
+      type: array
+      items:
+        type: string
+      description: Logical suggestion IDs linked to this ticket
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+TicketAttachment:
+  type: object
+  required: [content, mimeType, filename]
+  properties:
+    content:
+      type: string
+      format: byte
+      description: Base64-encoded file content
+    mimeType:
+      type: string
+      enum: [image/png, image/jpeg, image/gif, image/webp, application/pdf, text/csv, text/plain]
+    filename:
+      type: string
+      maxLength: 255
+
+TicketCreateRequest:
+  type: object
+  required: [connectionId, projectKey, summary]
+  properties:
+    connectionId:
+      $ref: '#/Id'
+    projectKey:
+      type: string
+    projectId:
+      type: string
+      description: Numeric Jira project ID
+    issueTypeId:
+      type: string
+    summary:
+      type: string
+      maxLength: 255
+    description:
+      type: string
+    labels:
+      type: array
+      items:
+        type: string
+    mode:
+      type: string
+      enum: [individual, grouped]
+      default: individual
+    suggestionIds:
+      type: array
+      items:
+        type: string
+      maxItems: 1500
+    opportunityId:
+      type: string
+    attachments:
+      type: array
+      items:
+        $ref: '#/TicketAttachment'
+      maxItems: 10
+
