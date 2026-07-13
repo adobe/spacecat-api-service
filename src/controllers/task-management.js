@@ -31,7 +31,9 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { TaskManagementConnectionDto } from '../dto/task-management-connection.js';
 import { TicketDto } from '../dto/ticket.js';
 
-// Accepts any UUID version (matches the gateway's isValidUUIDAnyVersion check).
+// Accepts any well-formed UUID (relaxed: any hex in version/variant positions).
+// The gateway's isValidUUIDAnyVersion enforces this pattern upstream, so only
+// structurally valid UUIDs reach the controller.
 const UUID_ANY_VERSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isValidUUIDAnyVersion = (v) => UUID_ANY_VERSION_RE.test(v);
 
