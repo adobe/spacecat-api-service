@@ -342,5 +342,39 @@ describe('topics definitions', () => {
       const result = transformOtherTagsForFilterDimensions(raw);
       expect(result.tags).to.deep.equal([{ id: null, label: 'abc' }]);
     });
+
+    it('routes tags whose prefix collides with a reserved result key into tags instead of a dynamic group', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: 'brands:foo' },
+            { value: 'regions:APAC' },
+            { value: 'topics:x' },
+            { value: 'categories:x' },
+            { value: 'page_intents:x' },
+            { value: 'origins:x' },
+            { value: 'tags:x' },
+            { value: 'type:branded' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result).to.not.have.property('brands');
+      expect(result).to.not.have.property('regions');
+      expect(result).to.not.have.property('topics');
+      expect(result).to.not.have.property('categories');
+      expect(result).to.not.have.property('page_intents');
+      expect(result).to.not.have.property('origins');
+      expect(result.type).to.deep.equal([{ id: null, label: 'branded' }]);
+      expect(result.tags).to.deep.equal([
+        { id: null, label: 'foo' },
+        { id: null, label: 'APAC' },
+        { id: null, label: 'x' },
+        { id: null, label: 'x' },
+        { id: null, label: 'x' },
+        { id: null, label: 'x' },
+        { id: null, label: 'x' },
+      ]);
+    });
   });
 });

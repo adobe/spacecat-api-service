@@ -109,13 +109,25 @@ export function transformOriginsToFilterDimensions(raw) {
 const KNOWN_TAG_PREFIXES = ['topic:', 'category:', 'intent:', 'source:'];
 
 /**
+ * Keys already populated on the filter-dimensions result before the dynamic
+ * groups are merged in (see `getUrlInspectorFilterDimensions`). A raw tag whose
+ * `prefix:` matches one of these verbatim (e.g. `brands:foo`, `regions:APAC`)
+ * would otherwise be grouped under that same key and merged into the
+ * pre-existing array, corrupting it — so such tags are routed to the generic
+ * `tags` bucket instead.
+ */
+const RESERVED_RESULT_KEYS = ['brands', 'regions', 'topics', 'categories', 'page_intents', 'origins', 'tags'];
+
+/**
  * Extracts every tag NOT already covered by the known `topic:`/`category:`/
  * `intent:`/`source:` prefixes, so newly-introduced Semrush tag types (e.g.
  * `type:branded`) surface in the response without a code change per prefix.
  *
  * - `prefix:value` tags are grouped by their prefix into a dynamic key
- *   (e.g. `{ type: [{ id: null, label: 'branded' }, ...] }`).
- * - Plain tags with no `prefix:` at all are collected into a generic `tags` array.
+ *   (e.g. `{ type: [{ id: null, label: 'branded' }, ...] }`), unless `prefix`
+ *   collides with a {@link RESERVED_RESULT_KEYS} entry, in which case the tag
+ *   is routed to the generic `tags` array instead.
+ * - Plain tags with no `prefix:` at all are also collected into `tags`.
  *
  * Both forms apply the same `Parent__Child` splitting as the known dimensions.
  *
@@ -138,6 +150,10 @@ export function transformOtherTagsForFilterDimensions(raw) {
     }
     const prefix = value.slice(0, sepIdx);
     const rest = value.slice(sepIdx + 1);
+    if (RESERVED_RESULT_KEYS.includes(prefix)) {
+      tags.push({ id: null, ...splitParent(rest) });
+      return;
+    }
     groups[prefix] = groups[prefix] ?? [];
     groups[prefix].push({ id: null, ...splitParent(rest) });
   });

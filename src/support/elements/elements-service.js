@@ -77,7 +77,7 @@ export function createElementsService(transport) {
       Object.entries(otherGroups).forEach(([key, items]) => {
         result[key] = result[key] ? [...result[key], ...items] : items;
       });
-      result.tags = tags;
+      result.tags = result.tags ? [...result.tags, ...tags] : tags;
       return result;
     },
 
