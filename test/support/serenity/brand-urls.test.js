@@ -410,6 +410,43 @@ describe('brand-urls helpers', () => {
       expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 1 });
     });
 
+    it('diffs against the DRAFT view, so a removal still lands on an unpublished project', async () => {
+      // A brand URL is written into the project's DRAFT; only a publish promotes it
+      // into the published view. `republishBestEffort` swallows a quota 405, which
+      // leaves the project unpublished — so the published view reports an EMPTY set
+      // while the draft holds the rows. Diffing the published view there would make
+      // `toDelete` empty and a user's removal would silently never reach Semrush.
+      const sources = { urls: ['https://acme.com'] };
+      const listBrandUrls = sandbox.stub();
+      // Published view: stale/empty (the pending rows are invisible to it).
+      listBrandUrls.withArgs(WS, 'p-us', BID).resolves({ brand_urls: [] });
+      // Draft view: the true pending state the sync must converge.
+      listBrandUrls.withArgs(WS, 'p-us', BID, { draft: true }).resolves({
+        brand_urls: [
+          { id: 'keep', url: 'https://acme.com' },
+          { id: 'stale', url: 'https://old.com' }, // removed by the user
+        ],
+      });
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls,
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        // The republish quota-405 that strands the project as a draft in the first place.
+        publishProject: sandbox.stub().rejects(new SerenityTransportError(405, 'quota')),
+      };
+
+      const result = await syncBrandUrlsAcrossMarkets(transport, sources, WS, undefined);
+
+      // Read the draft, not the published view.
+      expect(listBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, { draft: true });
+      // The removal lands, and the already-present URL is NOT re-submitted.
+      expect(transport.deleteBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, ['stale']);
+      expect(transport.createBrandUrls).to.not.have.been.called;
+      expect(result).to.deep.equal({ markets: 1, created: 0, deleted: 1 });
+    });
+
     it('skips the project primary-domain website (benchmark already holds it)', async () => {
       // The project's own domain is the primary — its own-brand website URL is
       // dropped so it does not double-list the benchmark (#25). Socials stay.

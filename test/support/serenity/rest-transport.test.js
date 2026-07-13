@@ -501,7 +501,7 @@ describe('Semrush REST transport', () => {
       expect(call.body).to.equal(undefined);
     });
 
-    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls', async () => {
+    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls (published view by default)', async () => {
       fetchStub.resolves(fetchOk({ brand_urls: [] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -509,7 +509,19 @@ describe('Semrush REST transport', () => {
 
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
+      // No `draft` query → the default (published) view.
       expect(call.url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+    });
+
+    it('listBrandUrls sends ?draft=true when the draft view is requested', async () => {
+      fetchStub.resolves(fetchOk({ brand_urls: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID, { draft: true });
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls\?draft=true$/);
     });
 
     it('createBrandUrls POSTs the entries array as the body', async () => {
