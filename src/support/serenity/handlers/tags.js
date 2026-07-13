@@ -402,7 +402,7 @@ export async function handleCreateTag(
     return {
       status: 200,
       body: {
-        brandId, geoTargetId, languageCode, type, name, id, parentId: rootId ?? null, created,
+        brandId, geoTargetId, languageCode, type, name, id, parentId: rootId, created,
       },
     };
   }
@@ -491,7 +491,7 @@ export async function handleCreateTagSubworkspace(
     return {
       status: 200,
       body: {
-        geoTargetId, languageCode, type, name, id, parentId: rootId ?? null, created,
+        geoTargetId, languageCode, type, name, id, parentId: rootId, created,
       },
     };
   }
