@@ -12,7 +12,8 @@
 
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { reassignSiteOrganization } from '../../../controllers/plg/plg-onboarding/entitlement.js';
+import { reparentSiteProject } from './set-ims-org-modal.js';
+import { createSayFunction } from './entitlement-modal-utils.js';
 
 /**
  * Binds a site enrollment to the target org's existing ASO entitlement, without
@@ -50,7 +51,9 @@ async function bindAsoSiteEnrollment(site, targetOrg, lambdaContext) {
  *
  * Re-validates the move (state may have changed since the button was posted), revokes
  * all of the site's existing product enrollments (any product code — not just ASO),
- * reassigns the site's organization, bumps the target org's ASO entitlement to
+ * reassigns the site's organization (re-parenting its project too, via
+ * reparentSiteProject, so the site doesn't end up pointing at a project still owned
+ * by the old org — see SITES-46200), bumps the target org's ASO entitlement to
  * PRE_ONBOARD if it's currently FREE_TRIAL or PLG, and binds a fresh ASO site
  * enrollment to it.
  */
@@ -62,8 +65,9 @@ export function openMovePlgSiteModal(lambdaContext) {
     await ack();
 
     const {
-      baseURL, siteId, imsOrgId, organizationId, channelId, messageTs,
+      baseURL, siteId, imsOrgId, organizationId, channelId, threadTs, messageTs,
     } = JSON.parse(body.actions[0].value);
+    const say = createSayFunction(client, channelId, threadTs);
 
     const updateMessage = async (text) => client.chat.update({
       channel: channelId,
@@ -115,6 +119,10 @@ export function openMovePlgSiteModal(lambdaContext) {
         log.info(`Set ASO entitlement to PRE_ONBOARD for org ${organizationId} (was ${currentTier || 'none'})`);
       }
 
+      // Revokes every enrollment regardless of product (ASO/LLMO/ACO): only ASO is
+      // re-bound below, so any LLMO/ACO entitlement on the target org is intentionally
+      // not carried over. This flow is scoped to ASO moves; re-enable other products
+      // manually post-move if the target org already has them.
       if (siteEnrollments && siteEnrollments.length > 0) {
         await Promise.all(siteEnrollments.map(async (enrollment) => {
           log.info(`Revoking enrollment ${enrollment.getId()} for site ${siteId} before org move`);
@@ -122,7 +130,22 @@ export function openMovePlgSiteModal(lambdaContext) {
         }));
       }
 
-      await reassignSiteOrganization(site, organizationId);
+      // Multi-step write sequence (revoke -> reassign org/project -> bind ASO
+      // enrollment); not transactional. A failure partway through leaves the site in
+      // an inconsistent state (e.g. enrollments revoked but org unchanged, or org
+      // changed but no enrollment bound yet) that requires manual recovery — the
+      // confirm-button gate limits how often this path is exercised, but it is not
+      // retried automatically.
+      //
+      // The tier/enrollment checks above were re-validated on this click, but nothing
+      // locks the target org between that check and this write — a concurrent change
+      // (e.g. another admin flipping the tier to PAID) in this window can still race in.
+      site.setOrganizationId(organizationId);
+      await reparentSiteProject({
+        site, targetOrgId: organizationId, baseURL, lambdaContext, say,
+      });
+      await site.save();
+
       const { entitlement } = await bindAsoSiteEnrollment(site, targetOrg, lambdaContext);
 
       await updateMessage(

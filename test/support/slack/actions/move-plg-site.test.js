@@ -24,7 +24,7 @@ describe('openMovePlgSiteModal action', () => {
   let entitlementStub;
   let siteEnrollmentStub;
   let lambdaContext;
-  let reassignSiteOrganizationStub;
+  let reparentSiteProjectStub;
   let createEntitlementStub;
   let checkValidEntitlementStub;
   let tierClientCreateForOrgStub;
@@ -48,7 +48,7 @@ describe('openMovePlgSiteModal action', () => {
       create: sinon.stub().resolves({ getId: () => 'new-enrollment' }),
     };
 
-    reassignSiteOrganizationStub = sinon.stub().resolves();
+    reparentSiteProjectStub = sinon.stub().resolves();
     createEntitlementStub = sinon.stub().resolves({ entitlement: { getTier: () => 'PRE_ONBOARD' } });
     checkValidEntitlementStub = sinon.stub().resolves({
       entitlement: { getId: () => 'ent-1', getTier: () => 'PRE_ONBOARD' },
@@ -59,8 +59,8 @@ describe('openMovePlgSiteModal action', () => {
     });
 
     openMovePlgSiteModal = (await esmock('../../../../src/support/slack/actions/move-plg-site.js', {
-      '../../../../src/controllers/plg/plg-onboarding/entitlement.js': {
-        reassignSiteOrganization: reassignSiteOrganizationStub,
+      '../../../../src/support/slack/actions/set-ims-org-modal.js': {
+        reparentSiteProject: reparentSiteProjectStub,
       },
       '@adobe/spacecat-shared-tier-client': { default: { createForOrg: tierClientCreateForOrgStub } },
     })).default;
@@ -79,6 +79,8 @@ describe('openMovePlgSiteModal action', () => {
   const makeSite = (overrides = {}) => ({
     getId: () => 'site-123',
     getSiteEnrollments: sinon.stub().resolves([]),
+    setOrganizationId: sinon.stub(),
+    save: sinon.stub().resolves(),
     ...overrides,
   });
 
@@ -87,7 +89,12 @@ describe('openMovePlgSiteModal action', () => {
   const invoke = async (value = VALUE) => {
     const handler = openMovePlgSiteModal(lambdaContext);
     const ack = sinon.stub().resolves();
-    const client = { chat: { update: sinon.stub().resolves() } };
+    const client = {
+      chat: {
+        update: sinon.stub().resolves(),
+        postMessage: sinon.stub().resolves(),
+      },
+    };
     const body = { actions: [{ value: JSON.stringify(value) }] };
     await handler({ ack, body, client });
     return { ack, client };
@@ -116,7 +123,7 @@ describe('openMovePlgSiteModal action', () => {
 
   it('revokes existing ASO enrollments before reassigning the org', async () => {
     const removeStub = sinon.stub().resolves();
-    siteStub.findById.resolves(makeSite({
+    const site = makeSite({
       getSiteEnrollments: sinon.stub().resolves([
         {
           getId: () => 'enrollment-1',
@@ -124,7 +131,8 @@ describe('openMovePlgSiteModal action', () => {
           remove: removeStub,
         },
       ]),
-    }));
+    });
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
     entitlementStub.allByOrganizationId.resolves([
       { getProductCode: () => 'ASO', getTier: () => 'PRE_ONBOARD' },
@@ -133,14 +141,15 @@ describe('openMovePlgSiteModal action', () => {
     await invoke();
 
     expect(removeStub).to.have.been.calledOnce;
-    expect(reassignSiteOrganizationStub).to.have.been.calledOnce;
-    expect(removeStub.calledBefore(reassignSiteOrganizationStub)).to.be.true;
+    expect(site.setOrganizationId).to.have.been.calledOnceWith('org-new');
+    expect(site.save).to.have.been.calledOnce;
+    expect(removeStub.calledBefore(site.save)).to.be.true;
   });
 
   it('revokes non-ASO enrollments too before reassigning the org', async () => {
     const removeAso = sinon.stub().resolves();
     const removeLlmo = sinon.stub().resolves();
-    siteStub.findById.resolves(makeSite({
+    const site = makeSite({
       getSiteEnrollments: sinon.stub().resolves([
         {
           getId: () => 'enrollment-aso',
@@ -153,7 +162,8 @@ describe('openMovePlgSiteModal action', () => {
           remove: removeLlmo,
         },
       ]),
-    }));
+    });
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
     entitlementStub.allByOrganizationId.resolves([
       { getProductCode: () => 'ASO', getTier: () => 'PRE_ONBOARD' },
@@ -163,11 +173,12 @@ describe('openMovePlgSiteModal action', () => {
 
     expect(removeAso).to.have.been.calledOnce;
     expect(removeLlmo).to.have.been.calledOnce;
-    expect(reassignSiteOrganizationStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
   });
 
   it('rejects if the target org now has a PAID entitlement', async () => {
-    siteStub.findById.resolves(makeSite());
+    const site = makeSite();
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
     entitlementStub.allByOrganizationId.resolves([
       { getProductCode: () => 'ASO', getTier: () => 'PAID' },
@@ -175,11 +186,12 @@ describe('openMovePlgSiteModal action', () => {
     const { client } = await invoke();
     const updateCall = client.chat.update.getCall(0);
     expect(updateCall.args[0].text).to.match(/PAID entitlement/);
-    expect(reassignSiteOrganizationStub).to.not.have.been.called;
+    expect(site.save).to.not.have.been.called;
   });
 
   it('sets FREE_TRIAL to PRE_ONBOARD before reassigning and binding the enrollment', async () => {
-    siteStub.findById.resolves(makeSite());
+    const site = makeSite();
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
     entitlementStub.allByOrganizationId.resolves([
       { getProductCode: () => 'ASO', getTier: () => 'FREE_TRIAL' },
@@ -189,7 +201,7 @@ describe('openMovePlgSiteModal action', () => {
 
     expect(tierClientCreateForOrgStub).to.have.been.called;
     expect(createEntitlementStub).to.have.been.calledWith('PRE_ONBOARD');
-    expect(reassignSiteOrganizationStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
     expect(checkValidEntitlementStub).to.have.been.calledOnce;
 
     const updateCall = client.chat.update.getCall(0);
@@ -198,7 +210,8 @@ describe('openMovePlgSiteModal action', () => {
   });
 
   it('sets PLG to PRE_ONBOARD before reassigning and binding the enrollment', async () => {
-    siteStub.findById.resolves(makeSite());
+    const site = makeSite();
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
     entitlementStub.allByOrganizationId.resolves([
       { getProductCode: () => 'ASO', getTier: () => 'PLG' },
@@ -207,22 +220,24 @@ describe('openMovePlgSiteModal action', () => {
     await invoke();
 
     expect(createEntitlementStub).to.have.been.calledWith('PRE_ONBOARD');
-    expect(reassignSiteOrganizationStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
   });
 
   it('sets a missing entitlement to PRE_ONBOARD before reassigning and binding the enrollment', async () => {
-    siteStub.findById.resolves(makeSite());
+    const site = makeSite();
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
     entitlementStub.allByOrganizationId.resolves([]);
 
     await invoke();
 
     expect(createEntitlementStub).to.have.been.calledWith('PRE_ONBOARD');
-    expect(reassignSiteOrganizationStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
   });
 
   it('skips the entitlement bump when target org is already PRE_ONBOARD', async () => {
-    siteStub.findById.resolves(makeSite());
+    const site = makeSite();
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
     entitlementStub.allByOrganizationId.resolves([
       { getProductCode: () => 'ASO', getTier: () => 'PRE_ONBOARD' },
@@ -231,8 +246,28 @@ describe('openMovePlgSiteModal action', () => {
     await invoke();
 
     expect(createEntitlementStub).to.not.have.been.called;
-    expect(reassignSiteOrganizationStub).to.have.been.calledOnce;
+    expect(site.save).to.have.been.calledOnce;
     expect(checkValidEntitlementStub).to.have.been.calledOnce;
+  });
+
+  it('re-parents the site project so it stays visible under the target org', async () => {
+    const site = makeSite();
+    siteStub.findById.resolves(site);
+    organizationStub.findById.resolves(makeOrg());
+    entitlementStub.allByOrganizationId.resolves([
+      { getProductCode: () => 'ASO', getTier: () => 'PRE_ONBOARD' },
+    ]);
+
+    await invoke();
+
+    expect(reparentSiteProjectStub).to.have.been.calledOnce;
+    const callArgs = reparentSiteProjectStub.getCall(0).args[0];
+    expect(callArgs.site).to.equal(site);
+    expect(callArgs.targetOrgId).to.equal('org-new');
+    expect(callArgs.baseURL).to.equal('https://example.com');
+    expect(callArgs.lambdaContext).to.equal(lambdaContext);
+    expect(callArgs.say).to.be.a('function');
+    expect(reparentSiteProjectStub.calledBefore(site.save)).to.be.true;
   });
 
   it('reuses an existing site enrollment for the entitlement instead of creating a new one', async () => {
@@ -266,10 +301,10 @@ describe('openMovePlgSiteModal action', () => {
     });
   });
 
-  it('reports failure when reassignment throws', async () => {
-    siteStub.findById.resolves(makeSite());
+  it('reports failure when reparenting/saving throws', async () => {
+    const site = makeSite({ save: sinon.stub().rejects(new Error('db down')) });
+    siteStub.findById.resolves(site);
     organizationStub.findById.resolves(makeOrg());
-    reassignSiteOrganizationStub.rejects(new Error('db down'));
 
     const { client } = await invoke();
     const updateCall = client.chat.update.getCall(0);
