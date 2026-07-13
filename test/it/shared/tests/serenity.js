@@ -11,7 +11,9 @@
  */
 
 import { expect } from 'chai';
-import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
+import {
+  ORG_1_ID, BRAND_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
+} from '../seed-ids.js';
 
 /**
  * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
@@ -53,7 +55,12 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  *     `publish_status` -> `live`. Pinned by the bumped client deps, so it runs
  *     unconditionally.
  */
-export default function serenityTests(getHttpClient, resetData, resetMocks = async () => {}) {
+export default function serenityTests(
+  getHttpClient,
+  resetData,
+  resetMocks = async () => {},
+  mockControls = {},
+) {
   // Seed the baseline org/brand rows the catalog + brand-resolution tests read.
   // (The route-gate cases fire before any DB access, but the org-level reads
   // need ORG_1 present.) Mirrors every other postgres factory.
@@ -558,6 +565,74 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       );
       expect(list.status).to.equal(200);
       expect(list.body.items.filter((p) => p.text === text)).to.have.lengthOf(1);
+    });
+  });
+
+  // Dynamic-allocation kill-switch ON — drives the JIT top-up FRONTING end-to-end against the live
+  // metered User Manager mock (Rainer's review item #4). ORG_1 carries a parent workspace
+  // (SERENITY_ORG_PARENT_WS_ID) so BRAND_1's sub-workspace resolves a non-null parent id and
+  // the guard engages; the flag is a global env kill-switch read per request, toggled here around
+  // the block. The `__quota` / `__dump` mock control routes are injected by the postgres harness.
+  describe('Serenity API — dynamic allocation ON (metered JIT via the live UM mock)', () => {
+    const { setUmMockQuota, dumpUmMock } = mockControls;
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+    const US_GEO = 2840;
+    const CHILD = SERENITY_MOCK_WORKSPACE_ID; // BRAND_1's sub-workspace (the metered child)
+    const PARENT = SERENITY_ORG_PARENT_WS_ID; // ORG_1's parent workspace (advisory units pool)
+
+    const childTotal = (dump, dim) => {
+      const rec = (dump.workspace_resources || []).find((r) => r.id === CHILD);
+      return rec?.ai?.[dim]?.total;
+    };
+
+    // Skip cleanly if a wiring didn't inject the mock control routes (only the postgres harness has
+    // the live containers); this keeps the shared factory usable by any future non-metered wiring.
+    before(function skipWithoutMockControls() {
+      if (typeof setUmMockQuota !== 'function' || typeof dumpUmMock !== 'function') {
+        this.skip();
+      }
+    });
+
+    beforeEach(async () => {
+      await resetData();
+      await resetMocks();
+      process.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
+      // Parent (units pool) amply provisioned; child seeded at ZERO total so a metered write must
+      // top it up. Both metered so the allocator's strict /resources reads resolve.
+      await setUmMockQuota(PARENT, { projects: 100, prompts: 100000 });
+      await setUmMockQuota(CHILD, {
+        projects: { used: 0, drafted: 0, total: 0 },
+        prompts: { used: 0, drafted: 0, total: 0 },
+      });
+    });
+
+    afterEach(() => {
+      delete process.env.SERENITY_DYNAMIC_ALLOCATION;
+    });
+
+    it('tops up the sub-workspace via a live /resources transfer when a metered write needs headroom', async () => {
+      // create-market fronts PROJECT headroom before createProject: from a seeded 0 total the guard
+      // tops the child up to a whole block (>=1) with a REAL /resources transfer to the mock, then
+      // creates + publishes the project.
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+
+      // Positive proof the flag-ON JIT engaged end-to-end over the wire: the child's PROJECT total
+      // grew from the seeded 0 via a live transfer. A flag-OFF run never fronts/transfers, so it
+      // would still read 0 — asserting the top-up AND that the kill-switch env toggle took effect
+      // for the request. (The prompt dimension's `texts × models` sizing is covered by the
+      // resource-manager unit tests; here the project carve is the decisive over-the-wire signal.)
+      const dump = await dumpUmMock();
+      expect(childTotal(dump, 'projects'), 'projects topped up from 0 via a live transfer')
+        .to.be.greaterThan(0);
+
+      // Smoke: the prompt write path also runs cleanly under the flag (fronts, then publishes).
+      const post = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{ text: 'best trail running shoes?', geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(post.status).to.equal(200);
     });
   });
 }

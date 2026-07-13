@@ -66,6 +66,15 @@ export const BP_PROMPT_1_INTENT = 'informational';
 export const SERENITY_MOCK_WORKSPACE_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
 export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
 
+// Org-level parent workspace for ORG_1, so a subworkspace brand resolves a non-null
+// `parentWorkspaceId` — the condition the dynamic-allocation JIT guard needs to engage, and the
+// workspace whose `/resources` the allocator reads as the advisory pool gauge when a top-up fires.
+// Set to the `parent-with-child` UM-mock seed's CHILD workspace id: an EXISTING mock workspace
+// (distinct from BRAND_1's sub-workspace SERENITY_MOCK_WORKSPACE_ID) that the flag-ON IT meters via
+// `__quota` so the advisory read resolves. (Its role in the mock seed is irrelevant here — the IT
+// only needs a real, metable workspace to stand in as the units pool.)
+export const SERENITY_ORG_PARENT_WS_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
+
 // ── FACS state-layer managers (hybrid-model §8.3) ──
 // The brandManager persona holds state-layer `llmo/can_manage_users` on
 // MANAGED_BRAND_ID only (seeded in facs-access-mappings.js). It has an EMPTY
