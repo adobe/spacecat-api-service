@@ -138,7 +138,13 @@ describe('Preflight Controller', () => {
       findLatest: sandbox.stub().resolves(mockConfiguration),
     },
     Organization: {
-      findById: sandbox.stub().resolves({ getId: () => 'org-123' }),
+      findById: sandbox.stub().resolves({
+        getId: () => 'org-123',
+        // SITES-48037: createPreflight threads imsOrgId to mysticat and rejects
+        // when it's missing/empty (500). Default the stub to a valid value; per-test
+        // overrides in the "missing imsOrgId" cases stub it to '' / null.
+        getImsOrgId: () => 'TEST123456@AdobeOrg',
+      }),
     },
     Preflight: {
       create: sandbox.stub().resolves(mockPreflight),
@@ -1141,6 +1147,13 @@ describe('Preflight Controller', () => {
       mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
       mockDataAccess.Site.findByPreviewURL = sandbox.stub().resolves(mockSite);
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
+      // SITES-48037: createPreflight resolves imsOrgId via Organization.findById.
+      // Re-stub per test to keep the fail-closed cases (null org / null imsOrgId)
+      // from leaking into subsequent tests via a shared sandbox.
+      mockDataAccess.Organization.findById = sandbox.stub().resolves({
+        getId: () => 'org-123',
+        getImsOrgId: () => 'TEST123456@AdobeOrg',
+      });
       hasAccessStub = sandbox.stub().resolves(true);
 
       // SITES-43236 / SITES-46699: createPreflight constructs a custom-env
@@ -1619,6 +1632,74 @@ describe('Preflight Controller', () => {
       expect(preflightBody.preflightId).to.be.a('string');
     });
 
+    // -- SITES-48037: ims_org_id threading & fail-closed contract --
+
+    it('threads ims_org_id into the mysticat analyze body (SITES-48037)', async () => {
+      // Mysticat requires this in the payload to bypass DRS's cross-org S2S
+      // auto-resolution (SITES-47943 RCA). Spacecat is the source of truth
+      // and threads the value verbatim from Organization.getImsOrgId().
+      await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.ims_org_id).to.equal('TEST123456@AdobeOrg');
+      expect(mockDataAccess.Organization.findById).to.have.been.calledWith('org-123');
+    });
+
+    it('returns 500 when the Organization has no imsOrgId (SITES-48037 fail-closed)', async () => {
+      // Empty imsOrgId cannot be forwarded to mysticat (which now rejects the
+      // request without it). Fail here where the log line can name the site
+      // and organization; deferring the same failure by one hop to mysticat's
+      // 422 wouldn't add diagnostic value.
+      mockDataAccess.Organization.findById.resolves({
+        getId: () => 'org-123',
+        getImsOrgId: () => '',
+      });
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Site organization is missing imsOrgId');
+      // Never reached the mysticat call.
+      expect(fetchStub.secondCall).to.be.null;
+    });
+
+    it('returns 500 when Organization.findById throws (SITES-48037)', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('db down'));
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Failed to resolve site organization');
+    });
+
+    it('returns 500 when Organization.findById returns null (SITES-48037)', async () => {
+      // Site row exists but its Organization row was deleted / never existed.
+      // The optional-chain in the controller (`organization?.getImsOrgId()`)
+      // handles this; the missing-imsOrgId branch takes over.
+      mockDataAccess.Organization.findById.resolves(null);
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Site organization is missing imsOrgId');
+    });
+
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
@@ -1886,6 +1967,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
@@ -1929,6 +2011,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => { throw new Error('authoring type lookup failed'); },
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(brokenSite);
       mockDataAccess.Site.findByPreviewURL.resolves(brokenSite);
@@ -1970,6 +2053,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
@@ -2035,6 +2119,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
         getDeliveryType: () => 'aem_edge',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(spSite);
       mockDataAccess.Site.findByPreviewURL.resolves(spSite);
@@ -2083,6 +2168,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);

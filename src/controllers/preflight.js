@@ -415,6 +415,7 @@ function PreflightController(ctx, log, env) {
     url,
     pageAuthHeader,
     imsServiceToken,
+    imsOrgId,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -433,6 +434,10 @@ function PreflightController(ctx, log, env) {
           url,
           async_job_id: asyncJobId,
           persist: true,
+          // SITES-48037: mysticat requires this in the payload to bypass DRS's
+          // cross-org S2S auto-resolution. Caller (this controller) is the
+          // source of truth via site.getOrganizationId() → Organization.
+          ims_org_id: imsOrgId,
         }),
       });
     } finally {
@@ -515,6 +520,30 @@ function PreflightController(ctx, log, env) {
 
     if (!await accessControlUtil.hasAccess(site)) {
       return preflightError('PREFLIGHT_ACCESS_DENIED', 'Access denied', 403);
+    }
+
+    // SITES-48037: resolve the site's imsOrgId (the AdobeOrg-formatted string
+    // on the Organization) — required by mysticat's DRS submission to bypass
+    // DRS's cross-org S2S auto-resolution (SITES-47943 RCA). Spacecat is the
+    // source of truth for the site → organization mapping; mysticat requires
+    // us to supply it and does not fall back to any local projection.
+    //
+    // Fail-closed on Organization load failure or missing/empty imsOrgId —
+    // mysticat's analyze route rejects the request with 422 if the field is
+    // absent, so let-it-through-and-fail-late would just defer the same 500
+    // by one hop. Better to surface the data issue here where the error
+    // message can name the site and organization directly.
+    let imsOrgId;
+    try {
+      const organization = await dataAccess.Organization.findById(site.getOrganizationId());
+      imsOrgId = organization?.getImsOrgId();
+    } catch (e) {
+      log.error(`[Preflight] Failed to load Organization ${site.getOrganizationId()} for site ${siteId}: ${e.message}`);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to resolve site organization', 500);
+    }
+    if (!hasText(imsOrgId)) {
+      log.error(`[Preflight] Organization ${site.getOrganizationId()} for site ${siteId} has no imsOrgId — cannot proceed with preflight (mysticat requires it).`);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Site organization is missing imsOrgId', 500);
     }
 
     // Validate the URL belongs to this site
@@ -679,6 +708,7 @@ function PreflightController(ctx, log, env) {
         url,
         pageAuthHeader,
         imsServiceToken,
+        imsOrgId,
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
