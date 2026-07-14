@@ -22,6 +22,7 @@ import {
   handleBulkDeletePromptsSubworkspace,
 } from '../../../../src/support/serenity/handlers/prompts-subworkspace.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { TAG_IDS, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -43,13 +44,19 @@ function proj({ id = 'p-us-en', geo = 2840, lang = 'en' } = {}) {
 function makeTransport(overrides = {}) {
   return {
     listProjects: sinon.stub().resolves({ items: [proj()] }),
+    listProjectTags: makeListProjectTagsStub(),
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
-    createTaggedPrompts: sinon.stub().resolves({ ids: ['new-prompt'] }),
+    createPromptsByIds: sinon.stub().resolves({
+      page: 1, total: 1, items: [{ id: 'new-prompt', name: 'p' }],
+    }),
     deletePromptsByIds: sinon.stub().resolves(null),
     publishProject: sinon.stub().resolves(null),
     ...overrides,
   };
 }
+
+// A classifier over BARE `type` values, matching the flat-mode twin.
+const classifyByBrandMention = (text) => (/\bacme\b/i.test(text) ? 'branded' : 'non-branded');
 
 describe('prompts-subworkspace handlers', () => {
   afterEach(() => sinon.restore());
@@ -58,7 +65,17 @@ describe('prompts-subworkspace handlers', () => {
     it('resolves the slice from the listing and maps prompts', async () => {
       const transport = makeTransport({
         listPromptsByTags: sinon.stub().resolves({
-          items: [{ id: 'q1', name: 'a prompt', tags: [{ id: 't-1', name: 'Topic' }] }],
+          items: [{
+            id: 'q1',
+            name: 'a prompt',
+            // A descendant tag embeds its own parent_id + root-first path.
+            tags: [{
+              id: TAG_IDS.categoryRunningShoes,
+              name: 'Running Shoes',
+              parent_id: TAG_IDS.categoryRoot,
+              path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+            }],
+          }],
         }),
       });
       const result = await handleListPromptsSubworkspace(
@@ -67,12 +84,19 @@ describe('prompts-subworkspace handlers', () => {
         { geoTargetId: 2840, languageCode: 'en' },
         log,
       );
+      // Parentage rides on the prompt payload; no tag-tree walk is needed.
       expect(result.items).to.deep.equal([{
         semrushPromptId: 'q1',
         geoTargetId: 2840,
         languageCode: 'en',
         text: 'a prompt',
-        tagMap: { Topic: 't-1' },
+        tags: [{
+          id: TAG_IDS.categoryRunningShoes,
+          name: 'Running Shoes',
+          parentId: TAG_IDS.categoryRoot,
+          path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+        }],
+        tagMap: { 'Running Shoes': TAG_IDS.categoryRunningShoes },
       }]);
       expect(result).to.include({ total: 1, page: 1, limit: 50 });
       expect(transport.listPromptsByTags).to.have.been.calledWith(WS, 'p-us-en');
@@ -115,50 +139,52 @@ describe('prompts-subworkspace handlers', () => {
   });
 
   describe('handleCreatePromptsSubworkspace', () => {
-    it('creates prompts on the resolved project and publishes once', async () => {
+    it('creates prompts by id on the resolved project and publishes once', async () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
-          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      expect(transport.createTaggedPrompts).to.have.been.calledWith(WS, 'p-us-en');
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1']);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
-    it('creates a prompt by id-based tagIds via aio/prompts, not the name-based endpoint (twin of the flat-mode fix)', async () => {
-      const transport = makeTransport({
-        createPromptsByIds: sinon.stub().resolves({
-          page: 1, total: 1, items: [{ id: 'new-prompt-by-id', name: 'p' }], existing_count: 0,
-        }),
-      });
+    // A tag NAME cannot address a nested tag, so a `tags` key is rejected
+    // rather than silently writing a phantom root tag (twin of the flat-mode
+    // contract).
+    it('skips an input that supplies tag names instead of tagIds', async () => {
+      const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
-          text: 'p', tagIds: ['tag-cat-1', 'tag-child-1'], geoTargetId: 2840, languageCode: 'en',
+          text: 'p', tags: ['Running Shoes'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log);
-      expect(result.created).to.have.length(1);
-      expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt-by-id' });
-      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'tag-child-1']);
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-cat-1', 'tag-child-1']);
-      expect(transport.createTaggedPrompts).to.not.have.been.called;
+      expect(result.created).to.have.length(0);
+      expect(result.skipped).to.have.length(1);
+      expect(transport.createPromptsByIds).to.not.have.been.called;
     });
 
-    it('injects the computed type tag from the classifier (serenity-docs#31, twin of the flat-mode layer)', async () => {
+    it('injects the computed type tag id from the classifier (serenity-docs#31, twin of the flat-mode layer)', async () => {
       const transport = makeTransport();
-      const classify = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
-          text: 'is Acme good?', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
+          text: 'is Acme good?',
+          tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded],
+          geoTargetId: 2840,
+          languageCode: 'en',
         }],
-      }, log, classify);
-      expect(result.created[0].tags).to.deep.equal(['topic:X', 'type:branded']);
-      expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
+      }, log, classifyByBrandMention);
+      expect(result.created[0].tagIds).to.deep.equal([
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+      ]);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        { 'is Acme good?': ['topic:X', 'type:branded'] },
+        ['is Acme good?'],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
       );
     });
 
@@ -166,13 +192,13 @@ describe('prompts-subworkspace handlers', () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
-          text: 'p', tags: [], geoTargetId: 9999, languageCode: 'en',
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 9999, languageCode: 'en',
         }],
       }, log);
       expect(result.created).to.have.length(0);
       expect(result.skipped).to.have.length(1);
       expect(transport.listProjects).to.have.been.calledOnce;
-      expect(transport.createTaggedPrompts).to.not.have.been.called;
+      expect(transport.createPromptsByIds).to.not.have.been.called;
     });
 
     it('400s on an empty prompts array', async () => {
@@ -182,7 +208,7 @@ describe('prompts-subworkspace handlers', () => {
 
     it('400s when the prompts array exceeds maxItems', async () => {
       const prompts = Array.from({ length: 501 }, (unused, i) => ({
-        text: `p${i}`, tags: [], geoTargetId: 2840, languageCode: 'en',
+        text: `p${i}`, tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
       }));
       await expect(handleCreatePromptsSubworkspace(makeTransport(), WS, { prompts }, log))
         .to.be.rejectedWith(/maxItems/);
@@ -190,23 +216,23 @@ describe('prompts-subworkspace handlers', () => {
 
     it('skips an input that fails normalization (missing text)', async () => {
       const result = await handleCreatePromptsSubworkspace(makeTransport(), WS, {
-        prompts: [{ tags: ['x'], geoTargetId: 2840, languageCode: 'en' }],
+        prompts: [{ tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en' }],
       }, log);
       expect(result.created).to.have.length(0);
       expect(result.skipped).to.have.length(1);
       expect(result.skipped[0].reason).to.match(/required/);
     });
 
-    it('records an upstream createTaggedPrompts failure per input and redacts the gateway URL', async () => {
+    it('records an upstream create failure per input and redacts the gateway URL', async () => {
       // The transport error message embeds the internal gateway URL + UUIDs;
       // the per-item failed.message must be redacted, never echoed to the client.
       const leak = 'Semrush POST https://gw.internal/workspaces/ws/projects/p/prompts failed: 500';
       const transport = makeTransport({
-        createTaggedPrompts: sinon.stub().rejects(new SerenityTransportError(500, leak)),
+        createPromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, leak)),
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
-          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log);
       expect(result.created).to.have.length(0);
@@ -218,11 +244,11 @@ describe('prompts-subworkspace handlers', () => {
 
     it('defaults a statusless create failure to status 500', async () => {
       const transport = makeTransport({
-        createTaggedPrompts: sinon.stub().rejects(new Error('no status')),
+        createPromptsByIds: sinon.stub().rejects(new Error('no status')),
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
-          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log);
       expect(result.failed[0].status).to.equal(500);
@@ -234,7 +260,7 @@ describe('prompts-subworkspace handlers', () => {
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
-          text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log);
       expect(result.created).to.have.length(1);
@@ -244,22 +270,22 @@ describe('prompts-subworkspace handlers', () => {
   });
 
   describe('handleUpdatePromptSubworkspace', () => {
-    it('replaces the prompt (delete-then-create) and publishes', async () => {
+    it('replaces the prompt (delete-then-create-by-id) and publishes', async () => {
       const transport = makeTransport();
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
-        text: 'new', tags: ['t'], geoTargetId: 2840, languageCode: 'en',
+        text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(200);
       expect(result.body.semrushPromptId).to.equal('new-prompt');
       expect(transport.deletePromptsByIds).to.have.been.calledWith(WS, 'p-us-en', ['old-id']);
-      expect(transport.createTaggedPrompts).to.have.been.calledOnce;
+      expect(transport.createPromptsByIds).to.have.been.calledOnce;
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
     it('404s marketNotFound when the slice has no project', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [] }) });
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
-        text: 'new', tags: [], geoTargetId: 2840, languageCode: 'en',
+        text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(404);
       expect(result.body.error).to.equal('marketNotFound');
@@ -270,14 +296,14 @@ describe('prompts-subworkspace handlers', () => {
         deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
       });
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
-        text: 'new', tags: [], geoTargetId: 2840, languageCode: 'en',
+        text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(404);
       expect(result.body.error).to.equal('promptNotFound');
-      expect(transport.createTaggedPrompts).to.not.have.been.called;
+      expect(transport.createPromptsByIds).to.not.have.been.called;
     });
 
-    it('400s when text or tags are missing', async () => {
+    it('400s when text or tagIds are missing', async () => {
       const result = await handleUpdatePromptSubworkspace(
         makeTransport(),
         WS,
@@ -302,7 +328,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.body.error).to.equal('invalidRequest');
     });
 
-    it('replaces text+tagIds via the id-based endpoint (twin of the flat-mode fix)', async () => {
+    it('replaces text+tagIds via the id-based endpoint, echoing the sanitized ids', async () => {
       const transport = makeTransport({
         createPromptsByIds: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-prompt-by-id', name: 'new' }], existing_count: 0,
@@ -316,7 +342,6 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
       expect(transport.deletePromptsByIds).to.have.been.calledWith(WS, 'p-us-en', ['old-id']);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1']);
-      expect(transport.createTaggedPrompts).to.not.have.been.called;
     });
 
     it('400s when the slice key is invalid', async () => {
@@ -325,7 +350,7 @@ describe('prompts-subworkspace handlers', () => {
         WS,
         'old-id',
         {
-          text: 'new', tags: [], geoTargetId: -1, languageCode: 'en',
+          text: 'new', tagIds: ['tag-1'], geoTargetId: -1, languageCode: 'en',
         },
         log,
       );
@@ -338,16 +363,21 @@ describe('prompts-subworkspace handlers', () => {
       // arg the defensive `typeof !== function` bypass fires silently, so a
       // regression in delete-then-create injection would go uncaught here.
       const transport = makeTransport();
-      const classify = (text) => (/\bacme\b/i.test(text) ? 'type:branded' : 'type:non-branded');
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
-        text: 'now mentions Acme', tags: ['topic:X', 'type:non-branded'], geoTargetId: 2840, languageCode: 'en',
-      }, log, classify);
+        text: 'now mentions Acme',
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded],
+        geoTargetId: 2840,
+        languageCode: 'en',
+      }, log, classifyByBrandMention);
       expect(result.status).to.equal(200);
-      expect(result.body.tags).to.deep.equal(['topic:X', 'type:branded']);
-      expect(transport.createTaggedPrompts).to.have.been.calledOnceWithExactly(
+      expect(result.body.tagIds).to.deep.equal([
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+      ]);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        { 'now mentions Acme': ['topic:X', 'type:branded'] },
+        ['now mentions Acme'],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
       );
     });
 
@@ -356,9 +386,9 @@ describe('prompts-subworkspace handlers', () => {
         deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
       await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
-        text: 'new', tags: [], geoTargetId: 2840, languageCode: 'en',
+        text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
       }, log)).to.be.rejected;
-      expect(transport.createTaggedPrompts).to.not.have.been.called;
+      expect(transport.createPromptsByIds).to.not.have.been.called;
     });
 
     it('logs and re-throws when createOnePrompt fails AFTER a successful delete (data-loss window)', async () => {
@@ -479,6 +509,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
   // query without search → search stays undefined.
   it('handleListPromptsSubworkspace: non-integer page defaults to 1, absent search stays undefined', async () => {
     const transport = makeTransport({
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
     });
     // page is a string (not integer) → defaults to 1; no search field.
@@ -496,6 +527,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
 
   it('handleListPromptsSubworkspace: page <= 0 defaults to 1', async () => {
     const transport = makeTransport({
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
     });
     const result = await handleListPromptsSubworkspace(
@@ -511,6 +543,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
   // lacks coverage (the else side produces [] which existing tests exercise).
   it('handleListPromptsSubworkspace: tagIds array is forwarded to listPromptsByTags', async () => {
     const transport = makeTransport({
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
     });
     await handleListPromptsSubworkspace(
@@ -527,6 +560,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
   // resolves with `{}` (no items field) → defensive fallback to [].
   it('handleListPromptsSubworkspace: survives upstream listPromptsByTags returning {} (no items)', async () => {
     const transport = makeTransport({
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({}),
     });
     const result = await handleListPromptsSubworkspace(
@@ -544,6 +578,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
   it('handleListPromptsSubworkspace: falls back to items.length when total is missing and page is full', async () => {
     // Return exactly 1 item and set limit to 1 — a full page. resp has no total.
     const transport = makeTransport({
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({
         items: [{ id: 'q1', name: 'a prompt', tags: [] }],
         // total intentionally absent
@@ -568,46 +603,42 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
     ).to.be.rejectedWith(/non-empty/);
   });
 
-  // Line 149: `Array.isArray(resp?.ids)&&resp.ids.length>0?String(resp.ids[0]):''` else —
-  // transport.createTaggedPrompts resolves with {} (no ids) → semrushPromptId = ''.
-  it('handleCreatePromptsSubworkspace: semrushPromptId is empty string when createTaggedPrompts returns no ids', async () => {
+  // `createPromptsByIds` resolves without an `items` array → semrushPromptId
+  // degrades to '' rather than the literal string "undefined".
+  it('handleCreatePromptsSubworkspace: semrushPromptId is empty string when createPromptsByIds returns no items', async () => {
     const transport = makeTransport({
-      createTaggedPrompts: sinon.stub().resolves({}),
+      createPromptsByIds: sinon.stub().resolves({}),
     });
     const result = await handleCreatePromptsSubworkspace(transport, WS, {
       prompts: [{
-        text: 'p', tags: ['x'], geoTargetId: 2840, languageCode: 'en',
+        text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
       }],
     }, log);
     expect(result.created).to.have.length(1);
     expect(result.created[0].semrushPromptId).to.equal('');
   });
 
-  // Lines 246-247: in handleUpdatePromptSubworkspace, `body.tags` is not an array
-  // — the else `[]` fallback fires for the nextTags assignment.
-  it('handleUpdatePromptSubworkspace: non-array body.tags coerces to []', async () => {
-    const transport = makeTransport({
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-id'] }),
-    });
-    const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+  // A `tags` key is rejected on presence, whatever its value — a name cannot
+  // address a nested tag.
+  it('handleUpdatePromptSubworkspace: 400s on a non-array tags key', async () => {
+    const result = await handleUpdatePromptSubworkspace(makeTransport(), WS, 'old-id', {
       text: 'next',
       tags: null,
+      tagIds: ['tag-1'],
       geoTargetId: 2840,
       languageCode: 'en',
     }, log);
-    expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal([]);
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
   });
 
-  // Line 275: `Array.isArray(resp?.ids)&&resp.ids.length>0?String(resp.ids[0]):''` else
-  // on the update path — createTaggedPrompts returns {} so newSemrushPromptId = ''.
-  it('handleUpdatePromptSubworkspace: empty semrushPromptId when createTaggedPrompts returns no ids', async () => {
+  it('handleUpdatePromptSubworkspace: empty semrushPromptId when createPromptsByIds returns no items', async () => {
     const transport = makeTransport({
-      createTaggedPrompts: sinon.stub().resolves({}),
+      createPromptsByIds: sinon.stub().resolves({}),
     });
     const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
       text: 'next',
-      tags: ['t'],
+      tagIds: ['tag-1'],
       geoTargetId: 2840,
       languageCode: 'en',
     }, log);
@@ -627,6 +658,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
   // All existing tests omit page (defaults to 1 via the else), so this side was uncovered.
   it('handleListPromptsSubworkspace: valid integer page > 0 is forwarded to listPromptsByTags', async () => {
     const transport = makeTransport({
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
     });
     const result = await handleListPromptsSubworkspace(
@@ -643,6 +675,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
   // Line 65 true branch: query.search has text — the truthy path trims and returns the string.
   it('handleListPromptsSubworkspace: search string is trimmed and forwarded when provided', async () => {
     const transport = makeTransport({
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
     });
     await handleListPromptsSubworkspace(
@@ -655,20 +688,18 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
     expect(body.search).to.equal('shoes');
   });
 
-  // Line 246 inner falsy branch: body.tags IS an array but contains a falsy element
-  // (null or empty string). The `String(t || \'\').trim()` coerces it to \'\' which
-  // filter(Boolean) then drops. This is distinct from the else branch (non-array tags).
-  it('handleUpdatePromptSubworkspace: falsy tag elements in body.tags are coerced and filtered', async () => {
-    const transport = makeTransport({
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-id'] }),
-    });
+  // body.tagIds IS an array but carries a falsy element; the sanitizer coerces
+  // it away rather than forwarding an empty id upstream (which would 500 the
+  // atomic create).
+  it('handleUpdatePromptSubworkspace: falsy entries in body.tagIds are dropped', async () => {
+    const transport = makeTransport();
     const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
       text: 'next',
-      tags: ['keep', null, ''],
+      tagIds: ['keep', null, ''],
       geoTargetId: 2840,
       languageCode: 'en',
     }, log);
     expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal(['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep']);
   });
 });
