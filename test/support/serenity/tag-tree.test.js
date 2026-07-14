@@ -260,7 +260,7 @@ describe('serenity tag-tree', () => {
         createProjectTags: sinon.stub(),
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.deep.equal(['category', 'intent', 'source', 'type']);
+      expect([...roots.keys()]).to.deep.equal(['category', 'intent', 'origin', 'type']);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
@@ -268,10 +268,83 @@ describe('serenity tag-tree', () => {
       const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
       const transport = { listProjectTags, createProjectTags };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect(createProjectTags).to.have.been.calledOnce;
-      expect(createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', 'intent', 'source', 'type']);
+      // `origin` is resolved (and, absent a legacy `source` root, created) via its
+      // own seam rather than blind-created alongside the other three roots — two
+      // create calls, not one.
+      expect(createProjectTags).to.have.been.calledTwice;
+      const createdNames = createProjectTags.getCalls().flatMap((c) => c.args[2]);
+      expect(createdNames.sort()).to.deep.equal(['category', 'intent', 'origin', 'type'].sort());
       expect(roots.get('type')).to.equal('created::type');
+      expect(roots.get('origin')).to.equal('created::origin');
+    });
+
+    it('adopts an existing legacy "source" root as "origin" instead of minting a second root', async () => {
+      const levels = {
+        '': [
+          { id: 'r-category', name: 'category' },
+          { id: 'r-intent', name: 'intent' },
+          { id: 'r-source', name: 'source', children_count: 2 },
+          { id: 'r-type', name: 'type' },
+        ],
+        'r-source': [
+          { id: 'source-ai', name: 'ai', parent_id: 'r-source' },
+          { id: 'source-human', name: 'human', parent_id: 'r-source' },
+        ],
+      };
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub();
+      const transport = { listProjectTags, createProjectTags };
+
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+
+      expect(roots.get('origin')).to.equal('r-source');
+      expect(createProjectTags).to.not.have.been.called;
+    });
+
+    it('does NOT adopt a "source" root whose children are not a subset of {ai, human}', async () => {
+      const levels = {
+        '': [
+          { id: 'r-category', name: 'category' },
+          { id: 'r-intent', name: 'intent' },
+          { id: 'r-source', name: 'source', children_count: 1 },
+          { id: 'r-type', name: 'type' },
+        ],
+        'r-source': [
+          { id: 'source-other', name: 'some-unrelated-value', parent_id: 'r-source' },
+        ],
+      };
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `made:${name}`, name, parent_id: options.parentId || null })),
+        ),
+      );
+      const transport = { listProjectTags, createProjectTags };
+
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+
+      // A NEW `origin` root is minted; the unrelated `source` root is left alone.
+      expect(roots.get('origin')).to.equal('made:origin');
+      expect(createProjectTags).to.have.been.calledWithExactly(WS, PROJECT, ['origin'], {});
+    });
+
+    it('resolves an "origin" root directly when a project already has one', async () => {
+      const levels = {
+        '': [
+          { id: 'r-category', name: 'category' },
+          { id: 'r-intent', name: 'intent' },
+          { id: 'r-origin', name: 'origin' },
+          { id: 'r-type', name: 'type' },
+        ],
+      };
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub();
+      const transport = { listProjectTags, createProjectTags };
+
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+
+      expect(roots.get('origin')).to.equal('r-origin');
+      expect(createProjectTags).to.not.have.been.called;
     });
   });
 
@@ -284,7 +357,7 @@ describe('serenity tag-tree', () => {
       const { roots, values } = await provisionDimensionTree(transport, WS, PROJECT, fakeLog());
 
       expect(roots.get('category')).to.equal(TAG_IDS.categoryRoot);
-      expect([...values.keys()]).to.deep.equal(['intent', 'source', 'type']);
+      expect([...values.keys()]).to.deep.equal(['intent', 'origin', 'type']);
       // The open dimension's children are customer content, never provisioned.
       expect(values.has('category')).to.equal(false);
       expect([...values.get('intent').keys()]).to.deep.equal([
@@ -298,9 +371,10 @@ describe('serenity tag-tree', () => {
       const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
       const transport = { listProjectTags, createProjectTags };
       const { values } = await provisionDimensionTree(transport, WS, PROJECT, fakeLog());
-      // Roots first, then one call per closed dimension.
-      expect(createProjectTags).to.have.callCount(4);
-      expect(values.get('source').get('ai')).to.equal('created:created::source:ai');
+      // Roots first — one call for the three blind roots plus one for `origin`'s
+      // own resolver — then one call per closed dimension.
+      expect(createProjectTags).to.have.callCount(5);
+      expect(values.get('origin').get('ai')).to.equal('created:created::origin:ai');
       expect(values.get('intent').get('Navigational'))
         .to.equal('created:created::intent:Navigational');
     });
@@ -313,7 +387,7 @@ describe('serenity tag-tree', () => {
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
           { id: 'r-int', name: 'intent', children_count: 0 },
-          { id: 'r-src', name: 'source', children_count: 0 },
+          { id: 'r-src', name: 'origin', children_count: 0 },
         ],
         'r-int': [],
         'r-src': [],
@@ -337,8 +411,8 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub();
       const transport = { listProjectTags, createProjectTags: sinon.stub() };
       const { roots, values } = await provisionDimensionTree(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.have.members(['category', 'intent', 'source', 'type']);
-      expect(values.get('source')?.get('ai')).to.equal(TAG_IDS.sourceAi);
+      expect([...roots.keys()]).to.have.members(['category', 'intent', 'origin', 'type']);
+      expect(values.get('origin')?.get('ai')).to.equal(TAG_IDS.originAi);
       expect(values.get('type')?.get('branded')).to.equal(TAG_IDS.typeBranded);
       // The open `category` root is provisioned but its children are customer content.
       expect(values.has('category')).to.equal(false);
@@ -352,25 +426,25 @@ describe('serenity tag-tree', () => {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const res = await ensureClosedValue(transport, WS, PROJECT, 'source', 'ai', fakeLog());
+      const res = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
       expect(res).to.deep.equal({
-        id: TAG_IDS.sourceAi, rootId: TAG_IDS.sourceRoot, created: false,
+        id: TAG_IDS.originAi, rootId: TAG_IDS.originRoot, created: false,
       });
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
     it('creates a missing value under its root and reports created:true', async () => {
       const levels = dimensionTreeLevels();
-      levels[TAG_IDS.sourceRoot] = [];
+      levels[TAG_IDS.originRoot] = [];
       const transport = {
         listProjectTags: makeListProjectTagsStub(levels),
         createProjectTags: sinon.stub().resolves([
-          { id: 'made-ai', name: 'ai', parent_id: TAG_IDS.sourceRoot },
+          { id: 'made-ai', name: 'ai', parent_id: TAG_IDS.originRoot },
         ]),
       };
-      const res = await ensureClosedValue(transport, WS, PROJECT, 'source', 'ai', fakeLog());
+      const res = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
       expect(res).to.deep.equal({
-        id: 'made-ai', rootId: TAG_IDS.sourceRoot, created: true,
+        id: 'made-ai', rootId: TAG_IDS.originRoot, created: true,
       });
     });
 
@@ -380,7 +454,7 @@ describe('serenity tag-tree', () => {
         // The create echoes nothing, so no root id is ever learned.
         createProjectTags: sinon.stub().resolves([]),
       };
-      const err = await ensureClosedValue(transport, WS, PROJECT, 'source', 'ai', fakeLog())
+      const err = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
@@ -467,10 +541,10 @@ describe('serenity tag-tree', () => {
         transport,
         WS,
         PROJECT,
-        [TAG_IDS.sourceHuman, 'no-such-tag'],
+        [TAG_IDS.originHuman, 'no-such-tag'],
         fakeLog(),
       );
-      expect(found.get(TAG_IDS.sourceHuman).rootName).to.equal('source');
+      expect(found.get(TAG_IDS.originHuman).rootName).to.equal('origin');
       expect(found.get('no-such-tag')).to.deep.equal({
         kind: 'unknown', parentId: null, rootName: null, ancestorIds: [],
       });
@@ -505,9 +579,9 @@ describe('serenity tag-tree', () => {
 
     it('reports the same bare name under a different root as that other dimension', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
-      const placed = await findTagsInTree(transport, WS, PROJECT, [TAG_IDS.sourceHuman], fakeLog());
-      const found = placed.get(TAG_IDS.sourceHuman);
-      expect(found.rootName).to.equal('source');
+      const placed = await findTagsInTree(transport, WS, PROJECT, [TAG_IDS.originHuman], fakeLog());
+      const found = placed.get(TAG_IDS.originHuman);
+      expect(found.rootName).to.equal('origin');
     });
 
     it('reports an id absent from the tree as unknown', async () => {
@@ -582,7 +656,7 @@ describe('serenity tag-tree', () => {
       // The cheap check — comparing against the three closed root ids — passes here.
       // Ancestry is what catches it.
       const transport = { listProjectTags: makeListProjectTagsStub() };
-      const err = await assertParentWithinDimension(transport, WS, PROJECT, 'category', TAG_IDS.sourceHuman, fakeLog()).then(() => null, (e) => e);
+      const err = await assertParentWithinDimension(transport, WS, PROJECT, 'category', TAG_IDS.originHuman, fakeLog()).then(() => null, (e) => e);
       expect(err.status).to.equal(400);
     });
 

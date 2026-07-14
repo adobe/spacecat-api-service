@@ -17,6 +17,33 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
+import { ORIGIN_VALUE } from './serenity/prompt-tags.js';
+
+const ORIGIN_VALUES = new Set(Object.values(ORIGIN_VALUE));
+
+/**
+ * Resolves the `origin` a prompt write should carry, from the caller's
+ * authenticated principal rather than trusting the request body outright.
+ *
+ * A SERVICE principal (e.g. llmo-data-retrieval-service, which POSTs with a
+ * hardcoded `origin: "ai"`) may assert either enum value; an unrecognized
+ * value is treated as absent rather than rejected — a write must never fail
+ * over this field. A USER principal's asserted value is always ignored: a
+ * human hitting this endpoint is definitionally authoring the prompt
+ * themselves, so the body's `origin` (if any) is silently overridden, never
+ * used to reject the request.
+ *
+ * @param {*} candidate - the request body's asserted `origin`, if any.
+ * @param {boolean} isServicePrincipal - true when the caller authenticated as
+ *   an S2S service (see `context.s2sConsumer` at the controller boundary).
+ * @returns {'ai' | 'human'}
+ */
+export function resolveOriginForWrite(candidate, isServicePrincipal) {
+  if (isServicePrincipal && ORIGIN_VALUES.has(candidate)) {
+    return candidate;
+  }
+  return ORIGIN_VALUE.HUMAN;
+}
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
 // live in `./intent.js` so the LLM intent classifier can reuse them without an
@@ -405,7 +432,9 @@ function mapRowToPrompt(row) {
     name: row.name,
     regions: row.regions || [],
     status: row.status || 'active',
-    origin: row.origin || 'human',
+    // No fallback: the column has zero NULLs in production, so `|| 'human'`
+    // was dead code that would otherwise silently mislabel a null as human.
+    origin: row.origin,
     source: row.source || 'config',
     intent: row.intent ?? null,
     createdAt: row.created_at,
@@ -706,6 +735,9 @@ export async function getPromptById({
  *   text without an explicit intent. Non-fatal: a null result leaves intent unset.
  * @param {number} [params.classifyIntentBatchTimeoutMs] - Cap on the classifier
  *   batch (ms); the upsert proceeds without intent once it elapses.
+ * @param {boolean} [params.isServicePrincipal] - true when the caller
+ *   authenticated as an S2S service; gates whether a per-prompt `origin` in
+ *   the request body is honored (see {@link resolveOriginForWrite}).
  * @returns {Promise<{created: number, updated: number, prompts: object[]}>}
  */
 export async function upsertPrompts({
@@ -716,6 +748,7 @@ export async function upsertPrompts({
   updatedBy = 'system',
   classifyIntent,
   classifyIntentBatchTimeoutMs = 8000,
+  isServicePrincipal = false,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
@@ -789,7 +822,7 @@ export async function upsertPrompts({
       category_id: categoryUuid,
       topic_id: topicUuid,
       status: p.status || 'active',
-      origin: p.origin || 'human',
+      origin: resolveOriginForWrite(p.origin, isServicePrincipal),
       source: p.source || 'config',
       intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
@@ -1003,9 +1036,9 @@ export async function updatePromptById({
   if (updates.status !== undefined) {
     patch.status = updates.status;
   }
-  if (updates.origin !== undefined) {
-    patch.origin = updates.origin;
-  }
+  // `origin` is never patchable via the PATCH body — mirrors `source`, which is
+  // already absent here. It is set once at create time (from the authenticated
+  // principal — see `upsertPrompts`) and never re-derived or overridden later.
   if (updates.intent !== undefined) {
     // The shared fallback strips intent when the column is known-absent.
     patch.intent = normalizeIntent(updates.intent);

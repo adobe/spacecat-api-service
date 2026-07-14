@@ -148,7 +148,8 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1']);
+      // `origin` is always injected (never client-settable), same as `type`.
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1', TAG_IDS.originAi]);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
@@ -178,13 +179,13 @@ describe('prompts-subworkspace handlers', () => {
         }],
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         ['is Acme good?'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi],
       );
     });
 
@@ -339,9 +340,10 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.status).to.equal(200);
       expect(result.body.semrushPromptId).to.equal('new-prompt-by-id');
-      expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
+      // No `origin` tag was already present, so the update falls back to `ai`.
+      expect(result.body.tagIds).to.deep.equal(['tag-cat-1', TAG_IDS.originAi]);
       expect(transport.deletePromptsByIds).to.have.been.calledWith(WS, 'p-us-en', ['old-id']);
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1']);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1', TAG_IDS.originAi]);
     });
 
     it('400s when the slice key is invalid', async () => {
@@ -371,13 +373,13 @@ describe('prompts-subworkspace handlers', () => {
       }, log, classifyByBrandMention);
       expect(result.status).to.equal(200);
       expect(result.body.tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         ['now mentions Acme'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi],
       );
     });
 
@@ -700,6 +702,6 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
       languageCode: 'en',
     }, log);
     expect(result.status).to.equal(200);
-    expect(result.body.tagIds).to.deep.equal(['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep', TAG_IDS.originAi]);
   });
 });

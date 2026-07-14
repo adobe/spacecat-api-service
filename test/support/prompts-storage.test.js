@@ -30,6 +30,7 @@ import {
   isMissingIntentColumnError,
   findPromptsBlockingRegionRemoval,
   getIntentsByPromptIds,
+  resolveOriginForWrite,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -899,7 +900,10 @@ describe('prompts-storage', () => {
       expect(result).to.not.be.null;
       expect(result.regions).to.deep.equal([]);
       expect(result.status).to.equal('active');
-      expect(result.origin).to.equal('human');
+      // No fallback: the column has zero NULLs in production, so a null/
+      // undefined `origin` is returned as-is rather than silently coerced to
+      // 'human' (which would have mislabeled it).
+      expect(result.origin).to.equal(undefined);
       expect(result.source).to.equal('config');
       expect(result.category).to.be.null;
       expect(result.topic).to.be.null;
@@ -2979,6 +2983,79 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.prompts[0].source).to.equal('config');
+    });
+  });
+
+  describe('resolveOriginForWrite (WP-O2b: origin derived from the authenticated principal)', () => {
+    it('honors a valid asserted value from a service principal', () => {
+      expect(resolveOriginForWrite('ai', true)).to.equal('ai');
+      expect(resolveOriginForWrite('human', true)).to.equal('human');
+    });
+
+    it('falls back to human for an unrecognized value from a service principal (never rejects)', () => {
+      expect(resolveOriginForWrite('bogus', true)).to.equal('human');
+      expect(resolveOriginForWrite(undefined, true)).to.equal('human');
+    });
+
+    it('always overrides to human for a user principal, regardless of the asserted value', () => {
+      expect(resolveOriginForWrite('ai', false)).to.equal('human');
+      expect(resolveOriginForWrite('human', false)).to.equal('human');
+      expect(resolveOriginForWrite(undefined, false)).to.equal('human');
+    });
+  });
+
+  describe('upsertPrompts - origin derived from the authenticated principal', () => {
+    function makeUpsertClient() {
+      return {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => thenable({ data: [], error: null }),
+                }),
+              }),
+              insert: () => ({
+                select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+              }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+    }
+
+    it('honors a service principal\'s asserted origin', async () => {
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'New prompt', regions: ['us'], origin: 'ai' }],
+        postgrestClient: makeUpsertClient(),
+        isServicePrincipal: true,
+      });
+      expect(result.prompts[0].origin).to.equal('ai');
+    });
+
+    it('overrides a user principal\'s asserted origin to human', async () => {
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'New prompt', regions: ['us'], origin: 'ai' }],
+        postgrestClient: makeUpsertClient(),
+        isServicePrincipal: false,
+      });
+      expect(result.prompts[0].origin).to.equal('human');
+    });
+
+    it('defaults to human when isServicePrincipal is omitted', async () => {
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'New prompt', regions: ['us'], origin: 'ai' }],
+        postgrestClient: makeUpsertClient(),
+      });
+      expect(result.prompts[0].origin).to.equal('human');
     });
   });
 
