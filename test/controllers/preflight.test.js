@@ -21,7 +21,11 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import esmock from 'esmock';
 
 import * as utils from '../../src/support/utils.js';
-import PreflightController from '../../src/controllers/preflight.js';
+import PreflightController, {
+  countIssuesForAudit,
+  PREFLIGHT_PROCESS_AUDW,
+  PREFLIGHT_PROCESS_MYST,
+} from '../../src/controllers/preflight.js';
 
 // Make fetch available globally
 global.fetch = fetch;
@@ -63,6 +67,8 @@ describe('Preflight Controller', () => {
     }),
     remove: sandbox.stub().resolves(),
     setStatus: sandbox.stub(),
+    setError: sandbox.stub(),
+    setEndedAt: sandbox.stub(),
     save: sandbox.stub().resolves(),
   };
 
@@ -91,6 +97,8 @@ describe('Preflight Controller', () => {
     getCreatedAt: () => '2024-03-20T10:00:00Z',
     getCreatedBy: () => ({ email: 'user@example.com', displayName: 'Test User' }),
     getSiteId: () => 'test-site-123',
+    getAsyncJobId: () => jobId,
+    getAsyncJob: sandbox.stub().resolves(mockJob),
     getUpdatedAt: () => '2024-03-20T10:01:00Z',
     getStartedAt: () => '2024-03-20T10:00:00Z',
     getEndedAt: () => null,
@@ -168,6 +176,8 @@ describe('Preflight Controller', () => {
     mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
     mockDataAccess.Preflight.findById = sandbox.stub().resolves(mockPreflight);
     mockDataAccess.Preflight.allBySiteIdAndUrl = sandbox.stub().resolves([mockPreflight]);
+    // sandbox.restore() drops the module-level getAsyncJob stub between tests; re-attach.
+    mockPreflight.getAsyncJob = sandbox.stub().resolves(mockJob);
     mockSqs.sendMessage = sandbox.stub().resolves();
     preflightStatus = 'IN_PROGRESS';
     preflightError$ = null;
@@ -1515,19 +1525,22 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(502);
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_UPSTREAM_ERROR');
-      expect(mockPreflight.setStatus).to.have.been.calledWith('FAILED');
-      // Stored error mirrors the external 502 message — the raw upstream
-      // body could leak via GET detail and is sanitized server-side.
-      expect(mockPreflight.setError).to.have.been.calledWithMatch({
+      // SITES-47254: error lives on AsyncJob (source of truth); Preflight
+      // carries only the status + endedAt cache. The sanitized message
+      // mirrors the external 502 — the raw upstream body could leak
+      // internal hostnames/stack traces via the detail endpoint.
+      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockJob.setError).to.have.been.calledWithMatch({
         code: 'MYSTICAT_ERROR',
         message: 'Upstream analyze service failed',
       });
+      expect(mockJob.setEndedAt).to.have.been.calledOnce;
+      expect(mockJob.save).to.have.been.calledOnce;
+      // Preflight cache flipped with no error payload (error lives only on AsyncJob).
+      expect(mockPreflight.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockPreflight.setEndedAt).to.have.been.calledOnce;
+      expect(mockPreflight.setError).to.not.have.been.called;
       expect(mockPreflight.save).to.have.been.calledOnce;
-      // AsyncJob row must also be flipped to FAILED; the controller updates
-      // both records so a future refactor that drops the AsyncJob update is
-      // caught here.
-      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
-      expect(mockJob.save).to.have.been.called;
     });
 
     it('creates preflight successfully and returns 202 with Location header (prod)', async () => {
@@ -1542,6 +1555,12 @@ describe('Preflight Controller', () => {
       expect(result.preflightId).to.equal(preflightId);
       expect(result.status).to.equal('IN_PROGRESS');
       expect(result.url).to.equal('https://main--example-site.aem.page/test.html');
+      expect(result.siteId).to.equal('test-site-123');
+      expect(result.createdAt).to.equal('2024-03-20T10:00:00Z');
+      expect(result.createdBy).to.deep.equal({ email: 'user@example.com', displayName: 'Test User' });
+      // SITES-47254: just-created body omits updatedAt/endedAt (no info at creation time)
+      expect(result).to.not.have.property('updatedAt');
+      expect(result).to.not.have.property('endedAt');
 
       const locationHeader = response.headers.get('Location');
       expect(locationHeader).to.equal(
@@ -1575,7 +1594,7 @@ describe('Preflight Controller', () => {
     });
 
     it('calls Mysticat with correct parameters', async () => {
-      await preflightController.createPreflight({
+      const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
         data: { url: 'https://main--example-site.aem.page/test.html' },
         attributes: { authInfo: mockAuthInfo },
@@ -1587,6 +1606,17 @@ describe('Preflight Controller', () => {
       expect(body.url).to.equal('https://main--example-site.aem.page/test.html');
       expect(body.mode).to.be.undefined;
       expect(body.audits).to.be.undefined;
+      // SITES-47173: wire field is `async_job_id` (the AsyncJob id spacecat
+      // owns); mystique mints its own scan_id internally. The deprecated
+      // `scan_id` body field must NOT be sent.
+      expect(body.async_job_id).to.be.a('string').and.not.empty;
+      expect(body.scan_id).to.be.undefined;
+      // The async_job_id carries the AsyncJob row id that createPreflight
+      // creates — pulled from the response's Preflight DTO via its
+      // back-reference, but easier to assert it matches what's on the wire.
+      const preflightBody = await response.json();
+      expect(body.async_job_id).to.not.be.undefined;
+      expect(preflightBody.preflightId).to.be.a('string');
     });
 
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
@@ -2201,6 +2231,255 @@ describe('Preflight Controller', () => {
       });
     });
 
+    it('logs a compact summary with issue counts (all three counting modes)', async () => {
+      loggerStub.info.resetHistory();
+      const resultJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'suggest',
+            audits: [
+              // empty audit -> 0
+              { name: 'body-size', type: 'seo', opportunities: [] },
+              // single-issue-per-opportunity -> 2
+              {
+                name: 'metatags',
+                type: 'seo',
+                opportunities: [{ issue: 'Title too short' }, { issue: 'Description too short' }],
+              },
+              // issue-is-an-array (links) -> 3 + 1 = 4
+              {
+                name: 'links',
+                type: 'seo',
+                opportunities: [
+                  { check: 'broken-internal-links', issue: [{}, {}, {}] },
+                  { check: 'broken-external-links', issue: [{}] },
+                ],
+              },
+              // accessibility -> sum of occurrences = 5 + 40 = 45
+              {
+                name: 'accessibility',
+                type: 'a11y',
+                opportunities: [
+                  { type: 'aria-allowed-attr', occurrences: 5 },
+                  { type: 'color-contrast', occurrences: 40 },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(resultJob);
+
+      const context = { params: { jobId } };
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
+      expect(logged).to.deep.equal([
+        {
+          pageUrl: 'https://main--example-site.aem.page/test.html',
+          step: 'suggest',
+          audits: [
+            {
+              name: 'body-size', type: 'seo', opportunities: 0, issues: 0,
+            },
+            {
+              name: 'metatags', type: 'seo', opportunities: 2, issues: 2,
+            },
+            {
+              name: 'links', type: 'seo', opportunities: 2, issues: 4,
+            },
+            {
+              name: 'accessibility', type: 'a11y', opportunities: 2, issues: 45,
+            },
+          ],
+        },
+      ]);
+    });
+
+    it('handles malformed result entries (non-array audits / opportunities)', async () => {
+      loggerStub.info.resetHistory();
+      const resultJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          // audits is not an array -> falls back to []
+          { pageUrl: 'https://main--example-site.aem.page/a.html', step: 'identify', audits: undefined },
+          // audit present but opportunities is not an array -> opportunities count falls back to 0
+          {
+            pageUrl: 'https://main--example-site.aem.page/b.html',
+            step: 'identify',
+            audits: [{ name: 'metatags', type: 'seo', opportunities: undefined }],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(resultJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
+      const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
+      expect(logged).to.deep.equal([
+        { pageUrl: 'https://main--example-site.aem.page/a.html', step: 'identify', audits: [] },
+        {
+          pageUrl: 'https://main--example-site.aem.page/b.html',
+          step: 'identify',
+          audits: [{
+            name: 'metatags', type: 'seo', opportunities: 0, issues: 0,
+          }],
+        },
+      ]);
+    });
+
+    it('does not log results while the job is still IN_PROGRESS', async () => {
+      loggerStub.info.resetHistory();
+      const inProgressJob = {
+        ...mockJob,
+        getStatus: () => 'IN_PROGRESS',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'identify',
+            audits: [{ name: 'Meta Tags', type: 'meta-tags', opportunities: [{}] }],
+          },
+        ],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(inProgressJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run complete.'));
+      expect(infoCall, 'expected no [Preflight] jobId info log while IN_PROGRESS').to.be.undefined;
+    });
+
+    it('warns with code + message (not the full error object) when the job is FAILED', async () => {
+      loggerStub.warn.resetHistory();
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => failedError,
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      // details must NOT be logged (never log secrets / freeform worker content)
+      expect(warnCall.args[0]).to.not.include('details');
+      expect(warnCall.args[0]).to.not.include('tok');
+    });
+
+    it('warns with errorCode=none when the job is FAILED without a structured error', async () => {
+      loggerStub.warn.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => null,
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=none');
+      expect(warnCall.args[0]).to.include('errorMessage=none');
+    });
+
+    it('logs FAILED at warn level, not error', async () => {
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      await preflightController.getPreflightJobStatusAndResult({ params: { jobId } });
+
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
+    });
+
+    it('re-logs the terminal outcome on every poll (stateless — one warn per poll)', async () => {
+      loggerStub.warn.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+
+      const runFailedWarns = loggerStub.warn.getCalls()
+        .filter((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(runFailedWarns).to.have.lengthOf(3);
+    });
+
+    it('does not log a failure for a COMPLETED job', async () => {
+      loggerStub.warn.resetHistory();
+      const completedJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(completedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(warnCall, 'expected no [Preflight] Run failed warn log for a COMPLETED job').to.be.undefined;
+    });
+
     it('returns 400 Bad Request for invalid job ID', async () => {
       const context = {
         params: {
@@ -2311,6 +2590,15 @@ describe('Preflight Controller', () => {
       expect(result).to.be.an('array').with.lengthOf(1);
       expect(result[0].preflightId).to.equal(preflightId);
       expect(result[0].status).to.equal('IN_PROGRESS');
+      // SITES-47254: list items carry siteId, updatedAt, endedAt
+      expect(result[0].siteId).to.equal('test-site-123');
+      expect(result[0].updatedAt).to.equal('2024-03-20T10:01:00Z');
+      expect(result[0]).to.have.property('endedAt');
+      // List does not surface asyncJobId/scanId/result/error
+      expect(result[0]).to.not.have.property('asyncJobId');
+      expect(result[0]).to.not.have.property('scanId');
+      expect(result[0]).to.not.have.property('result');
+      expect(result[0]).to.not.have.property('error');
     });
 
     it('returns empty array when no preflights exist', async () => {
@@ -2446,6 +2734,81 @@ describe('Preflight Controller', () => {
       expect(result.result).to.be.null;
       expect(result.error).to.be.null;
       expect(result.updatedAt).to.equal('2024-03-20T10:01:00Z');
+      // SITES-47254: detail carries siteId; result/error join AsyncJob
+      expect(result.siteId).to.equal('test-site-123');
+      // Internal correlation fields and AsyncJob-owned timing stay off the wire
+      expect(result).to.not.have.property('asyncJobId');
+      expect(result).to.not.have.property('scanId');
+      expect(result).to.not.have.property('startedAt');
+    });
+
+    it('sources result/error from the joined AsyncJob, not from Preflight', async () => {
+      const errorPayload = { code: 'DA_FETCH_ERROR', message: 'Document Authoring 502' };
+      const completedJob = {
+        ...mockJob,
+        getResult: () => [{ pageUrl: 'https://example.com/page', audits: [] }],
+        getError: () => errorPayload,
+      };
+      mockPreflight.getAsyncJob.resolves(completedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      const result = await response.json();
+      expect(result.result).to.deep.equal([{ pageUrl: 'https://example.com/page', audits: [] }]);
+      expect(result.error).to.deep.equal(errorPayload);
+    });
+
+    it('degrades result/error to null when getAsyncJob resolves to null (no linked job yet)', async () => {
+      mockPreflight.getAsyncJob.resolves(null);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+      const nullResult = await response.json();
+      expect(nullResult.result).to.be.null;
+      expect(nullResult.error).to.be.null;
+      // Preflight-sourced fields still populated
+      expect(nullResult.preflightId).to.equal(preflightId);
+      expect(nullResult.status).to.equal('IN_PROGRESS');
+    });
+
+    it('returns 503 when getAsyncJob throws (do not silently 200 with null lifecycle)', async () => {
+      // A 200 with result: null is indistinguishable on the wire from a
+      // legitimately empty completed scan; polling clients would cache the
+      // wrong terminal answer. 503 surfaces "transient infra failure, retry."
+      mockPreflight.getAsyncJob.rejects(new Error('async_jobs unreachable'));
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(503);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_LIFECYCLE_UNAVAILABLE');
+      expect(loggerStub.warn).to.have.been.called;
+    });
+
+    it('hardens warn log against non-Error throws (e.message would be undefined)', async () => {
+      // PostgREST/transport layers can throw non-Error values; `e.message`
+      // alone would log "...preflight <id>: undefined" and lose the reason.
+      // `callsFake` + raw `Promise.reject` is required because `.rejects(x)`
+      // wraps non-Error values into Error instances — defeating the test.
+      mockPreflight.getAsyncJob = sandbox.stub().callsFake(
+        // eslint-disable-next-line prefer-promise-reject-errors
+        () => Promise.reject({ statusCode: 503 }),
+      );
+
+      await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      const asyncJobWarn = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes(`preflight ${preflightId}`));
+      expect(asyncJobWarn, 'expected an AsyncJob-fetch warn for the test preflight').to.exist;
+      // Regression guard: the warn must NOT end with "...: undefined" (which
+      // is what `e.message` alone would produce for non-Error rejections).
+      expect(asyncJobWarn.args[0]).to.not.include('undefined');
+      expect(asyncJobWarn.args[0]).to.match(/preflight \S+: \S+/);
     });
 
     it('returns 500 when Site.findById throws', async () => {
@@ -2467,5 +2830,136 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
     });
+
+    it('logs a run-complete summary tagged with the myst process', async () => {
+      loggerStub.info.resetHistory();
+      const completedJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'suggest',
+            audits: [{ name: 'metatags', type: 'seo', opportunities: [{ issue: 'Title too short' }] }],
+          },
+        ],
+      };
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(completedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_MYST}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a myst-process [Preflight] Run complete info log').to.not.be.undefined;
+    });
+
+    it('warns (not errors) with code + message tagged with the myst process when FAILED', async () => {
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => failedError,
+      };
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(failedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_MYST}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a myst-process [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      expect(warnCall.args[0]).to.not.include('tok');
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
+    });
+
+    it('does not emit an outcome log when no AsyncJob is linked yet (null job)', async () => {
+      loggerStub.info.resetHistory();
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(null);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const outcomeLog = [
+        ...loggerStub.info.getCalls(),
+        ...loggerStub.warn.getCalls(),
+        ...loggerStub.error.getCalls(),
+      ].find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run'));
+      expect(outcomeLog, 'expected no outcome log when AsyncJob is null').to.be.undefined;
+    });
+  });
+});
+
+describe('countIssuesForAudit', () => {
+  it('returns 0 for an audit with no opportunities', () => {
+    expect(countIssuesForAudit({ name: 'body-size', opportunities: [] })).to.equal(0);
+  });
+
+  it('returns 0 when opportunities is missing or not an array', () => {
+    expect(countIssuesForAudit({ name: 'h1-count' })).to.equal(0);
+    expect(countIssuesForAudit({ name: 'h1-count', opportunities: null })).to.equal(0);
+    expect(countIssuesForAudit(undefined)).to.equal(0);
+  });
+
+  it('counts one issue per opportunity with a scalar issue (metatags/headings)', () => {
+    const audit = {
+      name: 'metatags',
+      opportunities: [{ issue: 'Title too short' }, { issue: 'Description too short' }],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(2);
+  });
+
+  it('ignores opportunities without an issue in the default mode', () => {
+    const audit = {
+      name: 'headings',
+      opportunities: [{ issue: 'Empty Heading' }, { check: 'no-issue-field' }],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(1);
+  });
+
+  it('sums issue-array lengths for links audits', () => {
+    const audit = {
+      name: 'links',
+      opportunities: [
+        { check: 'broken-internal-links', issue: [{}, {}, {}] },
+        { check: 'broken-external-links', issue: [{}] },
+        { check: 'bad-links', issue: [{}] },
+      ],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(5);
+  });
+
+  it('sums occurrences for accessibility audits (not htmlWithIssues length)', () => {
+    const audit = {
+      name: 'accessibility',
+      opportunities: [
+        { type: 'aria-allowed-attr', occurrences: 5, htmlWithIssues: [{}, {}] },
+        { type: 'color-contrast', occurrences: 40 },
+        { type: 'missing-occurrences' },
+      ],
+    };
+    expect(countIssuesForAudit(audit)).to.equal(45);
   });
 });

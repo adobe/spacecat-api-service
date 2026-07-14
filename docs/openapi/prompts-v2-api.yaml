@@ -66,7 +66,11 @@ v2-prompts-by-brand:
       required: false
       schema:
         type: string
-      description: Filter by region (matches prompts whose regions array contains this value)
+      description: >-
+        Filter by region code (e.g. `us`). Matches prompts whose `regions`
+        array contains the value, case-insensitively — region codes are stored
+        with inconsistent casing depending on the onboarding path, so both
+        lower- and upper-case variants are matched.
     - name: origin
       in: query
       required: false
@@ -74,6 +78,16 @@ v2-prompts-by-brand:
         type: string
         enum: [ai, human]
       description: Filter by origin (ai or human)
+    - name: source
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >-
+        Filter by prompt source (exact match), e.g. `gsc`, `semrush`,
+        `base_url`, `config`. Free-form string — sources are open-ended and
+        added by upstream producers (e.g. DRS) without API changes, so no enum
+        is enforced.
     - name: sort
       in: query
       required: false
@@ -121,6 +135,9 @@ v2-prompts-by-brand:
     summary: Create or upsert prompts (bulk)
     description: |
       Upserts prompts. Match by id or by (text, regions). If match found, update; else insert.
+      If a matched prompt has status `deleted`, it is reactivated to `active` and counted as
+      updated. Prompts with status `pending` or other non-active statuses are left unchanged
+      (counted as skipped, not returned in the response).
     operationId: createPromptsByBrand
     security:
       - ims_key: [ ]

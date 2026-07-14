@@ -19,6 +19,7 @@ import {
   BRAND_URL_TYPE,
   regionApplies,
   collectBrandUrlEntries,
+  primaryDomainSet,
   normalizeBenchmarkDomain,
   ensureOwnBrandBenchmark,
   attachBrandUrlsToProject,
@@ -116,6 +117,60 @@ describe('brand-urls helpers', () => {
       expect(collectBrandUrlEntries({ urls: ['  https://acme.com  '] }, 'us')).to.deep.equal([
         { url: 'https://acme.com', type: BRAND_URL_TYPE.WEBSITE },
       ]);
+    });
+
+    it('skips a market primary domain website (apex + www)', () => {
+      // The benchmark already carries the primary domain (scheme-less), and a
+      // brand_urls row must be https:// — so adding it would double-list it in
+      // the UI. Both the apex and www forms of the primary are dropped (#25).
+      const sources = {
+        urls: ['https://acme.com', 'https://www.acme.com', 'https://blog.acme.com'],
+        socialAccounts: [{ url: 'https://x.com/acme', regions: [] }],
+      };
+      const primaries = primaryDomainSet(['acme.com']);
+      expect(collectBrandUrlEntries(sources, 'us', primaries)).to.deep.equal([
+        { url: 'https://blog.acme.com', type: BRAND_URL_TYPE.WEBSITE },
+        { url: 'https://x.com/acme', type: BRAND_URL_TYPE.SOCIAL },
+      ]);
+    });
+
+    it('skips ANOTHER market primary domain too (market-mirror brand)', () => {
+      // acme.ca is CA's primary; on the US market it must not surface as a website
+      // brand URL either — the skip set is every market's primary, not just this
+      // market's. Matches the migration CLI (mysticat-data-service).
+      const sources = { urls: ['https://acme.com', 'https://acme.ca', 'https://shop.acme.com'] };
+      const primaries = primaryDomainSet(['acme.com', 'acme.ca']);
+      expect(collectBrandUrlEntries(sources, 'us', primaries)).to.deep.equal([
+        { url: 'https://shop.acme.com', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
+    });
+
+    it('keeps all website urls when no primary domains are given', () => {
+      const sources = { urls: ['https://acme.com', 'https://www.acme.com'] };
+      // Empty skip set → nothing skipped (both kept; www vs apex are two rows).
+      expect(collectBrandUrlEntries(sources, 'us')).to.deep.equal([
+        { url: 'https://acme.com', type: BRAND_URL_TYPE.WEBSITE },
+        { url: 'https://www.acme.com', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
+    });
+  });
+
+  describe('primaryDomainSet', () => {
+    it('normalizes each domain to a host and drops the unusable ones', () => {
+      // Accepts any form (scheme / www / path) — the project `domain` field is
+      // scheme-less, but the create payload's brandDomain may carry a scheme.
+      const set = primaryDomainSet([
+        'acme.com',
+        'https://www.acme.ca/en',
+        null,
+        '',
+        'not a domain !!!',
+      ]);
+      expect([...set].sort()).to.deep.equal(['acme.ca', 'acme.com']);
+    });
+
+    it('returns an empty set for a non-array', () => {
+      expect(primaryDomainSet(null).size).to.equal(0);
     });
   });
 
@@ -248,13 +303,15 @@ describe('brand-urls helpers', () => {
       expect(transport.createBrandUrls).to.not.have.been.called;
     });
 
-    it('ensures the benchmark and creates the URLs', async () => {
+    it('ensures the benchmark and creates the URLs verbatim (https-ful, no resolve)', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         createBenchmarks: sandbox.stub(),
         createBrandUrls: sandbox.stub().resolves({ ids: ['a'], existing_count: 0 }),
       };
-      const entries = [{ url: 'https://acme.com', type: 'website' }];
+      // Entries are written exactly as given (the caller already dropped the
+      // primary domain and https-filtered them) — no url/resolve normalization.
+      const entries = [{ url: 'https://www.acme.com', type: 'website' }];
       const result = await attachBrandUrlsToProject(transport, WS, PID, entries, BRAND, undefined);
       expect(result).to.deep.equal({ created: 1 });
       expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, PID, BID, entries);
@@ -351,6 +408,92 @@ describe('brand-urls helpers', () => {
       expect(transport.deleteBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, ['stale']);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us');
       expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 1 });
+    });
+
+    it('diffs against the DRAFT view, so a removal still lands on an unpublished project', async () => {
+      // A brand URL is written into the project's DRAFT; only a publish promotes it
+      // into the published view. `republishBestEffort` swallows a quota 405, which
+      // leaves the project unpublished — so the published view reports an EMPTY set
+      // while the draft holds the rows. Diffing the published view there would make
+      // `toDelete` empty and a user's removal would silently never reach Semrush.
+      const sources = { urls: ['https://acme.com'] };
+      const listBrandUrls = sandbox.stub();
+      // Published view: stale/empty (the pending rows are invisible to it).
+      listBrandUrls.withArgs(WS, 'p-us', BID).resolves({ brand_urls: [] });
+      // Draft view: the true pending state the sync must converge.
+      listBrandUrls.withArgs(WS, 'p-us', BID, { draft: true }).resolves({
+        brand_urls: [
+          { id: 'keep', url: 'https://acme.com' },
+          { id: 'stale', url: 'https://old.com' }, // removed by the user
+        ],
+      });
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls,
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        // The republish quota-405 that strands the project as a draft in the first place.
+        publishProject: sandbox.stub().rejects(new SerenityTransportError(405, 'quota')),
+      };
+
+      const result = await syncBrandUrlsAcrossMarkets(transport, sources, WS, undefined);
+
+      // Read the draft, not the published view.
+      expect(listBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, { draft: true });
+      // The removal lands, and the already-present URL is NOT re-submitted.
+      expect(transport.deleteBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, ['stale']);
+      expect(transport.createBrandUrls).to.not.have.been.called;
+      expect(result).to.deep.equal({ markets: 1, created: 0, deleted: 1 });
+    });
+
+    it('skips the project primary-domain website (benchmark already holds it)', async () => {
+      // The project's own domain is the primary — its own-brand website URL is
+      // dropped so it does not double-list the benchmark (#25). Socials stay.
+      const transport = {
+        listProjects: sandbox.stub().resolves({
+          items: [{ id: 'p-us', domain: 'acme.com', settings: { ai: { country: { code: 'us' } } } }],
+        }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://acme.com', 'https://blog.acme.com'], socialAccounts: [{ url: 'https://x.com/acme', regions: [] }] },
+        WS,
+        undefined,
+      );
+      // Primary acme.com dropped; the secondary site + social remain.
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'p-us', BID, [
+        { url: 'https://blog.acme.com', type: BRAND_URL_TYPE.WEBSITE },
+        { url: 'https://x.com/acme', type: BRAND_URL_TYPE.SOCIAL },
+      ]);
+      expect(result).to.deep.equal({ markets: 1, created: 2, deleted: 0 });
+    });
+
+    it('reuses a pre-fetched project listing instead of calling listProjects', async () => {
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [] }), // would be empty if called
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().resolves({}),
+      };
+
+      const result = await syncBrandUrlsAcrossMarkets(
+        transport,
+        { urls: ['https://acme.com'] },
+        WS,
+        undefined,
+        [projectWith('p-us', 'us')],
+      );
+
+      expect(transport.listProjects).to.not.have.been.called;
+      expect(result.markets).to.equal(1);
     });
 
     it('logs the failing project/market (status only) and rethrows when a market sync throws mid-fan-out', async () => {

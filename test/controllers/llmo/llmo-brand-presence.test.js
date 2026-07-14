@@ -5548,6 +5548,54 @@ describe('llmo-brand-presence', () => {
       expect(body.totalCount).to.equal(1);
     });
 
+    it('enriches items with userIntent looked up by prompt_id', async () => {
+      // The chainable mock returns the same rows for both the executions query
+      // and the prompts intent lookup, so a row whose id === prompt_id and which
+      // carries `intent` exercises the getIntentsByPromptIds -> DTO join.
+      const rows = [
+        makeDetailRow({
+          prompt: 'q1', prompt_id: 'p1', id: 'p1', intent: 'Commercial',
+        }),
+      ];
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items[0].userIntent).to.equal('Commercial');
+    });
+
+    it('bounds the intent lookup to the paginated page, not all rows', async () => {
+      // 5 distinct prompts, pageSize 2 → only the 2 returned prompt_ids should be
+      // looked up (proves enrichment runs after pagination, not over all rawRows).
+      const rows = [];
+      for (let i = 0; i < 5; i += 1) {
+        rows.push(makeDetailRow({
+          prompt: `q${i}`, prompt_id: `p${i}`, id: `p${i}`, intent: `intent${i}`,
+        }));
+      }
+      mockContext.params.topicId = 'T';
+      mockContext.data = { page: '0', pageSize: '2' };
+      const client = createChainableMock({ data: rows, error: null });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items).to.have.lengthOf(2);
+      expect(body.items.map((i) => i.userIntent)).to.deep.equal(['intent0', 'intent1']);
+      // Only the intent lookup uses `.in('id', ...)`; assert it received just the
+      // page's prompt_ids, not all 5.
+      const inCall = client.in.getCalls().find((c) => c.args[0] === 'id');
+      expect(inCall.args[1]).to.deep.equal(['p0', 'p1']);
+    });
+
     it('returns empty items when no data', async () => {
       mockContext.params.topicId = 'None';
       mockContext.dataAccess.Site.postgrestService = createChainableMock({

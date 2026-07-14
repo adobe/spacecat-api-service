@@ -29,18 +29,31 @@ function buildContext() {
   return {
     env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
     pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
+    attributes: { authInfo: { getType: () => 'ims' } },
   };
 }
 
-async function loadModule({ resolveWorkspaceId, handleCreateMarketSubworkspace }) {
-  return esmock('../../../src/support/serenity/brand-provisioning.js', {
+async function loadModule({
+  resolveWorkspaceId,
+  handleCreateMarketSubworkspace,
+  resolveSemrushImsToken,
+  createSerenityTransport,
+}) {
+  const overrides = {
     '../../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId },
     '../../../src/support/serenity/rest-transport.js': {
-      createSerenityTransport: () => ({}),
+      createSerenityTransport: createSerenityTransport || (() => ({})),
       SerenityTransportError,
     },
     '../../../src/support/serenity/handlers/markets-subworkspace.js': { handleCreateMarketSubworkspace },
-  });
+  };
+  // Only override when a test supplies one; otherwise the real
+  // support/utils.js#resolveSemrushImsToken runs (its own decode/exchange
+  // logic is covered directly in test/support/utils.test.js).
+  if (resolveSemrushImsToken) {
+    overrides['../../../src/support/utils.js'] = { resolveSemrushImsToken };
+  }
+  return esmock('../../../src/support/serenity/brand-provisioning.js', overrides);
 }
 
 const baseParams = {
@@ -73,7 +86,7 @@ describe('provisionBrandSubworkspace', () => {
     // Mimic the real handler: ensureSubworkspace would set the brand stub's
     // workspace id, then a project is created. Stub captures that side-effect.
     handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
-      brand.setSemrushWorkspaceId(NEW_WS);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
       return { status: 201, body: { brandId: brand.getId() } };
     });
   });
@@ -83,7 +96,82 @@ describe('provisionBrandSubworkspace', () => {
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
-    expect(result).to.deep.equal({ semrushWorkspaceId: NEW_WS, published: false });
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
+    });
+  });
+
+  it('exposes a brand stub whose getters/save are usable by the handler', async () => {
+    // Exercises the stub's getSemrushSubWorkspaceId() (initially undefined) and the
+    // no-op save() that the real handler invokes while driving provisioning.
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      expect(brand.getSemrushSubWorkspaceId()).to.equal(undefined);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      await brand.save();
+      return { status: 201, body: { brandId: brand.getId() } };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result.semrushSubWorkspaceId).to.equal(NEW_WS);
+  });
+
+  it('returns published:true when the initial market was published', async () => {
+    // result.body.published truthy → Boolean(...) true branch (line 225).
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      return { status: 201, body: { brandId: brand.getId(), published: true } };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS, published: true, projectId: '', geoTargetId: null, languageCode: 'en',
+    });
+  });
+
+  it('returns published:false when a successful result carries no body (result.body || {})', async () => {
+    // result.body is undefined on the success path → the `|| {}` fallback fires
+    // before reading `.published` (line 225 right branch).
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      return { status: 200 };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
+    });
+  });
+
+  it('surfaces the initial market identity from the handler body, deliberately without writing the mapping row', async () => {
+    // provisionBrandSubworkspace runs before the brand row is written (a
+    // throwaway id), so it can't satisfy the mapping row's FK to brands —
+    // the caller (brands.js) writes it once the real row is persisted.
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      return {
+        status: 201,
+        body: {
+          brandId: brand.getId(), projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
+        },
+      };
+    });
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const result = await provisionBrandSubworkspace(buildContext(), baseParams);
+    expect(result).to.deep.equal({
+      semrushSubWorkspaceId: NEW_WS,
+      published: false,
+      projectId: 'proj-initial',
+      geoTargetId: 2840,
+      languageCode: 'en',
+    });
   });
 
   it('passes the "REGION - LANG" project name and brand identity to the handler', async () => {
@@ -115,7 +203,57 @@ describe('provisionBrandSubworkspace', () => {
     // The stub drives the sub-workspace title off the brand's name + id.
     expect(brandStub.getName()).to.equal('Acme');
     expect(brandStub.getId()).to.equal('brand-1');
-    expect(brandStub.getSemrushWorkspaceId()).to.equal(undefined);
+    expect(brandStub.getSemrushSubWorkspaceId()).to.equal(undefined);
+  });
+
+  it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
+    const context = {
+      ...buildContext(),
+      pathInfo: { headers: { 'x-promise-token': 'raw-promise-token' } },
+      attributes: { authInfo: { getType: () => 'jwt' } },
+    };
+    const resolveSemrushImsTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    const createSerenityTransportStub = sinon.stub().returns({});
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId,
+      handleCreateMarketSubworkspace,
+      resolveSemrushImsToken: resolveSemrushImsTokenStub,
+      createSerenityTransport: createSerenityTransportStub,
+    });
+
+    await provisionBrandSubworkspace(context, baseParams);
+
+    expect(resolveSemrushImsTokenStub.calledOnce).to.equal(true);
+    expect(resolveSemrushImsTokenStub.firstCall.args[0]).to.equal(context);
+    expect(resolveSemrushImsTokenStub.firstCall.args[2]).to.equal('brand-provisioning');
+    expect(createSerenityTransportStub.calledOnce).to.equal(true);
+    expect(createSerenityTransportStub.firstCall.args[0]).to.deep.equal({
+      env: context.env,
+      imsToken: 'exchanged-ims-token',
+    });
+  });
+
+  it('falls back to US/EN and publishes best-effort when generateTopics is false with no market or models', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    await provisionBrandSubworkspace(buildContext(), {
+      ...baseParams,
+      market: '',
+      languageCode: '',
+      modelIds: [],
+      generateTopics: false,
+    });
+    const { args } = handleCreateMarketSubworkspace.firstCall;
+    const [, , , body, , , , options] = args;
+    // No market/language supplied → US/EN default slice.
+    expect(body.market).to.equal('US');
+    expect(body.languageCode).to.equal('en');
+    expect(body.name).to.equal('US - EN');
+    // No prompts + no models → empty units → best-effort publish (leaves a draft).
+    expect(options.generateTopics).to.equal(false);
+    expect(options.topicCap).to.equal(0);
+    expect(options.publishMode).to.equal('best-effort');
   });
 
   it('forwards brandAliases to the handler for branded prompt classification', async () => {
@@ -214,11 +352,11 @@ describe('provisionBrandSubworkspace', () => {
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
+    // market/languageCode are NOT in this list: they are optional (a no-prompt
+    // brand may omit them, falling back to US/EN) — see the fallback test below.
     for (const bad of [
       { ...baseParams, brandName: '' },
       { ...baseParams, brandId: '' },
-      { ...baseParams, market: '' },
-      { ...baseParams, languageCode: '' },
       { ...baseParams, brandDomain: '' },
     ]) {
       // eslint-disable-next-line no-await-in-loop
@@ -259,7 +397,7 @@ describe('provisionBrandSubworkspace', () => {
     // brand row is never written, so the caller's compensation can't fire).
     const transfer = sinon.stub().resolves({});
     const handler = sinon.stub().callsFake(async (transport, brand) => {
-      brand.setSemrushWorkspaceId(NEW_WS);
+      brand.setSemrushSubWorkspaceId(NEW_WS);
       return { status: 502, body: { message: 'upstream blew up' } };
     });
     const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
@@ -317,16 +455,25 @@ describe('releaseProvisionedWorkspace', () => {
     return {
       env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
       pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
+      attributes: { authInfo: { getType: () => 'ims' } },
     };
   }
 
-  async function loadWithTransport(transferWorkspaceResources) {
-    return esmock('../../../src/support/serenity/brand-provisioning.js', {
+  async function loadWithTransport(
+    transferWorkspaceResources,
+    { resolveSemrushImsToken, createSerenityTransport } = {},
+  ) {
+    const overrides = {
       '../../../src/support/serenity/rest-transport.js': {
-        createSerenityTransport: () => ({ transferWorkspaceResources }),
+        createSerenityTransport: createSerenityTransport
+          || (() => ({ transferWorkspaceResources })),
         SerenityTransportError,
       },
-    });
+    };
+    if (resolveSemrushImsToken) {
+      overrides['../../../src/support/utils.js'] = { resolveSemrushImsToken };
+    }
+    return esmock('../../../src/support/serenity/brand-provisioning.js', overrides);
   }
 
   it('releases the orphaned workspace allocation back to the parent pool', async () => {
@@ -357,122 +504,152 @@ describe('releaseProvisionedWorkspace', () => {
     expect(log.error.calledOnce).to.equal(true);
     expect(log.error.firstCall.args[1].semrushWorkspaceId).to.equal(NEW_WS);
   });
-  describe('defensive branch coverage', () => {
-    describe('initialMarketProjectName - falsy market and languageCode', () => {
-      it('returns " - " when market is null (String(null || "") = "")', () => {
-        // Line 38: String(market || '') right branch fires.
-        expect(initialMarketProjectName(null, 'en')).to.equal(' - EN');
-      });
 
-      it('returns " - " when market is empty string (String("" || "") = "")', () => {
-        expect(initialMarketProjectName('', 'en')).to.equal(' - EN');
-      });
+  it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
+    const context = {
+      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
+      pathInfo: { headers: { 'x-promise-token': 'raw-promise-token' } },
+      attributes: { authInfo: { getType: () => 'jwt' } },
+    };
+    const transfer = sinon.stub().resolves({});
+    const resolveSemrushImsTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    const createSerenityTransportStub = sinon.stub()
+      .returns({ transferWorkspaceResources: transfer });
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer, {
+      resolveSemrushImsToken: resolveSemrushImsTokenStub,
+      createSerenityTransport: createSerenityTransportStub,
+    });
+    const log = { info: sinon.stub(), error: sinon.stub() };
 
-      it('returns "US - " when languageCode is null (String(null || "") = "")', () => {
-        // Line 39: String(languageCode || '') right branch fires (split('')[0] = '').
-        expect(initialMarketProjectName('us', null)).to.equal('US - ');
-      });
+    await releaseProvisionedWorkspace(context, NEW_WS, log);
 
-      it('returns "US - " when languageCode is empty string', () => {
-        expect(initialMarketProjectName('us', '')).to.equal('US - ');
-      });
+    expect(resolveSemrushImsTokenStub.calledOnce).to.equal(true);
+    expect(resolveSemrushImsTokenStub.firstCall.args[0]).to.equal(context);
+    expect(resolveSemrushImsTokenStub.firstCall.args[2]).to.equal('brand-provisioning');
+    expect(createSerenityTransportStub.calledOnce).to.equal(true);
+    expect(createSerenityTransportStub.firstCall.args[0]).to.deep.equal({
+      env: context.env,
+      imsToken: 'exchanged-ims-token',
+    });
+    expect(log.error.called).to.equal(false);
+  });
+});
+
+describe('defensive branch coverage', () => {
+  describe('initialMarketProjectName - falsy market and languageCode', () => {
+    it('returns " - " when market is null (String(null || "") = "")', () => {
+      // Line 38: String(market || '') right branch fires.
+      expect(initialMarketProjectName(null, 'en')).to.equal(' - EN');
     });
 
-    describe('releaseCapturedOnFailure catch block (lines 141-145)', () => {
-      it('logs error when provisioning fails after workspace creation AND the release itself throws', async () => {
-        // The catch on line 140 fires when: handleCreateMarketSubworkspace captures a
-        // workspaceId (via brand.setSemrushWorkspaceId) and then returns a 4xx result
-        // triggering releaseCapturedOnFailure, AND transferWorkspaceResources throws.
-        const transfer = sinon.stub().rejects(new Error('release network error'));
-        const handler = sinon.stub().callsFake(async (transport, brand) => {
-          brand.setSemrushWorkspaceId(NEW_WS);
-          return { status: 422, body: {} };
-        });
-        const log = { error: sinon.stub(), info: sinon.stub() };
-        const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
-          '../../../src/support/serenity/workspace-resolver.js': {
-            resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
-          },
-          '../../../src/support/serenity/rest-transport.js': {
-            createSerenityTransport: () => ({ transferWorkspaceResources: transfer }),
-            SerenityTransportError,
-          },
-          '../../../src/support/serenity/handlers/markets-subworkspace.js': {
-            handleCreateMarketSubworkspace: handler,
-          },
-        });
-        try {
-          await mod.provisionBrandSubworkspace(buildContext(), baseParams, log);
-          expect.fail('should have thrown');
-        } catch (e) {
-          expect(e.status).to.equal(422);
-        }
-        // The release was attempted but failed; log.error must have been called
-        // from the catch block with the 'failed to release' message.
-        expect(transfer.calledOnce).to.equal(true);
-        expect(log.error.called).to.equal(true);
-        const [msg, meta] = log.error.firstCall.args;
-        expect(msg).to.include('failed to release');
-        expect(meta.semrushWorkspaceId).to.equal(NEW_WS);
-        expect(meta.error).to.equal('release network error');
-      });
+    it('returns " - " when market is empty string (String("" || "") = "")', () => {
+      expect(initialMarketProjectName('', 'en')).to.equal(' - EN');
     });
 
-    describe('provisionBrandSubworkspace result.body.message fallback', () => {
-      it('uses fallback message when result has no body.message', async () => {
-        // Line 196: result.body?.message || 'Failed to provision Semrush sub-workspace'
-        // right side fires when body.message is absent/falsy.
-        const handler = sinon.stub().callsFake(async (transport, brand) => {
-          brand.setSemrushWorkspaceId(NEW_WS);
-          return { status: 422, body: {} };
-        });
-        const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
-          '../../../src/support/serenity/workspace-resolver.js': {
-            resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
-          },
-          '../../../src/support/serenity/rest-transport.js': {
-            createSerenityTransport: () => ({}),
-            SerenityTransportError,
-          },
-          '../../../src/support/serenity/handlers/markets-subworkspace.js': {
-            handleCreateMarketSubworkspace: handler,
-          },
-        });
-        try {
-          await mod.provisionBrandSubworkspace(buildContext(), baseParams);
-          expect.fail('should have thrown');
-        } catch (e) {
-          expect(e.status).to.equal(422);
-          expect(e.message).to.equal('Failed to provision Semrush sub-workspace');
-        }
-      });
+    it('returns "US - " when languageCode is null (String(null || "") = "")', () => {
+      // Line 39: String(languageCode || '') right branch fires (split('')[0] = '').
+      expect(initialMarketProjectName('us', null)).to.equal('US - ');
+    });
 
-      it('uses fallback message when result has no body at all', async () => {
-        // result.body is undefined -> result.body?.message = undefined -> fallback.
-        const handler = sinon.stub().callsFake(async (transport, brand) => {
-          brand.setSemrushWorkspaceId(NEW_WS);
-          return { status: 500 };
-        });
-        const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
-          '../../../src/support/serenity/workspace-resolver.js': {
-            resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
-          },
-          '../../../src/support/serenity/rest-transport.js': {
-            createSerenityTransport: () => ({}),
-            SerenityTransportError,
-          },
-          '../../../src/support/serenity/handlers/markets-subworkspace.js': {
-            handleCreateMarketSubworkspace: handler,
-          },
-        });
-        try {
-          await mod.provisionBrandSubworkspace(buildContext(), baseParams);
-          expect.fail('should have thrown');
-        } catch (e) {
-          expect(e.status).to.equal(500);
-          expect(e.message).to.equal('Failed to provision Semrush sub-workspace');
-        }
+    it('returns "US - " when languageCode is empty string', () => {
+      expect(initialMarketProjectName('us', '')).to.equal('US - ');
+    });
+  });
+
+  describe('releaseCapturedOnFailure catch block (lines 141-145)', () => {
+    it('logs error when provisioning fails after workspace creation AND the release itself throws', async () => {
+      // The catch on line 140 fires when: handleCreateMarketSubworkspace captures a
+      // workspaceId (via brand.setSemrushSubWorkspaceId) and then returns a 4xx result
+      // triggering releaseCapturedOnFailure, AND transferWorkspaceResources throws.
+      const transfer = sinon.stub().rejects(new Error('release network error'));
+      const handler = sinon.stub().callsFake(async (transport, brand) => {
+        brand.setSemrushSubWorkspaceId(NEW_WS);
+        return { status: 422, body: {} };
       });
+      const log = { error: sinon.stub(), info: sinon.stub() };
+      const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
+        '../../../src/support/serenity/workspace-resolver.js': {
+          resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
+        },
+        '../../../src/support/serenity/rest-transport.js': {
+          createSerenityTransport: () => ({ transferWorkspaceResources: transfer }),
+          SerenityTransportError,
+        },
+        '../../../src/support/serenity/handlers/markets-subworkspace.js': {
+          handleCreateMarketSubworkspace: handler,
+        },
+      });
+      try {
+        await mod.provisionBrandSubworkspace(buildContext(), baseParams, log);
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect(e.status).to.equal(422);
+      }
+      // The release was attempted but failed; log.error must have been called
+      // from the catch block with the 'failed to release' message.
+      expect(transfer.calledOnce).to.equal(true);
+      expect(log.error.called).to.equal(true);
+      const [msg, meta] = log.error.firstCall.args;
+      expect(msg).to.include('failed to release');
+      expect(meta.semrushWorkspaceId).to.equal(NEW_WS);
+      expect(meta.error).to.equal('release network error');
+    });
+  });
+
+  describe('provisionBrandSubworkspace result.body.message fallback', () => {
+    it('uses fallback message when result has no body.message', async () => {
+      // Line 196: result.body?.message || 'Failed to provision Semrush sub-workspace'
+      // right side fires when body.message is absent/falsy.
+      const handler = sinon.stub().callsFake(async (transport, brand) => {
+        brand.setSemrushSubWorkspaceId(NEW_WS);
+        return { status: 422, body: {} };
+      });
+      const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
+        '../../../src/support/serenity/workspace-resolver.js': {
+          resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
+        },
+        '../../../src/support/serenity/rest-transport.js': {
+          createSerenityTransport: () => ({}),
+          SerenityTransportError,
+        },
+        '../../../src/support/serenity/handlers/markets-subworkspace.js': {
+          handleCreateMarketSubworkspace: handler,
+        },
+      });
+      try {
+        await mod.provisionBrandSubworkspace(buildContext(), baseParams);
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect(e.status).to.equal(422);
+        expect(e.message).to.equal('Failed to provision Semrush sub-workspace');
+      }
+    });
+
+    it('uses fallback message when result has no body at all', async () => {
+      // result.body is undefined -> result.body?.message = undefined -> fallback.
+      const handler = sinon.stub().callsFake(async (transport, brand) => {
+        brand.setSemrushSubWorkspaceId(NEW_WS);
+        return { status: 500 };
+      });
+      const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
+        '../../../src/support/serenity/workspace-resolver.js': {
+          resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
+        },
+        '../../../src/support/serenity/rest-transport.js': {
+          createSerenityTransport: () => ({}),
+          SerenityTransportError,
+        },
+        '../../../src/support/serenity/handlers/markets-subworkspace.js': {
+          handleCreateMarketSubworkspace: handler,
+        },
+      });
+      try {
+        await mod.provisionBrandSubworkspace(buildContext(), baseParams);
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect(e.status).to.equal(500);
+        expect(e.message).to.equal('Failed to provision Semrush sub-workspace');
+      }
     });
   });
 });

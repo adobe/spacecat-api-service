@@ -11,25 +11,30 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp, expectBatch207 } from '../helpers/assertions.js';
+import { expectISOTimestamp, expectBatch207, sortById } from '../helpers/assertions.js';
 import {
   SITE_1_ID,
   SITE_3_ID,
   OPPTY_1_ID,
   OPPTY_2_ID,
   OPPTY_3_ID,
+  OPPTY_4_ID,
   FIX_1_ID,
   FIX_2_ID,
   FIX_3_ID,
+  FIX_4_ID,
   FIX_1_CREATED_DATE,
   SUGG_1_ID,
   SUGG_2_ID,
   NON_EXISTENT_FIX_ID,
+  NON_EXISTENT_SITE_ID,
 } from '../seed-ids.js';
 
 const BASE = `/sites/${SITE_1_ID}/opportunities/${OPPTY_1_ID}/fixes`;
 const DENIED_BASE = `/sites/${SITE_3_ID}/opportunities/${OPPTY_3_ID}/fixes`;
 const STATUS_BASE = `/sites/${SITE_1_ID}/opportunities/${OPPTY_1_ID}/status`;
+const SITE_FIXES_BASE = `/sites/${SITE_1_ID}/fixes`;
+const SITE_FIXES_DENIED_BASE = `/sites/${SITE_3_ID}/fixes`;
 
 /**
  * Asserts that an object has the FixDto shape.
@@ -93,6 +98,113 @@ export default function fixTests(getHttpClient, resetData) {
         );
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('returns 400 for non-underscore locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr-FR`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns fixes', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
+        res.body.forEach((f) => expectFixDto(f));
+      });
+
+      it('user: promotes locale-specific suggestion titles on embedded suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions).to.be.an('array').with.lengthOf(1);
+        expect(fix1.suggestions[0].data.title).to.equal('Mettre à jour l\'image hero');
+        expect(fix1.suggestions[0].data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English suggestion titles when locale is absent', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(BASE);
+        expect(res.status).to.equal(200);
+        const fix1 = res.body.find((f) => f.id === FIX_1_ID);
+        expect(fix1.suggestions[0].data.title).to.equal('Update hero image');
+      });
+    });
+
+    describe('GET /sites/:siteId/fixes (site-wide aggregation)', () => {
+      before(() => resetData());
+
+      it('user: aggregates fixes across every opportunity for the site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(SITE_FIXES_BASE);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(4);
+        res.body.forEach((f) => expectFixDto(f));
+
+        const ids = sortById(res.body).map((f) => f.id);
+        expect(ids).to.include(FIX_1_ID);
+        expect(ids).to.include(FIX_2_ID);
+        expect(ids).to.include(FIX_3_ID);
+        expect(ids).to.include(FIX_4_ID);
+
+        // FIX_4 belongs to OPPTY_4, not OPPTY_1 — confirms cross-opportunity aggregation
+        const fix4 = res.body.find((f) => f.id === FIX_4_ID);
+        expect(fix4.opportunityId).to.equal(OPPTY_4_ID);
+      });
+
+      it('user: filters aggregated fixes by status', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?status=FAILED`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(FIX_4_ID);
+        expect(res.body[0].status).to.equal('FAILED');
+      });
+
+      it('user: returns empty array for status with no matches', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?status=ROLLED_BACK`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('returns 400 for an invalid status value', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?status=NOT_A_REAL_STATUS`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for a non-positive limit', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?limit=0`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: caps the aggregated result set at the given limit', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?limit=1`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+      });
+
+      it('user: returns 403 for denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(SITE_FIXES_DENIED_BASE);
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 404 for non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${NON_EXISTENT_SITE_ID}/fixes`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for non-underscore locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?locale=fr-FR`);
+        expect(res.status).to.equal(400);
       });
     });
 
@@ -217,6 +329,35 @@ export default function fixTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${NON_EXISTENT_FIX_ID}/suggestions`);
         expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for non-underscore locale format', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=en-US`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(SUGG_1_ID);
+      });
+
+      it('user: promotes locale-specific suggestion title when locale matches', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body[0].data.title).to.equal('Mettre à jour l\'image hero');
+        expect(res.body[0].data).to.not.have.property('i18n');
+      });
+
+      it('user: returns English suggestion title when locale is absent', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions`);
+        expect(res.status).to.equal(200);
+        expect(res.body[0].data.title).to.equal('Update hero image');
       });
     });
 

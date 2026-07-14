@@ -27,6 +27,7 @@ import {
   JwtHandler,
   s2sAuthWrapper,
   readOnlyAdminWrapper,
+  facsWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
@@ -77,6 +78,9 @@ import RedirectsController from './controllers/redirects.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
+import LlmoCloudflareController from './controllers/llmo/llmo-cloudflare.js';
+import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
+import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
@@ -99,14 +103,17 @@ import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
+import routeFacsCapabilities from './routes/facs-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
 import AiVisibilityController from './controllers/ai-visibility.js';
+import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
 import SerenityController from './controllers/serenity.js';
+import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
@@ -252,6 +259,9 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
+    const llmoCloudflareController = LlmoCloudflareController(context);
+    const llmoCloudFrontController = LlmoCloudFrontController(context);
+    const llmoAkamaiController = LlmoAkamaiController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fanoutReportController = FanoutReportController(context);
@@ -279,9 +289,11 @@ async function run(request, context) {
     const drsBpPgAuditController = DrsBpPgAuditController(context);
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
+    const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
     const serenityController = SerenityController(context, log, context.env);
+    const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
 
     const routeHandlers = getRouteHandlers(
@@ -311,6 +323,9 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
+      llmoCloudflareController,
+      llmoCloudFrontController,
+      llmoAkamaiController,
       llmoMysticatController,
       llmoOpportunitiesController,
       userActivitiesController,
@@ -339,9 +354,11 @@ async function run(request, context) {
       webhooksController,
       aiVisibilityController,
       fanoutReportController,
+      stateAccessMappingsController,
       agenticCategoriesController,
       agenticPageTypesController,
       serenityController,
+      elementsController,
       proxyController,
       redirectsController,
     );
@@ -402,6 +419,9 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
 //    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
 //    (fail-closed), so unmapped routes are blocked for read-only admins
+// 4. facsWrapper — innermost (runs last, just before the route handler): enforces the
+//    hybrid MAC/FACS permission model (JWT facs_permissions ∪ state-layer grants) for
+//    FACS-governed external callers; internal identities and non-enrolled orgs bypass
 //
 // authHandlers order contract:
 //  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
@@ -445,6 +465,12 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
+  // Innermost: runs after auth wrappers have populated authInfo and after
+  // dataAccess/enrichPathInfo (applied on `main`), but before the route handler.
+  // Enforces the hybrid MAC/FACS model (JWT facs_permissions ∪ state-layer grants)
+  // for FACS-governed external callers; internal identities and non-enrolled orgs
+  // bypass. See routeFacsCapabilities for route → capability classification.
+  .with(facsWrapper, { routeFacsCapabilities })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,

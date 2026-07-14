@@ -41,7 +41,7 @@ services:
       retries: 10
 
   data-service:
-    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v5.43.0
+    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v5.57.0
     container_name: spacecat-it-data-service
     depends_on:
       db:
@@ -61,3 +61,51 @@ services:
     ports:
       - "${IT_POSTGREST_PORT:-3300}:3000"
       - "${IT_POSTGREST_ADMIN_PORT:-3301}:3001"
+
+  # ── Semrush vendor mocks (serenity E2E) ──────────────────────────────────
+  # Stateful Counterfact mocks of the Semrush Project Engine and User Manager
+  # gateways, published public to GHCR from adobe/spacecat-shared. Each serves
+  # ONLY its own path prefix over self-signed HTTPS on internal :8443 (Caddy);
+  # the dev server reaches them via localhost with NODE_TLS_REJECT_UNAUTHORIZED=0
+  # and the SEMRUSH_PROJECTS_BASE_URL / SEMRUSH_USERS_BASE_URL split (api-service#2656).
+  # Public images → no registry credentials needed in CI. Control routes
+  # (/<prefix>/__reset, /__seed, /__dump) are unauthenticated; reset between tests.
+  #
+  # Image tag == the installed client dependency version. The mock is published
+  # from the SAME package as the typed client (@adobe/spacecat-shared-*-client),
+  # so testing against a different mock version than the client we ship would be
+  # an unsound contract test. setup.js (startContainers) reads the installed
+  # client version and exports SERENITY_PE_MOCK_TAG / SERENITY_UM_MOCK_TAG.
+  # The `:?` form FAILS HARD when the tag is unset — there is deliberately NO
+  # default: a hardcoded fallback would silently run a different version than the
+  # client we ship (chaos). If a client is bumped to a version whose mock image
+  # is not yet published, the pull also fails loudly, forcing the mock to be
+  # released in lockstep. Always launch via `mise run`/the harness, never a bare
+  # `docker compose up` (which would have no tag set).
+  project-engine-mock:
+    image: ghcr.io/adobe/spacecat-shared-project-engine-client-mock:${SERENITY_PE_MOCK_TAG:?must be set to the installed @adobe/spacecat-shared-project-engine-client version (exported by test/it/postgres/setup.js)}
+    container_name: spacecat-it-pe-mock
+    environment:
+      MOCK_SEED: workspace-with-data
+    ports:
+      - "${IT_PE_MOCK_PORT:-8443}:8443"
+    healthcheck:
+      test: ["CMD", "curl", "-ksf", "https://localhost:8443/enterprise/projects/api/__dump"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  user-manager-mock:
+    image: ghcr.io/adobe/spacecat-shared-user-manager-client-mock:${SERENITY_UM_MOCK_TAG:?must be set to the installed @adobe/spacecat-shared-user-manager-client version (exported by test/it/postgres/setup.js)}
+    container_name: spacecat-it-um-mock
+    environment:
+      MOCK_SEED: parent-with-child
+    ports:
+      - "${IT_UM_MOCK_PORT:-8444}:8443"
+    healthcheck:
+      test: ["CMD", "curl", "-ksf", "https://localhost:8443/enterprise/users/api/__dump"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s

@@ -24,6 +24,7 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
+  allHaveSamePathname,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -31,7 +32,9 @@ import crypto from 'crypto';
 import { getDomain, parse as parseDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, {
+  calculateForwardedHost,
+} from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
@@ -45,6 +48,7 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectAemCsFastlyForDomain,
+  hasSubpath,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1086,8 +1090,16 @@ function LlmoController(ctx) {
     const { spaceCatId } = context.params;
     const { data } = context;
 
-    // Customers never see the internal reason — only a generic failure.
-    const GENERIC_ONBOARD_ERROR = "We couldn't onboard this domain — please contact support.";
+    // Customers never see the internal reason - only a generic failure. The
+    // project-elmo-ui client renders its own localized copy (with a link to the
+    // onboarding guide) instead of this raw text - this string only reaches a
+    // caller that skips the UI (e.g. a direct API/curl consumer), so it stays a
+    // short, plain fallback. Kept ASCII-only (no em dash / curly quotes): it's
+    // copied verbatim into the `x-error` response header by
+    // badRequest()/internalServerError(), and a character outside the
+    // header-safe range (see cleanupHeaderValue) crashes the response with a 500
+    // "Invalid character in header content" instead of the intended 400/500 body.
+    const GENERIC_ONBOARD_ERROR = "We couldn't onboard this domain right now. Please contact support.";
 
     try {
       // --- Resolve org (404 if missing) ---
@@ -1165,7 +1177,7 @@ function LlmoController(ctx) {
       const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
       if (!validation.isValid) {
         log.warn(`Site-only onboarding rejected for org ${spaceCatId}, domain ${domain}: ${validation.error}`);
-        return badRequest(GENERIC_ONBOARD_ERROR);
+        return badRequest(cleanupHeaderValue(GENERIC_ONBOARD_ERROR));
       }
 
       // --- Orchestrate (siteOnly: true; no `say` → zero customer Slack) ---
@@ -1201,7 +1213,7 @@ function LlmoController(ctx) {
         `:x: Site-only onboarding failed for org ${spaceCatId}: ${error.message}`,
         context,
       );
-      return internalServerError(GENERIC_ONBOARD_ERROR);
+      return internalServerError(cleanupHeaderValue(GENERIC_ONBOARD_ERROR));
     }
   };
 
@@ -1600,7 +1612,12 @@ function LlmoController(ctx) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
       }
-
+      if (hasSubpath(baseURL)) {
+        log.info(`[edge-optimize-routing] ${baseURL} subpath sites not eligible for auto routing`);
+        return ok({
+          ...metaconfig,
+        });
+      }
       let cdnTypeNormalized = null;
       if (hasText(cdnType)) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
@@ -2037,6 +2054,10 @@ function LlmoController(ctx) {
 
       if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
         return badRequest('Staging domains must belong to the same base domain as the production site');
+      }
+
+      if (!allHaveSamePathname(stagingDomains, site.getBaseURL())) {
+        return badRequest('Staging domains must be within the site pathname scope of the production site');
       }
 
       const tokowakaClient = TokowakaClient.createFrom(context);

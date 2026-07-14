@@ -144,7 +144,7 @@ Add thin wrappers (all under `API_PREFIX`, all via the existing `request()` help
 | `deleteWorkspace(wsId)` | DELETE `…/v1/workspaces/{id}` | **test cleanup only** — guard comment; production flows never call it |
 | `listProjects(wsId)` | GET `…/v1/workspaces/{id}/projects` | v1 **default view** (draft‑faithful) |
 | `getProject(wsId, projectId)` | GET `…/v1/workspaces/{id}/projects/{id}` | v1 by‑id read |
-| `getInitStatus(wsId, projectId)` | GET `…/v1/workspaces/{id}/projects/{id}/aio/init_status` | detail‑read enrichment only |
+| `getInitStatus(wsId, projectId)` | GET `…/v2/workspaces/{id}/projects/{id}/aio/init_status` | detail‑read enrichment only (moved v1→v2 in project-engine-client 1.2.0; v1 route removed — see ADR-006) |
 
 Extend **`errors.js`** with normative classification (design §6) and new `ERROR_CODES`:
 - `405` + `text/html` body on publish → **permanent allocation failure** (`allocationFailure`) — never retried as transient.

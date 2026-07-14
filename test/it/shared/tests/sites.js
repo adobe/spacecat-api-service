@@ -24,6 +24,8 @@ import {
   SITE_4_BASE_URL,
   SITE_LEGACY_LLMO_ID,
   SITE_NEW_LLMO_ID,
+  MARKET_SITE_1_ID,
+  MARKET_SITE_1_BASE_URL,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
   PROJECT_2_ID,
@@ -169,6 +171,79 @@ export default function siteTests(getHttpClient, resetData) {
         expect(page2.body.pagination.limit).to.equal(2);
         const page1Ids = new Set(page1.body.sites.map((s) => s.id));
         page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
+      });
+
+      // ── baseUrlContains substring search (SITES-47203, ADR-006) ──
+      // These exercise the REAL PostgREST `ilike` path end-to-end (not a stub):
+      // the where-builder, deterministic ordering, N+1 hasMore, offset paging, and
+      // DB-level wildcard escaping against actual seeded rows.
+      it('admin: baseUrlContains returns only matching sites in the search envelope with the echo', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, baseUrlContains: 'semrush' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: baseUrlContains honors limit and reports hasMore (N+1 against real rows)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&limit=2');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(res.body.pagination).to.include({ limit: 2, hasMore: true, baseUrlContains: 'example.com' });
+        // every returned row genuinely matches the substring (proves real ilike filtering)
+        res.body.sites.forEach((s) => expect(s.baseURL.toLowerCase()).to.include('example.com'));
+      });
+
+      it('admin: baseUrlContains pages by offset and returns a non-overlapping page', async () => {
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=0');
+        expect(page1.status).to.equal(200);
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({
+          limit: 2, offset: 0, hasMore: true, baseUrlContains: 'example.com',
+        });
+
+        const page2 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=2');
+        expect(page2.status).to.equal(200);
+        expect(page2.body.pagination).to.include({
+          limit: 2, offset: 2, baseUrlContains: 'example.com',
+        });
+        // The two offset pages must not overlap (proves offset actually advanced).
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
+      });
+
+      it('admin: baseUrlContains escapes LIKE wildcards so user % cannot widen the match', async () => {
+        // '%example' is escaped to a literal; no base_url literally contains "%example",
+        // so the result is empty. If escaping were broken it would behave like
+        // '%%example%' and match every *.example.com site.
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites?baseUrlContains=${encodeURIComponent('%example')}`);
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(0);
+        expect(res.body.pagination).to.include({ hasMore: false });
+      });
+
+      it('admin: baseUrlContains shorter than 3 chars is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=ab');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: baseUrlContains with a negative offset is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&offset=-1');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: baseUrlContains still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(403);
       });
     });
 
@@ -375,9 +450,20 @@ export default function siteTests(getHttpClient, resetData) {
         });
       });
 
-      it('admin: returns empty array for unmatched delivery type', async () => {
+      it('admin: returns the Serenity market-mirror site for delivery type other', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/other');
+        expect(res.status).to.equal(200);
+        // MARKET_SITE_1 (Semrush market mirror) is the only delivery_type=other site.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(MARKET_SITE_1_ID);
+        expect(res.body[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expect(res.body[0].deliveryType).to.equal('other');
+      });
+
+      it('admin: returns empty array for unmatched delivery type', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/aem_ams');
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
@@ -573,6 +659,25 @@ export default function siteTests(getHttpClient, resetData) {
           projectId: PROJECT_2_ID,
         });
         expect(res.status).to.equal(403);
+      });
+
+      it('returns 403 when changing the baseURL of a site attached to a Semrush-managed brand', async () => {
+        // SITE_1 is the primary site of BRAND_1, which is Semrush-managed
+        // (semrush_workspace_id set in the seed). The brand's tracked domain
+        // lives on its Semrush projects, which have no domain-update path, so the
+        // SpaceCat site URL is immutable while that brand is attached. Admin is
+        // used so the only thing that can 403 is the URL-immutability guard
+        // itself (not access control). Other site fields stay editable.
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
+          baseURL: 'https://semrush-managed-rename.example.com',
+        });
+        expect(res.status).to.equal(403);
+
+        // The URL is unchanged (the guard blocked the write before persist).
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(SITE_1_BASE_URL);
       });
     });
 

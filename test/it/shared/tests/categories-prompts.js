@@ -183,6 +183,97 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
       });
     });
 
+    // ── The region/market filter is case-insensitive (LLMO-5755) ──
+
+    describe('Prompt-list region filter matches case-insensitively', () => {
+      before(() => resetData());
+
+      it('matches prompts whose stored region casing differs from the query', async () => {
+        const http = getHttpClient();
+
+        // Stored region codes can be lower- or upper-case. Store one prompt
+        // each way, then filter with the lowercased code — both must come back
+        // (a case-sensitive contains would miss the upper-case row). (LLMO-5755)
+        const created = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+          [
+            { prompt: 'Uppercase region prompt', regions: ['US'] },
+            { prompt: 'Lowercase region prompt', regions: ['us'] },
+            { prompt: 'Other region prompt', regions: ['gb'] },
+          ],
+        );
+        expect(created.status).to.equal(201);
+        expect(created.body.created).to.equal(3);
+
+        // Lowercase query returns BOTH the US and us rows, not the gb one.
+        const filtered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?region=us`,
+        );
+        expect(filtered.status).to.equal(200);
+        expect(filtered.body.total).to.equal(2);
+        expect(filtered.body.items).to.have.lengthOf(2);
+
+        // Uppercase query is symmetric — also returns both rows.
+        const filteredUpper = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?region=US`,
+        );
+        expect(filteredUpper.status).to.equal(200);
+        expect(filteredUpper.body.total).to.equal(2);
+
+        // No filter returns all three — proving the filter narrowed the set
+        // rather than the brand simply having those prompts.
+        const unfiltered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+        );
+        expect(unfiltered.status).to.equal(200);
+        expect(unfiltered.body.total).to.equal(3);
+      });
+    });
+
+    describe('Prompt-list source filter narrows by exact source', () => {
+      before(() => resetData());
+
+      it('returns only prompts with the requested source, and 0 for an unknown source', async () => {
+        const http = getHttpClient();
+
+        // Two gsc-sourced prompts and one config-sourced prompt.
+        const created = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+          [
+            { prompt: 'First GSC prompt', source: 'gsc' },
+            { prompt: 'Second GSC prompt', source: 'gsc' },
+            { prompt: 'A config prompt', source: 'config' },
+          ],
+        );
+        expect(created.status).to.equal(201);
+        expect(created.body.created).to.equal(3);
+
+        // source=gsc returns only the two gsc rows.
+        const filtered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?source=gsc`,
+        );
+        expect(filtered.status).to.equal(200);
+        expect(filtered.body.total).to.equal(2);
+        expect(filtered.body.items).to.have.lengthOf(2);
+        expect(filtered.body.items.every((p) => p.source === 'gsc')).to.equal(true);
+
+        // No filter returns all three — proving the filter narrowed the set.
+        const unfiltered = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
+        );
+        expect(unfiltered.status).to.equal(200);
+        expect(unfiltered.body.total).to.equal(3);
+
+        // Fail-loud guard: an unknown source must return 0, proving the param is
+        // honored and not silently ignored (a two-stage-deploy inflation risk).
+        const unknown = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts?source=__nonexistent__`,
+        );
+        expect(unknown.status).to.equal(200);
+        expect(unknown.body.total).to.equal(0);
+      });
+    });
+
     // ── Multibyte / non-ASCII-only names (LLMO-5515) ──
 
     describe('Category creation with an all-multibyte name (no explicit id)', () => {

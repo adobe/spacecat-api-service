@@ -434,6 +434,19 @@ export function parseMonthYM(sp) {
   return { year: Number(m[1]), month: Number(m[2]) };
 }
 
+/**
+ * Returns the `date` query param only when it is an exact `YYYY-MM-DD` snapshot date,
+ * otherwise `undefined`. A month-only `YYYY-MM` (the value the UI currently sends, since
+ * Competitor Research has no date filter) is intentionally dropped so the upstream service
+ * defaults to the latest available snapshot — mirroring `competitors/metrics`. Pinning a
+ * month-only `target_date` makes the gRPC TopicService return NotFound on the first day of a
+ * month, before that month has any data. See LLMO-5963.
+ */
+export function exactSnapshotDate(sp) {
+  const raw = sp.get('date')?.trim();
+  return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
+}
+
 export function statsByLLMDateRange(endYear, endMonth, windowMonths) {
   let fromMonth = endMonth - (windowMonths - 1);
   let fromYear = endYear;

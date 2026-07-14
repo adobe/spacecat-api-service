@@ -14,7 +14,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserTokenStrict } from '../utils.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken } from '../utils.js';
 import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
@@ -67,8 +67,13 @@ export function initialMarketProjectName(market, languageCode) {
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
  * @param {string} params.brandDomain - brand domain for the upstream project.
  * @param {string[]} params.modelIds - AI models (LLMs) to attach to the project.
- * @param {string[]} [params.brandAliases] - brand aliases; with the brand name
- *   they classify each generated prompt as `type:branded` / `type:non-branded`.
+ * @param {boolean} [params.generateTopics] - when true (default), generate +
+ *   attach topics/prompts (top N by volume) at create; when false, create the
+ *   project empty (models still attached when supplied).
+ * @param {Array<string|{name: string, regions?: string[]}>} [params.brandAliases]
+ *   - brand aliases; region-clamped to the initial market by the create handler.
+ *   With the brand name they classify each generated prompt as `type:branded` /
+ *   `type:non-branded` and populate the project's `brand_names`.
  * @param {object} [params.brandUrlSources] - the brand's URL sources
  *   ({ urls, socialAccounts, earnedContent }) pushed onto the initial market's
  *   own-brand benchmark (own sites + social + earned). Best-effort: a failed
@@ -77,10 +82,20 @@ export function initialMarketProjectName(market, languageCode) {
  *   brands to track") tracked as region-filtered project benchmarks (domain-only).
  *   Best-effort: a failed sync is logged and skipped, never aborts provisioning.
  * @param {object} [log]
- * @returns {Promise<{semrushWorkspaceId: string, published: boolean}>} the new
- *   sub-workspace id and whether the initial market was published. Publish is
- *   required (`publishMode: 'require'`): a quota 405 does NOT return a draft, it
- *   throws (surfaced as 409 "Quota exceeded").
+ * @returns {Promise<{
+ *   semrushSubWorkspaceId: string,
+ *   published: boolean,
+ *   projectId: string,
+ *   geoTargetId: number | null,
+ *   languageCode: string,
+ * }>} the new sub-workspace id, whether the initial market was published, and
+ *   the initial market's identity — deliberately NOT written to
+ *   `brand_to_semrush_projects` here (this function runs before the brand row
+ *   exists, and the mapping row's FK requires it); the caller writes the
+ *   mapping row itself once the brand row is persisted, mirroring how it
+ *   already handles `ensureMarketSite` (see `controllers/brands.js`). Publish
+ *   is required (`publishMode: 'require'`): a quota 405 does NOT return a
+ *   draft, it throws (surfaced as 409 "Quota exceeded").
  * @throws {ErrorWithStatusCode} on workspace/project create or publish failure
  *   (the caller then skips the brand write). URL and competitor propagation are
  *   best-effort and never throw.
@@ -88,6 +103,7 @@ export function initialMarketProjectName(market, languageCode) {
 export async function provisionBrandSubworkspace(context, {
   spaceCatId, brandId, brandName, market, languageCode, brandDomain,
   modelIds = [], brandAliases = [], brandUrlSources = null, competitors = [],
+  generateTopics = true,
 }, log = console) {
   if (!hasText(brandName)) {
     throw new ErrorWithStatusCode('brandName is required for Semrush provisioning', 400);
@@ -95,12 +111,16 @@ export async function provisionBrandSubworkspace(context, {
   if (!hasText(brandId)) {
     throw new ErrorWithStatusCode('brandId is required for Semrush provisioning', 400);
   }
-  if (!hasText(market) || !hasText(languageCode)) {
-    throw new ErrorWithStatusCode('market and languageCode are required for Semrush provisioning', 400);
-  }
   if (!hasText(brandDomain)) {
     throw new ErrorWithStatusCode('brandDomain is required for Semrush provisioning', 400);
   }
+  // market/languageCode are OPTIONAL: a brand created WITHOUT prompt generation
+  // (generateTopics=false) may omit them. Fall back to the US/EN default slice so
+  // the project still has a valid (geo, language) to provision against. When
+  // generateTopics=true the caller (brands.js) still requires both, so a fallback
+  // never silently mislabels a prompt-generating project.
+  const resolvedMarket = hasText(market) ? market : 'US';
+  const resolvedLanguageCode = hasText(languageCode) ? languageCode : 'en';
 
   const parentWorkspaceId = await resolveWorkspaceId(context, spaceCatId);
   if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
@@ -108,10 +128,11 @@ export async function provisionBrandSubworkspace(context, {
   }
 
   // Match the /serenity/* IMS-only contract: the upstream gateway only
-  // understands IMS user tokens, so refuse to forward anything else. POST
-  // /brands is organization:write and thus S2S-reachable; getImsUserTokenStrict
-  // 401s a non-IMS bearer before it can be proxied upstream.
-  const imsToken = getImsUserTokenStrict(context);
+  // understands IMS user tokens. POST /brands is organization:write and thus
+  // S2S-reachable, so prefer an x-promise-token exchange (same as serenity.js/
+  // elements.js) and otherwise fall back to strict IMS-bearer forwarding,
+  // 401ing a non-IMS bearer before it can be proxied upstream.
+  const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
   /** @type {string|null} */
@@ -119,8 +140,8 @@ export async function provisionBrandSubworkspace(context, {
   const brandStub = {
     getId: () => brandId,
     getName: () => brandName,
-    getSemrushWorkspaceId: () => undefined,
-    setSemrushWorkspaceId: (id) => { capturedWorkspaceId = id; },
+    getSemrushSubWorkspaceId: () => undefined,
+    setSemrushSubWorkspaceId: (id) => { capturedWorkspaceId = id; },
     save: async () => {},
   };
 
@@ -155,31 +176,38 @@ export async function provisionBrandSubworkspace(context, {
       brandStub,
       parentWorkspaceId,
       {
-        market,
-        languageCode,
+        market: resolvedMarket,
+        languageCode: resolvedLanguageCode,
         brandDomain,
         brandNames: [brandName],
         brandDisplayName: brandName,
-        name: initialMarketProjectName(market, languageCode),
+        name: initialMarketProjectName(resolvedMarket, resolvedLanguageCode),
       },
       log,
       // preResolvedWorkspaceId / reloadPointer: defaults (single-create path).
       null,
       null,
-      // Brand-create attaches the chosen LLMs, generates+attaches topics/prompts
-      // (top N by volume, tagged `topic:<NAME>` + standard tags), then publishes.
-      // The child is carved a real allocation (CREATE_ALLOCATION) so prompts and
-      // publish have quota; a 405 here is a true over-quota and surfaces below.
+      // Brand-create attaches the chosen LLMs and, WHEN generateTopics is set,
+      // generates+attaches topics/prompts (top N by volume, tagged `topic:<NAME>`
+      // + standard tags) before publishing. With generateTopics=false the project
+      // is created empty (no prompts); models are still attached when supplied.
       {
         modelIds,
-        generateTopics: true,
-        topicCap: MAX_TOPICS_ON_CREATE,
+        generateTopics,
+        topicCap: generateTopics ? MAX_TOPICS_ON_CREATE : 0,
         standardTags: [...STANDARD_PROMPT_TAGS],
         brandAliases,
         projectTags: [...PROJECT_STANDARD_TAGS],
         brandUrlSources,
         competitors,
-        publishMode: 'require',
+        // A project with neither models nor generated prompts would publish
+        // "empty units", which Semrush rejects with a disguised quota 405
+        // (workspace doc §5). Tolerate that by leaving it a draft (best-effort)
+        // instead of failing the whole create; a project that has models OR
+        // prompts has real units and must publish (require).
+        publishMode: (Array.isArray(modelIds) && modelIds.length > 0) || generateTopics
+          ? 'require'
+          : 'best-effort',
       },
     );
   } catch (e) {
@@ -203,9 +231,21 @@ export async function provisionBrandSubworkspace(context, {
   if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
     throw new ErrorWithStatusCode('Semrush provisioning returned no sub-workspace id', 502);
   }
+  // handleCreateMarketSubworkspace's own body already carries the initial
+  // market's identity (geoTargetId/languageCode resolved from the same
+  // resolvedMarket/resolvedLanguageCode this call passed in) — read it back
+  // rather than re-deriving it.
+  /** @type {any} */
+  const resultBody = result.body || {};
   return {
-    semrushWorkspaceId: capturedWorkspaceId,
-    published: Boolean(/** @type {{ published?: boolean }} */ (result.body || {}).published),
+    semrushSubWorkspaceId: capturedWorkspaceId,
+    published: Boolean(resultBody.published),
+    projectId: String(resultBody.projectId || ''),
+    // Absent stays null (not 0) so upsertMappingRow's `!geoTargetId` guard
+    // rejects an unresolvable slice explicitly rather than persisting a
+    // sentinel value.
+    geoTargetId: resultBody.geoTargetId != null ? Number(resultBody.geoTargetId) : null,
+    languageCode: String(resultBody.languageCode || resolvedLanguageCode),
   };
 }
 
@@ -229,10 +269,10 @@ export async function releaseProvisionedWorkspace(context, workspaceId, log = co
     return;
   }
   try {
-    // Use the strict IMS-type guard, matching every other Semrush-transport
-    // call site — keeps the IMS-only forwarding invariant uniform even though
-    // this helper is only reachable after provisioning already passed it.
-    const imsToken = getImsUserTokenStrict(context);
+    // Prefer x-promise-token, matching every other Semrush-transport call site
+    // — keeps the IMS-only forwarding invariant uniform even though this
+    // helper is only reachable after provisioning already passed it.
+    const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
     const transport = createSerenityTransport({ env: context.env, imsToken });
     await transport.transferWorkspaceResources(workspaceId, RELEASE_ALLOCATION);
     log?.info?.('serenity: released orphaned subworkspace allocation back to parent pool', {
