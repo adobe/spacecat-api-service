@@ -4155,7 +4155,7 @@ describe('LlmoController', () => {
 
     const makePostgrest = () => {
       calls = {
-        from: [], select: [], eq: [], not: [], ilike: [],
+        from: [], select: [], eq: [], not: [], ilike: [], limit: [],
       };
       let chain;
       const rec = (name) => (...a) => {
@@ -4168,6 +4168,7 @@ describe('LlmoController', () => {
         eq: rec('eq'),
         not: rec('not'),
         ilike: rec('ilike'),
+        limit: rec('limit'),
         then: (resolve) => resolve({ data: postgrestRows, error: postgrestError }),
       };
       return chain;
@@ -4191,13 +4192,20 @@ describe('LlmoController', () => {
       }]);
     });
 
-    it('queries topics org-scoped, non-null reasoning, ILIKE on topic', async () => {
+    it('queries topics org-scoped, non-null reasoning, ILIKE on topic, bounded', async () => {
       await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
       expect(calls.from[0]).to.deep.equal(['topics']);
       expect(calls.select[0][0]).to.equal('name,popularity_volume,popularity_reasoning,updated_at');
       expect(calls.eq[0]).to.deep.equal(['organization_id', TEST_ORG_ID]);
       expect(calls.not[0]).to.deep.equal(['popularity_reasoning', 'is', null]);
       expect(calls.ilike[0]).to.deep.equal(['name', '%Convert PDF%']);
+      expect(calls.limit[0][0]).to.be.a('number').and.to.be.greaterThan(0);
+    });
+
+    it('escapes LIKE metacharacters in the user-supplied topic', async () => {
+      await controller.getLlmoRationale({ ...rationaleContext, data: { topic: '50%_off\\deal' } });
+      // %, _ and \ must be backslash-escaped so they match literally
+      expect(calls.ilike[0]).to.deep.equal(['name', '%50\\%\\_off\\\\deal%']);
     });
 
     it('maps volume to popularity label (High/Medium/Low/N/A)', async () => {
@@ -4262,10 +4270,10 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.contain('not associated with an organization');
     });
 
-    it('returns a generic 400 on a PostgREST error (no schema leak)', async () => {
+    it('returns a generic 500 on a PostgREST error (no schema leak)', async () => {
       postgrestError = { message: 'relation "topics" column "secret" does not exist' };
       const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const msg = (await result.json()).message;
       expect(msg).to.equal('Error retrieving rationale');
       expect(msg).to.not.contain('secret');

@@ -11,9 +11,23 @@
  */
 
 import {
-  badRequest, notFound,
+  badRequest, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { cachedOk } from '../../support/cached-response.js';
+
+// Max topic rows returned from the DB path (defense-in-depth against an
+// unexpectedly broad match; a single topic name maps to far fewer rows).
+const MAX_TOPIC_ROWS = 1000;
+
+/**
+ * Escapes LIKE/ILIKE metacharacters (`%`, `_`, `\`) in user input so a topic
+ * containing them matches literally instead of acting as a wildcard.
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeLikePattern(value) {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
 
 /**
  * Filters topics based on provided query parameters.
@@ -112,19 +126,22 @@ export async function handleLlmoRationale(context, site) {
 
   // `topics` is org-scoped with no category/region column, so we match on topic
   // name — filtered server-side via ILIKE (case-insensitive substring) to keep
-  // the result set bounded (avoids PostgREST's default row cap), and require a
-  // non-null rationale.
+  // the result set bounded, and require a non-null rationale. LIKE metacharacters
+  // in the user-supplied topic are escaped so they match literally, and an
+  // explicit limit guards against an unexpectedly broad match.
   const { data, error } = await client
     .from('topics')
     .select('name,popularity_volume,popularity_reasoning,updated_at')
     .eq('organization_id', organizationId)
     .not('popularity_reasoning', 'is', null)
-    .ilike('name', `%${topic}%`);
+    .ilike('name', `%${escapeLikePattern(topic)}%`)
+    .limit(MAX_TOPIC_ROWS);
 
   if (error) {
-    // Keep PostgREST detail server-side only (avoid leaking schema names to the client).
+    // Server-side failure (not the client's fault) → 500; keep PostgREST detail
+    // server-side only (avoid leaking schema names to the client).
     log.error(`LLMO rationale PostgREST error for site ${siteId}: ${error.message}`);
-    return badRequest('Error retrieving rationale');
+    return internalServerError('Error retrieving rationale');
   }
 
   const topics = (data || []).map((row) => ({
