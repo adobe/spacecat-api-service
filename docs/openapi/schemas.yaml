@@ -11360,6 +11360,14 @@ SerenityActivateResponse:
         `pending` and the response is HTTP 502 (incomplete activation; body carries
         `error`/`message` and the per-market outcomes — retry to converge). Mirrors
         the persisted brand status.
+    baseSiteId:
+      type: string
+      format: uuid
+      description: |
+        The brand's primary Site (`brands.site_id`), present on a successful
+        activation (HTTP 200) — set to the primary domain's mirror Site so an
+        active Serenity brand is always anchored by a base site (same contract as
+        a non-Serenity brand). Absent on incomplete activations.
     error:
       type: string
       description: |
