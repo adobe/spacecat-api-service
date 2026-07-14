@@ -77,7 +77,7 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/offboard',
 
   // Semrush onboarding - IMS-user, org-membership gated (hasAccess), not S2S.
-  'POST /v2/orgs/:spaceCatId/onboarding',
+  'POST /v2/orgs/:spaceCatId/semrush-onboarding',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url',
