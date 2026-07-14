@@ -280,6 +280,17 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
     expect(log.warn).to.have.been.calledWithMatch(/prod_llm_unavailable/);
   });
 
+  it('fires the prod path (warn + counter) when prod is signalled via ENV, not just AWS_ENV', async () => {
+    // Regression: prod detection resolves through resolveEnvironment (AWS_ENV || ENV),
+    // so ENV=prod alone must still trip the prod path — the old AWS_ENV-only check missed this.
+    const { classifyPromptIntents } = await loadWithClassifier({ classify: null });
+    await classifyPromptIntents(['a'], {
+      env: { ENV: 'prod' }, log, deadline: Date.now() + 100000, writePath: 'create',
+    });
+    expect(emittedMetric('ProdLlmUnavailable')).to.have.length(1);
+    expect(log.warn).to.have.been.calledWithMatch(/prod_llm_unavailable/);
+  });
+
   it('does NOT emit ProdLlmUnavailable on the construction failure in non-prod', async () => {
     const { classifyPromptIntents } = await loadWithClassifier({ classify: null });
     await classifyPromptIntents(['a'], {
@@ -320,6 +331,20 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
     expect(softLog).to.not.equal(undefined);
     expect(softLog.args[1].samples[0].reasoning).to.have.length(200);
     expect(softLog.args[1].samples[0].reason).to.equal('low_confidence');
+  });
+
+  it('logs only {reason, reasoning} per soft-failure sample — never the prompt text', async () => {
+    const secret = 'super-secret-prompt-text-that-must-not-be-logged';
+    const { classifyPromptIntents } = await loadWithRealBatch({
+      classifyByText: () => ({ intent: 'Commercial', confidence: 0.1, reasoning: 'low conf' }),
+    });
+    await classifyPromptIntents([secret], {
+      env: {}, log, deadline: Date.now() + 100000, writePath: 'create',
+    });
+    const softLog = log.info.getCalls().find((c) => /soft failures/.test(c.args[0]));
+    expect(softLog).to.not.equal(undefined);
+    expect(softLog.args[1].samples[0]).to.have.keys(['reason', 'reasoning']);
+    expect(JSON.stringify(softLog.args)).to.not.contain(secret);
   });
 
   it('caps the number of logged soft-failure reasoning samples at 10', async () => {
@@ -404,5 +429,27 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
       env: {}, log, deadline: Date.now() + 100000, writePath: 'create',
     });
     expect(result.get('a')).to.equal('intent:Task');
+  });
+
+  it('never throws when emitMetric throws on the latency + prod_llm_unavailable paths', async () => {
+    // Real batch runner so the per-call timing wrapper runs (populating
+    // callDurations → latency emits), in prod with nothing resolving so the
+    // repeated-invoke-failure ProdLlmUnavailable site also fires — all while
+    // emitMetric throws on every call.
+    const mod = await esmock('../../../src/support/serenity/intent-classification.js', {
+      '../../../src/support/intent-classifier.js': {
+        createIntentClassifier: () => async () => null,
+        classifyIntents: realClassifyIntents,
+      },
+      '../../../src/support/metrics-emf.js': {
+        emitMetric: () => { throw new Error('emf boom'); },
+        resolveEnvironment: realResolveEnvironment,
+      },
+    });
+    const result = await mod.classifyPromptIntents(['a', 'b'], {
+      env: { AWS_ENV: 'prod' }, log, deadline: Date.now() + 100000, writePath: 'create',
+    });
+    expect(result.get('a')).to.equal('intent:Informational');
+    expect(result.get('b')).to.equal('intent:Informational');
   });
 });
