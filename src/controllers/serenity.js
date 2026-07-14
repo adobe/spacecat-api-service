@@ -63,6 +63,7 @@ import {
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
+import { isDynamicAllocationEnabled } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
@@ -420,6 +421,11 @@ function SerenityController(context, log, env) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
 
+  // Global dynamic-allocation kill-switch for this request (env/Vault boolean, default OFF). Read
+  // per request off ctx.env, mirroring buildTransport's env resolution. When OFF the metered
+  // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
+  const dynamicAllocationEnabled = (ctx) => isDynamicAllocationEnabled(ctx?.env || env);
+
   /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
@@ -501,6 +507,10 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
+          },
         )
         : await handleCreatePrompts(
           transport,
@@ -689,6 +699,9 @@ function SerenityController(context, log, env) {
             // in depth: this options bag flows into markets-subworkspace.js and
             // shouldn't carry access to unrelated tables).
             dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
+            // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -982,7 +995,16 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const result = auth.mode === 'subworkspace'
-        ? await handleUpdateModelsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
+        ? await handleUpdateModelsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
+          },
+        )
         : await handleUpdateModels(
           transport,
           ctx.dataAccess,
@@ -1072,6 +1094,7 @@ function SerenityController(context, log, env) {
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
+          { dynamicAllocation: dynamicAllocationEnabled(ctx) },
         );
         let bareSucceeded = true;
         if (typeof brand.setStatus === 'function') {
@@ -1166,6 +1189,7 @@ function SerenityController(context, log, env) {
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
+        { dynamicAllocation: dynamicAllocationEnabled(ctx) },
       );
       const results = [];
       for (const m of markets) {
@@ -1214,6 +1238,8 @@ function SerenityController(context, log, env) {
               // Narrowed to the one model the mapping-row helpers touch — see
               // the single-market create call site for the same rationale.
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+              // JIT units pool = the org parent passed positionally above; not duplicated here.
+              dynamicAllocation: dynamicAllocationEnabled(ctx),
             },
           );
         } catch (e) {

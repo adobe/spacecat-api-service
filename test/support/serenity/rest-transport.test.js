@@ -983,6 +983,24 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('getWorkspaceResources', () => {
+    it('GETs /v1/workspaces/{ws}/resources', async () => {
+      fetchStub.resolves(fetchOk({
+        product_resources: { ai: { resources: { projects: { used: 0, drafted: 0, total: 13 } } } },
+      }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getWorkspaceResources(WORKSPACE_ID);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/resources`,
+      );
+      expect(result.product_resources.ai.resources.projects.total).to.equal(13);
+    });
+  });
+
   describe('listWorkspaceFamily', () => {
     it('GETs /v1/workspaces/{parent}/family', async () => {
       fetchStub.resolves(fetchOk({ items: [{ id: 'subworkspace-ws-1', title: 'Adobe Express' }] }));
