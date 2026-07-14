@@ -149,4 +149,29 @@ describe('OnboardingController', () => {
 
     expect(res.status).to.equal(502);
   });
+
+  it('maps an unexpected error without a status to 500', async () => {
+    notifyStub.rejects(new Error('something unexpected'));
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    const res = await controller.triggerOnboarding(ctx);
+
+    expect(res.status).to.equal(500);
+  });
+
+  it('redacts the webhook URL from the error log even if the thrown message contains it', async () => {
+    const webhookUrl = 'https://hooks.slack.test/x';
+    const err = new Error(`connect failed to ${webhookUrl}?token=leak`);
+    err.status = 502;
+    notifyStub.rejects(err);
+    const ctx = buildContext({ env: { SLACK_ONBOARDING_WEBHOOK_URL: webhookUrl } });
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    const res = await controller.triggerOnboarding(ctx);
+
+    expect(res.status).to.equal(502);
+    expect(ctx.log.error.calledOnce).to.equal(true);
+    const logged = ctx.log.error.firstCall.args[0];
+    expect(logged).to.not.contain(webhookUrl);
+    expect(logged).to.contain('[redacted]');
+  });
 });
