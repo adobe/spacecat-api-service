@@ -143,11 +143,6 @@ function RedirectsController(ctx) {
 
       // S3 returns the object's ETag already quoted (RFC 7232 opaque-tag form),
       // e.g. `"d41d8cd98f00b204e9800998ecf8427e"`. Passthrough gives the client
-      // a strong validator without hashing the body — the writer is single-part,
-      // so this is an MD5 today; multipart uploads would surface an opaque S3
-      // ETag which is still a valid strong validator for If-None-Match compares.
-      // S3 returns the object's ETag already quoted (RFC 7232 opaque-tag form),
-      // e.g. `"d41d8cd98f00b204e9800998ecf8427e"`. Passthrough gives the client
       // a strong validator without hashing the body — the writer is single-part
       // (small overlays), so this is an MD5 today; multipart uploads would
       // surface an opaque S3 ETag which is still a valid strong validator.
