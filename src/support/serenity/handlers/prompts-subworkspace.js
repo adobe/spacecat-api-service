@@ -89,6 +89,8 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     throw err;
   }
 
+  // Each prompt's tags already carry their own parentage (see buildTagsOf), so
+  // one upstream call answers the whole page — no tag-tree walk to join against.
   const resp = await transport.listPromptsByTags(workspaceId, project.id, {
     tag_ids: tagIds,
     page,
@@ -139,12 +141,12 @@ export async function handleCreatePromptsSubworkspace(
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const input = normalizePromptInput(raw);
+    const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
       return {
         skipped: {
           text: String(raw?.text || ''),
-          reason: 'text, languageCode, and geoTargetId are required',
+          reason: /** @type {string} */ (reason),
         },
       };
     }
@@ -168,8 +170,7 @@ export async function handleCreatePromptsSubworkspace(
           geoTargetId: typed.geoTargetId,
           languageCode: input.languageCode,
           text: typed.text,
-          tags: typed.tags,
-          ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
+          tagIds: typed.tagIds,
         },
         affectedProjectId: projectId,
       };
@@ -232,7 +233,7 @@ export async function handleUpdatePromptSubworkspace(
   if (!parsedBody.ok) {
     return { status: parsedBody.status, body: parsedBody.body };
   }
-  const { text: nextText, tags: nextTags, tagIds: nextTagIds } = parsedBody;
+  const { text: nextText, tagIds: nextTagIds } = parsedBody;
   const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
   const languageCode = normalizeLanguageCode(body.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -261,7 +262,7 @@ export async function handleUpdatePromptSubworkspace(
   // twin): the unified layer must not run between delete and create.
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
   const typed = await injectComputedType(projectId, {
-    text: nextText, geoTargetId, tags: nextTags, tagIds: nextTagIds,
+    text: nextText, geoTargetId, tagIds: nextTagIds,
   });
 
   try {
@@ -312,8 +313,7 @@ export async function handleUpdatePromptSubworkspace(
       geoTargetId,
       languageCode,
       text: typed.text,
-      tags: typed.tags,
-      ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
+      tagIds: typed.tagIds,
     },
   };
 }
