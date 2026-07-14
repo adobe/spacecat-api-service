@@ -299,6 +299,30 @@ Expected fields in the structured log payload:
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
 
+## Dynamic AI resource allocation — operations (LLMO-6191)
+
+The JIT top-up allocator (`SERENITY_DYNAMIC_ALLOCATION`, default OFF — see
+`src/support/serenity/dynamic-allocation-active.js`) has its own operational surface, separate from
+the request-path proxy documented above:
+
+- **Metrics/SLIs:** `src/support/serenity/allocation-metrics.js` emits CloudWatch EMF metrics
+  (namespace `Mysticat/SerenityAllocation`) — pool-free ratio, top-up latency, rejection/retry/
+  release-outcome counters, and the hot-path (topped-up vs not) ratio. See that file's module doc
+  for the full catalog and the pager-worthy/dashboard-only split.
+- **Zombie-workspace recovery:** see
+  [`docs/runbooks/serenity-zombie-workspace-recovery.md`](./runbooks/serenity-zombie-workspace-recovery.md)
+  for diagnosing and recovering a sub-workspace stuck `workspaceBusy` after a partially-applied
+  transfer, and for the alerting/paging guidance.
+- **Rightsizing sweep:** `scripts/serenity-rightsizing-sweep.mjs` is a one-time backfill that
+  lowers already-carved sub-workspaces (brands onboarded before the JIT allocator shipped) down to
+  their actual usage, using `releaseAiSurplus` as the reclaim primitive. Run `--dry-run` first —
+  see the script's own header comment for full usage and the auth caveat (requires an operator
+  IMS token; there is no service-account path to Semrush in this repo).
+- **Cross-container serialization:** `src/support/serenity/resource-lock.js` only serializes
+  same-container contention. The cross-container gap and the options considered for closing it are
+  recorded in
+  [`docs/decisions/007-cross-container-resource-lock.md`](./decisions/007-cross-container-resource-lock.md).
+
 ## Dev environment smoke tests
 
 After the api-service feature branch deploys to dev, exercise the surface against `https://spacecat.experiencecloud.live/api/ci`.

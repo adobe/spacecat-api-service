@@ -13,6 +13,7 @@
 // @ts-check
 
 import { SerenityTransportError } from './rest-transport.js';
+import { recordMeteredQuotaClassifier } from './allocation-metrics.js';
 
 /**
  * Recognises an upstream "already gone" response — the signal that an
@@ -86,15 +87,24 @@ export function isWorkspaceNotReady(e) {
  * quota (`used + need > total`). Matches ONLY on an explicit quota signal in the body — NOT any
  * `405`, so a legitimate Method-Not-Allowed is not absorbed. The exact disguised-405 body is pinned
  * by the PR-4 live-gateway canary; widen the signal here only from that pinned shape.
+ *
+ * Emits the `MeteredQuotaClassifier` observability metric (LLMO-6191 item 2) on every call,
+ * dimensioned by match/no-match, so the "405-classifier match ratio" the rollout-hardening ticket
+ * asks for is available the moment a caller wires this predicate into a metered handler's catch
+ * path. NOTE: as of this PR no production call site invokes `isMeteredQuota` yet — see the module
+ * doc above — so this metric will read zero in every environment until one is added.
  * @param {unknown} e
  * @returns {boolean}
  */
 export function isMeteredQuota(e) {
   if (!(e instanceof SerenityTransportError) || e.status !== 405) {
+    recordMeteredQuotaClassifier(false);
     return false;
   }
   const text = bodyText(e);
-  return text.includes('quota') || text.includes('allocation exhausted');
+  const matched = text.includes('quota') || text.includes('allocation exhausted');
+  recordMeteredQuotaClassifier(matched);
+  return matched;
 }
 
 /**
