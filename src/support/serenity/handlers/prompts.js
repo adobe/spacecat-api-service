@@ -229,12 +229,35 @@ export async function handleListPrompts(
   };
 }
 
-export async function publishAffected(transport, semrushWorkspaceId, projectIds, log) {
+/**
+ * Publishes every affected project, collecting (not throwing) per-project failures. Shared by flat
+ * and subworkspace callers.
+ * @param {object} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string[]} projectIds
+ * @param {object} log
+ * @param {(fn: () => Promise<any>) => Promise<any>} [wrapPublish] - wraps each project's
+ *   `publishProject` call (default identity — a plain call, byte-for-byte the pre-existing
+ *   behavior). The subworkspace create-prompts caller passes `headroom.retryOnQuota` (LLMO-6190
+ *   item 4) so a disguised metered-405 gets ONE bounded top-up+retry per project BEFORE it is
+ *   recorded as a failure; flat-mode callers omit this param, so flat mode is untouched.
+ * @returns {Promise<Array<{ projectId: string, message: string }>>}
+ */
+export async function publishAffected(
+  transport,
+  semrushWorkspaceId,
+  projectIds,
+  log,
+  wrapPublish = (fn) => fn(),
+) {
   const unique = Array.from(new Set(projectIds.filter(Boolean)));
   const errors = [];
   await Promise.all(unique.map(async (pid) => {
     try {
-      await transport.publishProject(semrushWorkspaceId, pid);
+      // wrapPublish is nested INSIDE this per-project try so each project's publish (and its
+      // bounded retry, when wired) fails independently — a surviving 405 after the retry still
+      // lands in `errors` for this pid rather than aborting the whole Promise.all fan-out.
+      await wrapPublish(() => transport.publishProject(semrushWorkspaceId, pid));
     } catch (e) {
       log?.warn?.('publishProject failed', { projectId: pid, error: e.message });
       errors.push({ projectId: pid, message: redactUpstreamMessage(e) });

@@ -764,7 +764,10 @@ function SerenityController(context, log, env) {
           log,
           // Narrowed to the one model the mapping-row helpers touch — see the
           // create-market call site above for the same rationale.
-          { dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject } },
+          {
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+          },
         )
         : handleDeleteMarket(
           transport,

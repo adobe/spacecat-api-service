@@ -569,13 +569,19 @@ export async function handleCreateMarketSubworkspace(
   // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
   // empty-units child 405s as a disguised quota rejection, workspace doc §5) and
   // leaves the project a draft so the brand still succeeds.
+  //
+  // Both branches route the publish through `headroom.retryOnQuota` (LLMO-6190 item 4): a no-op
+  // passthrough when the flag is OFF (or `headroom.ensure` above already covered the need), and
+  // ONE bounded re-read+top-up+retry when the publish 405s as a disguised metered-quota rejection
+  // despite the pre-publish `ensure`. A 'best-effort' publish that STILL 405s after that one retry
+  // falls through to the existing swallow below, unchanged.
   let published = false;
   if (publishMode === 'require') {
-    await transport.publishProject(workspaceId, projectId);
+    await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
     published = true;
   } else if (publishMode === 'best-effort') {
     try {
-      await transport.publishProject(workspaceId, projectId);
+      await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
       published = true;
     } catch (e) {
       if (e instanceof SerenityTransportError && e.status === 405) {
@@ -627,6 +633,14 @@ export async function handleCreateMarketSubworkspace(
  * already-vanished project is left un-tombstoned — accepted,
  * reconcile-recoverable drift (implementation plan §3.2/§11).
  *
+ * Wires `releaseAiSurplus` (LLMO-6190 item 3) once the project is confirmed gone — either branch
+ * (our own `deleteProject` succeeded, or it 404'd because the upstream was already gone) leaves the
+ * project truly absent, so both are treated identically: release fires after the try/catch, not
+ * just on the success leg. Same shape as the model-removal seam
+ * (`handleUpdateModelsSubworkspace`): inline, fail-fast (`releaseAiSurplus({ failFast: true })`),
+ * best-effort (its own internal try/catch swallows expected transport/pool failures — a release
+ * hiccup must never fail an otherwise-successful DELETE), post-delete. No-op when the flag is OFF.
+ *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
  * @param {string|number|null} geoTargetId - the market's Google Ads Geo Target id.
@@ -634,6 +648,8 @@ export async function handleCreateMarketSubworkspace(
  * @param {object} log - logger.
  * @param {object} [options]
  * @param {any} [options.dataAccess]
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, hands
+ *   the deleted project's freed units back to the parent pool after the delete.
  */
 export async function handleDeleteMarketSubworkspace(
   transport,
@@ -641,7 +657,7 @@ export async function handleDeleteMarketSubworkspace(
   geoTargetId,
   languageCode,
   log,
-  { dataAccess = null } = {},
+  { dataAccess = null, dynamicAllocation = false } = {},
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
@@ -659,12 +675,20 @@ export async function handleDeleteMarketSubworkspace(
   if (dataAccess) {
     await tombstoneMappingRow(dataAccess, project.id, log);
   }
-  // SCOPE NOTE (serenity-docs#22): this market DELETE does NOT yet call `releaseAiSurplus` to hand
-  // the freed project/prompt units back to the parent pool — release wiring on the delete path is a
-  // deliberate fast-follow, not built here. The stranded units self-heal (next `ensureAiHeadroom`
-  // reuse, a later release, or decommission — see the `releaseAiSurplus` scope note). When it
-  // lands, follow the model-update seam (`handleUpdateModelsSubworkspace`): inline, fail-fast
-  // (`releaseAiSurplus({ failFast: true })`), best-effort, post-publish — no async queue/worker.
+  if (dynamicAllocation) {
+    // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
+    // transfer (silently ignored by the gateway — see resource-manager.js). Best-effort: a release
+    // failure must not turn an already-successful delete into a 500 — releaseAiSurplus's own
+    // try/catch guarantees this by construction (it never throws for expected failures).
+    // `resolveProject` above already resolved a project against `workspaceId`, so it is a real,
+    // non-blank id here; releaseAiSurplus's own requireWorkspaceId re-asserts this at runtime —
+    // narrow the (JSDoc-optional) `string|null` param for tsc, which cannot infer that.
+    await releaseAiSurplus(transport, {
+      subWorkspaceId: /** @type {string} */ (workspaceId),
+      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+      failFast: true,
+    }, log);
+  }
   return { status: 204 };
 }
 
@@ -919,6 +943,10 @@ export async function handleUpdateModelsSubworkspace(
     modelIds,
     { geoTargetId, languageCode },
     log,
+    // LLMO-6190 item 4: bounded top-up+retry if the sync's publish 405s as a disguised
+    // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
+    // when OFF.
+    { wrapPublish: (fn) => headroom.retryOnQuota(fn) },
   );
 
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then

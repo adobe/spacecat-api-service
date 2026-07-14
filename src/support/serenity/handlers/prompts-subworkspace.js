@@ -212,9 +212,11 @@ export async function handleCreatePromptsSubworkspace(
   // projects of THIS child; size headroom from `used + drafted` (includeDrafted, staleness-immune)
   // before the publish. One workspace-level top-up covers all affected projects (the allocation is
   // per sub-workspace, not per project). No-op when the flag is OFF; skipped when nothing was
-  // created so the OFF path and the empty path issue zero headroom reads.
+  // created so the OFF path and the empty path issue zero headroom reads (and, deliberately, no
+  // fail-loud id validation either — nothing here needs metering).
+  let headroom = null;
   if (affectedProjectIds.length > 0) {
-    const headroom = createHeadroomGuard(
+    headroom = createHeadroomGuard(
       transport,
       { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
       log,
@@ -222,7 +224,17 @@ export async function handleCreatePromptsSubworkspace(
     await headroom.ensure({}, { includeDrafted: true });
   }
 
-  const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
+  // LLMO-6190 item 4: when something was created, route each project's publish through
+  // `headroom.retryOnQuota` — a bounded top-up+retry if it 405s as a disguised metered-quota
+  // rejection despite the sizing above. `publishAffected` nests this per-project, so a surviving
+  // 405 after the retry still lands in `publishErrors` for that project rather than throwing.
+  const publishErrors = await publishAffected(
+    transport,
+    workspaceId,
+    affectedProjectIds,
+    log,
+    headroom ? (fn) => headroom.retryOnQuota(fn) : undefined,
+  );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
   for (const pubErr of publishErrors) {

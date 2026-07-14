@@ -19,6 +19,7 @@ import {
   DYNAMIC_ALLOCATION_ENV_FLAG,
 } from '../../../src/support/serenity/dynamic-allocation-active.js';
 import { clearResourceLocks } from '../../../src/support/serenity/resource-lock.js';
+import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
 use(sinonChai);
 
@@ -143,5 +144,166 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
     await Promise.all([guard.ensure({ projects: 1 }), guard.ensure({ projects: 1 })]);
     expect(t.transferWorkspaceResources).to.have.callCount(1);
     expect(childState.projects.total).to.equal(1);
+  });
+
+  it('defaults the ceiling to DEFAULT_BRAND_AI_CEILING (generous — a realistic top-up does NOT 409)', async () => {
+    // Regression guard (LLMO-6190 item 2): if the default ever shrank enough to be enforcing, this
+    // would start throwing brandAiLimit for an ordinary large top-up with no explicit ceiling.
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 5_000_000), dimObj(0, 0, 5_000_000_000)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
+    const r = await guard.ensure({ prompts: 5000 });
+    expect(r.toppedUp).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+  });
+});
+
+describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () => {
+  afterEach(() => clearResourceLocks());
+
+  const quota405 = () => new SerenityTransportError(405, 'Semrush POST .../publish failed: 405', { message: 'quota exceeded' });
+  const otherError = () => new SerenityTransportError(404, 'not found', { message: 'not found' });
+
+  it('OFF: pure passthrough — fn called once, zero transport/ensure calls, even on failure', async () => {
+    const t = makeTransport();
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: false, subWorkspaceId: '', parentWorkspaceId: '' },
+      log,
+    );
+    const fn = sinon.stub().rejects(quota405());
+    await expect(guard.retryOnQuota(fn)).to.be.rejectedWith(SerenityTransportError);
+    expect(fn).to.have.been.calledOnce;
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON, fn succeeds first try: exactly one fn call, zero ensure/transport calls', async () => {
+    const t = makeTransport();
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
+    const fn = sinon.stub().resolves('ok');
+    const r = await guard.retryOnQuota(fn);
+    expect(r).to.equal('ok');
+    expect(fn).to.have.been.calledOnce;
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON, fn throws a NON-metered error: rethrown immediately, ensure never called, fn called once', async () => {
+    const t = makeTransport();
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
+    const fn = sinon.stub().rejects(otherError());
+    await expect(guard.retryOnQuota(fn)).to.be.rejectedWith(SerenityTransportError, /not found/);
+    expect(fn).to.have.been.calledOnce;
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON, metered 405 then recovery + retry succeeds: fn called twice, ensure called once with includeDrafted', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
+    const fn = sinon.stub();
+    fn.onFirstCall().rejects(quota405());
+    fn.onSecondCall().resolves('recovered');
+    const r = await guard.retryOnQuota(fn);
+    expect(r).to.equal('recovered');
+    expect(fn).to.have.been.calledTwice;
+    expect(t.getWorkspaceResources).to.have.been.calledWith(CHILD);
+  });
+
+  it('ON, metered 405 persists on retry: the SECOND error propagates untouched, fn called exactly twice (no third call)', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
+    const secondError = quota405();
+    const fn = sinon.stub();
+    fn.onFirstCall().rejects(quota405());
+    fn.onSecondCall().rejects(secondError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(secondError);
+    expect(fn).to.have.been.calledTwice;
+  });
+
+  it('ON, the recovery ensure() itself throws (e.g. org pool exhausted): that error propagates and fn is NOT retried', async () => {
+    // child has a drafted-but-not-yet-used prompt surplus, so `ensure({}, {includeDrafted:true})`
+    // actually needs a top-up (required=10 > total=0) and reaches the transfer — which we stub to
+    // reject as pool-exhausted, so ensureAiHeadroom's transfer hits the terminal mapping inside
+    // ensure(). fn must not be called a second time.
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 10, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    t.transferWorkspaceResources = sinon.stub().rejects(
+      new SerenityTransportError(422, 'insufficient available units in subscription', { message: 'insufficient available units in subscription' }),
+    );
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
+    const fn = sinon.stub().rejects(quota405());
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.code).to.equal('orgPoolExhausted');
+    expect(fn).to.have.been.calledOnce;
+  });
+
+  it('ON: fn itself is NOT wrapped in the per-child lock — an independent metered write is not serialized behind it', async () => {
+    // Only the recovery `ensure()` call goes through withResourceLock; `fn` (the publish itself) is
+    // the caller's own transport call and must not be queued behind another child's chain.
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      log,
+    );
+    let fnStarted = false;
+    const fn = sinon.stub().callsFake(async () => {
+      fnStarted = true;
+      return 'ok';
+    });
+    // A concurrent ensure() call on the SAME child occupies the lock; retryOnQuota's own fn() call
+    // (no prior 405) must still run immediately rather than queueing behind it.
+    const blocker = guard.ensure({ projects: 1 });
+    await guard.retryOnQuota(fn);
+    expect(fnStarted).to.equal(true);
+    await blocker;
   });
 });
