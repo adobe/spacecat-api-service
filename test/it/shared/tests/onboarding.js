@@ -18,7 +18,7 @@ import {
 } from '../seed-ids.js';
 
 /**
- * Shared integration tests for POST /v2/orgs/:spaceCatId/onboarding.
+ * Shared integration tests for POST /v2/orgs/:spaceCatId/semrush-onboarding.
  *
  * Scope is the auth gate that resolves against the real DB *before* the endpoint
  * calls the external Slack webhook: org existence and membership. The webhook
@@ -29,10 +29,10 @@ import {
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
  */
 export default function onboardingTests(getHttpClient, resetData) {
-  describe('POST /v2/orgs/:spaceCatId/onboarding', () => {
+  describe('POST /v2/orgs/:spaceCatId/semrush-onboarding', () => {
     before(() => resetData());
 
-    const onboardingPath = (orgId) => `/v2/orgs/${orgId}/onboarding`;
+    const onboardingPath = (orgId) => `/v2/orgs/${orgId}/semrush-onboarding`;
 
     it('returns 404 when the organization does not exist', async () => {
       const http = getHttpClient();

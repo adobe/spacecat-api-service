@@ -260,7 +260,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
-    'POST /v2/orgs/:spaceCatId/onboarding': onboardingController.triggerOnboarding,
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding': onboardingController.triggerOnboarding,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,

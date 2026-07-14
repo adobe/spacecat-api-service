@@ -10,7 +10,7 @@ trigger-onboarding:
         example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
   post:
     tags:
-      - onboarding
+      - semrush-onboarding
     summary: Trigger a Semrush onboarding notification
     description: >-
       Sends a Slack notification announcing an onboarding request for the

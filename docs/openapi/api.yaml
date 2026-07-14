@@ -82,7 +82,7 @@ tags:
   - name: state-access-mappings
     description: |
       Hybrid permission model — state-layer access mappings + capability views.
-  - name: onboarding
+  - name: semrush-onboarding
     description: Semrush onboarding notification operations
 
 paths:
@@ -648,7 +648,7 @@ paths:
     $ref: './llmo-api.yaml#/llmo-onboard'
   /v2/orgs/{spaceCatId}/llmo/onboard-site:
     $ref: './llmo-api.yaml#/llmo-onboard-site'
-  /v2/orgs/{spaceCatId}/onboarding:
+  /v2/orgs/{spaceCatId}/semrush-onboarding:
     $ref: './onboarding-api.yaml#/trigger-onboarding'
   /sites/{siteId}/llmo/offboard:
     $ref: './llmo-api.yaml#/llmo-offboard'

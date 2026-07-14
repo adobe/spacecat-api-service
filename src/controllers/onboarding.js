@@ -31,7 +31,7 @@ import { notifyOnboarding } from '../support/onboarding/slack-notifier.js';
  */
 export default function OnboardingController(context, log, env) {
   /**
-   * POST /v2/orgs/:spaceCatId/onboarding
+   * POST /v2/orgs/:spaceCatId/semrush-onboarding
    * @param {object} ctx - Request context.
    * @returns {Promise<Response>}
    */
