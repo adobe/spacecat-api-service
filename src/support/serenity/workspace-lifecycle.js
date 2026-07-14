@@ -96,7 +96,7 @@ function subworkspaceTitle(brand) {
   return hasText(name) ? `${name} [${suffix}]` : `brand-${suffix}`;
 }
 
-async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
+export async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     const status = await transport.getWorkspaceStatus(workspaceId);
@@ -259,6 +259,9 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  *   re-reads the brand's CURRENT semrush_sub_workspace_id from the data layer.
  *   When supplied, the create path uses it as a last-update concurrency guard
  *   (see below) so a parallel activation cannot orphan a resourced workspace.
+ * @param {object} [options] - feature-flag toggles for the dual-mode carve.
+ * @param {boolean} [options.dynamicAllocation] - when true (LLMO/dynamic-allocation ON), skip
+ *   the flat re-grant on an existing sub-workspace; JIT top-up owns sizing. Default false.
  * @returns {Promise<string>} the subworkspace id.
  */
 export async function ensureSubworkspace(
@@ -269,7 +272,9 @@ export async function ensureSubworkspace(
   log,
   timing = {},
   reloadPointer = null,
+  options = {},
 ) {
+  const { dynamicAllocation = false } = options;
   const poll = {
     attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
     intervalMs: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
@@ -290,9 +295,25 @@ export async function ensureSubworkspace(
     // and a subsequent op 422s "workspace not ready" (verified live
     // 2026-06-15). So settle before AND after the transfer so the caller can
     // immediately create/publish projects against it.
+    // This pre-poll runs regardless of mode — the workspace must be `created` before we return it
+    // (dynamic allocation only skips the flat re-grant below, not the readiness settle).
     await pollUntilCreated(transport, existing, poll);
-    await transport.transferWorkspaceResources(existing, resourceAllocation(marketCount));
-    await pollUntilCreated(transport, existing, poll);
+    // Dynamic allocation (flag ON): SKIP the flat re-grant. The pre-sized
+    // `resourceAllocation(marketCount)` carve is exactly the up-front over/under-allocation JIT
+    // replaces — the metered handlers top up just-in-time (ensureAiHeadroom) and release surplus,
+    // so re-flattening the total here would both undo a JIT top-up and, on an ON→OFF rollback of an
+    // already-grown child, risk setting `total` below `used`. Flag OFF unchanged (byte-for-byte).
+    //
+    // SCOPE DECISION (serenity-docs#22, Rainer 2026-07-08 — explicit, NOT a deferral): there is NO
+    // rightsizing/backfill sweep for children already carved under the OLD flat allocation, and
+    // none is planned. It was evaluated and rejected as unnecessary: decommission already releases
+    // a child's FULL allocation to the parent pool, and any over-provisioned survivor self-heals
+    // on its next delete/model-remove release or on decommission (the carve only over-reserves — it
+    // never breaks the child). So do not read the absence of a migration sweep as missing work.
+    if (!dynamicAllocation) {
+      await transport.transferWorkspaceResources(existing, resourceAllocation(marketCount));
+      await pollUntilCreated(transport, existing, poll);
+    }
     return existing;
   }
 
