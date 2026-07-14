@@ -21,16 +21,16 @@ import {
 } from '../../../src/support/serenity/intent-taxonomy.js';
 
 describe('intent-taxonomy.js — parseSerenityIntent (serenity-docs#32)', () => {
-  it('returns the ready-to-use wire tag for a valid value at/above the confidence floor', () => {
+  it('returns the bare value for a valid value at/above the confidence floor', () => {
     expect(parseSerenityIntent({ intent: 'Task', confidence: PROMPT_INTENT_MIN_CONFIDENCE }))
-      .to.equal('intent:Task');
+      .to.equal('Task');
     expect(parseSerenityIntent({ intent: 'Informational', confidence: 0.99 }))
-      .to.equal('intent:Informational');
+      .to.equal('Informational');
   });
 
   it('accepts every canonical value', () => {
     SERENITY_INTENT_VALUES.forEach((value) => {
-      expect(parseSerenityIntent({ intent: value, confidence: 1 })).to.equal(`intent:${value}`);
+      expect(parseSerenityIntent({ intent: value, confidence: 1 })).to.equal(value);
     });
   });
 
@@ -66,10 +66,10 @@ describe('intent-taxonomy.js — parseSerenityIntent (serenity-docs#32)', () => 
 });
 
 describe('intent-taxonomy.js — inspectSerenityIntent (serenity-docs#32 observability)', () => {
-  it('returns ok with the wire tag and surfaced fields for a valid, confident result', () => {
+  it('returns ok with the bare value and surfaced fields for a valid, confident result', () => {
     const r = inspectSerenityIntent({ intent: 'Task', confidence: 0.97, reasoning: 'delegated pick' });
     expect(r).to.deep.equal({
-      tag: 'intent:Task', reason: 'ok', confidence: 0.97, reasoning: 'delegated pick',
+      value: 'Task', reason: 'ok', confidence: 0.97, reasoning: 'delegated pick',
     });
   });
 
@@ -77,7 +77,7 @@ describe('intent-taxonomy.js — inspectSerenityIntent (serenity-docs#32 observa
     const r = inspectSerenityIntent({
       intent: 'Commercial', confidence: PROMPT_INTENT_MIN_CONFIDENCE - 0.01, reasoning: 'unsure',
     });
-    expect(r.tag).to.equal(null);
+    expect(r.value).to.equal(null);
     expect(r.reason).to.equal('low_confidence');
     expect(r.reasoning).to.equal('unsure');
   });
@@ -93,9 +93,9 @@ describe('intent-taxonomy.js — inspectSerenityIntent (serenity-docs#32 observa
     expect(inspectSerenityIntent({ intent: 'Task', confidence: 1, reasoning: 42 }).reasoning).to.equal('');
   });
 
-  it('parseSerenityIntent is the tag projection of inspectSerenityIntent', () => {
+  it('parseSerenityIntent is the value projection of inspectSerenityIntent', () => {
     const parsed = { intent: 'Navigational', confidence: 0.9, reasoning: 'go to site' };
-    expect(parseSerenityIntent(parsed)).to.equal(inspectSerenityIntent(parsed).tag);
-    expect(parseSerenityIntent({ intent: 'x' })).to.equal(inspectSerenityIntent({ intent: 'x' }).tag);
+    expect(parseSerenityIntent(parsed)).to.equal(inspectSerenityIntent(parsed).value);
+    expect(parseSerenityIntent({ intent: 'x' })).to.equal(inspectSerenityIntent({ intent: 'x' }).value);
   });
 });

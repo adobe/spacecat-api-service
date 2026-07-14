@@ -101,10 +101,10 @@ v2-serenity-prompts:
     summary: Bulk-create Serenity prompts
     description: |
       Creates up to 500 prompts in one call. Each input must carry
-      (geoTargetId, languageCode, text) plus at most one of `tags` (names,
-      the legacy write path) or `tagIds` (upstream tag ids, the id-based
-      write path — serenity-docs#24). Inputs are grouped by slice; each
-      affected upstream project is published once at the end.
+      (geoTargetId, languageCode, text, tagIds). Tags are addressed by upstream
+      id: a bare name cannot identify a tag, because names are unique only per
+      (project, parent). Inputs are grouped by slice; each affected upstream
+      project is published once at the end.
     operationId: createSerenityPrompts
     security:
       - ims_key: []
@@ -470,22 +470,30 @@ v2-serenity-tags:
     tags: [serenity]
     summary: Create (or, for a closed dimension, resolve) a tag on one market
     description: |
-      Registers a `<type>:<name>` prompt tag on the market addressed by the
-      `(geoTargetId, languageCode)` slice. `type` is one of the OPEN tag
-      dimensions (`category`, `topic`, customer-authored values — a duplicate
-      name at the same tree level is a hard upstream error, resolve-before-
-      create is the CALLER's job) or one of the CLOSED dimensions (`source`,
-      `intent`, `type` — a small fixed value enum; `name` must be one of that
-      enum's values). A closed-dimension create is resolve-OR-create
-      (idempotent): if the project already has that exact tag, its existing id
-      is returned (200, `created: false`) instead of attempting another create;
-      `parentId` is not allowed for a closed dimension (always a root). The
-      "Categories" view, for example, is the `category:` slice of the open-
-      dimension tags across a brand's markets.
+      Registers a BARE-NAMED prompt tag on the market addressed by the
+      `(geoTargetId, languageCode)` slice. Every tag is a descendant of one of
+      the four dimension roots (`category`, `intent`, `source`, `type`); a tag's
+      dimension is that root ancestor, never a prefix on its name. `type` names
+      the dimension the value belongs to, and `name` must not contain `:` nor
+      shadow a dimension root's name.
 
-      Pass `parentId` (an upstream tag id from a prior list) to create an OPEN-
-      dimension tag as a 1-level nested child of that category; omit it for a
-      root/flat tag.
+      `category` is the one OPEN dimension: its values are customer-authored. A
+      duplicate name under the same parent is a hard upstream error, so
+      resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
+      value directly under the `category` root; pass an upstream tag id (from a
+      prior tags list) to nest it under an existing category as a sub-category.
+      The "Categories" view is the `category` root's subtree across a brand's
+      markets.
+
+      `intent` / `source` / `type` are CLOSED dimensions with a fixed value enum:
+      `name` must be one of that enum's values, and `parentId` is not accepted
+      because their values are always direct children of the dimension root. A
+      closed-dimension create is resolve-OR-create (idempotent): if the project
+      already carries that value its existing id is returned (200,
+      `created: false`) instead of attempting another create.
+
+      The four dimension roots are provisioned on demand, so a project that
+      predates this taxonomy is brought forward by the first write to it.
     operationId: createSerenityTag
     security:
       - ims_key: []
@@ -500,16 +508,18 @@ v2-serenity-tags:
             properties:
               type:
                 type: string
-                enum: [category, topic, source, intent, type]
-                description: The tag dimension. category/topic are open (customer-authored); source/intent/type are closed (fixed enum).
+                enum: [category, intent, source, type]
+                description: The tag's dimension. `category` is open (customer-authored); `intent`/`source`/`type` are closed (fixed enum).
               name:
                 type: string
                 minLength: 1
                 maxLength: 100
                 description: |
-                  For an open dimension: a free-form value (must not contain
-                  ':'). For a closed dimension: must exactly match one of that
-                  dimension's fixed enum values.
+                  A BARE value — no dimension prefix. Must not contain ':' and
+                  must not be one of the reserved dimension root names
+                  (`category`, `intent`, `source`, `type`). For a closed
+                  dimension it must exactly match one of that dimension's fixed
+                  enum values.
               geoTargetId:
                 type: integer
                 minimum: 1
@@ -522,14 +532,14 @@ v2-serenity-tags:
                 type: [string, 'null']
                 description: |
                   Optional upstream tag id (from a prior tags list) to nest the
-                  new OPEN-dimension tag under as a 1-level child. Omit, or
-                  pass explicit JSON `null`, for a root/flat tag — unlike the
-                  PATCH endpoint's `parentId`, create has no "leave unchanged"
-                  state to distinguish `null` from, so both are treated
-                  identically. Not allowed for a closed dimension.
+                  new OPEN-dimension value under as a sub-category. Omit, or
+                  pass explicit JSON `null`, to hang it directly under the
+                  `category` dimension root — never at the root level, which is
+                  reserved for the four dimension roots. Not allowed for a
+                  closed dimension.
     responses:
       '200':
-        description: Closed-dimension tag resolved (already existed or was just created — see `created`).
+        description: Closed-dimension value resolved (already existed or was just created — see `created`).
         content:
           application/json:
             schema:
@@ -538,16 +548,17 @@ v2-serenity-tags:
                 brandId: { type: string, format: uuid }
                 geoTargetId: { type: integer }
                 languageCode: { type: string }
-                type: { type: string, enum: [source, intent, type] }
-                name: { type: string }
-                tag: { type: string, description: The full `<type>:<name>` string. }
+                type: { type: string, enum: [intent, source, type] }
+                name: { type: string, description: The bare value. }
                 id: { type: string, description: The tag's upstream id. }
-                parentId: { type: 'null', description: Always null — closed-dimension tags are always roots. }
+                parentId:
+                  type: string
+                  description: The dimension root's id — a closed value is always a direct child of its root.
                 created:
                   type: boolean
-                  description: 'true if this call created the tag; false if it already existed.'
+                  description: 'true if this call created the value; false if it already existed.'
       '201':
-        description: OPEN-dimension tag registered on the market's project.
+        description: OPEN-dimension value registered on the market's project.
         content:
           application/json:
             schema:
@@ -556,20 +567,16 @@ v2-serenity-tags:
                 brandId: { type: string, format: uuid }
                 geoTargetId: { type: integer }
                 languageCode: { type: string }
-                type: { type: string, enum: [category, topic] }
-                name: { type: string }
-                tag:
-                  type: string
-                  description: |
-                    The registered tag string: the full `<type>:<name>` for a
-                    root/flat tag (no `parentId`), or the BARE `<name>` (no
-                    dimension prefix) for a 1-level nested child.
+                type: { type: string, enum: [category] }
+                name: { type: string, description: The bare value. }
                 id:
                   type: string
                   description: The created tag's upstream id.
                 parentId:
-                  type: [string, 'null']
-                  description: The parent tag id when nested, otherwise null.
+                  type: string
+                  description: |
+                    The parent tag's id: the `category` dimension root for a
+                    category, or the enclosing category for a sub-category.
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or the (geoTargetId, languageCode) market not found.
@@ -610,18 +617,28 @@ v2-serenity-tag-by-id:
     description: |
       Updates a single AIO tag in place on the market addressed by the
       `(geoTargetId, languageCode)` slice — renames it and/or re-parents it under
-      another category (1-level nesting), or promotes a child back to a root.
-      `name` is required on every call; its shape depends on the CURRENT tag: a
-      root takes the full `<dimension>:<value>` string, a child takes a BARE
-      value (no dimension prefix — mirrors tag creation). `parentId` has three
-      meanings: a re-parent target id RE-PARENTS the tag; explicit JSON `null`
-      PROMOTES a child to root; omitting the field entirely leaves the parent
-      unchanged (for a child, the proxy resolves and re-sends its CURRENT
-      `parentId` itself rather than omitting it from the upstream call — an
-      omitted `parent_id` silently promotes a child to root upstream, so
-      omission and explicit `null` are NOT interchangeable). An unknown
-      `tagId` is NOT a 404 — it surfaces as 502, like every serenity proxy
-      write against an upstream error.
+      another tag. `name` is required on every call and is always BARE: a tag's
+      dimension is its root ancestor, not a prefix on its name, and a name may
+      not shadow a dimension root's name.
+
+      `parentId` names a re-parent target. Omitting it leaves the parent
+      unchanged, which the proxy honours by resolving the tag's CURRENT parent
+      and RE-SENDING it upstream — an upstream PATCH that omits `parent_id`
+      silently PROMOTES the tag to a root, stranding it outside its dimension
+      while every carrying prompt stays attached. Explicit JSON `null` is
+      rejected with a 400: the root level is reserved for the four dimension
+      roots, so a tag can never legally become one.
+
+      A re-parent stays inside the tag's own dimension, and the new parent may
+      not be the tag itself or one of its descendants (400). Upstream stores a
+      parent pointer rather than a tree and would accept such an edge, leaving
+      the tag and its subtree reachable from no root — and so unreachable and
+      unrepairable through this API.
+
+      The four dimension roots themselves cannot be renamed or re-parented
+      (400) — doing so would leave their whole subtree without a dimension. A
+      closed dimension's value cannot be renamed or re-parented either: its
+      vocabulary is fixed.
     operationId: updateSerenityTag
     security:
       - ims_key: []
@@ -637,21 +654,21 @@ v2-serenity-tag-by-id:
               name:
                 type: string
                 minLength: 1
+                maxLength: 100
                 description: |
-                  The tag's new name. For a ROOT tag, the full
-                  `<dimension>:<value>` string (dimension one of `category` /
-                  `topic`) — rename by changing the value. For a CHILD tag
-                  (currently nested under a parent), a BARE value with no
-                  dimension prefix, mirroring how children are created.
+                  The tag's new BARE name — no dimension prefix. Must not
+                  contain ':' and must not be one of the reserved dimension root
+                  names (`category`, `intent`, `source`, `type`).
               parentId:
-                type: [string, 'null']
+                type: string
                 description: |
-                  An upstream tag id RE-PARENTS this tag under it. Explicit
-                  JSON `null` PROMOTES a child to root. Omit the field
-                  entirely to leave the parent unchanged (safe for both a root
-                  and a child — the proxy resolves and preserves a child's
-                  current parent server-side rather than omitting it from the
-                  upstream call). `null` and omission are NOT interchangeable.
+                  An upstream tag id RE-PARENTS this tag under it. Omit the
+                  field to leave the parent unchanged — the proxy resolves the
+                  tag's current parent and re-sends it upstream rather than
+                  omitting it, which would promote the tag to a root. Explicit
+                  JSON `null` is rejected (400). Must resolve to a tag on this
+                  market, inside the tag's own dimension, and must be neither the
+                  tag itself nor one of its descendants.
               geoTargetId:
                 type: integer
                 minimum: 1
@@ -672,22 +689,29 @@ v2-serenity-tag-by-id:
                 geoTargetId: { type: integer }
                 languageCode: { type: string }
                 tagId: { type: string }
-                tag:
+                name:
                   type: string
-                  description: |
-                    The tag's name after update: the full `<dimension>:<value>`
-                    string for a root, or the BARE value for a child.
+                  description: The tag's bare name after the update.
                 parentId:
-                  type: [string, 'null']
-                  description: The parent tag id when nested, otherwise null.
-      '400': { $ref: './responses.yaml#/400' }
+                  type: string
+                  description: The tag's parent id after the update.
+      '400':
+        description: |
+          Malformed body, a name carrying ':' or shadowing a dimension root, an
+          explicit null `parentId`, a `parentId` outside the tag's dimension or
+          inside the tag's own subtree, or a PATCH targeting a dimension root or
+          a closed dimension's value.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '404':
         description: |
-          Organization, brand, or the (geoTargetId, languageCode) market not found
-          (local checks). An unknown upstream tag id is NOT a 404 — like every
-          serenity proxy write, an upstream error surfaces as 502.
+          Organization, brand, the (geoTargetId, languageCode) market, or the
+          `tagId` itself — an id absent from the project's tag tree answers
+          `tagNotFound` rather than being forwarded upstream, because without the
+          tag's current parent there is no request body that preserves it.
       '502':
-        description: Upstream returned a non-2xx response (including an unknown tag id).
+        description: Upstream returned a non-2xx response.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -1001,4 +1025,100 @@ v2-serenity-org-languages:
         description: Caller lacks access to the organization.
       '404':
         description: Organization not found.
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-url-inspector-filter-dimensions:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Filter dimensions for the Serenity URL Inspector dashboard
+    description: |
+      Returns the option universe for the URL Inspector Brand/Region/Topic/
+      Category/Intent/Origin filter dropdowns, sourced from the Semrush Brands,
+      Markets, and Topics elements (not from Adobe Postgres). Unlike the
+      cascading `/brand-presence/filter-dimensions` endpoint, this read is not
+      itself filtered by any of the dimensions it returns — it defines what
+      those dropdowns can show.
+
+      `topics`/`categories`/`page_intents`/`origins` are derived from the same
+      underlying Topics element response, split apart by their `topic:`/
+      `category:`/`intent:`/`source:` tag prefix. Any other tag prefix Semrush
+      introduces later (e.g. `type:branded`) surfaces automatically as an extra
+      array property keyed by that prefix, and prefix-less tags collect into
+      `tags` — see `SerenityUrlInspectorFilterDimensions`.
+    operationId: listSerenityUrlInspectorFilterDimensions
+    security:
+      - ims_key: []
+    parameters:
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope brands/topics to. Accepts a Semrush Elements model
+          name directly, or a SpaceCat/UI platform code (translated
+          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: projectId
+        in: query
+        required: false
+        description: Semrush project UUID to scope the Topics element to a specific market.
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Filter dimensions retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityUrlInspectorFilterDimensions' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }

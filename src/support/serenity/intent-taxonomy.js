@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { tagFor, TAG_DIMENSION } from './prompt-tags.js';
+import { INTENT_VALUE } from './prompt-tags.js';
 
 /**
  * Serenity's 5-value intent taxonomy (serenity-docs#32) — the LLM-facing
@@ -25,15 +25,11 @@ import { tagFor, TAG_DIMENSION } from './prompt-tags.js';
  */
 
 // The 5 bare category words the model must emit verbatim (Capitalized,
-// case-sensitive) — matches the existing `INTENT_TAG` wire vocabulary in
-// `prompt-tags.js` exactly, so no taxonomy change is needed on the write path.
-export const SERENITY_INTENT_VALUES = Object.freeze([
-  'Informational',
-  'Task',
-  'Commercial',
-  'Transactional',
-  'Navigational',
-]);
+// case-sensitive) — the `intent` closed-dimension vocabulary from
+// `prompt-tags.js` (INTENT_VALUE). Under the dimension-root tag model these are
+// bare values resolved to child tag ids under the `intent` root, not prefixed
+// wire tags, so no taxonomy change is needed on the write path.
+export const SERENITY_INTENT_VALUES = Object.freeze(Object.values(INTENT_VALUE));
 
 // Validity floor, NOT a quality gate (calibration finding: the model is
 // uniformly over-confident regardless of correctness — gpt-4.1 mean 0.959,
@@ -84,10 +80,10 @@ Do not include markdown, code fences, or any text outside the JSON object.`;
 
 /**
  * @typedef {object} SerenityIntentInspection
- * @property {string|null} tag - the wire tag (`intent:<Value>`) or null on any
- *   soft failure.
+ * @property {string|null} value - the bare `intent` value (e.g. `Task`) or null
+ *   on any soft failure.
  * @property {'ok'|'invalid_value'|'low_confidence'} reason - why the result is
- *   what it is: `ok` (usable tag), `invalid_value` (garbled / unrecognized
+ *   what it is: `ok` (usable value), `invalid_value` (garbled / unrecognized
  *   value), or `low_confidence` (recognized value below the validity floor).
  * @property {number} confidence - the parsed confidence (NaN if unparseable).
  * @property {string} reasoning - the model's `reasoning` field ('' if absent),
@@ -96,11 +92,11 @@ Do not include markdown, code fences, or any text outside the JSON object.`;
 
 /**
  * Inspects a parsed model response against the Serenity taxonomy, distinguishing
- * the soft-failure modes the {@link parseSerenityIntent} boolean result collapses
- * away — so the caller's observability layer can count `low_confidence` apart
- * from other unresolved cases and log the `reasoning` for debuggability. The
+ * the soft-failure modes the {@link parseSerenityIntent} result collapses away —
+ * so the caller's observability layer can count `low_confidence` apart from
+ * other unresolved cases and log the `reasoning` for debuggability. The
  * retry/default behavior is unchanged: any non-`ok` reason still yields a null
- * `tag`, which the caller folds into the same fallback ladder.
+ * `value`, which the caller folds into the same fallback ladder.
  *
  * @param {object} parsed - the parsed `{intent, confidence, reasoning}` body.
  * @returns {SerenityIntentInspection}
@@ -109,35 +105,35 @@ export function inspectSerenityIntent(parsed) {
   const value = String(parsed?.intent ?? '');
   const confidence = Number(parsed?.confidence);
   const reasoning = typeof parsed?.reasoning === 'string' ? parsed.reasoning : '';
-  if (!SERENITY_INTENT_VALUES.includes(value)) {
+  if (!(/** @type {readonly string[]} */ (SERENITY_INTENT_VALUES)).includes(value)) {
     return {
-      tag: null, reason: 'invalid_value', confidence, reasoning,
+      value: null, reason: 'invalid_value', confidence, reasoning,
     };
   }
   if (!Number.isFinite(confidence) || confidence < PROMPT_INTENT_MIN_CONFIDENCE) {
     return {
-      tag: null, reason: 'low_confidence', confidence, reasoning,
+      value: null, reason: 'low_confidence', confidence, reasoning,
     };
   }
   return {
-    tag: tagFor(TAG_DIMENSION.INTENT, value), reason: 'ok', confidence, reasoning,
+    value, reason: 'ok', confidence, reasoning,
   };
 }
 
 /**
  * Validates a parsed model response against the Serenity taxonomy: the value
  * must be one of the 5 canonical Capitalized literals AND confidence must meet
- * the validity floor. Returns the ready-to-use wire tag (e.g. `intent:Task`) on
- * success, mirroring `classifyBrandedTag` returning a ready `TYPE_TAG.*` string
- * rather than a bare value — or `null` on any validation failure (garbled
- * output, an unrecognized value, or a below-floor confidence, all treated as
- * the same "soft failure" by the caller's retry/default ladder).
+ * the validity floor. Returns the bare `intent` value (e.g. `Task`) on success —
+ * which the caller resolves to a child tag id under the `intent` root via
+ * {@link resolveIntentValueInjection} — or `null` on any validation failure
+ * (garbled output, an unrecognized value, or a below-floor confidence, all
+ * treated as the same "soft failure" by the caller's retry/default ladder).
  *
  * @param {object} parsed - the parsed `{intent, confidence, reasoning}` body.
- * @returns {string|null} the wire tag (`intent:<Value>`) or null.
+ * @returns {string|null} the bare `intent` value or null.
  */
 export function parseSerenityIntent(parsed) {
-  return inspectSerenityIntent(parsed).tag;
+  return inspectSerenityIntent(parsed).value;
 }
 
 /**

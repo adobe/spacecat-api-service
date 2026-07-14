@@ -174,6 +174,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/deactivate:
     $ref: './serenity-api.yaml#/v2-serenity-deactivate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/filter-dimensions:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -193,6 +195,22 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /organizations/{organizationId}/task-management/connections:
+    $ref: './task-management-api.yaml#/task-management-connections'
+  /organizations/{organizationId}/task-management/connections/{connectionId}:
+    $ref: './task-management-api.yaml#/task-management-connection-by-id'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/projects:
+    $ref: './task-management-api.yaml#/task-management-connection-projects'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/issue-types:
+    $ref: './task-management-api.yaml#/task-management-connection-issue-types'
+  /organizations/{organizationId}/task-management/tickets:
+    $ref: './task-management-api.yaml#/task-management-tickets'
+  /organizations/{organizationId}/task-management/{provider}/tickets:
+    $ref: './task-management-api.yaml#/task-management-create-ticket'
+  /organizations/{organizationId}/suggestions/{suggestionId}/ticket:
+    $ref: './task-management-api.yaml#/ticket-by-suggestion'
+  /organizations/{organizationId}/opportunities/{opportunityId}/tickets:
+    $ref: './task-management-api.yaml#/tickets-by-opportunity'
   /organizations/{organizationId}/projects:
     $ref: './organizations-api.yaml#/organization-projects'
   /organizations/{organizationId}/projects/{projectId}/sites:
@@ -479,6 +497,8 @@ paths:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/{siteId}/fixes:
+    $ref: './site-opportunities.yaml#/site-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:

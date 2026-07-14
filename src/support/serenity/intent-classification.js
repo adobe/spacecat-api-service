@@ -14,7 +14,7 @@
 
 import { createIntentClassifier, classifyIntents } from '../intent-classifier.js';
 import { emitMetric, resolveEnvironment } from '../metrics-emf.js';
-import { INTENT_TAG, TAG_DIMENSION, tagFor } from './prompt-tags.js';
+import { INTENT_VALUE } from './prompt-tags.js';
 import {
   SERENITY_INTENT_CATEGORY_SPEC,
   SERENITY_INTENT_VALUES,
@@ -118,8 +118,9 @@ function remainingClassifyBudget(deadline, now = Date.now()) {
 }
 
 /**
- * Batch-classifies prompt texts into `intent:<Value>` wire tags under the
- * shared write-budget, applying the full fallback ladder from serenity-docs#32:
+ * Batch-classifies prompt texts into bare `intent` values (e.g. `Task`) under
+ * the shared write-budget, applying the full fallback ladder from
+ * serenity-docs#32:
  *
  * 1. Hard skip-gate — if there's no room for even one call at entry, default
  *    everything immediately (no LLM calls attempted, counted `budget_skipped`).
@@ -149,7 +150,7 @@ function remainingClassifyBudget(deadline, now = Date.now()) {
  * @param {string} [options.workspaceId] - the Semrush workspace id, used as the
  *   per-customer `Workspace` dimension on the outcome counters so one catalog's
  *   degradation isn't hidden under a healthy aggregate.
- * @returns {Promise<Map<string, string>>} text -> `intent:<Value>` wire tag.
+ * @returns {Promise<Map<string, string>>} text -> bare `intent` value.
  */
 export async function classifyPromptIntents(texts, {
   env, log = console, deadline, writePath = 'unknown', workspaceId,
@@ -173,8 +174,8 @@ export async function classifyPromptIntents(texts, {
     defaulted: 0,
     budget_skipped: 0,
   };
-  // Distribution of the emitted classified wire tags (excludes `defaulted`,
-  // which is reported as its own bucket). Keyed by wire tag.
+  // Distribution of the emitted classified intent values (excludes `defaulted`,
+  // which is reported as its own bucket). Keyed by bare intent value.
   const valueCounts = Object.create(null);
   // Per-call LLM latencies (ms) and a heuristic per-call timeout tally.
   const callDurations = [];
@@ -184,7 +185,7 @@ export async function classifyPromptIntents(texts, {
   const softFailures = [];
 
   const defaultAll = (list) => {
-    list.forEach((t) => result.set(t, INTENT_TAG.INFORMATIONAL));
+    list.forEach((t) => result.set(t, INTENT_VALUE.INFORMATIONAL));
     counts.defaulted += list.length;
   };
 
@@ -205,8 +206,7 @@ export async function classifyPromptIntents(texts, {
       }
     });
     SERENITY_INTENT_VALUES.forEach((word) => {
-      const tag = tagFor(TAG_DIMENSION.INTENT, word);
-      const c = valueCounts[tag] || 0;
+      const c = valueCounts[word] || 0;
       if (c > 0) {
         emitIntentMetric('IntentValueDistribution', c, 'Count', { WritePath: writePath, Value: word }, safeEnv);
       }
@@ -248,7 +248,7 @@ export async function classifyPromptIntents(texts, {
     systemPrompt: SERENITY_INTENT_CATEGORY_SPEC.systemPrompt,
     invokeTimeoutMs: SERENITY_INTENT_CATEGORY_SPEC.invokeTimeoutMs,
     parseResult: (parsed) => {
-      const { tag, reason, reasoning } = inspectSerenityIntent(parsed);
+      const { value, reason, reasoning } = inspectSerenityIntent(parsed);
       if (reason !== 'ok') {
         if (reason === 'low_confidence') {
           counts.low_confidence += 1;
@@ -257,7 +257,7 @@ export async function classifyPromptIntents(texts, {
           softFailures.push({ reason, reasoning: String(reasoning || '').slice(0, 200) });
         }
       }
-      return tag;
+      return value;
     },
   };
 

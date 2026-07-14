@@ -112,8 +112,8 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
     // deadline already effectively exhausted (in the past).
     const deadline = computeWriteDeadline(Date.now() - 100000);
     const result = await classifyPromptIntents(['a', 'b'], { env: {}, log, deadline });
-    expect(result.get('a')).to.equal('intent:Informational');
-    expect(result.get('b')).to.equal('intent:Informational');
+    expect(result.get('a')).to.equal('Informational');
+    expect(result.get('b')).to.equal('Informational');
     expect(classifyIntentsStub).to.not.have.been.called;
     expect(log.info).to.have.been.calledWithMatch(/budget_skipped/);
   });
@@ -123,7 +123,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
     const result = await classifyPromptIntents(['a'], {
       env: { AWS_ENV: 'dev' }, log, deadline: Date.now() + 100000,
     });
-    expect(result.get('a')).to.equal('intent:Informational');
+    expect(result.get('a')).to.equal('Informational');
     expect(log.info).to.have.been.calledWithMatch(/Azure OpenAI is not configured/);
     expect(log.warn).to.not.have.been.called;
   });
@@ -133,7 +133,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
     const result = await classifyPromptIntents(['a'], {
       env: { AWS_ENV: 'prod' }, log, deadline: Date.now() + 100000,
     });
-    expect(result.get('a')).to.equal('intent:Informational');
+    expect(result.get('a')).to.equal('Informational');
     expect(log.warn).to.have.been.calledWithMatch(/prod_llm_unavailable/);
   });
 
@@ -142,12 +142,12 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
     const result = await classifyPromptIntents(['a'], {
       env: null, log: null, deadline: Date.now() + 100000,
     });
-    expect(result.get('a')).to.equal('intent:Informational');
+    expect(result.get('a')).to.equal('Informational');
   });
 
   it('uses the first-pass classification result and counts classified_ok, no retry when everything resolves', async () => {
     const classifyIntentsStub = sinon.stub().resolves(new Map([
-      ['a', 'intent:Task'], ['b', 'intent:Commercial'],
+      ['a', 'Task'], ['b', 'Commercial'],
     ]));
     const { classifyPromptIntents } = await loadWithClassifier({
       classify: () => {}, classifyIntentsStub,
@@ -155,16 +155,16 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
     const result = await classifyPromptIntents(['a', 'b'], {
       env: {}, log, deadline: Date.now() + 100000,
     });
-    expect(result.get('a')).to.equal('intent:Task');
-    expect(result.get('b')).to.equal('intent:Commercial');
+    expect(result.get('a')).to.equal('Task');
+    expect(result.get('b')).to.equal('Commercial');
     expect(classifyIntentsStub).to.have.been.calledOnce;
     expect(log.info).to.have.been.calledWithMatch(/summary/, sinon.match({ classified_ok: 2, retry_attempted: 0 }));
   });
 
   it('retries once for unresolved texts when the budget allows, and uses the retry result on success', async () => {
     const classifyIntentsStub = sinon.stub();
-    classifyIntentsStub.onCall(0).resolves(new Map([['a', 'intent:Task']])); // 'b' left unresolved
-    classifyIntentsStub.onCall(1).resolves(new Map([['b', 'intent:Navigational']]));
+    classifyIntentsStub.onCall(0).resolves(new Map([['a', 'Task']])); // 'b' left unresolved
+    classifyIntentsStub.onCall(1).resolves(new Map([['b', 'Navigational']]));
     const { classifyPromptIntents } = await loadWithClassifier({
       classify: () => {}, classifyIntentsStub,
     });
@@ -172,8 +172,8 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
     const result = await classifyPromptIntents(['a', 'b'], {
       env: {}, log, deadline: Date.now() + 100000,
     });
-    expect(result.get('a')).to.equal('intent:Task');
-    expect(result.get('b')).to.equal('intent:Navigational');
+    expect(result.get('a')).to.equal('Task');
+    expect(result.get('b')).to.equal('Navigational');
     expect(classifyIntentsStub).to.have.been.calledTwice;
     expect(log.info).to.have.been.calledWithMatch(/summary/, sinon.match({ classified_ok: 1, retry_attempted: 1, retry_succeeded: 1 }));
   });
@@ -188,7 +188,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
     const result = await classifyPromptIntents(['a'], {
       env: {}, log, deadline: Date.now() + 100000,
     });
-    expect(result.get('a')).to.equal('intent:Informational');
+    expect(result.get('a')).to.equal('Informational');
     expect(classifyIntentsStub).to.have.been.calledTwice;
     expect(log.info).to.have.been.calledWithMatch(/summary/, sinon.match({ defaulted: 1, retry_attempted: 1 }));
   });
@@ -210,7 +210,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
         classify: () => {}, classifyIntentsStub,
       });
       const result = await classifyPromptIntents(['a'], { env: {}, log, deadline });
-      expect(result.get('a')).to.equal('intent:Informational');
+      expect(result.get('a')).to.equal('Informational');
       expect(classifyIntentsStub).to.have.been.calledOnce;
       expect(log.info).to.have.been.calledWithMatch(/summary/, sinon.match({ retry_attempted: 0, defaulted: 1 }));
     } finally {
@@ -226,7 +226,7 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
 
   it('emits IntentOutcome counters dimensioned by WritePath + Workspace, and IntentValueDistribution by WritePath', async () => {
     const classifyIntentsStub = sinon.stub().resolves(new Map([
-      ['a', 'intent:Task'], ['b', 'intent:Task'], ['c', 'intent:Commercial'],
+      ['a', 'Task'], ['b', 'Task'], ['c', 'Commercial'],
     ]));
     const { classifyPromptIntents } = await loadWithClassifier({
       classify: () => {}, classifyIntentsStub,
@@ -315,8 +315,8 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
     const result = await classifyPromptIntents(['a', 'b'], {
       env: {}, log, deadline: Date.now() + 100000, writePath: 'create', workspaceId: 'ws-9',
     });
-    expect(result.get('a')).to.equal('intent:Task');
-    expect(result.get('b')).to.equal('intent:Informational'); // defaulted after retry
+    expect(result.get('a')).to.equal('Task');
+    expect(result.get('b')).to.equal('Informational'); // defaulted after retry
 
     // low_confidence counted per soft-failure call (pass + retry = 2), distinct from defaulted (1).
     expect(log.info).to.have.been.calledWithMatch(
@@ -381,7 +381,7 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
         writePath: 'edit',
         workspaceId: 'ws-7',
       });
-      expect(result.get('a')).to.equal('intent:Informational');
+      expect(result.get('a')).to.equal('Informational');
 
       const p50 = emittedMetric('PerCallLatencyP50Ms');
       const p95 = emittedMetric('PerCallLatencyP95Ms');
@@ -414,7 +414,7 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
   });
 
   it('never throws into the classify path when emitMetric itself throws', async () => {
-    const classifyIntentsStub = sinon.stub().resolves(new Map([['a', 'intent:Task']]));
+    const classifyIntentsStub = sinon.stub().resolves(new Map([['a', 'Task']]));
     const mod = await esmock('../../../src/support/serenity/intent-classification.js', {
       '../../../src/support/intent-classifier.js': {
         createIntentClassifier: sinon.stub().returns(() => {}),
@@ -428,7 +428,7 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
     const result = await mod.classifyPromptIntents(['a'], {
       env: {}, log, deadline: Date.now() + 100000, writePath: 'create',
     });
-    expect(result.get('a')).to.equal('intent:Task');
+    expect(result.get('a')).to.equal('Task');
   });
 
   it('never throws when emitMetric throws on the latency + prod_llm_unavailable paths', async () => {
@@ -449,7 +449,7 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
     const result = await mod.classifyPromptIntents(['a', 'b'], {
       env: { AWS_ENV: 'prod' }, log, deadline: Date.now() + 100000, writePath: 'create',
     });
-    expect(result.get('a')).to.equal('intent:Informational');
-    expect(result.get('b')).to.equal('intent:Informational');
+    expect(result.get('a')).to.equal('Informational');
+    expect(result.get('b')).to.equal('Informational');
   });
 });

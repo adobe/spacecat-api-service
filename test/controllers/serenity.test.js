@@ -1262,14 +1262,17 @@ describe('SerenityController', () => {
         .to.deep.equal({
           generateTopics: false,
           topicCap: 0,
-          standardTags: [],
-          projectTags: [],
           brandAliases: ['Acme Inc', 'ACME'],
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
           env: {},
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+          // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
+          dynamicAllocation: false,
         });
+      // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
+      // options bag — the same id given to ensureSubworkspace.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[2]).to.equal(WORKSPACE);
     });
 
     it('createMarket forwards the brand URL sources so the project carries them', async () => {
@@ -1308,9 +1311,10 @@ describe('SerenityController', () => {
         .to.deep.equal(competitors);
     });
 
-    it('createMarket opts into topic generation (cap + standard tags) when generatePrompts is true', async () => {
-      // generatePrompts:true → genMarketTopics true → the true side of each
-      // ternary (topicCap, standardTags, projectTags) is forwarded.
+    it('createMarket opts into topic generation when generatePrompts is true', async () => {
+      // generatePrompts:true → genMarketTopics true → the true side of the
+      // topicCap ternary is forwarded. The tag taxonomy is no longer passed as
+      // an option: the handler provisions the dimension roots itself.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createMarket(fakeContext({
@@ -1327,8 +1331,8 @@ describe('SerenityController', () => {
       expect(opts.generateTopics).to.equal(true);
       // Topic cap + tag lists are populated (non-empty) on the opt-in path.
       expect(opts.topicCap).to.be.a('number').and.to.be.greaterThan(0);
-      expect(opts.standardTags).to.be.an('array').and.to.have.length.greaterThan(0);
-      expect(opts.projectTags).to.be.an('array').and.to.have.length.greaterThan(0);
+      expect(opts).to.not.have.property('standardTags');
+      expect(opts).to.not.have.property('projectTags');
     });
 
     it('deleteMarket routes to the subworkspace handler in subworkspace mode', async () => {
@@ -1685,7 +1689,7 @@ describe('SerenityController', () => {
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
     });
 
-    it('activate threads generateTopics + topicCap + tags when the stash opts into prompts', async () => {
+    it('activate threads generateTopics + topicCap when the stash opts into prompts', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel({
         getPendingSemrushProvisioning: () => ({
@@ -1701,8 +1705,6 @@ describe('SerenityController', () => {
       const options = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
       expect(options.generateTopics).to.equal(true);
       expect(options.topicCap).to.be.greaterThan(0);
-      expect(options.standardTags).to.not.be.empty;
-      expect(options.projectTags).to.not.be.empty;
       // generatePrompts → real units → must publish.
       expect(options.publishMode).to.equal('require');
     });
@@ -1861,14 +1863,13 @@ describe('SerenityController', () => {
         modelIds: [],
         generateTopics: false,
         topicCap: 0,
-        standardTags: [],
-        projectTags: [],
         publishMode: 'best-effort',
         brandAliases: ['Acme Inc'],
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
         env: {},
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+        dynamicAllocation: false,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       // writeDeadline is computed ONCE at activate entry, so every market in the
@@ -1880,6 +1881,9 @@ describe('SerenityController', () => {
       expect(dl2).to.equal(dl1);
       expect(opts1).to.deep.equal(expectedOpts);
       expect(opts2).to.deep.equal(expectedOpts);
+      // Org parent (JIT units pool) threaded positionally (arg index 2), not in the options bag.
+      expect(firstCall.args[2]).to.equal(WORKSPACE);
+      expect(secondCall.args[2]).to.equal(WORKSPACE);
     });
 
     it('activate reads the brand URL sources once and applies them to every market', async () => {
@@ -2421,9 +2425,10 @@ describe('SerenityController', () => {
       const classify = handlers.handleCreatePrompts.firstCall.args[6];
       expect(classify).to.be.a('function');
       // US market (geoTargetId 2840): brand name and the US alias both classify.
-      expect(classify('do you sell Test Brand shoes?', 2840)).to.equal('type:branded');
-      expect(classify('is Acme any good?', 2840)).to.equal('type:branded');
-      expect(classify('best running shoes?', 2840)).to.equal('type:non-branded');
+      // The classifier yields a BARE `type` value; the dimension is the tag's root.
+      expect(classify('do you sell Test Brand shoes?', 2840)).to.equal('branded');
+      expect(classify('is Acme any good?', 2840)).to.equal('branded');
+      expect(classify('best running shoes?', 2840)).to.equal('non-branded');
     });
 
     // Line 382: updatePrompt — `ctx?.params || {}` fallback. When ctx.params is

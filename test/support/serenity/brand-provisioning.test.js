@@ -17,8 +17,6 @@ import esmock from 'esmock';
 import {
   initialMarketProjectName,
   MAX_TOPICS_ON_CREATE,
-  STANDARD_PROMPT_TAGS,
-  PROJECT_STANDARD_TAGS,
 } from '../../../src/support/serenity/brand-provisioning.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
@@ -187,8 +185,11 @@ describe('provisionBrandSubworkspace', () => {
     expect(body.languageCode).to.equal('en');
     expect(body.brandDomain).to.equal('acme.com');
     expect(body.brandNames).to.deep.equal(['Acme']);
-    // Brand-create attaches LLMs, generates+attaches topic-tagged prompts, then
-    // publishes best-effort. writeDeadline is a request-scoped epoch-ms deadline
+    // Brand-create attaches LLMs, generates+attaches prompts (each carrying the
+    // standard closed-dimension values, a branded/non-branded `type` value, and a
+    // server-classified `intent` value), then publishes best-effort. The
+    // dimension-root taxonomy is provisioned by createMarket itself, so it is not
+    // passed through here. writeDeadline is a request-scoped epoch-ms deadline
     // (dynamic) — asserted as a number, then dropped before the deep-equal.
     const { writeDeadline, ...restOptions } = options;
     expect(writeDeadline).to.be.a('number');
@@ -196,9 +197,7 @@ describe('provisionBrandSubworkspace', () => {
       modelIds: ['m-1', 'm-2'],
       generateTopics: true,
       topicCap: MAX_TOPICS_ON_CREATE,
-      standardTags: STANDARD_PROMPT_TAGS,
       brandAliases: [],
-      projectTags: PROJECT_STANDARD_TAGS,
       brandUrlSources: null,
       competitors: [],
       env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },

@@ -10,19 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
-import { DEFAULT_ELEMENT_MODEL, ELEMENT_MODELS } from '../constants.js';
+import { resolveElementModel } from '../constants.js';
 
 /**
  * Builds the payload for the Topics (Tags) filter-dimensions element (row 3).
  * Returns all available topic and category tags — powers the Topics/Tags filter dropdown.
  *
  * @param {object} [params]
- * @param {string} [params.model] - AI model filter value. Must be one of {@link ELEMENT_MODELS};
- *   falls back to {@link DEFAULT_ELEMENT_MODEL} if omitted or unrecognised.
+ * @param {string} [params.model] - AI model (Semrush engine name or SpaceCat/UI platform code).
+ *   Translated to a Semrush model + validated via {@link resolveElementModel} (default search-gpt).
+ * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} [params.projectId] - Semrush project UUID to scope tags to a specific market.
  */
-export function buildTopicsPayload({ model, projectId } = {}) {
-  const resolvedModel = ELEMENT_MODELS.includes(model) ? model : DEFAULT_ELEMENT_MODEL;
+export function buildTopicsPayload({ model, platform, projectId } = {}) {
+  const resolvedModel = resolveElementModel(model || platform);
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
@@ -37,48 +38,159 @@ export function buildTopicsPayload({ model, projectId } = {}) {
 
 /**
  * @typedef {object} FilterDimensionItem
- * @property {string|null} id - Dimension identifier (null when no stable ID exists).
+ * @property {string} id - Dimension identifier: the original, unmodified tag
+ *   value as returned by the Elements API (e.g. `topic:Furniture__Sofas`).
  * @property {string} label - Human-readable label.
  */
 
+/**
+ * @typedef {object} PrefixedTag
+ * @property {string} original - The raw tag value exactly as returned by the
+ *   Elements API (e.g. `topic:Furniture__Sofas`), used as the dimension `id`.
+ * @property {string} stripped - `original` with the matched prefix removed
+ *   (e.g. `Furniture__Sofas`), used to derive `label`/`parent_label`.
+ */
+
+/**
+ * @param {object} raw - Raw response from the Elements API.
+ * @param {string} prefix - Tag prefix to filter on (e.g. `topic:`).
+ * @returns {PrefixedTag[]}
+ */
 function extractByPrefix(raw, prefix) {
   return (raw?.blocks?.value ?? [])
     .filter((item) => String(item.value ?? '').startsWith(prefix))
-    .map((item) => String(item.value).substring(prefix.length));
+    .map((item) => {
+      const original = String(item.value);
+      return { original, stripped: original.substring(prefix.length) };
+    });
 }
 
 /**
- * Extracts only "topic:"-prefixed entries → `{ id: null, label }`.
+ * Splits a "Parent__Child" value into its child label and parent label.
+ * Splits on the first "__" only, so a label containing further "__" occurrences
+ * is preserved intact in the child label. `parent_id` is reconstructed as
+ * `${prefix}${parent_label}` — the same original-tag shape as the item's own
+ * `id` — so a caller can filter by parent the same way as by id (e.g. for
+ * `category:Living Room Furniture Retail__Living Room Furniture and Sofas`,
+ * `parent_id` is `category:Living Room Furniture Retail`).
+ * @param {string} value - Raw stripped tag value (prefix already removed).
+ * @param {string} [prefix] - The prefix (including trailing `:`) stripped from
+ *   `value` before it was passed in; '' when the original tag had no prefix.
+ * @returns {{label: string, parent_id?: string, parent_label?: string}}
+ */
+function splitParent(value, prefix = '') {
+  const sep = '__';
+  const idx = value.indexOf(sep);
+  if (idx === -1) {
+    return { label: value };
+  }
+  const parentLabel = value.slice(0, idx);
+  return {
+    label: value.slice(idx + sep.length),
+    parent_id: `${prefix}${parentLabel}`,
+    parent_label: parentLabel,
+  };
+}
+
+/**
+ * Extracts only "topic:"-prefixed entries → `{ id: original tag, label }`,
+ * plus `parent_id`/`parent_label` when the tag encodes a "Parent__Child"
+ * hierarchy.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformTopicsForFilterDimensions(raw) {
-  return extractByPrefix(raw, 'topic:').map((label) => ({ id: null, label }));
+  return extractByPrefix(raw, 'topic:')
+    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, 'topic:') }));
 }
 
 /**
- * Extracts only "category:"-prefixed entries → `{ id: null, label }`.
+ * Extracts only "category:"-prefixed entries → `{ id: original tag, label }`,
+ * plus `parent_id`/`parent_label` when the tag encodes a "Parent__Child"
+ * hierarchy.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformCategoriesToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'category:').map((label) => ({ id: null, label }));
+  return extractByPrefix(raw, 'category:')
+    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, 'category:') }));
 }
 
 /**
- * Extracts only "intent:"-prefixed entries → `{ id: UPPERCASED, label: UPPERCASED }`.
+ * Extracts only "intent:"-prefixed entries → `{ id: original tag, label }`.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformIntentsToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'intent:').map((label) => ({ id: label.toUpperCase(), label }));
+  return extractByPrefix(raw, 'intent:')
+    .map(({ original, stripped }) => ({ id: original, label: stripped }));
 }
 
 /**
- * Extracts only "source:"-prefixed entries → `{ id: value, label: value }`.
+ * Extracts only "source:"-prefixed entries → `{ id: original tag, label }`.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformOriginsToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'source:').map((label) => ({ id: label, label }));
+  return extractByPrefix(raw, 'source:')
+    .map(({ original, stripped }) => ({ id: original, label: stripped }));
+}
+
+const KNOWN_TAG_PREFIXES = ['topic:', 'category:', 'intent:', 'source:'];
+
+/**
+ * Extracts every tag NOT already covered by the known `topic:`/`category:`/
+ * `intent:`/`source:` prefixes, so newly-introduced Semrush tag types (e.g.
+ * `type:branded`) surface in the response without a code change per prefix.
+ *
+ * - `prefix:value` tags are grouped by their prefix into a dynamic key
+ *   (e.g. `{ type: [{ id: 'type:branded', label: 'branded' }, ...] }`), unless
+ *   `prefix` collides with an entry in `reservedResultKeys`, in which case the
+ *   tag is routed to the generic `tags` array instead.
+ * - Plain tags with no `prefix:` at all are also collected into `tags`.
+ *
+ * `id` is always the original, unmodified tag value as returned by the
+ * Elements API. Both forms apply the same `Parent__Child` splitting as the
+ * known dimensions to derive `label`/`parent_label`.
+ *
+ * Tag prefixes are arbitrary strings from Semrush, so a prefix can legitimately
+ * be `constructor`, `__proto__`, etc. `groups` is created with `Object.create(null)`
+ * (not `{}`) so `groups[prefix]` never resolves to an inherited `Object.prototype`
+ * member for such a prefix — with a plain `{}`, `groups[prefix] ?? []` would
+ * silently return e.g. the `Object` constructor function instead of `undefined`,
+ * and the following `.push(...)` would throw.
+ *
+ * @param {object} raw - Raw response from the Elements API.
+ * @param {string[]} [reservedResultKeys] - Keys already populated on the
+ *   caller's result object (see `elements-service.js`) that a raw tag's
+ *   `prefix:` must not collide with. Passed in by the caller — rather than
+ *   hardcoded here — so this stays in sync automatically as the caller's
+ *   result shape changes.
+ * @returns {{[prefix: string]: FilterDimensionItem[], tags: FilterDimensionItem[]}}
+ */
+export function transformOtherTagsForFilterDimensions(raw, reservedResultKeys = []) {
+  const values = (raw?.blocks?.value ?? [])
+    .map((item) => String(item.value ?? ''))
+    .filter((value) => value !== '' && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
+
+  const groups = Object.create(null);
+  const tags = [];
+
+  values.forEach((value) => {
+    const sepIdx = value.indexOf(':');
+    if (sepIdx === -1) {
+      tags.push({ id: value, ...splitParent(value) });
+      return;
+    }
+    const prefix = value.slice(0, sepIdx);
+    const rest = value.slice(sepIdx + 1);
+    if (reservedResultKeys.includes(prefix)) {
+      tags.push({ id: value, ...splitParent(rest, `${prefix}:`) });
+      return;
+    }
+    groups[prefix] = groups[prefix] ?? [];
+    groups[prefix].push({ id: value, ...splitParent(rest, `${prefix}:`) });
+  });
+
+  return { ...groups, tags };
 }

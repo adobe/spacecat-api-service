@@ -177,7 +177,11 @@ describe('Index Tests', () => {
           findByHashedApiKey: sinon.stub().resolves(null),
         },
         Opportunity: {},
-        Suggestion: {},
+        Suggestion: { findById: sinon.stub() },
+        TaskManagementConnection: { allByOrganizationId: sinon.stub() },
+        Ticket: { findById: sinon.stub() },
+        TicketSuggestion: { findBySuggestionId: sinon.stub() },
+        IdempotencyKey: { findActiveKey: sinon.stub(), create: sinon.stub() },
       },
       s3Client: {
         send: sinon.stub(),
@@ -412,6 +416,20 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects task-management connection route with invalid connectionId', async () => {
+    const orgId = 'e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
+    context.pathInfo.suffix = `/organizations/${orgId}/task-management/connections/not-a-uuid`;
+
+    request = new Request(`${baseUrl}/organizations/${orgId}/task-management/connections/not-a-uuid`, {
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Connection Id is invalid. Please provide a valid UUID.');
   });
 
   it('handles dynamic route errors', async () => {
