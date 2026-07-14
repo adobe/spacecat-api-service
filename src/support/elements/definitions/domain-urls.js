@@ -17,7 +17,7 @@ import { resolveElementModel } from '../constants.js';
 /**
  * Builds the payload for the Stats-per-URL element (9af5ed83, `table`) scoped to a
  * single (project, date, model). Identical shape to the owned-urls stats payload
- * (date in BOTH simple + advanced, `CBF_model` in an `or` block, `category:<label>`
+ * (date in BOTH simple + advanced, `CBF_model` in an `or` block, `category__<label>`
  * tag, region via top-level `project_id`). `startDate`/`endDate` are required
  * (validated in the controller).
  *
@@ -31,7 +31,7 @@ import { resolveElementModel } from '../constants.js';
  * @param {string} [params.platform] - Legacy alias for `model`; `model` wins.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
- * @param {string} [params.category] - Category label → tag `category:<label>`.
+ * @param {string} [params.category] - Category label → tag `category__<label>`.
  * @param {string} [params.projectId] - Semrush project id (region scope, top-level).
  */
 export function buildDomainUrlsPayload({
@@ -44,7 +44,7 @@ export function buildDomainUrlsPayload({
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
   if (category) {
-    advancedFilters.push({ op: 'eq', val: `category:${category}`, col: 'CBF_tags' });
+    advancedFilters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
   }
   return {
     ...(projectId && { project_id: projectId }),

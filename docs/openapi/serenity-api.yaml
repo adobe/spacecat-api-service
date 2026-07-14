@@ -1064,11 +1064,12 @@ v2-serenity-url-inspector-filter-dimensions:
       those dropdowns can show.
 
       `topics`/`categories`/`page_intents`/`origins` are derived from the same
-      underlying Topics element response, split apart by their `topic:`/
-      `category:`/`intent:`/`source:` tag prefix. Any other tag prefix Semrush
-      introduces later (e.g. `type:branded`) surfaces automatically as an extra
-      array property keyed by that prefix, and prefix-less tags collect into
-      `tags` — see `SerenityUrlInspectorFilterDimensions`.
+      underlying Topics element response, split apart by their `topic__`/
+      `category__`/`intent__`/`source__` tag prefix. Any other tag prefix Semrush
+      introduces later (e.g. `type__branded`) surfaces automatically as an extra
+      array property keyed by that prefix. Bare prefix declarations with no
+      value (e.g. a lone `category` row) are ignored — see
+      `SerenityUrlInspectorFilterDimensions`.
     operationId: listSerenityUrlInspectorFilterDimensions
     security:
       - ims_key: []
