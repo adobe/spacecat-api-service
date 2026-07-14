@@ -1,3 +1,10 @@
+# [1.649.0](https://github.com/adobe/spacecat-api-service/compare/v1.648.0...v1.649.0) (2026-07-14)
+
+
+### Features
+
+* filter GET /organizations/:id/projects by ReBAC-viewable sites ([#2801](https://github.com/adobe/spacecat-api-service/issues/2801)) ([126168b](https://github.com/adobe/spacecat-api-service/commit/126168bc6a73e6ce836dc6336f9a93ed8deaeca0))
+
 # [1.648.0](https://github.com/adobe/spacecat-api-service/compare/v1.647.0...v1.648.0) (2026-07-14)
 
 
