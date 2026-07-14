@@ -9,9 +9,10 @@ preflight-jobs:
       - ims_key: [ ]
     summary: Submit a new preflight async job
     description: |
-      This endpoint is useful for submitting a new preflight async job.
-      The job will process the provided URL and return the results.
-      The jobId can be used to poll for the status of the job.
+      Submits a new preflight async job. The job processes the provided URL(s); use the
+      returned `jobId` to poll for status.
+      For promise-based authoring types (CS, CS_CW, AMS), include the `x-promise-token`
+      header (IMS session-based promise token from `POST /auth/v2/promise`).
     operationId: submitPreflightJob
     requestBody:
       required: true
@@ -42,7 +43,9 @@ preflight-jobs:
             schema:
               $ref: './schemas.yaml#/CreatePreflightJobResponse'
       '400':
-        description: Invalid request (missing urls array, step field, or other required fields)
+        description: |
+          Invalid request — e.g. missing `urls` or `step`, invalid body fields, or (for CS,
+          CS_CW, AMS sites) missing `x-promise-token` header.
         content:
           application/json:
             schema:

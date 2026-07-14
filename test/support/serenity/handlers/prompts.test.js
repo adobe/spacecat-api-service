@@ -20,15 +20,26 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
+  makeTypeInjector,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import {
+  TAG_IDS,
+  dimensionTreeLevels,
+  makeListProjectTagsStub,
+  makeProvisioningTransportStubs,
+} from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
 const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
+
+// A classifier over BARE `type` values — the dimension is the tag's root, never
+// a prefix on its name.
+const classifyByBrandMention = (text) => (/\bacme\b/i.test(text) ? 'branded' : 'non-branded');
 
 function makeProject({ semrushProjectId, geoTargetId, languageCode }) {
   return {
@@ -118,6 +129,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
     const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({
         // resp.items missing → Array.isArray(undefined) ? items : [] → []
         // resp.total missing → Number.isFinite(undefined) ? total : items.length → 0
@@ -134,44 +146,6 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     });
   });
 
-  // Branch coverage: `t || ''` falsy short-circuit in input normalization
-  // and PATCH tag scrubbing — a tag entry that is the empty string is
-  // dropped by the trim+filter pipeline.
-  it('drops empty / falsy tag entries from create and update inputs', async () => {
-    const project = makeProject({
-      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
-    });
-    const dataAccess = makeDataAccess([project]);
-    const transport = {
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-id'] }),
-      publishProject: sinon.stub().resolves(),
-      deletePromptsByIds: sinon.stub().resolves(),
-    };
-
-    // CREATE — tags array with a falsy entry → dropped silently.
-    const createResult = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [{
-        text: 'hi', geoTargetId: 2840, languageCode: 'en', tags: ['keep', '', null],
-      }],
-    }, fakeLog());
-    expect(createResult.created[0].tags).to.deep.equal(['keep']);
-
-    // PATCH — tags array with a falsy entry → dropped silently.
-    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
-    const updateResult = await handleUpdatePrompt(
-      transport,
-      dataAccess,
-      BRAND,
-      WORKSPACE,
-      'sem-1',
-      {
-        geoTargetId: 2840, languageCode: 'en', text: 'next', tags: ['keep', undefined],
-      },
-      fakeLog(),
-    );
-    expect(updateResult.body.tags).to.deep.equal(['keep']);
-  });
-
   // Branch coverage: object-form tags (`{id, name}`) and null `id` on the
   // prompt — both are valid upstream shapes that must not blow up the DTO.
   it('maps object-form tags and coerces null prompt id to empty string', async () => {
@@ -181,6 +155,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
     const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({
         items: [
           // Object-form tag with `name` → tagNamesOf maps to t.name
@@ -195,7 +170,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     });
 
     expect(result.items[0].semrushPromptId).to.equal('');
-    expect(result.items[0].tags).to.deep.equal(['consideration']);
+    expect(result.items[0].tagMap).to.deep.equal({ consideration: '' });
   });
 
   // Branch coverage: tagNamesOf handles items with no tags array (DTO carries
@@ -209,6 +184,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
     const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({
         items: [
           { id: 'sem-1', name: 'good prompt' /* tags omitted */ },
@@ -229,6 +205,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       languageCode: 'en',
       text: 'good prompt',
       tags: [],
+      tagMap: {},
     });
   });
 
@@ -239,6 +216,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
     const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
       listPromptsByTags: sinon.stub().resolves({
         items: [
           {
@@ -258,33 +236,234 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'What is Adobe?',
-      tags: ['awareness'],
+      // A ROOT tag omits parent_id/path upstream, so its parentage is null and
+      // its own name is its dimension.
+      tags: [{
+        id: 't-1', name: 'awareness', parentId: null, path: null,
+      }],
+      tagMap: { awareness: 't-1' },
     });
     expect(result.items[0]).not.to.have.property('id');
     expect(result.items[0]).not.to.have.property('semrushProjectId');
+  });
+
+  // The load-bearing property of the id-keyed `tags` array: a prompt can carry
+  // two tags with the same bare name from different dimensions. Upstream embeds
+  // each tag's own parentage on the prompt, so the dimension reads straight off
+  // `path[0]`. `tagMap`, being name-keyed, can only represent one of them —
+  // which is why it is deprecated.
+  it('keeps two same-named prompt tags distinct, reading each dimension off its own path', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listProjectTags: sinon.stub(),
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'best trail shoes',
+          // Exactly what upstream embeds on a prompt: a descendant carries its
+          // own parent_id and root-first path.
+          tags: [
+            {
+              id: TAG_IDS.subCategoryHuman,
+              name: 'human',
+              children_count: 0,
+              parent_id: TAG_IDS.categoryRunningShoes,
+              path: [
+                { id: TAG_IDS.categoryRoot, name: 'category' },
+                { id: TAG_IDS.categoryRunningShoes, name: 'Running Shoes' },
+              ],
+            },
+            {
+              id: TAG_IDS.sourceHuman,
+              name: 'human',
+              children_count: 0,
+              parent_id: TAG_IDS.sourceRoot,
+              path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+            },
+          ],
+        }],
+        total: 1,
+      }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    });
+
+    const { tags } = result.items[0];
+    expect(tags).to.have.lengthOf(2);
+    expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'source']);
+    expect(tags[0].parentId).to.equal(TAG_IDS.categoryRunningShoes);
+    expect(tags[1].parentId).to.equal(TAG_IDS.sourceRoot);
+    // The deprecated name-keyed view collapses them; only one id survives.
+    expect(Object.keys(result.items[0].tagMap)).to.deep.equal(['human']);
+    // Listing prompts costs exactly ONE upstream call — no tag-tree walk.
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('passes tagIds from query to listPromptsByTags when provided', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    };
+
+    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-uuid-1', 'tag-uuid-2'],
+    });
+
+    expect(transport.listPromptsByTags).to.have.been.calledOnce;
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.tag_ids).to.deep.equal(['tag-uuid-1', 'tag-uuid-2']);
+  });
+
+  it('passes empty tag_ids when tagIds is absent', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    };
+
+    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    });
+
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.tag_ids).to.deep.equal([]);
+  });
+
+  it('buildTagMapOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'prompt',
+          tags: [
+            null,
+            42,
+            { id: 'id-only' },
+            { name: 'name-only' },
+            { name: 'valid', id: 42 },
+            '',
+            'string-tag',
+          ],
+        }],
+        total: 1,
+      }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en',
+    });
+
+    expect(result.items[0].tagMap).to.deep.equal({
+      'name-only': '',
+      valid: '42',
+      'string-tag': '',
+    });
+  });
+
+  it('slices tagIds to MAX_TAG_IDS (50) before forwarding', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+    };
+    const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
+
+    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
+    });
+
+    const [, , body] = transport.listPromptsByTags.firstCall.args;
+    expect(body.tag_ids).to.have.lengthOf(50);
+    expect(body.tag_ids[0]).to.equal('tag-0');
+    expect(body.tag_ids[49]).to.equal('tag-49');
+  });
+
+  it('uses resp.total when returned item count equals the page limit', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const fullPage = Array.from({ length: 10 }, (_, i) => ({ id: `s-${i}`, name: `prompt ${i}` }));
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      listPromptsByTags: sinon.stub().resolves({ items: fullPage, total: 999 }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', limit: 10,
+    });
+
+    // items.length (10) === limit (10) → use resp.total
+    expect(result.total).to.equal(999);
+  });
+
+  it('computes exact total from items when on the last (partial) page', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    // 3 items returned, limit=10, page=2 → exact total = (2-1)*10 + 3 = 13
+    const partialPage = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, name: `prompt ${i}` }));
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      listPromptsByTags: sinon.stub().resolves({ items: partialPage, total: 999 }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', limit: 10, page: 2,
+    });
+
+    expect(result.total).to.equal(13);
   });
 });
 
 describe('handlers/prompts.js — handleCreatePrompts', () => {
   it('400s on empty prompts array (no upstream call)', async () => {
-    const transport = { createTaggedPrompts: sinon.stub() };
+    const transport = { createPromptsByIds: sinon.stub() };
     const dataAccess = makeDataAccess([]);
 
     await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [],
     }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode);
-    expect(transport.createTaggedPrompts).not.to.have.been.called;
+    expect(transport.createPromptsByIds).not.to.have.been.called;
   });
 
   // Review minor #4: maxItems=500 cap matches the OpenAPI declaration and
   // prevents an authenticated caller from submitting 10k+ items inside API
   // Gateway's request envelope. Defense-in-depth, not a correctness gate.
   it('400s when the prompts array exceeds maxItems=500', async () => {
-    const transport = { createTaggedPrompts: sinon.stub() };
+    const transport = { createPromptsByIds: sinon.stub() };
     const dataAccess = makeDataAccess([]);
     const tooMany = Array.from({ length: 501 }, (_, i) => ({
       text: `prompt ${i}`,
-      tags: ['t'],
+      tagIds: ['tag-1'],
       geoTargetId: 2840,
       languageCode: 'en',
     }));
@@ -292,7 +471,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: tooMany,
     }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode, /maxItems=500/);
-    expect(transport.createTaggedPrompts).not.to.have.been.called;
+    expect(transport.createPromptsByIds).not.to.have.been.called;
   });
 
   // Branch coverage: body with no `prompts` key → Array.isArray fallback to []
@@ -307,34 +486,35 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   // `projects || []` fallback kicks in and every input is skipped.
   it('skips every input when allByBrandId returns null', async () => {
     const dataAccess = makeDataAccess(null);
-    const transport = { createTaggedPrompts: sinon.stub() };
+    const transport = { createPromptsByIds: sinon.stub() };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
-        text: 'orphaned', geoTargetId: 2840, languageCode: 'en', tags: [],
+        text: 'orphaned', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
       }],
     }, fakeLog());
 
     expect(result.created).to.have.lengthOf(0);
     expect(result.skipped).to.have.lengthOf(1);
-    expect(transport.createTaggedPrompts).to.have.callCount(0);
+    expect(result.skipped[0].reason).to.match(/No market for slice/);
+    expect(transport.createPromptsByIds).to.have.callCount(0);
   });
 
   // Branch coverage: raw input with no `text` field → normalizePromptInput
   // returns null and the row lands in `skipped` with `text: ''`.
   it('skips inputs with no text field (raw.text undefined → empty string)', async () => {
     const dataAccess = makeDataAccess([]);
-    const transport = { createTaggedPrompts: sinon.stub() };
+    const transport = { createPromptsByIds: sinon.stub() };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [{ geoTargetId: 2840, languageCode: 'en', tags: [] }],
+      prompts: [{ geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'] }],
     }, fakeLog());
 
     expect(result.skipped).to.have.lengthOf(1);
     expect(result.skipped[0].text).to.equal('');
   });
 
-  // Branch coverage: createTaggedPrompts rejects with an error that has no
+  // Branch coverage: createPromptsByIds rejects with an error that has no
   // `.status` field → `e.status || 500` defaults to 500.
   it('defaults failed.status to 500 when upstream error has no status property', async () => {
     const project = makeProject({
@@ -342,13 +522,13 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
-      createTaggedPrompts: sinon.stub().rejects(new Error('opaque failure')),
+      createPromptsByIds: sinon.stub().rejects(new Error('opaque failure')),
       publishProject: sinon.stub().resolves(),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
-        text: 'will fail', geoTargetId: 2840, languageCode: 'en', tags: [],
+        text: 'will fail', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
       }],
     }, fakeLog());
 
@@ -356,7 +536,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   });
 
   it('skips inputs missing required fields', async () => {
-    const transport = { createTaggedPrompts: sinon.stub() };
+    const transport = { createPromptsByIds: sinon.stub() };
     const dataAccess = makeDataAccess([]);
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -367,19 +547,21 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(result.skipped[0].text).to.equal('no slice');
   });
 
-  it('creates a prompt and emits a SerenityPrompt DTO without semrushProjectId', async () => {
+  it('creates a prompt by id-based tagIds via aio/prompts and publishes the project', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }], existing_count: 0,
+      }),
       publishProject: sinon.stub().resolves(),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
-        text: 'hello', geoTargetId: 2840, languageCode: 'en', tags: ['a'],
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1', 'tag-child-1'],
       }],
     }, fakeLog());
 
@@ -389,9 +571,180 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'hello',
-      tags: ['a'],
+      tagIds: ['tag-cat-1', 'tag-child-1'],
     });
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['tag-cat-1', 'tag-child-1']);
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+  });
+
+  // A name cannot identify a nested tag: the name-keyed upstream write is
+  // root-only, so an unknown name would mint a phantom ROOT tag rather than
+  // attach the category the caller meant. A `tags` key is therefore rejected
+  // outright — a stale caller must fail loudly, not write garbage.
+  it('skips an input that supplies tag NAMES instead of tagIds', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = { createPromptsByIds: sinon.stub() };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tags: ['Running Shoes'],
+      }],
+    }, fakeLog());
+
+    expect(result.skipped).to.have.lengthOf(1);
+    expect(transport.createPromptsByIds).to.not.have.been.called;
+  });
+
+  it('skips an input that supplies both tags and tagIds', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = { createPromptsByIds: sinon.stub() };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tags: ['a'], tagIds: ['tag-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.skipped).to.have.lengthOf(1);
+    expect(transport.createPromptsByIds).to.not.have.been.called;
+  });
+
+  it('skips an input carrying an empty tags array alongside tagIds (presence-based rejection, not content-based)', async () => {
+    // Regression lock for the content-based-vs-presence-based fix: under a
+    // `tags.length > 0` check, an explicitly-present-but-empty `tags: []` would
+    // not conflict and this input would succeed via the id-based path. Both
+    // create and update reject on the KEY being present, matching
+    // parseUpdatePromptBody's contract (mirrored 400 test on the update side).
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = { createPromptsByIds: sinon.stub() };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tags: [], tagIds: ['tag-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.skipped).to.have.lengthOf(1);
+    expect(transport.createPromptsByIds).to.not.have.been.called;
+  });
+
+  it('drops falsy tagIds entries and returns empty semrushPromptId when createPromptsByIds has no items', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 0, items: [], existing_count: 1,
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['keep', '', null],
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].semrushPromptId).to.equal('');
+    expect(result.created[0].tagIds).to.deep.equal(['keep']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep']);
+  });
+
+  it('returns empty semrushPromptId (not the string "undefined") when createPromptsByIds returns an item with no id', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ name: 'hello' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].semrushPromptId).to.equal('');
+  });
+
+  it('drops malformed tagIds entries (too long / whitespace / control char) like validateParentIdFormat does for parentId', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+    const tooLong = 'x'.repeat(201);
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: ['keep', 'has space', `control${String.fromCharCode(1)}char`, tooLong],
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].tagIds).to.deep.equal(['keep']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep']);
+  });
+
+  it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+    const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].tagIds).to.have.lengthOf(50);
+    expect(result.created[0].tagIds).to.deep.equal(tooMany.slice(0, 50));
+  });
+
+  it('skips a create row when tagIds sanitizes to empty (every entry malformed)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = { createPromptsByIds: sinon.stub() };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['has space', ''],
+      }],
+    }, fakeLog());
+
+    expect(result.skipped).to.have.lengthOf(1);
+    expect(transport.createPromptsByIds).to.not.have.been.called;
   });
 
   it('skips inputs whose (geoTargetId, languageCode) slice has no row on the brand', async () => {
@@ -400,17 +753,19 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([usEn]);
     const transport = {
-      createTaggedPrompts: sinon.stub(),
-      publishProject: sinon.stub(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'good' }],
+      }),
+      publishProject: sinon.stub().resolves(),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [
         {
-          text: 'good', geoTargetId: 2840, languageCode: 'en', tags: [],
+          text: 'good', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
         },
         {
-          text: 'orphan', geoTargetId: 9999, languageCode: 'xx', tags: [],
+          text: 'orphan', geoTargetId: 9999, languageCode: 'xx', tagIds: ['tag-1'],
         },
       ],
     }, fakeLog());
@@ -422,26 +777,26 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       reason: 'No market for slice (9999, xx)',
     });
     // Only one upstream create — the orphan slice is filtered before any call.
-    expect(transport.createTaggedPrompts).to.have.callCount(1);
+    expect(transport.createPromptsByIds).to.have.callCount(1);
   });
 
-  // Branch coverage: upstream createTaggedPrompts rejects → that row enters the
+  // Branch coverage: upstream createPromptsByIds rejects → that row enters the
   // `failed` bucket with the upstream error's status code, but the rest of the
   // batch continues.
-  it('reports per-input failures when upstream createTaggedPrompts rejects', async () => {
+  it('reports per-input failures when upstream createPromptsByIds rejects', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
     const err = Object.assign(new Error('rate limited'), { status: 429 });
     const transport = {
-      createTaggedPrompts: sinon.stub().rejects(err),
+      createPromptsByIds: sinon.stub().rejects(err),
       publishProject: sinon.stub().resolves(),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
-        text: 'will fail', geoTargetId: 2840, languageCode: 'en', tags: [],
+        text: 'will fail', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
       }],
     }, fakeLog());
 
@@ -467,13 +822,15 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
+      }),
       publishProject: sinon.stub().rejects(new Error('publish boom')),
     };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
-        text: 'ok', geoTargetId: 2840, languageCode: 'en', tags: [],
+        text: 'ok', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
       }],
     }, fakeLog());
 
@@ -489,7 +846,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
 
 describe('handlers/prompts.js — handleUpdatePrompt', () => {
   // Regression guard for the "drop slow path" decision: PATCH treats the
-  // body as the full next state, so omitting either text or tags is a
+  // body as the full next state, so omitting either text or tagIds is a
   // client error. Previously omitting tags meant "preserve" and forced a
   // 10k-prompt walk per request — that's now gone, and the missing-field
   // 400 keeps the contract honest.
@@ -503,7 +860,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       BRAND,
       WORKSPACE,
       'sem-1',
-      { geoTargetId: 2840, languageCode: 'en', tags: ['only-tags'] },
+      { geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'] },
       fakeLog(),
     );
 
@@ -511,7 +868,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('missingFields');
   });
 
-  it('400s when tags is missing from body', async () => {
+  it('400s when tagIds is missing from body', async () => {
     const transport = {};
     const dataAccess = makeDataAccess([]);
 
@@ -529,6 +886,235 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('missingFields');
   });
 
+  // The shape a caller that has not migrated actually sends: the retired `tags`
+  // key and NO `tagIds`. The missing-field check must not run first, or the 400
+  // names the field the caller never heard of instead of the one it sent.
+  it('400s naming `tags` when a legacy body carries tags and no tagIds', async () => {
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tags: ['category:Shoes'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/tags is not supported/);
+  });
+
+  // `tags` is rejected on its own, not merely when it collides with `tagIds`:
+  // a name is not an address for a nested tag, so honouring it would write a
+  // phantom root tag upstream.
+  it('400s when tags is present at all, even as null', async () => {
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: ['tag-1'], tags: null,
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('400s when both tags and tagIds are present (mutually exclusive)', async () => {
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tags: ['a'], tagIds: ['tag-1'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('400s when tagIds is present but not an array', async () => {
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: 'not-an-array',
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('400s when tagIds is present but empty', async () => {
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: [],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('replaces text+tagIds via the id-based endpoint (delete-then-create-by-id)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const transport = {
+      deletePromptsByIds: sinon.stub().resolves(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }], existing_count: 0,
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: ['tag-cat-1'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(200);
+    expect(result.body).to.deep.equal({
+      semrushPromptId: 'new-sem-id',
+      geoTargetId: 2840,
+      languageCode: 'en',
+      text: 'next',
+      tagIds: ['tag-cat-1'],
+    });
+    expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['tag-cat-1']);
+  });
+
+  it('drops falsy tagIds entries on PATCH before sending to the id-based endpoint', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const transport = {
+      deletePromptsByIds: sinon.stub().resolves(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }], existing_count: 0,
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: ['keep', '', undefined],
+      },
+      fakeLog(),
+    );
+
+    expect(result.body.tagIds).to.deep.equal(['keep']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep']);
+  });
+
+  it('drops malformed tagIds entries on PATCH like validateParentIdFormat does for parentId', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const transport = {
+      deletePromptsByIds: sinon.stub().resolves(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+    const tooLong = 'x'.repeat(201);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        text: 'next',
+        tagIds: ['keep', 'has space', tooLong],
+      },
+      fakeLog(),
+    );
+
+    expect(result.body.tagIds).to.deep.equal(['keep']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep']);
+  });
+
+  it('400s when tagIds sanitizes to empty (every entry malformed)', async () => {
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: ['has space', ''],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
   it('400s when geoTargetId or languageCode missing from body', async () => {
     const transport = {};
     const dataAccess = makeDataAccess([]);
@@ -539,7 +1125,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       BRAND,
       WORKSPACE,
       'sem-1',
-      { text: 'next', tags: [] },
+      { text: 'next', tagIds: ['tag-1'] },
       fakeLog(),
     );
 
@@ -559,7 +1145,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       WORKSPACE,
       'sem-1',
       {
-        geoTargetId: 2840, languageCode: 'en', text: 'next', tags: [],
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: ['tag-1'],
       },
       fakeLog(),
     );
@@ -568,7 +1154,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('marketNotFound');
   });
 
-  it('replaces text+tags and never paginates upstream prompts', async () => {
+  it('replaces the prompt without paginating upstream prompts', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -581,7 +1167,9 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       // walk back fails this test.
       listPromptsByTags: sinon.stub(),
       deletePromptsByIds: sinon.stub().resolves(),
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'new text' }],
+      }),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -592,7 +1180,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       WORKSPACE,
       'sem-1',
       {
-        geoTargetId: 2840, languageCode: 'en', text: 'new text', tags: ['fresh'],
+        geoTargetId: 2840, languageCode: 'en', text: 'new text', tagIds: ['tag-fresh'],
       },
       fakeLog(),
     );
@@ -603,7 +1191,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'new text',
-      tags: ['fresh'],
+      tagIds: ['tag-fresh'],
     });
     expect(transport.listPromptsByTags).to.have.callCount(0);
     expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
@@ -622,7 +1210,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const err = new SerenityTransportError(404, 'not found');
     const transport = {
       deletePromptsByIds: sinon.stub().rejects(err),
-      createTaggedPrompts: sinon.stub(),
+      createPromptsByIds: sinon.stub(),
     };
 
     const result = await handleUpdatePrompt(
@@ -632,20 +1220,20 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       WORKSPACE,
       'sem-missing',
       {
-        geoTargetId: 2840, languageCode: 'en', text: 'x', tags: [],
+        geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['tag-1'],
       },
       fakeLog(),
     );
 
     expect(result.status).to.equal(404);
     expect(result.body.error).to.equal('promptNotFound');
-    expect(transport.createTaggedPrompts).to.have.callCount(0);
+    expect(transport.createPromptsByIds).to.have.callCount(0);
   });
 
-  // Branch coverage: body.tags is defined but not an array → handler treats
-  // it as "no tags" rather than throwing or 400ing. The 400 path only catches
-  // body.tags === undefined; once defined, the Array.isArray guard runs.
-  it('coerces non-array tags to empty list', async () => {
+  // Branch coverage: upstream createPromptsByIds answers without an `items`
+  // array → semrushPromptId becomes the empty string, so a caller can detect
+  // the anomaly rather than receiving the literal string "undefined".
+  it('returns empty semrushPromptId when upstream createPromptsByIds has no items', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -654,7 +1242,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
     const transport = {
       deletePromptsByIds: sinon.stub().resolves(),
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['new-sem-id'] }),
+      createPromptsByIds: sinon.stub().resolves({}), // no items
       publishProject: sinon.stub().resolves(),
     };
 
@@ -665,39 +1253,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       WORKSPACE,
       'sem-1',
       {
-        geoTargetId: 2840, languageCode: 'en', text: 't', tags: null,
-      },
-      fakeLog(),
-    );
-
-    expect(result.status).to.equal(200);
-    expect(result.body.tags).to.deep.equal([]);
-  });
-
-  // Branch coverage: upstream createTaggedPrompts returns no ids array →
-  // semrushPromptId becomes empty string (and downstream can detect the
-  // anomaly without us silently throwing).
-  it('returns empty semrushPromptId when upstream createTaggedPrompts has no ids', async () => {
-    const project = makeProject({
-      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
-    });
-    const dataAccess = makeDataAccess([]);
-    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
-
-    const transport = {
-      deletePromptsByIds: sinon.stub().resolves(),
-      createTaggedPrompts: sinon.stub().resolves({}), // no ids
-      publishProject: sinon.stub().resolves(),
-    };
-
-    const result = await handleUpdatePrompt(
-      transport,
-      dataAccess,
-      BRAND,
-      WORKSPACE,
-      'sem-1',
-      {
-        geoTargetId: 2840, languageCode: 'en', text: 't', tags: [],
+        geoTargetId: 2840, languageCode: 'en', text: 't', tagIds: ['tag-1'],
       },
       fakeLog(),
     );
@@ -716,12 +1272,11 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const err = Object.assign(new Error('upstream 503'), { status: 503 });
     const transport = {
       deletePromptsByIds: sinon.stub().rejects(err),
-      createTaggedPrompts: sinon.stub().resolves({ ids: ['should-not-happen'] }),
+      createPromptsByIds: sinon.stub().resolves({ items: [{ id: 'should-not-happen' }] }),
     };
 
-    // The previous warn-and-create behavior would leave both old and new
-    // prompts in the project; this assertion locks the new throw-on-error
-    // contract so a regression resurrects #1.
+    // A warn-and-create behaviour would leave both the old and the new prompt
+    // in the project; this locks the throw-on-error contract.
     await expect(handleUpdatePrompt(
       transport,
       dataAccess,
@@ -729,11 +1284,44 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       WORKSPACE,
       'sem-1',
       {
-        geoTargetId: 2840, languageCode: 'en', text: 'x', tags: [],
+        geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['tag-1'],
       },
       fakeLog(),
     )).to.be.rejectedWith(/upstream 503/);
-    expect(transport.createTaggedPrompts).to.have.callCount(0);
+    expect(transport.createPromptsByIds).to.have.callCount(0);
+  });
+
+  it('logs and re-throws when createOnePrompt fails AFTER a successful delete (data-loss window)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const createErr = Object.assign(new Error('unknown tag id: bogus'), { status: 500 });
+    const transport = {
+      deletePromptsByIds: sinon.stub().resolves(),
+      createPromptsByIds: sinon.stub().rejects(createErr),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await expect(handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['bogus'],
+      },
+      log,
+    )).to.be.rejectedWith(/unknown tag id: bogus/);
+    expect(transport.deletePromptsByIds).to.have.been.calledOnce;
+    expect(log.error).to.have.been.calledOnceWith(
+      sinon.match(/createOnePrompt failed AFTER a successful delete/),
+    );
+    expect(transport.publishProject).to.not.have.been.called;
   });
 });
 
@@ -1092,12 +1680,14 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     } = setupCtx;
 
     // Mutation: handleCreatePrompts pushes a new prompt → invalidate.
-    transport.createTaggedPrompts = sinon.stub().resolves({ ids: ['sem-new'] });
+    transport.createPromptsByIds = sinon.stub().resolves({
+      page: 1, total: 1, items: [{ id: 'sem-new', name: 'fresh' }],
+    });
     transport.publishProject = sinon.stub().resolves();
     await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
         text: 'fresh',
-        tags: ['new-tag'],
+        tagIds: ['tag-new'],
         geoTargetId: 2840,
         languageCode: 'en',
       }],
@@ -1120,13 +1710,15 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     } = setupCtx;
 
     transport.deletePromptsByIds = sinon.stub().resolves();
-    transport.createTaggedPrompts = sinon.stub().resolves({ ids: ['sem-new'] });
+    transport.createPromptsByIds = sinon.stub().resolves({
+      page: 1, total: 1, items: [{ id: 'sem-new', name: 'updated' }],
+    });
     transport.publishProject = sinon.stub().resolves();
     await handleUpdatePrompt(transport, dataAccess, BRAND, WORKSPACE, 'sem-1', {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'updated',
-      tags: ['new-tag'],
+      tagIds: ['tag-new'],
     }, fakeLog());
 
     const refetched = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
@@ -1157,5 +1749,264 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
 
     expect(refetched.items.map((t) => t.name)).to.deep.equal(['kept-tag']);
     expect(transport.listPromptsByTags).to.have.callCount(2);
+  });
+});
+
+describe('handlers/prompts.js — defensive branch coverage', () => {
+  // Line 152: `Number.isFinite(resp?.total)?resp.total:items.length` else branch —
+  // fires when a full page is returned (items.length >= limit) but resp.total is
+  // missing or non-finite. The else falls back to items.length as the best available
+  // count estimate.
+  it('handleListPrompts: falls back to items.length when total is missing on a full upstream page', async () => {
+    const project = {
+      getSemrushProjectId: () => 'proj-us-en',
+      getGeoTargetId: () => 2840,
+      getLanguageCode: () => 'en',
+    };
+    const dataAccess = {
+      BrandSemrushProject: {
+        allByBrandId: () => Promise.resolve([project]),
+        findBySlice: () => Promise.resolve(project),
+      },
+    };
+    // Return exactly `limit` items (10) with no `total` field — items.length (10)
+    // is NOT < limit (10) so the else branch fires; Number.isFinite(undefined)
+    // is false so total = items.length = 10.
+    const fullPage = Array.from({ length: 10 }, (_, i) => ({ id: `s-${i}`, name: `prompt ${i}` }));
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [] }),
+      listPromptsByTags: () => Promise.resolve({ items: fullPage /* no total */ }),
+    };
+    const { handleListPrompts: hlp } = await import(
+      '../../../../src/support/serenity/handlers/prompts.js'
+    );
+    const brandId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const workspaceId = 'workspace-1';
+    const result = await hlp(transport, dataAccess, brandId, workspaceId, {
+      geoTargetId: 2840, languageCode: 'en', limit: 10,
+    });
+    // items.length (10) >= limit (10) → else branch; total is undefined → items.length.
+    expect(result.total).to.equal(10);
+  });
+});
+
+describe('handlers/prompts.js — unified type classification (serenity-docs#31)', () => {
+  const project = () => makeProject({
+    semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+  });
+
+  describe('id-based create', () => {
+    it('resolves the computed type to a tag id and strips a caller-supplied type id', async () => {
+      const dataAccess = makeDataAccess([project()]);
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
+        }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'is Acme good?',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          // The caller supplies `non-branded`; the server computes `branded`.
+          tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded],
+        }],
+      }, fakeLog(), classifyByBrandMention);
+
+      expect(result.created[0].tagIds).to.deep.equal([
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+      ]);
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-us-en',
+        ['is Acme good?'],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+      );
+      // The whole taxonomy already exists, so nothing is provisioned.
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('classifies non-branded when the brand is not mentioned', async () => {
+      const dataAccess = makeDataAccess([project()]);
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'best running shoes' }],
+        }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'best running shoes',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      }, fakeLog(), classifyByBrandMention);
+
+      expect(result.created[0].tagIds).to.deep.equal([
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded,
+      ]);
+    });
+
+    // Strip-by-root, not strip-by-name: a customer category may legitimately be
+    // named `branded` without being the `type` value. Only ids beneath the
+    // `type` root are the server's to overwrite.
+    it('leaves a same-named category tag alone while stripping the real type value', async () => {
+      const dataAccess = makeDataAccess([project()]);
+      const decoyCategoryId = 'category-branded-decoy';
+      const levels = dimensionTreeLevels();
+      levels[TAG_IDS.categoryRoot] = [
+        ...levels[TAG_IDS.categoryRoot],
+        {
+          id: decoyCategoryId,
+          name: 'branded',
+          parent_id: TAG_IDS.categoryRoot,
+          children_count: 0,
+          path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+        },
+      ];
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(levels),
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
+        }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'is Acme good?',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tagIds: [decoyCategoryId, TAG_IDS.typeNonBranded],
+        }],
+      }, fakeLog(), classifyByBrandMention);
+
+      expect(result.created[0].tagIds).to.deep.equal([decoyCategoryId, TAG_IDS.typeBranded]);
+    });
+
+    // Projects that predate the taxonomy carry none of it; the first write
+    // brings them forward rather than 500ing on an unresolvable tag id.
+    it('provisions the type root and value on a project that has neither', async () => {
+      const dataAccess = makeDataAccess([project()]);
+      const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
+      const transport = {
+        listProjectTags,
+        createProjectTags,
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
+        }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'is Acme good?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        }],
+      }, fakeLog(), classifyByBrandMention);
+
+      // The four roots are created at the root level, then `branded` beneath
+      // the freshly-minted `type` root.
+      expect(createProjectTags.firstCall.args[2]).to.deep.equal([
+        'category', 'intent', 'source', 'type',
+      ]);
+      expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
+      expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
+      expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'created::type' });
+      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'created:created::type:branded']);
+    });
+  });
+
+  describe('update recomputes from the new text', () => {
+    it('recomputes the type tag on edit', async () => {
+      const dataAccess = makeDataAccess([]);
+      dataAccess.BrandSemrushProject.findBySlice.resolves(project());
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        deletePromptsByIds: sinon.stub().resolves(),
+        createPromptsByIds: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 're-id', name: 'now mentions Acme' }],
+        }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleUpdatePrompt(transport, dataAccess, BRAND, WORKSPACE, 'old-id', {
+        text: 'now mentions Acme',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: [TAG_IDS.categoryRunningShoes],
+      }, fakeLog(), classifyByBrandMention);
+
+      expect(result.status).to.equal(200);
+      expect(result.body.tagIds).to.deep.equal([
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+      ]);
+    });
+
+    // The tree read (and any provisioning it triggers) must happen BEFORE the
+    // delete, so a classification failure leaves the old prompt intact.
+    it('resolves the type BEFORE deleting the old prompt', async () => {
+      const dataAccess = makeDataAccess([]);
+      dataAccess.BrandSemrushProject.findBySlice.resolves(project());
+      const transport = {
+        listProjectTags: sinon.stub().rejects(new Error('tag tree unavailable')),
+        deletePromptsByIds: sinon.stub().resolves(),
+        createPromptsByIds: sinon.stub(),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      await expect(handleUpdatePrompt(transport, dataAccess, BRAND, WORKSPACE, 'old-id', {
+        text: 'now mentions Acme',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: [TAG_IDS.categoryRunningShoes],
+      }, fakeLog(), classifyByBrandMention)).to.be.rejectedWith(/tag tree unavailable/);
+
+      expect(transport.deletePromptsByIds).to.not.have.been.called;
+      expect(transport.createPromptsByIds).to.not.have.been.called;
+    });
+  });
+
+  describe('makeTypeInjector cache (serenity-docs#31)', () => {
+    it('resolves each (project, type) once across a batch, re-resolving only on a new key', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const inject = makeTypeInjector(transport, WORKSPACE, classifyByBrandMention, fakeLog());
+
+      // Resolving one (project, type) key reads two levels: the roots, then the
+      // children of the `type` root.
+      const a = await inject('proj-1', { text: 'love Acme', geoTargetId: 2840, tagIds: ['x'] });
+      expect(transport.listProjectTags).to.have.callCount(2);
+
+      // Same project + same computed type => served from cache, no new reads.
+      const b = await inject('proj-1', { text: 'Acme rocks', geoTargetId: 2840, tagIds: ['y'] });
+      expect(transport.listProjectTags).to.have.callCount(2);
+      expect(a.tagIds).to.deep.equal(['x', TAG_IDS.typeBranded]);
+      expect(b.tagIds).to.deep.equal(['y', TAG_IDS.typeBranded]);
+
+      // A different computed type is a new cache key => one more resolution.
+      const c = await inject('proj-1', { text: 'best running shoes', geoTargetId: 2840, tagIds: ['z'] });
+      expect(transport.listProjectTags).to.have.callCount(4);
+      expect(c.tagIds).to.deep.equal(['z', TAG_IDS.typeNonBranded]);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('passes the input through untouched when no classifier is supplied', async () => {
+      const transport = { listProjectTags: sinon.stub(), createProjectTags: sinon.stub() };
+      const inject = makeTypeInjector(transport, WORKSPACE, undefined, fakeLog());
+
+      const out = await inject('proj-1', { text: 'anything', geoTargetId: 2840, tagIds: ['x'] });
+
+      expect(out.tagIds).to.deep.equal(['x']);
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
   });
 });

@@ -122,17 +122,121 @@ sites:
       - site
     summary: Retrieve all sites
     description: |
-      This endpoint is useful for retrieving all sites.
+      Retrieves sites. Supports two response shapes for backwards compatibility:
+
+      - **Legacy (no query params):** returns a flat array of sites — a filtered subset for
+        backward compatibility. This shape is deprecated and will be removed once all
+        consumers have migrated to pagination.
+      - **Paginated (with `limit` and/or `cursor`):** returns `{ sites, pagination }` with
+        the full unfiltered result set. Iterate using `pagination.cursor` until
+        `pagination.hasMore` is `false` to fetch all sites.
+      - **Substring search (with `baseUrlContains`):** returns `{ sites, pagination }` where
+        `sites` are those whose `baseURL` contains the (case-insensitive) substring.
+        `pagination` is `{ limit, offset, hasMore, baseUrlContains }` (no `cursor`; this
+        branch paginates by `offset`). Defaults to a limit of 50 (clamped to 500) and an
+        offset of 0. The search term must be at least 3 characters after trimming
+        (otherwise 400).
+
+      Required capabilities: admin access (legacy admin path) or S2S `site:readAll`.
     operationId: getSites
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        description: |
+          Maximum number of items per page. When `limit` (or `cursor`) is provided the
+          response uses the paginated envelope shape; when both are omitted the response
+          uses the legacy flat-array shape (see endpoint description). Defaults to 100
+          when the paginated shape is selected. Non-integer or non-positive values
+          (e.g. `0`, `-1`, `abc`) return 400. Values above 500 are clamped to 500.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          example: 100
+      - name: cursor
+        in: query
+        required: false
+        description: |
+          Opaque cursor returned from a previous page's `pagination.cursor`. Pass it back
+          to fetch the next page. When present (or `limit` is present), the response uses
+          the paginated envelope shape. Treat as opaque — do not parse or construct
+          cursors client-side; the encoding is internal and may change without notice.
+        schema:
+          type: string
+          maxLength: 256
+          example: "eyJvZmZzZXQiOjEwMH0="
+      - name: baseUrlContains
+        in: query
+        required: false
+        description: |
+          Case-insensitive substring to match against each site's `baseURL`. When
+          provided, the response uses a non-cursor paginated envelope
+          (`{ sites, pagination: { limit, offset, hasMore, baseUrlContains } }`), where
+          `pagination.baseUrlContains` echoes the trimmed query so a client can confirm
+          the search was applied (an older deployment that ignores this param would
+          omit the echo). Length is enforced **after trimming**: must be at least 3
+          and at most 256 characters (otherwise 400). LIKE wildcards (`%`, `_`, `\`)
+          in the value are escaped and treated literally. The `limit` parameter
+          (default 50, clamped to 500) bounds the page size and `offset` (default 0)
+          selects the page; `cursor` is not used on this path.
+        schema:
+          type: string
+          # Bounds are enforced server-side AFTER trimming surrounding whitespace, so
+          # minLength/maxLength here are documentation of the effective post-trim limits.
+          minLength: 3
+          maxLength: 256
+          example: "adobe"
+      - name: offset
+        in: query
+        required: false
+        description: |
+          Zero-based offset into the `baseUrlContains` search results, used to page
+          through matches (e.g. `offset=2&limit=2` returns the second page of 2).
+          Only honored on the `baseUrlContains` search path. Defaults to 0. Negative
+          or non-integer values return 400.
+        schema:
+          type: integer
+          minimum: 0
+          example: 0
     responses:
       '200':
-        description: A list of sites
+        description: |
+          A list of sites. The shape depends on whether `limit`/`cursor` query parameters were provided.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SiteList'
+              description: |
+                Three response shapes are possible, selected by the request and
+                unambiguous by JSON type/shape, so no `discriminator` is used (nor can
+                one be expressed — the legacy branch is a top-level array, which has no
+                property to discriminate on):
+                - When `baseUrlContains` is provided → **`SiteSearchResponse`**, a JSON
+                  object with `sites` and a non-cursor `pagination`
+                  (`{ limit, offset, hasMore, baseUrlContains }`). The `baseUrlContains`
+                  echo lets a client confirm the search ran on the deployment it hit.
+                - When `limit` and/or `cursor` is provided (without `baseUrlContains`) →
+                  **`SitePagedResponse`**, a JSON object with `sites` and a
+                  cursor-based `pagination`.
+                - When none are provided → **`SiteList`**, the legacy top-level
+                  JSON array.
+
+                This resolves to a single shape once the legacy path is sunset.
+              oneOf:
+                # Per-usage deprecation: marks only the legacy branch of this
+                # endpoint as deprecated for codegen. The SiteList schema itself is
+                # not deprecated — it is still the active shape for
+                # getSitesByDeliveryType and getSitesForOrganization.
+                - $ref: './schemas.yaml#/SiteList'
+                  deprecated: true
+                - $ref: './schemas.yaml#/SitePagedResponse'
+                - $ref: './schemas.yaml#/SiteSearchResponse'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '500':
         $ref: './responses.yaml#/500'
     security:

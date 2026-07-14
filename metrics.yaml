@@ -1,0 +1,98 @@
+namespace: Mysticat/GitHubService
+
+metrics:
+  - name: WebhookReceived
+    unit: Count
+    dimensions:
+      - Environment
+      - Event
+    meaning: >
+      Incremented once for every webhook that reaches the controller handler,
+      after the HMAC auth layer passes. The Event dimension carries the raw
+      x-github-event header value (e.g. pull_request, ping).
+
+  - name: WebhookRejected
+    unit: Count
+    dimensions:
+      - Environment
+      - Reason
+    meaning: >
+      Incremented when the HMAC auth handler rejects a webhook before it
+      reaches the controller. Reason values: malformed_signature, not_json,
+      non_inscope_host, hmac_mismatch, body_too_large, empty_body.
+
+  - name: WebhookDestinationsMisconfigured
+    unit: Count
+    dimensions:
+      - Environment
+    meaning: >
+      Incremented when the GITHUB_DESTINATIONS registry is absent or
+      malformed. Alerts on this metric indicate a Vault/env misconfiguration
+      that will reject all webhooks.
+
+  - name: WebhookBadRequest
+    unit: Count
+    dimensions:
+      - Environment
+      - MissingField
+    meaning: >
+      Incremented when a mapped-event webhook is missing a required payload
+      field. MissingField values: action, installation.id, pull_request.number,
+      repository.owner.login, repository.name.
+
+  - name: WebhookSkipped
+    unit: Count
+    dimensions:
+      - Environment
+      - SkipReason
+    meaning: >
+      Incremented when the controller decides not to enqueue the webhook.
+      SkipReason values: unmapped_event, draft_pr, bot_sender,
+      non_default_branch, auto_trigger, wrong_reviewer, unsupported_action.
+
+  - name: WebhookEnqueued
+    unit: Count
+    dimensions:
+      - Environment
+      - JobType
+      - TargetId
+    meaning: >
+      Incremented after a job is successfully sent to SQS. JobType is the
+      resolved job type (e.g. pr-review). TargetId is the destination
+      identifier from the GITHUB_DESTINATIONS registry (expected cardinality
+      under ~20; growth past that should be a deliberate conversation, not a
+      silent dimension explosion).
+
+  - name: WebhookEnqueueFailure
+    unit: Count
+    dimensions:
+      - Environment
+    meaning: >
+      Incremented when sqs.sendMessage throws. The request returns 500 so
+      GitHub will retry. Alert on sustained spikes.
+
+  - name: WebhookHandlerError
+    unit: Count
+    dimensions:
+      - Environment
+      - Reason
+    meaning: >
+      Incremented on any uncaught exception in the controller (errorHandler
+      catch) or when reviewer_login is missing from the auth profile (fail-
+      closed 500). Reason values: uncaught_exception (outer catch-all; also
+      fires when an enqueue failure rethrows), missing_reviewer_login (internal
+      fail-closed reviewer check). Lets alerting separate code bugs from config
+      errors.
+
+  - name: WebhookProcessingMillis
+    unit: Milliseconds
+    dimensions:
+      - Environment
+      - Outcome
+    meaning: >
+      End-to-end controller latency in milliseconds, emitted via the finally
+      block so it fires on all code paths. Outcome matches the terminal state:
+      enqueued, skipped, bad_request, handler_error, enqueue_failure. The
+      `unknown` sentinel is the default and fires only when an error is thrown
+      before any outcome is classified; that latency includes the failed work,
+      so success-only latency panels should exclude it.

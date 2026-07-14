@@ -24,6 +24,7 @@ import {
   createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
   createReferralTrafficHasDataHandler,
 } from '../../../src/controllers/llmo/llmo-referral-traffic.js';
 
@@ -144,6 +145,34 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficKpisHandler(deny);
       const res = await handler(makeContext());
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── date range guardrail (SITES-46098) ────────────────────────────────────
+
+  describe('date range guardrail', () => {
+    it('returns 400 when the requested range exceeds the maximum', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/Date range too large/);
+    });
+
+    it('rejects the over-wide range before validating access', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-02-13', endDate: '2026-06-05' } });
+      const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(stubbedValidateAccess).to.not.have.been.called;
+    });
+
+    it('allows a valid in-range request through to the data layer', async () => {
+      const ctx = makeContext({ data: { startDate: '2026-01-01', endDate: '2026-01-28' } });
+      const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(stubbedValidateAccess).to.have.been.called;
+      expect(res.status).to.equal(200);
     });
   });
 
@@ -602,7 +631,7 @@ describe('llmo-referral-traffic', () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
       await handler(makeContext({ client, data: { pageSize: 10000 } }));
-      expect(client.rpc.getCall(0).args[1].p_limit).to.equal(1000);
+      expect(client.rpc.getCall(0).args[1].p_limit).to.equal(500);
     });
 
     it('uses {} when context.data is null in by-url handler (line 412)', async () => {
@@ -833,6 +862,9 @@ describe('llmo-referral-traffic', () => {
       expect(body.metrics.bounceRate).to.be.closeTo(0.2, 1e-6);
       expect(body.metrics.orders).to.equal(3);
       expect(body.metrics.revenue).to.equal(300);
+      // pins the reworked source resolve (controller :713): the validated
+      // source must be forwarded verbatim to the RPC, not collapsed.
+      expect(client.rpc.getCall(0).args[1].p_source).to.equal('adobe_analytics');
     });
 
     it('maps RPC row to source+metrics for ga4', async () => {
@@ -843,9 +875,27 @@ describe('llmo-referral-traffic', () => {
       });
       const handler = createReferralTrafficBusinessImpactHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client, data: { source: 'ga4' } }));
+      expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.source).to.equal('ga4');
       expect(body.metrics.visits).to.equal(7);
+      expect(client.rpc.getCall(0).args[1].p_source).to.equal('ga4');
+    });
+
+    it('maps RPC row to source+metrics for cja and forwards p_source=cja', async () => {
+      const client = makeRpcClient({
+        data: [{
+          total_pageviews: 25, visits: 11, bounce_rate: 0.3, orders: 4, revenue: 250,
+        }],
+      });
+      const handler = createReferralTrafficBusinessImpactHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client, data: { source: 'cja' } }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.source).to.equal('cja');
+      expect(body.metrics.visits).to.equal(11);
+      expect(body.metrics.revenue).to.equal(250);
+      expect(client.rpc.getCall(0).args[1].p_source).to.equal('cja');
     });
 
     it('uses {} when context.data is null — defaults source to adobe_analytics (line 553)', async () => {
@@ -982,6 +1032,16 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
       await handler(makeContext({ client, data: { source: 'cdn' } }));
       expect(client.from.calledWith('referral_traffic_cdn')).to.be.true;
+    });
+
+    it('queries referral_traffic_cja when ?source=cja', async () => {
+      const client = makeWeeksChainClient(
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+        { data: [{ traffic_date: '2026-01-12' }], error: null },
+      );
+      const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { source: 'cja' } }));
+      expect(client.from.calledWith('referral_traffic_cja')).to.be.true;
     });
 
     it('defaults to referral_traffic_optel when source is omitted', async () => {
@@ -1181,11 +1241,136 @@ describe('llmo-referral-traffic', () => {
       expect(client.rpc.getCall(0).args[1].p_source).to.equal('cdn');
     });
 
+    it('forwards cja source through parseParams (proves VALID_SOURCES gained cja)', async () => {
+      // Guards the controller:33 one-char diff: if cja were dropped from
+      // VALID_SOURCES it would silently fall back to optel here, and every
+      // Traffic-Insights handler (kpis/trend/by-*) shares this validation path.
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { source: 'cja' } }));
+      expect(client.rpc.getCall(0).args[1].p_source).to.equal('cja');
+    });
+
     it('falls back to optel when source is invalid', async () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
       await handler(makeContext({ client, data: { source: 'invalid' } }));
       expect(client.rpc.getCall(0).args[1].p_source).to.equal('optel');
     });
+  });
+});
+
+describe('llmo-referral-traffic — rotation (demo sites)', () => {
+  // demoStrategy has referral:true in ROTATION_CONFIG. Canned block = Jun 8–Jul 5 2026.
+  const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
+  const CANNED_START = '2026-06-08';
+  const CANNED_END = '2026-07-05';
+  // Freeze now=2026-07-06 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 8, Jul 5].
+  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
+  const REF_ROW = {
+    total_pageviews: 100,
+    bounce_rate: 0.3,
+    consent_rate: 0.8,
+    traffic_date: '2026-06-10',
+    week_start: '2026-06-10',
+    platform: 'openai',
+    channels: ['llm'],
+    visits: 90,
+    avg_time_on_site: 45,
+    revenue: 12,
+    visitors: 80,
+    orders: 3,
+    region: 'US',
+    device: 'desktop',
+    page_intent: 'INFORMATIONAL',
+    url_path: '/coffee',
+    host: 'frescopa.coffee',
+    entries: 50,
+    exits: 40,
+    total_count: 1,
+    avg_session_duration: 30,
+    pages_per_visit: 2,
+    conversion_rate: 0.03,
+  };
+
+  let clock;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+  });
+  afterEach(() => clock.restore());
+
+  const assertCannedDates = (client) => {
+    expect(client.rpc).to.have.been.called;
+    client.rpc.getCalls().forEach((call) => {
+      expect(call.args[1].p_start_date >= CANNED_START).to.equal(true);
+      expect(call.args[1].p_end_date <= CANNED_END).to.equal(true);
+    });
+  };
+
+  const ROTATED = [
+    ['filter-dimensions', createReferralTrafficFilterDimensionsHandler],
+    ['kpis', createReferralTrafficKpisHandler],
+    ['trend', createReferralTrafficTrendHandler],
+    ['by-platform', createReferralTrafficByPlatformHandler],
+    ['by-region', createReferralTrafficByRegionHandler],
+    ['by-page-intent', createReferralTrafficByPageIntentHandler],
+    ['by-url', createReferralTrafficByUrlHandler],
+    ['by-device', createReferralTrafficByDeviceHandler],
+    ['business-impact', createReferralTrafficBusinessImpactHandler],
+  ];
+  ROTATED.forEach(([name, factory]) => {
+    it(`${name}: rewrites the inbound range into the canned block`, async () => {
+      const client = makeRpcClient({ data: [REF_ROW], error: null });
+      const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+      const res = await factory(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      assertCannedDates(client);
+    });
+  });
+
+  it('by-url-trend: relabels canned week_start into the current window', async () => {
+    const client = makeRpcClient({ data: [{ week_start: '2026-06-10', total_pageviews: 20 }], error: null });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { ...FULL, urlPath: '/coffee' },
+    });
+    const res = await createReferralTrafficUrlTrendHandler(stubbedValidateAccess)(ctx);
+    const body = await res.json();
+    // phase 0 (P0 = anchor) ⇒ identity: canned 2026-06-10 stays 2026-06-10.
+    expect(body.trend[0].weekStart).to.equal('2026-06-10');
+  });
+
+  it('weeks: synthesises the rolling window when the source has canned data', async () => {
+    // Rotation path does a single existence check (limit(1)); first call has data.
+    const client = makeWeeksChainClient(
+      { data: [{ traffic_date: '2026-06-03' }], error: null },
+      { data: [{ traffic_date: '2026-06-24' }], error: null },
+    );
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect((await res.json()).weeks).to.have.length(4);
+  });
+
+  it('weeks: returns [] when the requested source has no canned rows', async () => {
+    const client = makeWeeksChainClient({ data: [], error: null });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect((await res.json()).weeks).to.deep.equal([]);
+  });
+
+  it('weeks: surfaces an existence-check error as 500', async () => {
+    const client = makeWeeksChainClient({ data: null, error: { message: 'boom' } });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(500);
+  });
+
+  it('non-rotation site: passes the requested range through unchanged', async () => {
+    const client = makeRpcClient({ data: [REF_ROW], error: null });
+    const ctx = makeContext({ client }); // default SITE_ID (not a demo site)
+    await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(client.rpc.getCall(0).args[1].p_start_date).to.equal('2026-01-01');
+    expect(client.rpc.getCall(0).args[1].p_end_date).to.equal('2026-01-28');
   });
 });

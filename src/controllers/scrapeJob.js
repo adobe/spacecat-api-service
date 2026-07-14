@@ -27,17 +27,11 @@ import {
   hasText,
   DELIVERY_TYPES,
 } from '@adobe/spacecat-shared-utils';
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
-
-const PROMISE_BASED_TYPES = [
-  SiteModel.AUTHORING_TYPES.CS,
-  SiteModel.AUTHORING_TYPES.CS_CW,
-  SiteModel.AUTHORING_TYPES.AMS,
-];
+import { PROMISE_BASED_AUTHORING_TYPES } from '../utils/constants.js';
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -62,8 +56,8 @@ function ScrapeJobController(context) {
   const MAX_JOBS_BY_BASEURL = 100;
 
   // Duplicated from preflight controller. Extraction tracked in SITES-45204
-  // (move checkEnableAuthentication / resolvePromiseToken / PROMISE_BASED_TYPES
-  // to src/support/auth.js, alongside getIMSPromiseToken).
+  // (move checkEnableAuthentication / resolvePromiseToken to src/support/auth.js,
+  // alongside getIMSPromiseToken). PROMISE_BASED_AUTHORING_TYPES lives in utils/constants.js.
   //
   // Hardened HEAD probe — 3 s timeout (under API Gateway's 29 s budget for an
   // outbound to arbitrary customer infrastructure) and redirect: 'manual' so
@@ -110,7 +104,7 @@ function ScrapeJobController(context) {
   // AEM_CS delivery on a non-promise authoring type, or vice versa.
   // Extraction to a shared util is tracked in SITES-45204.
   function isPromisePathSite(site) {
-    return PROMISE_BASED_TYPES.includes(site.getAuthoringType())
+    return PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())
       || site.getDeliveryType() === DELIVERY_TYPES.AEM_CS;
   }
 
@@ -273,7 +267,7 @@ function ScrapeJobController(context) {
       // 502 until a per-site auth-policy attribute drives scheme selection,
       // rather than guess. Promise-authoring sites whose delivery is AEM_CS
       // get `Bearer <IMS-token>` correctly below.
-      if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())
+      if (PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())
           && site.getDeliveryType() !== DELIVERY_TYPES.AEM_CS) {
         log.warn(
           `Refusing to mint Authorization for site ${siteId}: `

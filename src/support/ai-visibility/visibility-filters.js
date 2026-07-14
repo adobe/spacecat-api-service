@@ -14,8 +14,10 @@
 
 export const SR_AI_SEO_SUPPORTED_MARKET_CODES = [
   'AE', 'AR', 'AT', 'AU', 'BE', 'BR', 'CA', 'CH', 'CL', 'CO',
-  'DE', 'DK', 'ES', 'FI', 'FR', 'IE', 'IL', 'IN', 'IT', 'JP',
-  'MX', 'NL', 'NO', 'PA', 'PE', 'PL', 'SA', 'SE', 'UK', 'US', 'UY', 'ZA',
+  'DE', 'DK', 'ES', 'FI', 'FR', 'HK', 'ID', 'IE', 'IL', 'IN',
+  'IT', 'JP', 'KR', 'MX', 'MY', 'NL', 'NO', 'PA', 'PE', 'PH',
+  'PL', 'SA', 'SE', 'SG', 'TH', 'TR', 'TW', 'UK', 'US', 'UY',
+  'VN', 'ZA',
 ];
 
 const SUPPORTED_MARKET = new Set(SR_AI_SEO_SUPPORTED_MARKET_CODES);
@@ -48,6 +50,7 @@ export function resolveVisibilityMarketFromSearchParams(sp) {
 
 const ENGINE_QUERY_MAP = {
   chatgpt: 'chatgpt',
+  chat_gpt: 'chatgpt',
   gemini: 'gemini',
   aimode: 'googleAiMode',
   overview: 'googleAiOverview',
@@ -58,9 +61,12 @@ const ENGINE_QUERY_MAP = {
 };
 
 export function normalizeEngineFromQuery(engine) {
-  if (engine == null || engine === '' || engine === 'all') { return null; }
+  if (engine == null || engine === '') { return null; }
   const t = engine.trim();
   const e = t.toLowerCase();
+  // Drop aggregate / non-engine tokens: `all` (query) and `unspecified` (the
+  // SR `stats-by-llm` cross-engine total row's `llm` enum) are not selectable models.
+  if (e === 'all' || e === 'unspecified') { return null; }
   return ENGINE_QUERY_MAP[e] ?? t;
 }
 

@@ -59,7 +59,7 @@ import { cachedOk } from '../../support/cached-response.js';
 // unknown 10th positional parameter), and PostgREST then applies the
 // function's own `DEFAULT 'optel'` on the new build. Mirrors the same
 // "omit when absent" pattern used for `p_agent_types` (LLMO-4526).
-const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
+const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']);
 const DEFAULT_REFERRAL_SOURCE = 'optel';
 
 function parseReferralSource(q) {
@@ -302,6 +302,13 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
 
       const urls = rows.map((r) => ({
+        // url_id is the real source_urls.id (LLMO-5992). The URL Details
+        // "Prompt Analysis" drilldown forwards it as p_url_id to
+        // rpc_url_inspector_url_prompts; without it the dashboard synthesised a
+        // fake id that failed the uuid parse and returned no prompts. Mirrors
+        // getUrlInspectorDomainUrls. Empty-string fallback keeps the shape
+        // stable if an older RPC build (pre-url_id) is deployed.
+        urlId: r.url_id || '',
         url: r.url,
         citations: Number(r.citations ?? 0),
         promptsCited: Number(r.prompts_cited ?? 0),

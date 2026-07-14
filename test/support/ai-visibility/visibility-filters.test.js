@@ -31,7 +31,10 @@ describe('visibility-filters', () => {
     });
 
     it('contains expected market codes', () => {
-      expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.include.members(['US', 'UK', 'DE', 'FR', 'JP']);
+      expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.include.members([
+        'US', 'UK', 'DE', 'FR', 'JP',
+        'HK', 'ID', 'KR', 'MY', 'PH', 'SG', 'TH', 'TR', 'TW', 'VN',
+      ]);
     });
   });
 
@@ -77,6 +80,7 @@ describe('visibility-filters', () => {
       expect(normalizeMarketToken('us')).to.equal('US');
       expect(normalizeMarketToken('DE')).to.equal('DE');
       expect(normalizeMarketToken('jp')).to.equal('JP');
+      expect(normalizeMarketToken('sg')).to.equal('SG');
     });
 
     it('defaults unknown codes to US', () => {
@@ -141,6 +145,11 @@ describe('visibility-filters', () => {
       expect(normalizeEngineFromQuery('all')).to.be.null;
     });
 
+    it('returns null for "unspecified" (SR cross-engine total row, not a real model)', () => {
+      expect(normalizeEngineFromQuery('unspecified')).to.be.null;
+      expect(normalizeEngineFromQuery('UNSPECIFIED')).to.be.null;
+    });
+
     it('maps known engines', () => {
       expect(normalizeEngineFromQuery('chatgpt')).to.equal('chatgpt');
       expect(normalizeEngineFromQuery('gemini')).to.equal('gemini');
@@ -150,6 +159,11 @@ describe('visibility-filters', () => {
       expect(normalizeEngineFromQuery('googleAiOverview')).to.equal('googleAiOverview');
       expect(normalizeEngineFromQuery('google_ai_mode')).to.equal('googleAiMode');
       expect(normalizeEngineFromQuery('google_ai_overview')).to.equal('googleAiOverview');
+    });
+
+    it('maps the SR `llm` enum form CHAT_GPT to chatgpt', () => {
+      expect(normalizeEngineFromQuery('CHAT_GPT')).to.equal('chatgpt');
+      expect(normalizeEngineFromQuery('chat_gpt')).to.equal('chatgpt');
     });
 
     it('is case-insensitive for known engines', () => {
@@ -215,6 +229,27 @@ describe('visibility-filters', () => {
       const body = { data: [{ llm: 'chatgpt' }] };
       const result = attachSrFiltersToSuccessfulBody(200, body);
       expect(result.srFilters.models).to.include('chatgpt');
+    });
+
+    it('normalizes the stats-by-llm enum rows: CHAT_GPT -> chatgpt, drops UNSPECIFIED', () => {
+      // Mirrors the real `/v1/brand/stats-by-llm` body: one row per engine plus the
+      // cross-engine total row labelled `UNSPECIFIED`. Engines arrive as SR enum strings.
+      const body = {
+        llm: [
+          { llm: 'UNSPECIFIED', mentions: '932' },
+          { llm: 'GEMINI', mentions: '295' },
+          { llm: 'GOOGLE_AI_OVERVIEW', mentions: '180' },
+          { llm: 'GOOGLE_AI_MODE', mentions: '284' },
+          { llm: 'CHAT_GPT', mentions: '173' },
+        ],
+      };
+      const result = attachSrFiltersToSuccessfulBody(200, body);
+      expect(result.srFilters.models).to.include('chatgpt');
+      expect(result.srFilters.models).to.have.members([
+        'chatgpt', 'gemini', 'googleAiMode', 'googleAiOverview',
+      ]);
+      expect(result.srFilters.models).to.not.include('CHAT_GPT');
+      expect(result.srFilters.models).to.not.include('UNSPECIFIED');
     });
 
     it('includes searchParams country in filters', () => {

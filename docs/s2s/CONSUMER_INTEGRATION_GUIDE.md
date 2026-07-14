@@ -82,7 +82,7 @@ Technical Contact:
 
 > ⚠️ **IMPORTANT**:
 - Add `mysticat-s2s-request` lable on ticket.
-- Share ticket on channel [#aem-sites-optimizer-engineering](https://adobe.enterprise.slack.com/archives/C05A45JBP9N) with taging group `@mysticat-s2s-admin`.
+- Share ticket on channel [#mysticat-engineering](https://adobe.enterprise.slack.com/archives/C0A91S5UKRC) with taging group `@mysticat-s2s-admin`.
 - Permission is subject to approval. The SpaceCat Security Team reserves the right to grant or deny access based on security requirements and business justification.
 
 ### Step 2: Capability Review & Approval
@@ -91,10 +91,13 @@ The S2S Admin and SpaceCat Security Team will review your JIRA request:
 
 - **Read capabilities** (`*:read`): Generally approved quickly
 - **Write capabilities** (`*:write`): Require business justification and scrutiny
-- **Restricted capabilities**: The following are typically denied:
-  - `fixEntity:write` - Never granted
+- **Restricted capabilities**: The following require executive approval:
+  - `fixEntity:write` - Rarely granted, requires executive approval
+  - `fixEntity:create` - Rarely granted, requires executive approval
   - `site:write` - Rarely granted, requires executive approval
+  - `site:create` - Rarely granted, requires executive approval
   - `organization:write` - Rarely granted, requires executive approval
+  - `configuration:write` - Rarely granted, requires executive approval
 
 The team will respond via JIRA with approval or request additional information.
 
@@ -227,10 +230,10 @@ async function getSpaceCatSessionToken(imsAccessToken, imsOrgId) {
 Use the session token for subsequent SpaceCat API calls:
 
 ```javascript
-// Example: Get all sites
-async function getSites(sessionToken) {
+// Example: Get a specific site by ID
+async function getSite(sessionToken, siteId) {
   const response = await axios.get(
-    'https://spacecat.experiencecloud.live/api/ci/sites',
+    `https://spacecat.experiencecloud.live/api/ci/sites/${siteId}`,
     {
       headers: {
         'Authorization': `Bearer ${sessionToken}`,
@@ -650,12 +653,17 @@ the long-term fix is server-side cursor pagination (see
 | `organization:write` | Modify organizations | Update org settings (rarely granted) |
 | `opportunity:read` | Read opportunities | Access recommendations, issues |
 | `suggestion:read` | Read AI suggestions | Access AI-generated suggestions |
+| `configuration:read` | Read platform configuration | Access handlers, jobs, queue config |
+| `configuration:write` | Modify platform configuration | Update handlers, jobs, queues, audit types (rarely granted) |
 
-### Restricted Capabilities (Typically Denied)
+### Restricted Capabilities (Require Executive Approval)
 
-- `fixEntity:write` - Never granted, internal use only
+- `fixEntity:write` - Rarely granted, requires executive approval
+- `fixEntity:create` - Rarely granted, requires executive approval
 - `site:write` - Rarely granted, requires executive approval
+- `site:create` - Rarely granted, requires executive approval
 - `organization:write` - Rarely granted, requires executive approval
+- `configuration:write` - Rarely granted, requires executive approval
 
 ---
 

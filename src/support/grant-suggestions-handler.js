@@ -359,20 +359,33 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const newSuggestions = await Suggestion
     .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
   const newSuggestionIds = newSuggestions.map((s) => s.getId());
-  if (!newSuggestionIds.length) {
-    return;
-  }
 
   const { grantedIds, grantIds, notGrantedIds } = await SuggestionGrant
     .splitSuggestionsByGrantStatus(newSuggestionIds);
 
-  const existingToken = await Token.findBySiteIdAndTokenType(siteId, tokenType);
+  let token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
   const collections = { Suggestion, SuggestionGrant, Token };
   const ids = { siteId, tokenType, oppType };
 
-  const { token, didRevoke } = existingToken
-    ? await handleExistingTokenCycle(collections, ids, existingToken)
-    : await handleNewTokenCycle(collections, ids, { grantedIds, grantIds, newSuggestions });
+  let didRevoke = false;
+  if (token) {
+    ({ token, didRevoke } = await handleExistingTokenCycle(collections, ids, token));
+  } else {
+    try {
+      const prevToken = await Token.findLastCreatedBySiteIdAndTokenType(siteId, tokenType);
+      if (prevToken) {
+        // Side-effect only: revoke stale grants from previous cycle
+        await handleExistingTokenCycle(collections, ids, prevToken);
+      }
+    } catch {
+      // previous-cycle lookup/cleanup failure must not block new token creation
+    }
+    if (!newSuggestionIds.length) {
+      return;
+    }
+    const grants = { grantedIds, grantIds, newSuggestions };
+    ({ token, didRevoke } = await handleNewTokenCycle(collections, ids, grants));
+  }
 
   if (!token || token.getRemaining() <= 0) {
     return;

@@ -71,7 +71,7 @@ The controller validates that the `url` hostname matches one of the site's known
 different site returns `PREFLIGHT_INVALID_REQUEST`. This replaces the implicit validation
 previously provided by `findByPreviewURL`.
 
-`promiseToken` is passed via cookie for authenticated CMS pages (CS/CS_CW/AMS sites); it is not part of the request body.
+For authenticated CMS pages (CS, CS_CW, AMS), the promise token is sent on the `x-promise-token` request header (obtained from `POST /auth/v2/promise`); it is not part of the request body. The header is **required** for those authoring types; the API does not mint a promise token from the Spacecat session JWT in `Authorization`.
 
 `createdBy` is derived server-side from the caller's IMS profile and is never supplied by the client. It is an object containing the IMS user email (`profile.email`) and a display name composed from `profile.first_name` and `profile.last_name` (falling back to `profile.name`). Both fields are stored in async job metadata at creation time. No additional IMS lookup is required — both are available on the authenticated profile.
 
@@ -101,7 +101,6 @@ Body:
 |--------|-------------|-----------|
 | `400 Bad Request` | `PREFLIGHT_INVALID_REQUEST` | `url` is missing, not a valid URI, or does not belong to the site identified by `:siteId` |
 | `403 Forbidden` | `PREFLIGHT_ACCESS_DENIED` | Caller does not have access to the site |
-| `403 Forbidden` | `PREFLIGHT_NOT_ENABLED` | Preflight is not enabled for the site |
 | `404 Not Found` | `PREFLIGHT_SITE_NOT_FOUND` | `siteId` does not exist |
 | `502 Bad Gateway` | `PREFLIGHT_UPSTREAM_ERROR` | Mysticat returned a 5xx response |
 | `500 Internal Server Error` | `PREFLIGHT_INTERNAL_ERROR` | Unexpected error within this service |
@@ -109,16 +108,16 @@ Body:
 Error response body:
 ```json
 {
-  "errorCode": "PREFLIGHT_NOT_ENABLED",
-  "message": "Preflight is not enabled for this site"
+  "errorCode": "PREFLIGHT_ACCESS_DENIED",
+  "message": "Access denied"
 }
 ```
 
 `errorCode` gives consumers a stable machine-readable contract; `message` is a human-readable hint and should not be parsed by clients.
 
-No job record is created for `400`, `403`, or `404` responses. The current `/preflight/beta/jobs`
-behavior of creating a job and immediately setting it to `CANCELLED` when preflight is disabled
-is not carried forward — a `403` is returned immediately, keeping the job store clean.
+**Eligibility is Mysticat's decision, not SpaceCat's.** This endpoint does not consult `Configuration.handlers.preflight`, `Entitlement`, `SiteEnrollment`, or any product-code gating to decide whether the call should proceed. The only gate SpaceCat enforces is the tenancy boundary (`accessControlUtil.hasAccess(site)` — IMS org membership) plus the basic URL-belongs-to-site sanity check. Past those, the request proceeds to Mysticat unconditionally, and Mysticat's three-gate model (Gate 0 tier features, Gate 1 `enabled_opportunity_types`, Gates 2/3 per-fact + per-site overrides) is the sole source of truth for what runs. A site whose tier disables preflight will return `200` with `audits: []` — not a `403` from SpaceCat. See SITES-46202.
+
+No job record is created for `400`, `403`, or `404` responses **emitted by SpaceCat's own checks** (access, URL validation). Once those pass, the `AsyncJob` + `Preflight` rows are created unconditionally before dispatching to Mysticat; any subsequent Mysticat-side `5xx` flips the rows to `FAILED` with a `502 PREFLIGHT_UPSTREAM_ERROR` response.
 
 ---
 
@@ -130,7 +129,7 @@ is not carried forward — a `403` is returned immediately, keeping the job stor
 |-----------|------|----------|-------------|
 | `url` | string (URI, URL-encoded) | No | When present, filters results to preflights for this specific page URL only |
 
-**Response** `200 OK` — a flat list of preflights for the site, sorted by `createdAt` descending. No cap is applied; the 7-day TTL on `AsyncJob` records provides the natural upper bound. Pagination is deferred until there is evidence of consumers needing it.
+**Response** `200 OK` — a flat list of preflights for the site, sorted by `createdAt` descending. No pagination cap is applied at this stage. This is safe given: (a) results come from a dedicated `Preflight` table indexed on `siteId` — not the shared `AsyncJob` table; (b) preflights are human-triggered from the MFE, not batch-generated; (c) the 7-day TTL bounds per-site volume to a small set; (d) list items are lightweight (no result payload). Pagination will be added if evidence of consumer need emerges.
 ```json
 [
   {
@@ -221,7 +220,7 @@ Key changes:
   resource is communicated via the `Location` response header. Clients that need to poll for
   completion read `Location` rather than a body field.
 - **`step` is removed.** Mysticat's agent always performs both identify and suggest as a single
-  flow, making the field redundant. `promiseToken` (cookie) is retained unchanged. The existing
+  flow, making the field redundant. Promise-token auth via required `x-promise-token` (from `POST /auth/v2/promise`) is retained. The existing
   `step` branching in `src/preflight/links.js:102` and `src/preflight/metatags.js:103` is dead
   code that will be removed as part of this implementation.
 - **`createdBy`** is captured server-side as `{ email, displayName }` from the caller's IMS
@@ -230,10 +229,11 @@ Key changes:
   always a human-readable address for technical accounts). `displayName` is composed from
   `profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). No
   additional IMS lookup required — both fields are on the authenticated profile.
-- **No phantom jobs for rejected requests.** If the site is not found, the caller lacks access,
-  or preflight is not enabled for the site, the endpoint returns an error immediately without
-  creating a job record. The previous behavior of creating a `CANCELLED` job in these cases
-  is removed.
+- **No phantom jobs for SpaceCat-side rejections.** If the site is not found or the caller lacks
+  access, the endpoint returns an error immediately without creating a job record. The previous
+  behavior of creating a `CANCELLED` job in these cases is removed. Note that preflight-eligibility
+  is **not** a SpaceCat-side concern (see Eligibility below) — sites whose tier disables preflight
+  pass through to Mysticat and receive a `200` with `audits: []`, not a SpaceCat `403`.
 - **No `organizationId` in the path.** `siteId` is a globally unique UUID, consistent with
   all other site-scoped resources in this service.
 
@@ -244,83 +244,14 @@ OpenAPI spec entries and response headers (`Deprecation: true`, `Sunset: <date>`
 date will be set by PM at the time this ADR moves to Accepted, with a minimum of 90 days from
 MFE migration start.
 
-## Data Model: Dedicated Preflight Entity
+## Data Model
 
-The current implementation backs preflights with the generic `AsyncJob` model. `AsyncJob` is
-not exclusive to preflight — it is a shared backing store used by site-detection, PR review,
-and both legacy preflight variants (`preflight` and `preflight-beta`), each distinguished only
-by a `jobType` string buried in the `metadata` blob. Using it as the preflight backing store
-creates several problems:
+The backing entity design — including the rationale for a dedicated `Preflight` entity over
+extending `AsyncJob`, the full field schema, collection methods, creation flow, TTL strategy,
+and dual-store boundary — is captured in
+[ADR-003: Dedicated Preflight Entity Design](003-preflight-entity-design.md).
 
-- **No schema enforcement.** Preflight-specific fields — `siteId`, `url`, `createdBy` — live
-  in the `metadata` JSON blob with no type guarantees. Consumers must introspect the blob
-  directly rather than relying on a typed contract.
-- **Type discrimination via metadata.** Querying preflights for a site requires filtering on
-  `metadata.jobType === "preflight"` alongside `metadata.siteId`, neither of which is indexed.
-  Promoting them to top-level attributes works around the indexing problem but still leaves the
-  domain model generic.
-- **Coupling to an implementation detail.** `AsyncJob` is an execution primitive; `Preflight`
-  is a domain concept. Exposing the same model for both leaks the execution abstraction to
-  callers and makes the API contract brittle as `AsyncJob` evolves.
-- **Query inefficiency at scale.** Even with `siteId` promoted to an indexed column on
-  `async_jobs`, a query of `WHERE site_id = $siteId` would scan across all job types for that
-  site (site-detection, pr-review, preflight, preflight-beta). Isolating preflight records
-  requires a compound filter on `(site_id, job_type)`, a composite index, or an in-memory
-  post-filter pass. Preflight jobs represent a fraction of total `AsyncJob` volume; a dedicated
-  `preflights` table makes every row in the index a preflight by definition, keeping the index
-  small and the query clean with no cross-workflow contamination.
-
-The decision is to **introduce a dedicated `Preflight` entity in `spacecat-shared-data-access`**
-rather than extending `AsyncJob`. The `Preflight` entity owns the domain record and holds a
-1-to-1 FK reference to an `AsyncJob` via `asyncJobId` for execution lifecycle tracking (status
-polling, result storage). The `asyncJobId` is never exposed to API consumers.
-
-**`Preflight` entity — first-class fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `preflightId` | UUID | Primary key |
-| `siteId` | UUID (indexed) | The site this preflight belongs to |
-| `url` | string | The page URL that was analyzed; `(site_id, url)` composite index deferred — `url` filter applied in-memory (see collection methods) |
-| `asyncJobId` | UUID (FK to `async_jobs`, 1-to-1) | Backing AsyncJob reference for execution lifecycle tracking; never exposed to API consumers |
-| `status` | enum | `IN_PROGRESS` \| `COMPLETED` \| `FAILED` \| `CANCELLED` |
-| `createdBy` | object | `{ email, displayName }` from IMS profile at creation time |
-| `createdAt` | ISO 8601 | Creation timestamp |
-| `updatedAt` | ISO 8601 | Last update timestamp |
-| `startedAt` | ISO 8601 | When processing began |
-| `endedAt` | ISO 8601 | When processing completed |
-| `result` | object \| null | Audit result payload; `null` until completed. Shape is loosely typed here; the exact structure will be defined and strongly typed during implementation. |
-| `error` | object \| null | `{ code, message }` on failure |
-
-**`PreflightCollection` — methods:**
-
-- `allBySiteId(siteId)` — returns all preflights for a site, sorted by `createdAt` descending;
-  `url` filter applied in-memory when `?url=` query parameter is present
-- `findById(preflightId)` — loads a single preflight; caller verifies `siteId` matches path
-
-**Creation flow:** The controller creates the `AsyncJob` first, receives the `asyncJobId`, then
-immediately creates the `Preflight` entity with `asyncJobId` as the FK. This ordering ensures
-the execution primitive exists before the domain record that references it.
-
-**Expiry** is handled implicitly via the `ON DELETE CASCADE` on `async_job_id`. When the
-backing `AsyncJob` is cleaned up, its associated `Preflight` row is deleted with it. There
-is no separate TTL column on `preflights` — the `withRecordExpiry` SchemaBuilder helper is
-a DynamoDB-era mechanism marked `postgrestIgnore` in the v3 PostgreSQL layer and does not
-write to the database.
-
-`createdBy` is derived from the caller's IMS profile at job creation time: `email` is
-`profile.email` (the IMS user identifier); `displayName` is composed from
-`profile.first_name + ' ' + profile.last_name` (falling back to `profile.name`). It is
-never supplied by the client.
-
-`/preflight/beta/jobs` is removed outright as part of this work — it is replaced by the new
-endpoints, not deprecated. `/preflight/jobs` is the only legacy endpoint; it continues writing
-to `AsyncJob` unchanged until external consumers have migrated. The new
-`/sites/:siteId/preflights` endpoints write exclusively to the `Preflight` entity.
-
-**This change is scoped to `spacecat-shared-data-access` and is a prerequisite that must land
-before the controller work in this repo.** Alignment with @ekdogan is complete (SITES-44675).
-See SITES-44675 for the tracking ticket.
+That decision was aligned with @ekdogan (SITES-44675) before implementation began.
 
 ## Consequences
 - API shape is consistent with the rest of the service; new consumers can discover preflight
@@ -333,5 +264,8 @@ See SITES-44675 for the tracking ticket.
 - Existing consumers of `/preflight/jobs` are unaffected for now; migration timeline to be
   coordinated separately.
 - Job records are only created for requests that pass validation and access checks, keeping the
-  job store clean. Callers that previously relied on polling a `CANCELLED` job to detect a
-  disabled-preflight condition must handle `403` instead.
+  job store clean. Eligibility (which audits run, whether the tier enables preflight at all) is
+  delegated to Mysticat — see [SITES-46202](https://jira.corp.adobe.com/browse/SITES-46202). Callers
+  that previously relied on polling a `CANCELLED` job to detect a disabled-preflight condition
+  must now poll `Preflight.status` and inspect `result.audits` (an empty list signals the tier
+  has nothing eligible to run for this site).
