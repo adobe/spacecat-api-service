@@ -1383,6 +1383,26 @@ describe('Organizations Controller', () => {
       expect(result.status).to.equal(503);
     });
 
+    it('returns an empty list when the caller can view none of the org\'s sites', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      mockDataAccess.Site.allByOrganizationId.resolves(sites);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([]),
+      };
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      // Zero viewable sites must fail closed to [] — never the full project list.
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array').with.lengthOf(0);
+    });
+
     it('skips the project filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
       mockDataAccess.Organization.findById.resolves(organizations[1]);
       mockDataAccess.Project.allByOrganizationId.resolves(projects);
