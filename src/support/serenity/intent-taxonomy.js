@@ -83,6 +83,48 @@ Output format: {"intent": "<category>", "confidence": 0.0-1.0, "reasoning": "<on
 Do not include markdown, code fences, or any text outside the JSON object.`;
 
 /**
+ * @typedef {object} SerenityIntentInspection
+ * @property {string|null} tag - the wire tag (`intent:<Value>`) or null on any
+ *   soft failure.
+ * @property {'ok'|'invalid_value'|'low_confidence'} reason - why the result is
+ *   what it is: `ok` (usable tag), `invalid_value` (garbled / unrecognized
+ *   value), or `low_confidence` (recognized value below the validity floor).
+ * @property {number} confidence - the parsed confidence (NaN if unparseable).
+ * @property {string} reasoning - the model's `reasoning` field ('' if absent),
+ *   surfaced so the caller can log it on soft failures without re-running.
+ */
+
+/**
+ * Inspects a parsed model response against the Serenity taxonomy, distinguishing
+ * the soft-failure modes the {@link parseSerenityIntent} boolean result collapses
+ * away — so the caller's observability layer can count `low_confidence` apart
+ * from other unresolved cases and log the `reasoning` for debuggability. The
+ * retry/default behavior is unchanged: any non-`ok` reason still yields a null
+ * `tag`, which the caller folds into the same fallback ladder.
+ *
+ * @param {object} parsed - the parsed `{intent, confidence, reasoning}` body.
+ * @returns {SerenityIntentInspection}
+ */
+export function inspectSerenityIntent(parsed) {
+  const value = String(parsed?.intent ?? '');
+  const confidence = Number(parsed?.confidence);
+  const reasoning = typeof parsed?.reasoning === 'string' ? parsed.reasoning : '';
+  if (!SERENITY_INTENT_VALUES.includes(value)) {
+    return {
+      tag: null, reason: 'invalid_value', confidence, reasoning,
+    };
+  }
+  if (!Number.isFinite(confidence) || confidence < PROMPT_INTENT_MIN_CONFIDENCE) {
+    return {
+      tag: null, reason: 'low_confidence', confidence, reasoning,
+    };
+  }
+  return {
+    tag: tagFor(TAG_DIMENSION.INTENT, value), reason: 'ok', confidence, reasoning,
+  };
+}
+
+/**
  * Validates a parsed model response against the Serenity taxonomy: the value
  * must be one of the 5 canonical Capitalized literals AND confidence must meet
  * the validity floor. Returns the ready-to-use wire tag (e.g. `intent:Task`) on
@@ -95,15 +137,7 @@ Do not include markdown, code fences, or any text outside the JSON object.`;
  * @returns {string|null} the wire tag (`intent:<Value>`) or null.
  */
 export function parseSerenityIntent(parsed) {
-  const value = String(parsed?.intent ?? '');
-  const confidence = Number(parsed?.confidence);
-  if (!SERENITY_INTENT_VALUES.includes(value)) {
-    return null;
-  }
-  if (!Number.isFinite(confidence) || confidence < PROMPT_INTENT_MIN_CONFIDENCE) {
-    return null;
-  }
-  return tagFor(TAG_DIMENSION.INTENT, value);
+  return inspectSerenityIntent(parsed).tag;
 }
 
 /**

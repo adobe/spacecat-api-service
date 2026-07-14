@@ -525,7 +525,13 @@ export async function handleCreatePrompts(
   // per-item injection below (a per-item LLM call would be far too slow).
   const intentByText = await classifyPromptIntents(
     inputs.map((raw) => String(raw?.text || '')),
-    { env, log, deadline: writeDeadline },
+    {
+      env,
+      log,
+      deadline: writeDeadline,
+      writePath: deferPublish ? 'csv' : 'create',
+      workspaceId: semrushWorkspaceId,
+    },
   );
   const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
 
@@ -725,7 +731,9 @@ export async function handleUpdatePrompt(
   );
   const intentByText = await classifyPromptIntents(
     [nextText],
-    { env, log, deadline: writeDeadline },
+    {
+      env, log, deadline: writeDeadline, writePath: 'edit', workspaceId: semrushWorkspaceId,
+    },
   );
   const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
   let typed = await injectComputedType(projectId, {

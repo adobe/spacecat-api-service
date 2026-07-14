@@ -145,7 +145,13 @@ export async function handleCreatePromptsSubworkspace(
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
   const intentByText = await classifyPromptIntents(
     inputs.map((raw) => String(raw?.text || '')),
-    { env, log, deadline: writeDeadline },
+    {
+      env,
+      log,
+      deadline: writeDeadline,
+      writePath: deferPublish ? 'csv' : 'create',
+      workspaceId,
+    },
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
@@ -287,7 +293,9 @@ export async function handleUpdatePromptSubworkspace(
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
   const intentByText = await classifyPromptIntents(
     [nextText],
-    { env, log, deadline: writeDeadline },
+    {
+      env, log, deadline: writeDeadline, writePath: 'edit', workspaceId,
+    },
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
   let typed = await injectComputedType(projectId, {

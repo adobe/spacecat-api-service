@@ -233,7 +233,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   });
   const intentByText = await classifyPromptIntents(
     allTexts.slice(0, AI_GEN_CLASSIFY_MAX),
-    { env, log, deadline: writeDeadline },
+    {
+      env, log, deadline: writeDeadline, writePath: 'ai-gen', workspaceId,
+    },
   );
 
   const promptsByText = {};
