@@ -94,6 +94,7 @@ export const AUDIT_4_AUDITED_AT = '2025-01-17T10:00:00.000Z'; // SITE_3 cwv (den
 export const OPPTY_1_ID = 'aa111111-1111-4111-b111-111111111111'; // SITE_1, code-suggestions, NEW
 export const OPPTY_2_ID = 'aa222222-2222-4222-a222-222222222222'; // SITE_1, broken-backlinks, RESOLVED
 export const OPPTY_3_ID = 'aa333333-3333-4333-b333-333333333333'; // SITE_3 (denied), code-suggestions, NEW
+export const OPPTY_4_ID = 'aa444444-4444-4444-a444-444444444444'; // SITE_1, structured-data, IN_PROGRESS — second oppty with a fix, for site-wide aggregation
 
 // ── Suggestions (all under OPPTY_1) ──
 
@@ -108,6 +109,7 @@ export const FIX_1_EXECUTED_AT = '2025-01-20T12:00:00.000Z'; // deterministic da
 export const FIX_1_CREATED_DATE = '2025-01-20'; // fixEntityCreatedDate derived from executedAt
 export const FIX_2_ID = 'cc222222-2222-4222-a222-222222222222'; // CODE_CHANGE, DEPLOYED
 export const FIX_3_ID = 'cc333333-3333-4333-b333-333333333333'; // CODE_CHANGE, DEPLOYED — no junction entry
+export const FIX_4_ID = 'cc444444-4444-4444-a444-444444444444'; // under OPPTY_4, CODE_CHANGE, FAILED
 
 // ── Experiments (under SITE_1) ──
 

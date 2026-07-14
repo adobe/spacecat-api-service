@@ -1238,7 +1238,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
-    it('waitlists when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {
+    it('returns 400 when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1252,8 +1252,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
 
       const res = await controller.onboard(context);
 
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(res.status).to.equal(400);
     });
 
     it('treats org as non-internal when ASO_PLG_EXCLUDED_ORGS is not set', async () => {
@@ -1343,6 +1342,103 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
         .to.have.been.calledWithMatch(/already assigned to another organization/);
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/cannot be moved.*active products/);
+    });
+  });
+
+  describe('onboard - non-production domain guard', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
+      mockDataAccess.PlgOnboarding.create.resolves(mockOnboarding);
+    });
+
+    const NON_PROD_DOMAINS = [
+      // non-prod subdomain keywords
+      'qa.example.com',
+      'stage.example.com',
+      'staging.example.com',
+      'dev.example.com',
+      'development.example.com',
+      'example.qa.com',
+      'example.stage.com',
+      'experience-qa.adobe.com',
+      'dev-preview.example.com',
+      'example-stage.com',
+      'qa-internal.example.com',
+      'newweb-qa2.infineon.cn',
+      'stage2.example.com',
+      'dev3-preview.example.com',
+      // author/publish keywords
+      'author-mls-prod-65a.adobecqms.net',
+      'publish-lottretail.corp.tlclimited.com',
+      'author.example.com',
+      'publish.example.com',
+      // hlx/AEM delivery URLs
+      'main--notice--softbankbtob.aem.page',
+      'bundled-journey-qa-1--forms-engine-qa--hdfc-forms.aem.live',
+      'main--mysite--owner.hlx.live',
+      'main--mysite--owner.hlx.page',
+    ];
+
+    for (const domain of NON_PROD_DOMAINS) {
+      // eslint-disable-next-line no-loop-func
+      it(`waitlists domain containing non-prod subdomain: ${domain}`, async () => {
+        mockOnboarding.getDomain.returns(domain);
+        const context = buildContext({ domain });
+
+        const res = await controller.onboard(context);
+
+        expect(res.status).to.equal(200);
+        expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(mockOnboarding.setWaitlistReason)
+          .to.have.been.calledWithMatch(/non-production domain/);
+        expect(mockOnboarding.setSteps).to.not.have.been
+          .calledWithMatch({ nonProdCheckBypassed: true });
+      });
+    }
+
+    it('does not waitlist a normal production domain', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('does not waitlist a .dev TLD domain (legitimate production gTLD)', async () => {
+      mockOnboarding.getDomain.returns('mysite.dev');
+      const context = buildContext({ domain: 'mysite.dev' });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('does not waitlist a web.dev domain (legitimate production gTLD)', async () => {
+      mockOnboarding.getDomain.returns('web.dev');
+      const context = buildContext({ domain: 'web.dev' });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips non-prod guard when steps.nonProdCheckBypassed is already true (re-entrancy guard)', async () => {
+      // Simulates a bypass handler re-running the flow after the guard already fired
+      mockOnboarding.getDomain.returns('dev.example.com');
+      mockOnboarding.getSteps.returns({ nonProdCheckBypassed: true });
+      const context = buildContext({ domain: 'dev.example.com' });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      // Guard must not fire again — status should reach ONBOARDED, not WAITLISTED
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
     });
   });
 });

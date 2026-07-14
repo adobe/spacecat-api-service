@@ -18,6 +18,7 @@ import chaiAsPromised from 'chai-as-promised';
 import {
   listBrands,
   getBrandById,
+  getBrandIdentity,
   getBrandAliases,
   getBrandUrlSources,
   getBrandCompetitors,
@@ -466,6 +467,41 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(getBrandById(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to get brand');
+    });
+  });
+
+  describe('getBrandIdentity', () => {
+    it('returns null when postgrestClient is missing', async () => {
+      expect(await getBrandIdentity(ORG_ID, BRAND_ID, null)).to.be.null;
+    });
+
+    it('returns null when brandId is empty', async () => {
+      expect(await getBrandIdentity(ORG_ID, '', { from: () => {} })).to.be.null;
+    });
+
+    it('returns the { id, name } identity unchanged, without mapping through the full brand DTO', async () => {
+      const query = createChainableQuery({ data: { id: BRAND_ID, name: 'TestBrand' }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
+
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'TestBrand' });
+    });
+
+    it('returns null when the brand does not exist in the org', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
+      expect(result).to.be.null;
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand identity');
     });
   });
 

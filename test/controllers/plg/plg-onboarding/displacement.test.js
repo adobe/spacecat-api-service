@@ -205,9 +205,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
       const refreshedSite = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
-      // first call: initial fetch for fast-track; second call: re-fetch after reassignment
+      // first call: demo-site check; second call: initial fetch for fast-track;
+      // third call: re-fetch after reassignment
       mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(refreshedSite);
+        .onSecondCall().resolves(siteInInternalOrg)
+        .onThirdCall()
+        .resolves(refreshedSite);
 
       stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
       stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
@@ -255,20 +258,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('skips reassignment for internal org demo sites', async () => {
+    it('returns 400 for internal org demo sites', async () => {
       const INTERNAL_ORG_ID = 'internal-org-123';
       const DEMO_SITE_ID = 'demo-site-456';
 
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: DEMO_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
-        .resolves(preonboardedOnboarding);
-
       const demoSite = createMockSite({ id: DEMO_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findById.resolves(demoSite);
+      mockDataAccess.Site.findByBaseURL.resolves(demoSite);
 
       stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
       stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = DEMO_SITE_ID;
@@ -276,11 +271,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const context = buildContext({ domain: TEST_DOMAIN });
       const response = await controller.onboard(context);
 
-      expect(response.status).to.equal(200);
-      // Demo site should NOT be reassigned (stays in internal org)
+      expect(response.status).to.equal(400);
       expect(demoSite.setOrganizationId).to.not.have.been.called;
-      // PlgOnboarding org is still anchored to the resolved customer org.
-      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
     it('waitlists when preonboarded site is in different customer org', async () => {

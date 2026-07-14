@@ -27,7 +27,7 @@ const SUB_WORKSPACE_ID = 'sub-ws-uuid-456';
 const IMS_TOKEN = 'test-ims-token';
 const ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' };
 
-const BRANDS_RESULT = [{ id: null, label: 'Adobe', spacecat_brand_id: 'brand-1' }];
+const BRANDS_RESULT = [{ id: 'Adobe', label: 'Adobe', spacecat_brand_id: 'brand-1' }];
 const MARKETS_RESULT = [{ id: 'US', label: 'US-en', semrush_project_id: 'proj-1' }];
 const URL_INSPECTOR_RESULT = {
   brands: BRANDS_RESULT,
@@ -45,6 +45,9 @@ const PROMPTS_RESULT = {
     primary_intent: 'informational',
     volume: 2119,
   }],
+};
+const WEEKS_RESULT = {
+  weeks: [{ week: '2026-W27', startDate: '2026-06-29', endDate: '2026-07-05' }],
 };
 
 function fakeLog() {
@@ -99,7 +102,7 @@ function fakeContext({
   bearer = IMS_TOKEN,
   authType = 'ims',
   params = {},
-  url = `https://api.example.com/v2/orgs/${ORG_ID}/serenity/all/brand-presence/url-inspector/filter-dimensions`,
+  url = `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions`,
   org = { getId: () => ORG_ID },
   spacecatBrands = [{ id: 'brand-1', name: 'Adobe' }],
   brandSemrushProjects = [],
@@ -147,31 +150,32 @@ async function readBody(response) {
 }
 
 describe('ElementsController', () => {
-  let listSpacecatBrandsStub;
-  let resolveWorkspaceIdStub;
+  let getBrandIdentityStub;
+  let getBrandBySiteStub;
+  let resolveBrandWorkspaceStub;
   let accessControlHasAccessStub;
   let serviceStub;
   let createElementsServiceStub;
   let createElementsTransportStub;
   let exchangePromiseTokenStub;
   let resolveBrandUuidStub;
-  let resolveBrandWorkspaceStub;
   let MockElementsTransportError;
   let ElementsController;
 
   beforeEach(async () => {
-    resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE_ID);
     resolveBrandUuidStub = sinon.stub().resolves(BRAND_ID);
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'subworkspace', workspaceId: SUB_WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
     });
     accessControlHasAccessStub = sinon.stub().resolves(true);
 
-    listSpacecatBrandsStub = sinon.stub().resolves([{ id: 'brand-1', name: 'Adobe' }]);
+    getBrandIdentityStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+    getBrandBySiteStub = sinon.stub().resolves(null);
 
     serviceStub = {
       getUrlInspectorFilterDimensions: sinon.stub().resolves(URL_INSPECTOR_RESULT),
       getPrompts: sinon.stub().resolves(PROMPTS_RESULT),
+      getWeeks: sinon.stub().resolves(WEEKS_RESULT),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -203,13 +207,13 @@ describe('ElementsController', () => {
         ElementsTransportError: MockElementsTransportError,
       },
       '../../src/support/brands-storage.js': {
-        listBrands: listSpacecatBrandsStub,
+        getBrandIdentity: getBrandIdentityStub,
+        getBrandBySite: getBrandBySiteStub,
       },
       '../../src/support/prompts-storage.js': {
         resolveBrandUuid: resolveBrandUuidStub,
       },
       '../../src/support/serenity/workspace-resolver.js': {
-        resolveWorkspaceId: resolveWorkspaceIdStub,
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
@@ -285,8 +289,8 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(403);
     });
 
-    it('returns 404 when the org has no workspace ID', async () => {
-      resolveWorkspaceIdStub.resolves(null);
+    it('returns 404 when the brand has no resolvable workspace', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
       const ctx = fakeContext();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
@@ -465,26 +469,22 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(serviceStub.getUrlInspectorFilterDimensions).to.have.been.calledWith(
-        WORKSPACE_ID,
+        SUB_WORKSPACE_ID,
         sinon.match.object,
         sinon.match.array,
         sinon.match.array,
       );
     });
 
-    it('passes SpaceCat brands to the service', async () => {
-      const spacecatBrands = [{ id: 'brand-1', name: 'Adobe' }];
-      listSpacecatBrandsStub.resolves(spacecatBrands);
+    it('passes the resolved brand to the service', async () => {
       const ctx = fakeContext();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       const [, , brands] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
-      expect(brands).to.deep.equal(spacecatBrands);
+      expect(brands).to.deep.equal([{ id: BRAND_ID, name: 'Adobe Brand' }]);
     });
 
-    it('passes aggregated brandSemrushProjects across all brands', async () => {
-      const spacecatBrands = [{ id: 'brand-1', name: 'Adobe' }];
-      listSpacecatBrandsStub.resolves(spacecatBrands);
+    it('passes brandSemrushProjects for the resolved brand', async () => {
       const project = makeBrandSemrushProject();
       const ctx = fakeContext({ withBrandSemrushProject: true, brandSemrushProjects: [project] });
       ctx.dataAccess.BrandSemrushProject = { allByBrandId: sinon.stub().resolves([project]) };
@@ -505,7 +505,7 @@ describe('ElementsController', () => {
 
     it('passes query params from the request URL', async () => {
       const ctx = fakeContext({
-        url: `https://api.example.com/v2/orgs/${ORG_ID}/serenity/all/brand-presence/url-inspector/filter-dimensions?model=perplexity`,
+        url: `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions?model=perplexity`,
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
@@ -537,6 +537,64 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  // ─── brand-scoped (:brandId) ──────────────────────────────────────────────
+
+  describe('listUrlInspectorFilterDimensions (brand-scoped)', () => {
+    it('returns 400 when brandId is not a valid UUID', async () => {
+      const ctx = fakeContext({ params: { brandId: 'not-a-uuid' } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when the brand does not belong to the org', async () => {
+      getBrandIdentityStub.resolves(null);
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ params: { brandId: BRAND_ID }, postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+      expect(getBrandIdentityStub).to.not.have.been.called;
+    });
+
+    it('returns 404 when the brand has no resolvable workspace', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('calls the service with the brand sub-workspace ID and scopes to that single brand', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'subworkspace', workspaceId: 'sub-ws-uuid-456' });
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(resolveBrandWorkspaceStub).to.have.been.calledWith(ctx, ORG_ID, BRAND_ID);
+      const [workspaceId, , brands] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
+      expect(workspaceId).to.equal('sub-ws-uuid-456');
+      expect(brands).to.deep.equal([{ id: BRAND_ID, name: 'Adobe Brand' }]);
+    });
+
+    it('falls back to the org parent workspace when the brand has no sub-workspace yet', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: WORKSPACE_ID });
+      const ctx = fakeContext({ params: { brandId: BRAND_ID } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      const [workspaceId] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
+      expect(workspaceId).to.equal(WORKSPACE_ID);
     });
   });
 
@@ -701,6 +759,110 @@ describe('ElementsController', () => {
     });
   });
 
+  // ─── listWeeks ────────────────────────────────────────────────────────────
+
+  describe('listWeeks', () => {
+    const weeksUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/weeks${qs}`;
+
+    it('returns 200 with the weeks result', async () => {
+      const ctx = fakeContext({ url: weeksUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal(WEEKS_RESULT);
+    });
+
+    // Regression test for the missing-await bug: buildService(ctx) returns a
+    // Promise, so `buildService(ctx).getWeeks(...)` (no await) called .getWeeks
+    // on the Promise itself and threw `TypeError: ... is not a function` on
+    // every real invocation. Asserting the resolved service's getWeeks stub was
+    // actually invoked (and that a plain object result comes back) fails if
+    // that bug regresses.
+    it('awaits buildService before calling getWeeks on the resolved service', async () => {
+      const ctx = fakeContext({ url: weeksUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getWeeks).to.have.been.calledOnce;
+      expect(serviceStub.getWeeks.firstCall.args[0]).to.equal(SUB_WORKSPACE_ID);
+    });
+
+    it('calls getWeeks with the resolved workspace ID and query params, without a brand filter', async () => {
+      const ctx = fakeContext({ url: weeksUrl('?model=perplexity') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listWeeks(ctx);
+      expect(serviceStub.getWeeks).to.have.been.calledWith(SUB_WORKSPACE_ID, { model: 'perplexity' });
+      const [, params] = serviceStub.getWeeks.firstCall.args;
+      expect(params).to.not.have.property('brand');
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: weeksUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+      expect(serviceStub.getWeeks).to.not.have.been.called;
+    });
+
+    it('returns 400 when siteId does not resolve to any brand', async () => {
+      getBrandBySiteStub.resolves(null);
+      const ctx = fakeContext({ url: weeksUrl('?siteId=site-without-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getWeeks).to.not.have.been.called;
+    });
+
+    it('returns 400 when siteId resolves to a different brand than :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: 'some-other-brand-id', name: 'Other Brand' });
+      const ctx = fakeContext({ url: weeksUrl('?siteId=site-of-other-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(400);
+      const body = await readBody(res);
+      expect(body.message).to.match(/siteId does not belong to the specified brand/);
+      expect(serviceStub.getWeeks).to.not.have.been.called;
+    });
+
+    it('proceeds when siteId resolves to the same brand as :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = fakeContext({ url: weeksUrl('?siteId=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getWeeks).to.have.been.calledOnce;
+    });
+
+    it('accepts the site_id snake_case alias for siteId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = fakeContext({ url: weeksUrl('?site_id=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(200);
+      expect(getBrandBySiteStub).to.have.been.calledWith(ORG_ID, 'site-of-this-brand');
+    });
+
+    it('returns the auth error when brandId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: weeksUrl(), params: { brandId: 'not-a-uuid' } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getWeeks).to.not.have.been.called;
+    });
+
+    it('propagates upstream errors through mapError', async () => {
+      serviceStub.getWeeks.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext({ url: weeksUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listWeeks(ctx);
+      expect(res.status).to.equal(502);
+    });
+  });
+
   // ─── extractQuery edge cases ──────────────────────────────────────────────
 
   describe('extractQuery', () => {
@@ -722,7 +884,7 @@ describe('ElementsController', () => {
 
     it('captures multiple query params', async () => {
       const ctx = fakeContext({
-        url: `https://api.example.com/v2/orgs/${ORG_ID}/serenity/all/brand-presence/url-inspector/filter-dimensions?model=gpt-5&foo=bar`,
+        url: `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions?model=gpt-5&foo=bar`,
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
