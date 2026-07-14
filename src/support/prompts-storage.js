@@ -16,6 +16,7 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
+import { assertPermittedSource } from './prompt-sources.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
@@ -728,8 +729,8 @@ export async function upsertPrompts({
   const [{ data: existing }, lookups] = await Promise.all([
     withMissingIntentFallback(postgrestClient, (includeIntent) => {
       const cols = includeIntent
-        ? 'id,prompt_id,text,regions,status,intent'
-        : 'id,prompt_id,text,regions,status';
+        ? 'id,prompt_id,text,regions,status,source,intent'
+        : 'id,prompt_id,text,regions,status,source';
       let q = postgrestClient
         .from('prompts')
         .select(cols)
@@ -748,14 +749,23 @@ export async function upsertPrompts({
   // eslint-disable-next-line no-await-in-loop,max-len
   await ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy);
 
+  // `source` is part of prompt identity (SITES-47870): the store's unique key is
+  // (brand_id, lower(text), sorted_regions(regions), source), so the same text
+  // and regions produced by two pipelines coexists as separate per-source rows.
+  // Match/dedup here must therefore key on source too, or an incoming prompt
+  // would be matched to an existing same-text row of a DIFFERENT source and
+  // update it (moving counts between columns) instead of inserting its own row.
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}`;
+    const src = p.source || 'config';
+    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}:${src}`;
   };
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
   const existingByKey = new Map(
-    (existing || []).map((p) => [getKey({ prompt: p.text, regions: p.regions }), p]),
+    (existing || []).map(
+      (p) => [getKey({ prompt: p.text, regions: p.regions, source: p.source }), p],
+    ),
   );
 
   const toInsert = [];
@@ -765,12 +775,17 @@ export async function upsertPrompts({
   for (const p of prompts) {
     const text = p.prompt || p.text;
     const regions = p.regions || [];
+    const source = p.source || 'config';
+    // Write-boundary chokepoint (SITES-47870 / D2): reject an unregistered
+    // source before it is persisted — the only place UI-originated writes
+    // (e.g. semrush / synthetic_personas accept) can be covered.
+    assertPermittedSource(source);
     const promptId = hasText(p.id)
       ? p.id
       : (p.prompt_id || crypto.randomUUID().toString());
 
     // eslint-disable-next-line max-len
-    const match = existingById.get(promptId) || existingByKey.get(getKey({ prompt: text, regions }));
+    const match = existingById.get(promptId) || existingByKey.get(getKey({ prompt: text, regions, source }));
 
     const categoryUuid = hasText(p.category)
       ? categoryMap.get(p.category.toLowerCase().trim()) || null
@@ -790,7 +805,7 @@ export async function upsertPrompts({
       topic_id: topicUuid,
       status: p.status || 'active',
       origin: p.origin || 'human',
-      source: p.source || 'config',
+      source,
       intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
     };
@@ -819,9 +834,11 @@ export async function upsertPrompts({
     }
   }
 
-  // Guard against uq_prompt_text_region_per_brand: deduplicate toInsert by
-  // (lower(text), sorted_regions) before the bulk INSERT. For a new brand
-  // existingByKey is empty, so cross-topic text collisions all land here.
+  // Guard against uq_prompt_text_region_source_per_brand: deduplicate toInsert
+  // by (lower(text), sorted_regions, source) before the bulk INSERT. For a new
+  // brand existingByKey is empty, so cross-topic text collisions all land here.
+  // `source` is part of the key (SITES-47870), so the same text under two
+  // different sources is NOT a collision — each keeps its own row.
   // Deterministic tie-break: sort by (topic_id, prompt_id) asc, keep first.
   // Each drop is logged (warn) with a text hash — auditable without echoing
   // customer data. Dropped entries are removed from processed so counts stay
@@ -830,7 +847,7 @@ export async function upsertPrompts({
     const dedupKey = (row) => {
       const t = String(row.text || '').trim().toLowerCase();
       const r = [...(row.regions || [])].map((x) => String(x).toLowerCase()).sort().join(',');
-      return `${t}:${r}`;
+      return `${t}:${r}:${row.source}`;
     };
     const sortedForDedup = [...toInsert].sort((a, b) => {
       const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
@@ -902,7 +919,7 @@ export async function upsertPrompts({
     );
     if (error) {
       throwOnPgConstraintViolation(error, {
-        23505: { status: 409, message: 'A prompt with the same text and region already exists for this brand.' },
+        23505: { status: 409, message: 'A prompt with the same text, region and source already exists for this brand.' },
       });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }

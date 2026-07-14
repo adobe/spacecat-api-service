@@ -971,6 +971,97 @@ describe('prompts-storage', () => {
       expect(result.prompts).to.have.lengthOf(1);
     });
 
+    it('treats same text+regions with a DIFFERENT source as a new row (SITES-47870)', async () => {
+      const existing = [{
+        id: 'u1', prompt_id: 'p-gsc', text: 'Shared prompt', regions: ['us'], status: 'active', source: 'gsc',
+      }];
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => thenable({ data: existing, error: null }) }),
+              }),
+              insert: insertStub,
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Shared prompt', regions: ['us'], source: 'base_url' }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.updated).to.equal(0);
+      expect(updateStub.called).to.equal(false);
+      expect(insertStub.firstCall.args[0][0].source).to.equal('base_url');
+    });
+
+    it('matches same text+regions+source to the existing row (updates, not inserts)', async () => {
+      const existing = [{
+        id: 'u1', prompt_id: 'p-gsc', text: 'Shared prompt', regions: ['us'], status: 'active', source: 'gsc',
+      }];
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [], error: null }),
+      });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => thenable({ data: existing, error: null }) }),
+              }),
+              insert: insertStub,
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Shared prompt', regions: ['us'], source: 'gsc' }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(result.created).to.equal(0);
+      expect(insertStub.called).to.equal(false);
+    });
+
+    it('rejects an unregistered source with a 400 (SITES-47870 chokepoint)', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const err = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'x', regions: [], source: 'totally-bogus' }],
+        postgrestClient: client,
+      }).catch((e) => e);
+      expect(err).to.be.an('error');
+      expect(err.message).to.match(/Unregistered prompt source/);
+      expect(err.status).to.equal(400);
+    });
+
     it('persists normalized intent on insert (lowercases, remaps; invalid -> null)', async () => {
       const insertStub = sinon.stub().returns({
         select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
