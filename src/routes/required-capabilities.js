@@ -75,9 +75,6 @@ export const INTERNAL_ROUTES = [
   'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
   'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
-
-  // Semrush onboarding - IMS-user, org-membership gated (hasAccess), not S2S.
-  'POST /v2/orgs/:spaceCatId/semrush-onboarding',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url',
@@ -114,6 +111,9 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
+
+  // Semrush onboarding - IMS-user, org-membership gated (hasAccess), not S2S.
+  'POST /v2/orgs/:spaceCatId/semrush-onboarding',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',

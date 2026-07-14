@@ -59,8 +59,18 @@ export default function OnboardingController(context, log, env) {
     try {
       await notifyOnboarding(env, { email, workspaceId, spaceCatId });
     } catch (e) {
-      const status = e.status === 500 ? 500 : 502;
-      log.error(`[onboarding] notification failed for org=${spaceCatId} status=${status}: ${e.message}`);
+      // Default unexpected errors (no .status) to 500; only notifyOnboarding's
+      // explicit 502 (webhook failure) surfaces as a gateway error.
+      const status = e.status || 500;
+      // The webhook URL is a secret (its path carries the Slack token).
+      // notifyOnboarding is contracted to keep it out of thrown messages, but
+      // redact it here defensively so a future change there can never leak it
+      // into server logs.
+      const webhookUrl = env?.SLACK_ONBOARDING_WEBHOOK_URL;
+      const reason = webhookUrl && typeof e.message === 'string'
+        ? e.message.split(webhookUrl).join('[redacted]')
+        : (e.message || 'unknown error');
+      log.error(`[onboarding] notification failed for org=${spaceCatId} status=${status}: ${reason}`);
       return createResponse({ message: 'Failed to send onboarding notification' }, status);
     }
 

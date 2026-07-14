@@ -42,6 +42,9 @@ function buildMessage({ email, workspaceId, spaceCatId }) {
  * @param {{ email: string, workspaceId: string|null, spaceCatId: string }} payload
  * @returns {Promise<void>}
  * @throws {ErrorWithStatusCode} 500 if the webhook URL is unset; 502 on failure.
+ *   Invariant: thrown error messages never contain the webhook URL or other
+ *   secrets — they are safe to log. Covered by the "does not leak the webhook
+ *   URL" test; keep it green if this function's error text changes.
  */
 export async function notifyOnboarding(env, payload) {
   const webhookUrl = env?.SLACK_ONBOARDING_WEBHOOK_URL;
