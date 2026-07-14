@@ -19,12 +19,39 @@ import {
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
+import { getHeader } from '../support/http-headers.js';
+
 // Cloud Manager service identifier, e.g. cm-p154709-e1629980. Digit runs are
 // capped to a realistic length to avoid arbitrarily long lookups; the capture
 // groups yield the program id (pXXXX) and environment id (eYYYY).
 const SERVICE_RE = /^cm-p(\d{1,10})-e(\d{1,10})$/;
 // Aligns with the Fastly edge TTL for this path (fetch/100-aso-overlay-ttl.vcl).
 const OVERLAY_TTL_SECONDS = 10;
+
+// RFC 7232 §2.3.2 weak comparison: two validators are equal if their opaque
+// tags match character-by-character *ignoring* the optional `W/` weak-prefix.
+// If-None-Match uses weak comparison (§3.2), so `W/"abc"` and `"abc"` match.
+function stripWeakPrefix(v) {
+  const t = v.trim();
+  return t.startsWith('W/') ? t.slice(2) : t;
+}
+
+// RFC 7232 §3.2: If-None-Match matches when the header value is "*" (any
+// existing resource) or when any comma-separated validator in the list weakly
+// compares equal to the current ETag. S3 emits strong quoted ETags, but we
+// still normalize both sides so a client that tags its cached validator weak
+// (some caches do) matches correctly.
+function ifNoneMatchMatches(headerValue, currentEtag) {
+  if (!headerValue || !currentEtag) {
+    return false;
+  }
+  const trimmed = headerValue.trim();
+  if (trimmed === '*') {
+    return true;
+  }
+  const normCurrent = stripWeakPrefix(currentEtag);
+  return trimmed.split(',').some((tok) => stripWeakPrefix(tok) === normCurrent);
+}
 
 /**
  * Redirects Controller — serves the ASO dispatcher-layer redirect overlay
@@ -113,11 +140,43 @@ function RedirectsController(ctx) {
     try {
       const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
       const response = await s3Client.send(command);
+
+      // S3 returns the object's ETag already quoted (RFC 7232 opaque-tag form),
+      // e.g. `"d41d8cd98f00b204e9800998ecf8427e"`. Passthrough gives the client
+      // a strong validator without hashing the body — the writer is single-part,
+      // so this is an MD5 today; multipart uploads would surface an opaque S3
+      // ETag which is still a valid strong validator for If-None-Match compares.
+      // S3 returns the object's ETag already quoted (RFC 7232 opaque-tag form),
+      // e.g. `"d41d8cd98f00b204e9800998ecf8427e"`. Passthrough gives the client
+      // a strong validator without hashing the body — the writer is single-part
+      // (small overlays), so this is an MD5 today; multipart uploads would
+      // surface an opaque S3 ETag which is still a valid strong validator.
+      // Missing ETag (defensive — S3 always returns one for a successful GET,
+      // but a mock or a future storage backend might not) simply disables the
+      // conditional-GET path and we serve the body unconditionally.
+      const etag = response.ETag;
+      const ifNoneMatch = getHeader(context, 'if-none-match');
+      if (etag && ifNoneMatchMatches(ifNoneMatch, etag)) {
+        log.info('[aso-overlay] 304 Not Modified', { service, etag });
+        // 304 MUST NOT include a message body (RFC 7230 §3.3.3); MUST include
+        // any Cache-Control/ETag we would have sent on a 200 (RFC 7232 §4.1).
+        // We set content-type explicitly to text/plain — createResponse would
+        // otherwise default to application/json (misleading on this endpoint)
+        // and would run the JSON stringify branch on the empty body.
+        return createResponse('', 304, {
+          'content-type': 'text/plain; charset=utf-8',
+          etag,
+          'cache-control': `max-age=${OVERLAY_TTL_SECONDS}`,
+        });
+      }
+
       const body = await response.Body.transformToString();
       return createResponse(body, 200, {
         'content-type': 'text/plain; charset=utf-8',
         // Cache-friendly for Fastly request-collapsing; edge TTL also set in VCL.
         'cache-control': `max-age=${OVERLAY_TTL_SECONDS}`,
+        // Include ETag so a subsequent poll can conditionally revalidate.
+        ...(etag ? { etag } : {}),
       });
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;

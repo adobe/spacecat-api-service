@@ -28,9 +28,35 @@ get-aso-redirects:
           type: string
           pattern: '^cm-p\d{1,10}-e\d{1,10}$'
           example: cm-p154709-e1629980
+      - name: If-None-Match
+        in: header
+        required: false
+        description: |
+          RFC 7232 conditional GET. Send the `ETag` value from a previous
+          response to receive `304 Not Modified` when the overlay hasn't
+          changed. Weak comparison is used, so both `"tag"` and `W/"tag"`
+          are accepted. A comma-separated list of validators and the
+          wildcard `*` are also supported.
+        schema:
+          type: string
+          example: '"d41d8cd98f00b204e9800998ecf8427e"'
     responses:
       '200':
         description: The redirect overlay file.
+        headers:
+          ETag:
+            description: |
+              Strong validator (S3-passthrough) for the overlay object.
+              Persist and echo back on subsequent polls via `If-None-Match`
+              to skip re-downloading unchanged content.
+            schema:
+              type: string
+              example: '"d41d8cd98f00b204e9800998ecf8427e"'
+          Cache-Control:
+            description: Edge-cache directive aligned with the Fastly VCL TTL.
+            schema:
+              type: string
+              example: max-age=10
         content:
           text/plain:
             schema:
@@ -38,6 +64,23 @@ get-aso-redirects:
             example: |
               example.com/old-widget https://www.example.com/products/widget-v2
               blog.example.com/old-post https://blog.example.com/articles/new
+      '304':
+        description: |
+          The overlay has not changed since the client-supplied `If-None-Match`
+          validator. Response has no body; the `ETag` and `Cache-Control`
+          headers are still emitted so the client can refresh its cached copy
+          metadata. Authorization is still evaluated before this status is
+          returned — an unauthorized caller who happens to know a valid ETag
+          for some other tenant's overlay still receives `404`.
+        headers:
+          ETag:
+            schema:
+              type: string
+              example: '"d41d8cd98f00b204e9800998ecf8427e"'
+          Cache-Control:
+            schema:
+              type: string
+              example: max-age=10
       '400':
         $ref: './responses.yaml#/400'
       '401':
