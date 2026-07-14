@@ -722,6 +722,15 @@ export async function upsertPrompts({
     throw new Error('PostgREST client is required for prompts');
   }
 
+  // Write-boundary chokepoint (SITES-47870 / D2): validate every source up front,
+  // before any DB work or side effects. ensureLookupEntries (below) creates
+  // category/topic rows for the whole batch, so validating per-prompt inside the
+  // main loop would leave orphan lookup rows when a later prompt's source is
+  // rejected. Fail the whole batch first, cleanly.
+  for (const p of prompts) {
+    assertPermittedSource(p.source || 'config');
+  }
+
   const incomingIds = prompts
     .map((p) => p.id || p.prompt_id)
     .filter(hasText);
@@ -776,10 +785,6 @@ export async function upsertPrompts({
     const text = p.prompt || p.text;
     const regions = p.regions || [];
     const source = p.source || 'config';
-    // Write-boundary chokepoint (SITES-47870 / D2): reject an unregistered
-    // source before it is persisted — the only place UI-originated writes
-    // (e.g. semrush / synthetic_personas accept) can be covered.
-    assertPermittedSource(source);
     const promptId = hasText(p.id)
       ? p.id
       : (p.prompt_id || crypto.randomUUID().toString());
@@ -810,6 +815,13 @@ export async function upsertPrompts({
       updated_by: updatedBy,
     };
 
+    // `source` is immutable on an UPDATE (SITES-47870). getKey folds source into
+    // the match key, so a key-match always shares source; but existingById
+    // matches by prompt_id ALONE, so an id-match can carry a different incoming
+    // source. Overwriting it would silently move an existing row between report
+    // columns (the exact corruption the source-aware key prevents) and could
+    // raise an unmapped 23505 on the UPDATE. Preserve the stored source; source
+    // is only set at insert time. (Existing rows are NOT NULL source.)
     if (match && match.status !== 'active') {
       if (match.status === 'deleted') {
         const reactivated = {
@@ -817,6 +829,7 @@ export async function upsertPrompts({
           id: match.id,
           status: 'active',
           intent: row.intent ?? match.intent,
+          source: match.source ?? source,
         };
         toUpdate.push(reactivated);
         processed.push({ ...reactivated, prompt_id: promptId });
@@ -826,8 +839,9 @@ export async function upsertPrompts({
     }
 
     if (match) {
-      toUpdate.push({ ...row, id: match.id });
-      processed.push({ ...row, prompt_id: promptId });
+      const updated = { ...row, id: match.id, source: match.source ?? source };
+      toUpdate.push(updated);
+      processed.push({ ...updated, prompt_id: promptId });
     } else {
       toInsert.push(row);
       processed.push({ ...row, prompt_id: promptId });

@@ -84,11 +84,12 @@ export function isPermittedSource(source) {
  */
 export function assertPermittedSource(source) {
   if (!isPermittedSource(source)) {
+    // Echo the rejected value JSON-escaped and length-capped so a crafted source
+    // (newlines, control chars) cannot forge log lines, and keep internal repo/
+    // file names out of this client-facing 400 message.
+    const shown = JSON.stringify(String(source).slice(0, 64));
     const err = new Error(
-      `Unregistered prompt source '${source}'. Register it in `
-      + 'llmo-data-retrieval-service prompt_source.py (TRACKED_PROMPT_SOURCES) '
-      + 'and mirror it in spacecat-api-service prompt-sources.js before writing '
-      + 'prompts with it.',
+      `Unregistered prompt source ${shown}. It must be a registered prompt source.`,
     );
     err.status = 400;
     throw err;
