@@ -28,6 +28,7 @@ import {
   clearLanguageCache,
   clearTagCache,
   listProjectTagTree,
+  countPublishedPrompts,
 } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
@@ -1656,6 +1657,49 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-a');
+  });
+});
+
+describe('countPublishedPrompts', () => {
+  afterEach(() => sinon.restore());
+
+  it('sums prompt counts across pages until a short page ends the walk', async () => {
+    const listPromptsByTags = sinon.stub();
+    listPromptsByTags.onCall(0).resolves({ items: new Array(200).fill({ id: 'q' }) });
+    listPromptsByTags.onCall(1).resolves({ items: new Array(30).fill({ id: 'q' }) });
+    const count = await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1');
+    expect(count).to.equal(230);
+    expect(listPromptsByTags).to.have.callCount(2);
+  });
+
+  it('stops at the page ceiling on a still-full last page and warns (count is a floor)', async () => {
+    // Every page returns a full 200 → the walk hits the 50-page ceiling and stops, warning that the
+    // count may be under-stated (it is used as a floor for the metering need).
+    const warn = sinon.spy();
+    const listPromptsByTags = sinon.stub().resolves({ items: new Array(200).fill({ id: 'q' }) });
+    const count = await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1', { warn });
+    expect(count).to.equal(200 * 50);
+    expect(listPromptsByTags).to.have.callCount(50);
+    expect(warn).to.have.been.calledWithMatch('countPublishedPrompts: page ceiling hit');
+  });
+
+  it('returns 0 for an empty project', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    expect(await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1')).to.equal(0);
+  });
+
+  it('an upstream failure MID-WALK returns the counted-so-far instead of rejecting', async () => {
+    // Page 1 succeeds (200 items); page 2 throws. Must NOT propagate — countPublishedPrompts backs
+    // resource-manager's modelChangeUnits sizing, and a rejection here would fail the whole metered
+    // write over what should only under-state the need (the transfer 422 is the real backstop).
+    const warn = sinon.spy();
+    const listPromptsByTags = sinon.stub();
+    listPromptsByTags.onCall(0).resolves({ items: new Array(200).fill({ id: 'q' }) });
+    listPromptsByTags.onCall(1).rejects(new Error('upstream 500'));
+    const count = await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1', { warn });
+    expect(count).to.equal(200);
+    expect(listPromptsByTags).to.have.callCount(2);
+    expect(warn).to.have.been.calledWithMatch('countPublishedPrompts: upstream failure mid-walk');
   });
 });
 

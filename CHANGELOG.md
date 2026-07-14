@@ -1,3 +1,24 @@
+# [1.646.0](https://github.com/adobe/spacecat-api-service/compare/v1.645.0...v1.646.0) (2026-07-14)
+
+
+### Bug Fixes
+
+* **SITES-47960:** accept caller-supplied x-promise-token in page-relationships ([#2806](https://github.com/adobe/spacecat-api-service/issues/2806)) ([de3572b](https://github.com/adobe/spacecat-api-service/commit/de3572b974b70c8351123f43606f5f7a8ce1b726))
+* **slack:** forward mode to non-prerender audit types (LLMO-6167) ([#2807](https://github.com/adobe/spacecat-api-service/issues/2807)) ([50c98bb](https://github.com/adobe/spacecat-api-service/commit/50c98bbaacbeacf5c1399bceafabd2e539d11073))
+
+
+### Features
+
+* **serenity:** dynamic AI resource allocation — consolidated allocator + kill-switch + hot-path wiring (LLMO-5616) ([#2764](https://github.com/adobe/spacecat-api-service/issues/2764)) ([674334a](https://github.com/adobe/spacecat-api-service/commit/674334a8579fd709ea4213dcca9791d78246d7b3)), closes [#2750](https://github.com/adobe/spacecat-api-service/issues/2750)
+
+# [1.645.0](https://github.com/adobe/spacecat-api-service/compare/v1.644.0...v1.645.0) (2026-07-14)
+
+
+### Features
+
+* **serenity:** resolve tag dimensions from the tag tree, not a name prefix ([#2788](https://github.com/adobe/spacecat-api-service/issues/2788)) ([2c687f4](https://github.com/adobe/spacecat-api-service/commit/2c687f4f0336cee537c065f861adee53c597eb2e)), closes [Hi#level](https://github.com/Hi/issues/level) [serenity-docs#44](https://github.com/serenity-docs/issues/44) [serenity-docs#44](https://github.com/serenity-docs/issues/44)
+* **SITES-44690:** add task-management controller (connections, tickets, Jira integration) ([#2661](https://github.com/adobe/spacecat-api-service/issues/2661)) ([5c17023](https://github.com/adobe/spacecat-api-service/commit/5c1702342b6c7d19a8621bc38e9088898d5664b2))
+
 # [1.644.0](https://github.com/adobe/spacecat-api-service/compare/v1.643.1...v1.644.0) (2026-07-13)
 
 

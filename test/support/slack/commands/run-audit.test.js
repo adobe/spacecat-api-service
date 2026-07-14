@@ -582,6 +582,22 @@ describe('RunAuditCommand', () => {
       });
     });
 
+    it('forwards mode in audit data for non-prerender audit types (e.g. toc\'s mode:ai-only, LLMO-6167)', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence', 'generatePrompts:true', 'mode:ai-only'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(sqsStub.sendMessage).called;
+
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const parsedData = JSON.parse(sendMessageCall.args[1].data);
+      expect(parsedData).to.deep.include({
+        generatePrompts: 'true',
+        mode: 'ai-only',
+      });
+    });
+
     it('handles keyword format with spaces after colon', async () => {
       const command = RunAuditCommand(context);
 
