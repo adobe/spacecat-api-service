@@ -1216,8 +1216,9 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      // Delegate to the rationale handler for the actual processing
-      return await handleLlmoRationale(context);
+      // Delegate to the rationale handler, reusing the already-resolved site
+      // so it doesn't repeat the Site.findById lookup.
+      return await handleLlmoRationale(context, siteValidation.site);
     } catch (error) {
       log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));

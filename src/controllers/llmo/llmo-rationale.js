@@ -67,18 +67,21 @@ function volumeToPopularity(volume) {
 
 /**
  * Handles the LLMO rationale retrieval logic after site validation.
- * Reads popularity reasoning from the topics table (mysticat PostgreSQL via
- * PostgREST), replacing the decommissioned Mystique S3 cache.
  *
- * @param {object} context - The request context containing log, dataAccess, and params
+ * Reads popularity reasoning from the topics table (`popularity_volume` /
+ * `popularity_reasoning`, filled by the DRS brand-presence import + backfill),
+ * replacing the decommissioned Mystique S3 cache this endpoint used to read.
+ *
+ * @param {object} context - Request context (log, dataAccess, params, data)
+ * @param {object} [site] - Site resolved by getSiteAndValidateLlmo (avoids a re-lookup)
  * @returns {Promise<Response>} The rationale response
  */
-export async function handleLlmoRationale(context) {
+export async function handleLlmoRationale(context, site) {
   const { log, dataAccess } = context;
   const { siteId } = context.params;
 
-  // Extract query parameters (category/region/origin accepted for backwards
-  // compatibility but not applied — see note below).
+  // category/region/origin are accepted for backwards compatibility but not
+  // applied — topics is org-scoped with no such columns.
   const { topic, popularity } = context.data;
 
   // Validate mandatory parameters
@@ -93,41 +96,48 @@ export async function handleLlmoRationale(context) {
   }
   const client = Site.postgrestService;
 
-  const site = await Site.findById(siteId);
-  if (!site) {
+  // Reuse the site resolved by getSiteAndValidateLlmo when provided (avoids a
+  // second Site.findById round-trip); fall back to a lookup for standalone callers.
+  const resolvedSite = site ?? await Site.findById(siteId);
+  if (!resolvedSite) {
     return notFound(`Site not found: ${siteId}`);
   }
-  const organizationId = site.getOrganizationId();
+  const organizationId = resolvedSite.getOrganizationId();
+  if (!organizationId) {
+    log.error(`LLMO rationale: site ${siteId} has no organizationId`);
+    return badRequest('Site is not associated with an organization');
+  }
 
   log.info(`Getting LLMO rationale for site ${siteId} (org ${organizationId}) - topic: ${topic}, popularity: ${popularity || 'all'}`);
 
-  // Popularity reasoning now lives on the topics table (topics.popularity_reasoning /
-  // topics.popularity_volume), filled by the DRS brand-presence import + backfill. This
-  // replaces the decommissioned Mystique S3 cache this endpoint used to read. `topics`
-  // is org-scoped with no category/region column, so we match on topic name only —
-  // category/region query params are intentionally not applied here.
+  // `topics` is org-scoped with no category/region column, so we match on topic
+  // name — filtered server-side via ILIKE (case-insensitive substring) to keep
+  // the result set bounded (avoids PostgREST's default row cap), and require a
+  // non-null rationale.
   const { data, error } = await client
     .from('topics')
     .select('name,popularity_volume,popularity_reasoning,updated_at')
-    .eq('organization_id', organizationId);
+    .eq('organization_id', organizationId)
+    .not('popularity_reasoning', 'is', null)
+    .ilike('name', `%${topic}%`);
 
   if (error) {
+    // Keep PostgREST detail server-side only (avoid leaking schema names to the client).
     log.error(`LLMO rationale PostgREST error for site ${siteId}: ${error.message}`);
-    return badRequest(`Error retrieving rationale: ${error.message}`);
+    return badRequest('Error retrieving rationale');
   }
 
-  const topics = (data || [])
-    .filter((row) => row.popularity_reasoning)
-    .map((row) => ({
-      topic: row.name,
-      reasoning: row.popularity_reasoning,
-      popularity: volumeToPopularity(row.popularity_volume),
-      volume: row.popularity_volume,
-      added_date: row.updated_at,
-    }));
+  const topics = (data || []).map((row) => ({
+    topic: row.name,
+    reasoning: row.popularity_reasoning,
+    popularity: volumeToPopularity(row.popularity_volume),
+    volume: row.popularity_volume,
+    added_date: row.updated_at,
+  }));
 
-  // Only topic (mandatory) + popularity are applied; topics has no category/region/origin.
-  const filteredTopics = filterTopics(topics, { topic, popularity });
+  // topic is filtered server-side; apply the optional popularity filter here
+  // (it's derived from volume, so not expressible as a column predicate).
+  const filteredTopics = filterTopics(topics, { popularity });
 
   log.info(`Filtered ${topics.length} topics down to ${filteredTopics.length} results`);
 

@@ -17,6 +17,7 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { handleLlmoRationale } from '../../../src/controllers/llmo/llmo-rationale.js';
 import {
   EMPTY_SHEET_PAYLOAD,
   NOT_PROVISIONED_HEADER,
@@ -4202,100 +4203,101 @@ describe('LlmoController', () => {
     let rationaleContext;
     let postgrestRows;
     let postgrestError;
+    let calls;
 
-    const makePostgrest = () => ({
-      from: sinon.stub().returnsThis(),
-      select: sinon.stub().returnsThis(),
-      eq: sinon.stub().returnsThis(),
-      then: (resolve) => resolve({ data: postgrestRows, error: postgrestError }),
-    });
+    const makePostgrest = () => {
+      calls = {
+        from: [], select: [], eq: [], not: [], ilike: [],
+      };
+      let chain;
+      const rec = (name) => (...a) => {
+        calls[name].push(a);
+        return chain;
+      };
+      chain = {
+        from: rec('from'),
+        select: rec('select'),
+        eq: rec('eq'),
+        not: rec('not'),
+        ilike: rec('ilike'),
+        then: (resolve) => resolve({ data: postgrestRows, error: postgrestError }),
+      };
+      return chain;
+    };
 
     beforeEach(() => {
       postgrestRows = [];
       postgrestError = null;
       mockDataAccess.Site.postgrestService = makePostgrest();
-      rationaleContext = {
-        ...mockContext,
-        params: { siteId: TEST_SITE_ID },
-        data: {},
-      };
+      rationaleContext = { ...mockContext, params: { siteId: TEST_SITE_ID }, data: {} };
     });
 
-    it('returns topic popularity rows mapped from the topics table', async () => {
-      postgrestRows = [
-        {
-          name: 'Convert PDF', popularity_volume: -30, popularity_reasoning: 'Common high-intent task.', updated_at: '2026-07-08T00:00:00Z',
-        },
-        {
-          name: 'Merge PDF', popularity_volume: -10, popularity_reasoning: 'Niche task.', updated_at: '2026-07-08T00:00:00Z',
-        },
-      ];
+    it('maps topic popularity rows from the topics table', async () => {
+      postgrestRows = [{
+        name: 'Convert PDF', popularity_volume: -30, popularity_reasoning: 'High intent.', updated_at: '2026-07-08T00:00:00Z',
+      }];
       const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
       expect(result.status).to.equal(200);
+      expect(await result.json()).to.deep.equal([{
+        topic: 'Convert PDF', reasoning: 'High intent.', popularity: 'High', volume: -30, added_date: '2026-07-08T00:00:00Z',
+      }]);
+    });
+
+    it('queries topics org-scoped, non-null reasoning, ILIKE on topic', async () => {
+      await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
+      expect(calls.from[0]).to.deep.equal(['topics']);
+      expect(calls.select[0][0]).to.equal('name,popularity_volume,popularity_reasoning,updated_at');
+      expect(calls.eq[0]).to.deep.equal(['organization_id', TEST_ORG_ID]);
+      expect(calls.not[0]).to.deep.equal(['popularity_reasoning', 'is', null]);
+      expect(calls.ilike[0]).to.deep.equal(['name', '%Convert PDF%']);
+    });
+
+    it('maps volume to popularity label (High/Medium/Low/N/A)', async () => {
+      postgrestRows = [
+        {
+          name: 'A', popularity_volume: -30, popularity_reasoning: 'r', updated_at: null,
+        },
+        {
+          name: 'B', popularity_volume: -20, popularity_reasoning: 'r', updated_at: null,
+        },
+        {
+          name: 'C', popularity_volume: -10, popularity_reasoning: 'r', updated_at: null,
+        },
+        {
+          name: 'D', popularity_volume: 0, popularity_reasoning: 'r', updated_at: null,
+        },
+      ];
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
       const body = await result.json();
-      expect(body).to.be.an('array').with.length(1);
-      expect(body[0]).to.include({
-        topic: 'Convert PDF', reasoning: 'Common high-intent task.', popularity: 'High', volume: -30, added_date: '2026-07-08T00:00:00Z',
-      });
+      expect(body.map((t) => t.popularity)).to.deep.equal(['High', 'Medium', 'Low', 'N/A']);
+    });
+
+    it('applies the optional popularity filter', async () => {
+      postgrestRows = [
+        {
+          name: 'A', popularity_volume: -30, popularity_reasoning: 'r1', updated_at: null,
+        },
+        {
+          name: 'B', popularity_volume: -10, popularity_reasoning: 'r2', updated_at: null,
+        },
+      ];
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x', popularity: 'High' } });
+      const body = await result.json();
+      expect(body).to.have.length(1);
+      expect(body[0].popularity).to.equal('High');
+    });
+
+    it('returns an empty array when the query returns nothing', async () => {
+      postgrestRows = [];
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'nope' } });
+      expect(result.status).to.equal(200);
+      expect(await result.json()).to.be.an('array').with.length(0);
     });
 
     it('returns 400 when topic parameter is missing', async () => {
       const result = await controller.getLlmoRationale({ ...rationaleContext, data: {} });
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.equal('topic parameter is required');
-    });
-
-    it('matches topic name case-insensitively (partial)', async () => {
-      postgrestRows = [{
-        name: 'Convert PDF', popularity_volume: -20, popularity_reasoning: 'x', updated_at: null,
-      }];
-      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'convert' } });
-      expect(await result.json()).to.have.length(1);
-    });
-
-    it('applies the optional popularity filter', async () => {
-      postgrestRows = [
-        {
-          name: 'A topic', popularity_volume: -30, popularity_reasoning: 'r1', updated_at: null,
-        },
-        {
-          name: 'A topic two', popularity_volume: -10, popularity_reasoning: 'r2', updated_at: null,
-        },
-      ];
-      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'topic', popularity: 'High' } });
-      const body = await result.json();
-      expect(body).to.have.length(1);
-      expect(body[0].popularity).to.equal('High');
-    });
-
-    it('excludes topics with no popularity_reasoning', async () => {
-      postgrestRows = [
-        {
-          name: 'Has reasoning', popularity_volume: -20, popularity_reasoning: 'yes', updated_at: null,
-        },
-        {
-          name: 'Has reasoning too', popularity_volume: -20, popularity_reasoning: null, updated_at: null,
-        },
-      ];
-      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Has reasoning' } });
-      expect(await result.json()).to.have.length(1);
-    });
-
-    it('ignores category/region query params (topics is org+name scoped)', async () => {
-      postgrestRows = [{
-        name: 'Convert PDF', popularity_volume: -30, popularity_reasoning: 'r', updated_at: null,
-      }];
-      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF', category: 'Nope', region: 'ZZ' } });
-      expect(await result.json()).to.have.length(1);
-    });
-
-    it('returns an empty array when no topics match', async () => {
-      postgrestRows = [{
-        name: 'Something else', popularity_volume: -20, popularity_reasoning: 'r', updated_at: null,
-      }];
-      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
-      expect(result.status).to.equal(200);
-      expect(await result.json()).to.be.an('array').with.length(0);
     });
 
     it('returns 400 when PostgREST is not configured', async () => {
@@ -4305,17 +4307,47 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.contain('PostgreSQL data service is required');
     });
 
-    it('returns 404 when the site is not found', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
-      expect(result.status).to.equal(404);
-    });
-
-    it('returns 400 on a PostgREST error', async () => {
-      postgrestError = { message: 'boom' };
+    it('returns 400 when the site has no organizationId', async () => {
+      mockSite.getOrganizationId.returns(undefined);
       const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
       expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.contain('Error retrieving rationale');
+      expect((await result.json()).message).to.contain('not associated with an organization');
+    });
+
+    it('returns a generic 400 on a PostgREST error (no schema leak)', async () => {
+      postgrestError = { message: 'relation "topics" column "secret" does not exist' };
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
+      expect(result.status).to.equal(400);
+      const msg = (await result.json()).message;
+      expect(msg).to.equal('Error retrieving rationale');
+      expect(msg).to.not.contain('secret');
+    });
+
+    it('reuses the validated site (no second Site.findById)', async () => {
+      mockDataAccess.Site.findById.resetHistory();
+      await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
+      // getSiteAndValidateLlmo resolves the site once; the handler must not look it up again.
+      expect(mockDataAccess.Site.findById.callCount).to.equal(1);
+    });
+
+    // Standalone handler tests exercise the site-fallback path (site arg omitted).
+    describe('handleLlmoRationale (standalone, no site arg)', () => {
+      it('falls back to Site.findById when no site is passed', async () => {
+        mockDataAccess.Site.postgrestService = makePostgrest();
+        postgrestRows = [{
+          name: 'Convert PDF', popularity_volume: -20, popularity_reasoning: 'r', updated_at: null,
+        }];
+        const result = await handleLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
+        expect(result.status).to.equal(200);
+        expect(await result.json()).to.have.length(1);
+      });
+
+      it('returns 404 when the fallback lookup finds no site', async () => {
+        mockDataAccess.Site.postgrestService = makePostgrest();
+        mockDataAccess.Site.findById.resolves(null);
+        const result = await handleLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
+        expect(result.status).to.equal(404);
+      });
     });
   });
 
