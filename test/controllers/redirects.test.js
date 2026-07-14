@@ -344,6 +344,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     // Authz failed before S3 was touched.
     expect(mockS3.s3Client.send.called).to.be.false;
   });
@@ -354,6 +355,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -366,6 +368,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -373,6 +376,7 @@ describe('RedirectsController', () => {
     requestContext.params.service = 'not-a-cm-service';
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(400);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -380,6 +384,7 @@ describe('RedirectsController', () => {
     mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -387,6 +392,7 @@ describe('RedirectsController', () => {
     mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -396,6 +402,7 @@ describe('RedirectsController', () => {
     ]);
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -406,6 +413,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
   });
 
   it('returns 404 when S3 surfaces a 404 via $metadata', async () => {
@@ -415,6 +423,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
   });
 
   it('maps AccessDenied (no ListBucket → 403 on missing key) to 404 and logs error', async () => {
@@ -425,6 +434,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     // Logged at error so a missing IAM grant (every request 403) stays alertable.
     expect(mockContext.log.error.called).to.be.true;
   });
@@ -433,6 +443,7 @@ describe('RedirectsController', () => {
     mockS3.s3Client.send.rejects(new Error('boom'));
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(500);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockContext.log.error.called).to.be.true;
   });
 
@@ -440,6 +451,78 @@ describe('RedirectsController', () => {
     const ctl = RedirectsController({ ...mockContext, env: {} });
     const response = await ctl.getRedirects(requestContext);
     expect(response.status).to.equal(500);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  describe('negative-cache-control invariant', () => {
+    // Grouped invariant: every non-2xx/3xx response MUST advertise `no-store`
+    // so Fastly (and any downstream CDN) cannot cache negative responses.
+    // Without this, the aso-prod Fastly VCL default (10s TTL + 30s SWR + 86400s
+    // stale_if_error) pins a 404 for up to 24 h after any origin blip, causing
+    // the customer-provisioning race where dispatchers keep serving stale
+    // 404s long after ASO entitlement lands. See SITES-44966 / SITES-47966.
+    const scenarios = [
+      {
+        name: '400 (malformed service id)',
+        expectedStatus: 400,
+        setup: () => { requestContext.params.service = 'x'; },
+      },
+      {
+        name: '500 (bucket not configured)',
+        expectedStatus: 500,
+        setup: () => { controller = RedirectsController({ ...mockContext, env: {} }); },
+      },
+      {
+        name: '404 (site not found)',
+        expectedStatus: 404,
+        setup: () => mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null),
+      },
+      {
+        name: '404 (no ASO entitlement)',
+        expectedStatus: 404,
+        setup: () => mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null),
+      },
+      {
+        name: '404 (not enrolled)',
+        expectedStatus: 404,
+        setup: () => mockDataAccess.SiteEnrollment.allBySiteId.resolves([
+          { getEntitlementId: () => 'other' },
+        ]),
+      },
+      {
+        name: '404 (S3 NoSuchKey)',
+        expectedStatus: 404,
+        setup: () => {
+          const err = new Error('e');
+          err.name = 'NoSuchKey';
+          mockS3.s3Client.send.rejects(err);
+        },
+      },
+      {
+        name: '404 (S3 AccessDenied maps to 404)',
+        expectedStatus: 404,
+        setup: () => {
+          const err = new Error('e');
+          err.name = 'AccessDenied';
+          err.$metadata = { httpStatusCode: 403 };
+          mockS3.s3Client.send.rejects(err);
+        },
+      },
+      {
+        name: '500 (unexpected S3 error)',
+        expectedStatus: 500,
+        setup: () => mockS3.s3Client.send.rejects(new Error('boom')),
+      },
+    ];
+
+    scenarios.forEach(({ name, expectedStatus, setup }) => {
+      it(`emits Cache-Control: no-store on ${name}`, async () => {
+        setup();
+        const response = await controller.getRedirects(requestContext);
+        expect(response.status).to.equal(expectedStatus);
+        expect(response.headers.get('cache-control')).to.equal('no-store');
+      });
+    });
   });
 });

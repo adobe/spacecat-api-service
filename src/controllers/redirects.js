@@ -29,6 +29,21 @@ const SERVICE_RE = /^cm-p(\d{1,10})-e(\d{1,10})$/;
 // Single source of truth so the 200 and 304 responses can't drift under future edits.
 const OVERLAY_TTL_SECONDS = 10;
 const OVERLAY_CACHE_CONTROL = `max-age=${OVERLAY_TTL_SECONDS}`;
+// Every non-2xx/3xx response advertises `no-store` so Fastly (and any other
+// intermediary) will not cache negative responses. Without this, the Fastly VCL
+// at `fastly/vcl/aso-prod/fetch/100-aso-overlay-ttl.vcl` applies its default
+// TTL (10s) + stale-while-revalidate (30s) + stale_if_error (86400s) uniformly
+// across all statuses, which pins a 404 for up to 24 h under any subsequent
+// origin blip — creating the customer-provisioning race where a dispatcher
+// poll made *before* a site's ASO entitlement lands keeps serving stale 404s
+// long after provisioning completes. `no-store` at the origin overrides that
+// VCL default (Fastly respects the response Cache-Control) so the negative
+// cache never sticks. Belt-and-braces: even if the VCL is later tightened
+// to short-TTL 4xx, the origin still declares "do not cache" and any future
+// consumer (different CDN, direct-to-origin traffic, offline replay) gets the
+// correct semantics without needing to replicate the VCL rule.
+const NEGATIVE_CACHE_CONTROL = 'no-store';
+const NO_STORE_HEADERS = { 'cache-control': NEGATIVE_CACHE_CONTROL };
 
 // RFC 7232 §2.3 opaque-tag: the validator MUST be a double-quoted string,
 // optionally preceded by the case-sensitive `W/` weak indicator. Anything that
@@ -122,11 +137,11 @@ function RedirectsController(ctx) {
 
     const match = SERVICE_RE.exec(service);
     if (!match) {
-      return badRequest('Invalid service identifier');
+      return badRequest('Invalid service identifier', NO_STORE_HEADERS);
     }
     if (!bucketName) {
       log.error('[aso-overlay] S3_ASO_OVERLAYS_BUCKET is not configured');
-      return internalServerError('Overlay endpoint not configured');
+      return internalServerError('Overlay endpoint not configured', NO_STORE_HEADERS);
     }
 
     const [, programId, environmentId] = match;
@@ -140,7 +155,7 @@ function RedirectsController(ctx) {
     );
     if (!site) {
       log.info('[aso-overlay] no site resolves for service', { service });
-      return notFound('No redirect overlay found');
+      return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
 
     // Authorize: the site's org must hold an ASO entitlement AND the site must be
@@ -151,13 +166,13 @@ function RedirectsController(ctx) {
     );
     if (!entitlement) {
       log.info('[aso-overlay] site org not ASO-entitled', { siteId: site.getId() });
-      return notFound('No redirect overlay found');
+      return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
     const enrollments = await SiteEnrollment.allBySiteId(site.getId());
     const enrolled = enrollments.some((se) => se.getEntitlementId() === entitlement.getId());
     if (!enrolled) {
       log.info('[aso-overlay] site not enrolled for ASO', { siteId: site.getId() });
-      return notFound('No redirect overlay found');
+      return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
 
     // Read the overlay with the Lambda's own execution role (no SigV4 from caller).
@@ -205,7 +220,7 @@ function RedirectsController(ctx) {
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
       if (err.name === 'NoSuchKey' || code === 404) {
-        return notFound('No redirect overlay found');
+        return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
       // The reader role intentionally lacks s3:ListBucket (least privilege, no key
       // enumeration), so a *missing* object surfaces as 403 AccessDenied rather
@@ -219,10 +234,10 @@ function RedirectsController(ctx) {
           + '— missing object or missing s3:GetObject grant',
           err,
         );
-        return notFound('No redirect overlay found');
+        return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
       log.error(`[aso-overlay] failed to read ${key} from ${bucketName}`, err);
-      return internalServerError('Failed to retrieve redirect overlay');
+      return internalServerError('Failed to retrieve redirect overlay', NO_STORE_HEADERS);
     }
   }
 
