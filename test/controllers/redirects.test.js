@@ -37,6 +37,14 @@ describe('RedirectsController', () => {
   let controller;
   let requestContext;
 
+  // Helper: set an `If-None-Match` header on the current request context.
+  // Tests mutate this map rather than replacing `pathInfo` wholesale so that
+  // if the controller starts reading other pathInfo fields, tests don't
+  // silently drop them.
+  const withIfNoneMatch = (value) => {
+    requestContext.pathInfo.headers['if-none-match'] = value;
+  };
+
   beforeEach(() => {
     sandbox = sinon.createSandbox();
 
@@ -66,7 +74,7 @@ describe('RedirectsController', () => {
     };
 
     controller = RedirectsController(mockContext);
-    requestContext = { params: { service: SERVICE } };
+    requestContext = { params: { service: SERVICE }, pathInfo: { headers: {} } };
   });
 
   afterEach(() => {
@@ -102,8 +110,9 @@ describe('RedirectsController', () => {
   });
 
   it('returns 200 without an ETag header when S3 does not surface one', async () => {
-    // Defensive: S3 always returns ETag for a successful GET, but a future
-    // storage backend might not — in that case we serve the body unconditionally.
+    // Defensive: S3 always returns ETag for a successful GET, but a mock or
+    // future storage backend might not — the conditional-GET path degrades to
+    // a plain 200 rather than breaking.
     const overlay = 'example.com/old https://www.example.com/new\n';
     mockS3.s3Client.send.resolves({
       Body: { transformToString: sandbox.stub().resolves(overlay) },
@@ -116,6 +125,20 @@ describe('RedirectsController', () => {
     expect(await response.text()).to.equal(overlay);
   });
 
+  it('serves 200 when the request context has no pathInfo (defensive)', async () => {
+    // getHeader tolerates a missing pathInfo — controller must not throw.
+    delete requestContext.pathInfo;
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+  });
+
   it('returns 304 with ETag + Cache-Control and no body when If-None-Match matches', async () => {
     const overlay = 'example.com/old https://www.example.com/new\n';
     const bodyStub = sandbox.stub().resolves(overlay);
@@ -123,24 +146,25 @@ describe('RedirectsController', () => {
       ETag: ETAG,
       Body: { transformToString: bodyStub },
     });
-    requestContext.pathInfo = { headers: { 'If-None-Match': ETAG } };
+    withIfNoneMatch(ETAG);
 
     const response = await controller.getRedirects(requestContext);
 
     expect(response.status).to.equal(304);
     expect(response.headers.get('etag')).to.equal(ETAG);
     expect(response.headers.get('cache-control')).to.equal('max-age=10');
+    expect(response.headers.get('content-type')).to.equal('text/plain; charset=utf-8');
     expect(await response.text()).to.equal('');
-    // Body never deserialized when returning 304 — saves the transformToString cost.
+    // Body never deserialized when returning 304 — the transformToString cost is elided.
     expect(bodyStub.called).to.be.false;
   });
 
-  it('accepts a lower-case if-none-match header (case-insensitive per HTTP)', async () => {
+  it('accepts a mixed-case if-none-match header (HTTP header names are case-insensitive)', async () => {
     mockS3.s3Client.send.resolves({
       ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves('') },
     });
-    requestContext.pathInfo = { headers: { 'if-none-match': ETAG } };
+    requestContext.pathInfo.headers['If-None-Match'] = ETAG;
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(304);
@@ -151,10 +175,24 @@ describe('RedirectsController', () => {
       ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves('') },
     });
-    requestContext.pathInfo = { headers: { 'if-none-match': '*' } };
+    withIfNoneMatch('*');
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(304);
+  });
+
+  it('returns 304 on If-None-Match: * even when S3 omits ETag (RFC 7232 §3.2)', async () => {
+    // `*` matches any existing representation. The controller only reaches
+    // the conditional-GET branch after a successful S3 GET, so a rep exists.
+    mockS3.s3Client.send.resolves({
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch('*');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+    // No ETag was available to echo back, but 304 is still correct for `*`.
+    expect(response.headers.get('etag')).to.be.null;
   });
 
   it('returns 304 when If-None-Match is a multi-value list containing the current ETag', async () => {
@@ -162,7 +200,18 @@ describe('RedirectsController', () => {
       ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves('') },
     });
-    requestContext.pathInfo = { headers: { 'if-none-match': `"other", ${ETAG}, "another"` } };
+    withIfNoneMatch(`"other", ${ETAG}, "another"`);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+  });
+
+  it('returns 304 for a mixed weak/strong list where a weak-tagged validator matches', async () => {
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch(`"other", W/${ETAG}, "another"`);
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(304);
@@ -173,10 +222,74 @@ describe('RedirectsController', () => {
       ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves('') },
     });
-    requestContext.pathInfo = { headers: { 'if-none-match': `W/${ETAG}` } };
+    withIfNoneMatch(`W/${ETAG}`);
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(304);
+  });
+
+  it('serves 200 when S3 returns a malformed (unquoted) ETag even if the client-sent validator would textually match', async () => {
+    // Defense in depth: if S3 (or a future backend) surfaces a validator that
+    // is not a proper quoted opaque-tag, we must not honor conditional GETs
+    // against it — serve the body so the client can rebuild derived state.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: 'malformed-no-quotes',
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch('"malformed-no-quotes"');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    // The malformed ETag is still passed through on the 200 (defensive — it's
+    // opaque to us; that's between the writer and the client's cache).
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('serves 200 when S3 omits ETag and client sends a specific (non-*) validator', async () => {
+    // Belt-and-braces: with no server ETag and a specific INM, the compare
+    // must yield "no match" — never a spurious 304 against undefined.
+    // Also exercises the `currentEtag || ''` fallback in ifNoneMatchMatches.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch(ETAG);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+    expect(response.headers.get('etag')).to.be.null;
+  });
+
+  it('rejects an unquoted validator (must be an RFC 7232 opaque-tag) and serves 200', async () => {
+    // `abc` without surrounding quotes is not a valid opaque-tag. Accepting
+    // it would silently 304 against a shell-stripped or otherwise corrupted
+    // validator instead of forcing a fresh fetch.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch('d41d8cd98f00b204e9800998ecf8427e'); // no quotes
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('rejects a lowercase weak prefix (RFC 7232 §2.3 W/ is case-sensitive) and serves 200', async () => {
+    // `w/"..."` is malformed. We deliberately do not normalize to lowercase.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch(`w/${ETAG}`);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
   });
 
   it('returns 200 with fresh body when If-None-Match does not match the current ETag', async () => {
@@ -185,7 +298,7 @@ describe('RedirectsController', () => {
       ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves(overlay) },
     });
-    requestContext.pathInfo = { headers: { 'if-none-match': '"stale-etag"' } };
+    withIfNoneMatch('"stale-etag"');
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(200);
@@ -199,18 +312,35 @@ describe('RedirectsController', () => {
       ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves(overlay) },
     });
-    requestContext.pathInfo = { headers: { 'if-none-match': '   ' } };
+    withIfNoneMatch('   ');
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(200);
     expect(await response.text()).to.equal(overlay);
   });
 
+  it('does not reflect CRLF / control chars from If-None-Match into response headers', async () => {
+    // Defense in depth: even though the header is never echoed, verify a
+    // malicious client with an injected `\r\n` cannot smuggle a header via
+    // If-None-Match. The value should be treated as opaque validator input.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch(`${ETAG}\r\nX-Injected: evil`);
+
+    const response = await controller.getRedirects(requestContext);
+    // Injected token does not match the strong current ETag, so we serve 200.
+    expect(response.status).to.equal(200);
+    expect(response.headers.get('x-injected')).to.be.null;
+  });
+
   it('still returns 404 (not 304) when the site does not resolve — no enumeration signal via If-None-Match', async () => {
     // Guard: If-None-Match must not short-circuit authz. A non-entitled tenant
     // sending a valid ETag for some *other* tenant's overlay must still 404.
     mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
-    requestContext.pathInfo = { headers: { 'if-none-match': ETAG } };
+    withIfNoneMatch(ETAG);
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
@@ -220,7 +350,19 @@ describe('RedirectsController', () => {
 
   it('still returns 404 (not 304) when If-None-Match: * is sent by a non-entitled tenant', async () => {
     mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
-    requestContext.pathInfo = { headers: { 'if-none-match': '*' } };
+    withIfNoneMatch('*');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('still returns 404 (not 304) when an unenrolled site sends If-None-Match', async () => {
+    // Third authz gate: site + entitlement pass, enrollment fails.
+    mockDataAccess.SiteEnrollment.allBySiteId.resolves([
+      { getEntitlementId: () => 'some-other-entitlement' },
+    ]);
+    withIfNoneMatch(ETAG);
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
