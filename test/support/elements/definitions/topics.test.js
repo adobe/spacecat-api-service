@@ -31,16 +31,20 @@ const RESERVED_RESULT_KEYS = [
 const RAW_MIXED = {
   blocks: {
     value: [
-      { value: 'topic:SEO' },
-      { value: 'topic:AI' },
-      { value: 'category:Firefly' },
-      { value: 'category:Experience Cloud' },
-      { value: 'category:Modular & Configurable Sofas__Compact Shippable Furniture' },
-      { value: 'topic:Furniture__Compact Shippable Furniture' },
-      { value: 'intent:Informational' },
-      { value: 'intent:Transactional' },
-      { value: 'source:organic' },
-      { value: 'source:paid' },
+      { value: 'topic' },
+      { value: 'topic__SEO' },
+      { value: 'topic__AI' },
+      { value: 'category' },
+      { value: 'category__Firefly' },
+      { value: 'category__Experience Cloud' },
+      { value: 'category__Modular & Configurable Sofas__Compact Shippable Furniture' },
+      { value: 'topic__Furniture__Compact Shippable Furniture' },
+      { value: 'intent' },
+      { value: 'intent__Informational' },
+      { value: 'intent__Transactional' },
+      { value: 'source' },
+      { value: 'source__organic' },
+      { value: 'source__paid' },
     ],
   },
 };
@@ -108,59 +112,64 @@ describe('topics definitions', () => {
       expect(transformTopicsForFilterDimensions(null)).to.deep.equal([]);
     });
 
-    it('returns only topic:-prefixed entries', () => {
+    it('ignores the bare "topic" prefix declaration and returns only topic__-prefixed entries', () => {
       const result = transformTopicsForFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'topic:SEO', label: 'SEO' },
-        { id: 'topic:AI', label: 'AI' },
+        { id: 'topic__SEO', label: 'SEO' },
+        { id: 'topic__AI', label: 'AI' },
         {
-          id: 'topic:Furniture__Compact Shippable Furniture',
+          id: 'topic__Furniture__Compact Shippable Furniture',
           label: 'Compact Shippable Furniture',
-          parent_id: 'topic:Furniture',
+          parent_id: 'topic__Furniture',
           parent_label: 'Furniture',
         },
       ]);
     });
 
     it('adds parent_id/parent_label when the value contains a double underscore', () => {
-      const raw = { blocks: { value: [{ value: 'topic:Furniture__Sofas' }] } };
+      const raw = { blocks: { value: [{ value: 'topic__Furniture__Sofas' }] } };
       const [item] = transformTopicsForFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: 'topic:Furniture__Sofas',
+        id: 'topic__Furniture__Sofas',
         label: 'Sofas',
-        parent_id: 'topic:Furniture',
+        parent_id: 'topic__Furniture',
         parent_label: 'Furniture',
       });
     });
 
-    it('splits only on the first double underscore', () => {
-      const raw = { blocks: { value: [{ value: 'topic:A__B__C' }] } };
+    it('splits only on the first double underscore after the prefix', () => {
+      const raw = { blocks: { value: [{ value: 'topic__A__B__C' }] } };
       const [item] = transformTopicsForFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: 'topic:A__B__C',
+        id: 'topic__A__B__C',
         label: 'B__C',
-        parent_id: 'topic:A',
+        parent_id: 'topic__A',
         parent_label: 'A',
       });
     });
 
     it('sets id to the original tag value (including prefix) for each entry', () => {
-      const raw = { blocks: { value: [{ value: 'topic:SEO' }] } };
+      const raw = { blocks: { value: [{ value: 'topic__SEO' }] } };
       const [item] = transformTopicsForFilterDimensions(raw);
-      expect(item.id).to.equal('topic:SEO');
+      expect(item.id).to.equal('topic__SEO');
     });
 
-    it('strips the topic: prefix from the label', () => {
-      const raw = { blocks: { value: [{ value: 'topic:Machine Learning' }] } };
+    it('strips the topic__ prefix from the label', () => {
+      const raw = { blocks: { value: [{ value: 'topic__Machine Learning' }] } };
       const [item] = transformTopicsForFilterDimensions(raw);
       expect(item.label).to.equal('Machine Learning');
     });
 
     it('excludes non-topic entries', () => {
-      const raw = { blocks: { value: [{ value: 'category:Firefly' }, { value: 'topic:SEO' }] } };
+      const raw = { blocks: { value: [{ value: 'category__Firefly' }, { value: 'topic__SEO' }] } };
       const result = transformTopicsForFilterDimensions(raw);
       expect(result).to.have.length(1);
       expect(result[0].label).to.equal('SEO');
+    });
+
+    it('ignores a bare "topic" declaration with no value', () => {
+      const raw = { blocks: { value: [{ value: 'topic' }] } };
+      expect(transformTopicsForFilterDimensions(raw)).to.deep.equal([]);
     });
   });
 
@@ -169,74 +178,79 @@ describe('topics definitions', () => {
       expect(transformCategoriesToFilterDimensions(null)).to.deep.equal([]);
     });
 
-    it('returns only category:-prefixed entries', () => {
+    it('ignores the bare "category" prefix declaration and returns only category__-prefixed entries', () => {
       const result = transformCategoriesToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'category:Firefly', label: 'Firefly' },
-        { id: 'category:Experience Cloud', label: 'Experience Cloud' },
+        { id: 'category__Firefly', label: 'Firefly' },
+        { id: 'category__Experience Cloud', label: 'Experience Cloud' },
         {
-          id: 'category:Modular & Configurable Sofas__Compact Shippable Furniture',
+          id: 'category__Modular & Configurable Sofas__Compact Shippable Furniture',
           label: 'Compact Shippable Furniture',
-          parent_id: 'category:Modular & Configurable Sofas',
+          parent_id: 'category__Modular & Configurable Sofas',
           parent_label: 'Modular & Configurable Sofas',
         },
       ]);
     });
 
     it('adds parent_id/parent_label when the value contains a double underscore', () => {
-      const raw = { blocks: { value: [{ value: 'category:Sofas__Modular Sofas' }] } };
+      const raw = { blocks: { value: [{ value: 'category__Sofas__Modular Sofas' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: 'category:Sofas__Modular Sofas',
+        id: 'category__Sofas__Modular Sofas',
         label: 'Modular Sofas',
-        parent_id: 'category:Sofas',
+        parent_id: 'category__Sofas',
         parent_label: 'Sofas',
       });
     });
 
-    it('splits only on the first double underscore', () => {
-      const raw = { blocks: { value: [{ value: 'category:A__B__C' }] } };
+    it('splits only on the first double underscore after the prefix', () => {
+      const raw = { blocks: { value: [{ value: 'category__A__B__C' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: 'category:A__B__C',
+        id: 'category__A__B__C',
         label: 'B__C',
-        parent_id: 'category:A',
+        parent_id: 'category__A',
         parent_label: 'A',
       });
     });
 
     it('sets id to the original tag value (including prefix) for each entry', () => {
-      const raw = { blocks: { value: [{ value: 'category:Creative' }] } };
+      const raw = { blocks: { value: [{ value: 'category__Creative' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
-      expect(item.id).to.equal('category:Creative');
+      expect(item.id).to.equal('category__Creative');
     });
 
     it('sets parent_id to the prefix plus the parent label', () => {
       const raw = {
         blocks: {
-          value: [{ value: 'category:Living Room Furniture Retail__Living Room Furniture and Sofas' }],
+          value: [{ value: 'category__Living Room Furniture Retail__Living Room Furniture and Sofas' }],
         },
       };
       const [item] = transformCategoriesToFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: 'category:Living Room Furniture Retail__Living Room Furniture and Sofas',
+        id: 'category__Living Room Furniture Retail__Living Room Furniture and Sofas',
         label: 'Living Room Furniture and Sofas',
-        parent_id: 'category:Living Room Furniture Retail',
+        parent_id: 'category__Living Room Furniture Retail',
         parent_label: 'Living Room Furniture Retail',
       });
     });
 
-    it('strips the category: prefix from the label', () => {
-      const raw = { blocks: { value: [{ value: 'category:Creative Cloud' }] } };
+    it('strips the category__ prefix from the label', () => {
+      const raw = { blocks: { value: [{ value: 'category__Creative Cloud' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
       expect(item.label).to.equal('Creative Cloud');
     });
 
     it('excludes non-category entries', () => {
-      const raw = { blocks: { value: [{ value: 'topic:SEO' }, { value: 'category:AI' }] } };
+      const raw = { blocks: { value: [{ value: 'topic__SEO' }, { value: 'category__AI' }] } };
       const result = transformCategoriesToFilterDimensions(raw);
       expect(result).to.have.length(1);
       expect(result[0].label).to.equal('AI');
+    });
+
+    it('ignores a bare "category" declaration with no value', () => {
+      const raw = { blocks: { value: [{ value: 'category' }] } };
+      expect(transformCategoriesToFilterDimensions(raw)).to.deep.equal([]);
     });
   });
 
@@ -245,26 +259,37 @@ describe('topics definitions', () => {
       expect(transformIntentsToFilterDimensions(null)).to.deep.equal([]);
     });
 
-    it('returns only intent:-prefixed entries', () => {
+    it('ignores the bare "intent" prefix declaration and returns only intent__-prefixed entries', () => {
       const result = transformIntentsToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'intent:Informational', label: 'Informational' },
-        { id: 'intent:Transactional', label: 'Transactional' },
+        { id: 'intent__Informational', label: 'Informational' },
+        { id: 'intent__Transactional', label: 'Transactional' },
       ]);
     });
 
     it('sets id to the original tag value (including prefix) and preserves original casing in label', () => {
-      const raw = { blocks: { value: [{ value: 'intent:informational' }] } };
+      const raw = { blocks: { value: [{ value: 'intent__informational' }] } };
       const [item] = transformIntentsToFilterDimensions(raw);
-      expect(item.id).to.equal('intent:informational');
+      expect(item.id).to.equal('intent__informational');
       expect(item.label).to.equal('informational');
     });
 
     it('excludes non-intent entries', () => {
-      const raw = { blocks: { value: [{ value: 'category:AI' }, { value: 'intent:Buy' }] } };
+      const raw = { blocks: { value: [{ value: 'category__AI' }, { value: 'intent__Buy' }] } };
       const result = transformIntentsToFilterDimensions(raw);
       expect(result).to.have.length(1);
       expect(result[0].label).to.equal('Buy');
+    });
+
+    it('adds parent_id/parent_label when the value contains a double underscore', () => {
+      const raw = { blocks: { value: [{ value: 'intent__Commercial__Buy' }] } };
+      const [item] = transformIntentsToFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: 'intent__Commercial__Buy',
+        label: 'Buy',
+        parent_id: 'intent__Commercial',
+        parent_label: 'Commercial',
+      });
     });
   });
 
@@ -273,26 +298,26 @@ describe('topics definitions', () => {
       expect(transformOriginsToFilterDimensions(null)).to.deep.equal([]);
     });
 
-    it('returns only source:-prefixed entries', () => {
+    it('ignores the bare "source" prefix declaration and returns only source__-prefixed entries', () => {
       const result = transformOriginsToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'source:organic', label: 'organic' },
-        { id: 'source:paid', label: 'paid' },
+        { id: 'source__organic', label: 'organic' },
+        { id: 'source__paid', label: 'paid' },
       ]);
     });
 
     it('sets id to the original tag value (including prefix) and label to the stripped value', () => {
-      const raw = { blocks: { value: [{ value: 'source:direct' }] } };
+      const raw = { blocks: { value: [{ value: 'source__direct' }] } };
       const [item] = transformOriginsToFilterDimensions(raw);
-      expect(item.id).to.equal('source:direct');
+      expect(item.id).to.equal('source__direct');
       expect(item.label).to.equal('direct');
     });
 
     it('excludes non-source entries', () => {
-      const raw = { blocks: { value: [{ value: 'topic:SEO' }, { value: 'source:organic' }] } };
+      const raw = { blocks: { value: [{ value: 'topic__SEO' }, { value: 'source__organic' }] } };
       const result = transformOriginsToFilterDimensions(raw);
       expect(result).to.have.length(1);
-      expect(result[0].id).to.equal('source:organic');
+      expect(result[0].id).to.equal('source__organic');
     });
   });
 
@@ -307,41 +332,41 @@ describe('topics definitions', () => {
       expect(result).to.not.have.property('category');
       expect(result).to.not.have.property('intent');
       expect(result).to.not.have.property('source');
+      expect(result.tags).to.deep.equal([]);
     });
 
-    it('groups unknown prefix:value tags by their prefix', () => {
+    it('groups unknown prefix__value tags by their prefix', () => {
       const raw = {
         blocks: {
           value: [
-            { value: 'type:branded' },
-            { value: 'type:unbranded' },
-            { value: 'abc:value' },
+            { value: 'type' },
+            { value: 'type__branded' },
+            { value: 'type__unbranded' },
+            { value: 'abc__value' },
           ],
         },
       };
       const result = transformOtherTagsForFilterDimensions(raw);
       expect(result.type).to.deep.equal([
-        { id: 'type:branded', label: 'branded' },
-        { id: 'type:unbranded', label: 'unbranded' },
+        { id: 'type__branded', label: 'branded' },
+        { id: 'type__unbranded', label: 'unbranded' },
       ]);
-      expect(result.abc).to.deep.equal([{ id: 'abc:value', label: 'value' }]);
+      expect(result.abc).to.deep.equal([{ id: 'abc__value', label: 'value' }]);
       expect(result.tags).to.deep.equal([]);
     });
 
-    it('collects plain, prefix-less tags into the generic tags array', () => {
+    it('ignores bare prefix declarations (values with no double underscore)', () => {
       const raw = { blocks: { value: [{ value: 'abc' }, { value: 'another-plain-tag' }] } };
       const result = transformOtherTagsForFilterDimensions(raw);
-      expect(result.tags).to.deep.equal([
-        { id: 'abc', label: 'abc' },
-        { id: 'another-plain-tag', label: 'another-plain-tag' },
-      ]);
+      expect(result.tags).to.deep.equal([]);
+      expect(Object.keys(result)).to.deep.equal(['tags']);
     });
 
-    it('applies Parent__Child splitting to grouped and plain tags alike', () => {
+    it('applies Parent__Child splitting to grouped tags and to unreserved plain-prefix tags', () => {
       const raw = {
         blocks: {
           value: [
-            { value: 'type:Branded__Sub' },
+            { value: 'type__Branded__Sub' },
             { value: 'Parent__Child' },
           ],
         },
@@ -349,34 +374,33 @@ describe('topics definitions', () => {
       const result = transformOtherTagsForFilterDimensions(raw);
       expect(result.type).to.deep.equal([
         {
-          id: 'type:Branded__Sub', label: 'Sub', parent_id: 'type:Branded', parent_label: 'Branded',
+          id: 'type__Branded__Sub', label: 'Sub', parent_id: 'type__Branded', parent_label: 'Branded',
         },
       ]);
-      expect(result.tags).to.deep.equal([
-        {
-          id: 'Parent__Child', label: 'Child', parent_id: 'Parent', parent_label: 'Parent',
-        },
+      expect(result.Parent).to.deep.equal([
+        { id: 'Parent__Child', label: 'Child' },
       ]);
+      expect(result.tags).to.deep.equal([]);
     });
 
     it('ignores empty string values', () => {
       const raw = { blocks: { value: [{ value: '' }, { value: 'abc' }] } };
       const result = transformOtherTagsForFilterDimensions(raw);
-      expect(result.tags).to.deep.equal([{ id: 'abc', label: 'abc' }]);
+      expect(result.tags).to.deep.equal([]);
     });
 
     it('routes tags whose prefix collides with a reserved result key into tags instead of a dynamic group', () => {
       const raw = {
         blocks: {
           value: [
-            { value: 'brands:foo' },
-            { value: 'regions:APAC' },
-            { value: 'topics:x' },
-            { value: 'categories:x' },
-            { value: 'page_intents:x' },
-            { value: 'origins:x' },
-            { value: 'tags:x' },
-            { value: 'type:branded' },
+            { value: 'brands__foo' },
+            { value: 'regions__APAC' },
+            { value: 'topics__x' },
+            { value: 'categories__x' },
+            { value: 'page_intents__x' },
+            { value: 'origins__x' },
+            { value: 'tags__x' },
+            { value: 'type__branded' },
           ],
         },
       };
@@ -387,24 +411,24 @@ describe('topics definitions', () => {
       expect(result).to.not.have.property('categories');
       expect(result).to.not.have.property('page_intents');
       expect(result).to.not.have.property('origins');
-      expect(result.type).to.deep.equal([{ id: 'type:branded', label: 'branded' }]);
+      expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
       expect(result.tags).to.deep.equal([
-        { id: 'brands:foo', label: 'foo' },
-        { id: 'regions:APAC', label: 'APAC' },
-        { id: 'topics:x', label: 'x' },
-        { id: 'categories:x', label: 'x' },
-        { id: 'page_intents:x', label: 'x' },
-        { id: 'origins:x', label: 'x' },
-        { id: 'tags:x', label: 'x' },
+        { id: 'brands__foo', label: 'foo' },
+        { id: 'regions__APAC', label: 'APAC' },
+        { id: 'topics__x', label: 'x' },
+        { id: 'categories__x', label: 'x' },
+        { id: 'page_intents__x', label: 'x' },
+        { id: 'origins__x', label: 'x' },
+        { id: 'tags__x', label: 'x' },
       ]);
     });
 
     it('reconstructs parent_id with the reserved-key prefix when a colliding tag has a Parent__Child value', () => {
-      const raw = { blocks: { value: [{ value: 'topics:Parent__Child' }] } };
+      const raw = { blocks: { value: [{ value: 'topics__Parent__Child' }] } };
       const result = transformOtherTagsForFilterDimensions(raw, RESERVED_RESULT_KEYS);
       expect(result.tags).to.deep.equal([
         {
-          id: 'topics:Parent__Child', label: 'Child', parent_id: 'topics:Parent', parent_label: 'Parent',
+          id: 'topics__Parent__Child', label: 'Child', parent_id: 'topics__Parent', parent_label: 'Parent',
         },
       ]);
     });
@@ -413,29 +437,39 @@ describe('topics definitions', () => {
       const raw = {
         blocks: {
           value: [
-            { value: 'constructor:evil' },
-            { value: 'toString:evil' },
-            { value: '__proto__:evil' },
-            { value: 'hasOwnProperty:evil' },
+            { value: 'constructor__evil' },
+            { value: 'toString__evil' },
+            { value: 'hasOwnProperty__evil' },
           ],
         },
       };
       const result = transformOtherTagsForFilterDimensions(raw);
-      const protoKey = ['_', '_', 'proto', '_', '_'].join('');
-      expect(result.constructor).to.deep.equal([{ id: 'constructor:evil', label: 'evil' }]);
-      expect(result.toString).to.deep.equal([{ id: 'toString:evil', label: 'evil' }]);
-      expect(result[protoKey]).to.deep.equal([{ id: `${protoKey}:evil`, label: 'evil' }]);
-      expect(result.hasOwnProperty).to.deep.equal([{ id: 'hasOwnProperty:evil', label: 'evil' }]);
+      expect(result.constructor).to.deep.equal([{ id: 'constructor__evil', label: 'evil' }]);
+      expect(result.toString).to.deep.equal([{ id: 'toString__evil', label: 'evil' }]);
+      expect(result.hasOwnProperty).to.deep.equal([{ id: 'hasOwnProperty__evil', label: 'evil' }]);
+      expect(Object.getPrototypeOf(result)).to.equal(Object.prototype);
+    });
+
+    it('does not throw and does not pollute the prototype for a value starting with the separator itself', () => {
+      // A value starting with "__" (e.g. a literal "__proto__..." tag) yields an
+      // empty-string prefix under first-occurrence splitting — still safe because
+      // `groups` is created with Object.create(null).
+      const raw = { blocks: { value: [{ value: '__proto__evil' }] } };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result['']).to.deep.equal([
+        {
+          id: '__proto__evil', label: 'evil', parent_id: '__proto', parent_label: 'proto',
+        },
+      ]);
       expect(Object.getPrototypeOf(result)).to.equal(Object.prototype);
     });
 
     it('routes Object.prototype-named prefixes into tags when they are reserved by the caller', () => {
-      const raw = { blocks: { value: [{ value: 'constructor:evil' }, { value: '__proto__:evil' }] } };
+      const raw = { blocks: { value: [{ value: 'constructor__evil' }] } };
       const result = transformOtherTagsForFilterDimensions(raw, RESERVED_RESULT_KEYS);
       expect(Object.prototype.hasOwnProperty.call(result, 'constructor')).to.equal(false);
       expect(result.tags).to.deep.equal([
-        { id: 'constructor:evil', label: 'evil' },
-        { id: '__proto__:evil', label: 'evil' },
+        { id: 'constructor__evil', label: 'evil' },
       ]);
     });
   });

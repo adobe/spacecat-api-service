@@ -425,7 +425,7 @@ export default function ElementsController(context, log, env) {
    * {@link authorizeBrandSubWorkspace}.
    *
    * Query params (all optional): `model`/`platform` (AI model, default search-gpt),
-   * `tag` (CSV of FULL tag values, AND-ed — e.g. `type:branded`, `category:Brand`),
+   * `tag` (CSV of FULL tag values, AND-ed — e.g. `type__branded`, `category__Brand`),
    * `projectId` (CSV of Semrush project UUIDs; omitted → all of the brand's projects
    * in its sub-workspace).
    */
