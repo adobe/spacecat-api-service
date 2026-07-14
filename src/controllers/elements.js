@@ -145,6 +145,22 @@ function splitCsv(value) {
 }
 
 /**
+ * True when the `showTrends`/`show_trends` query param requests trend data,
+ * mirroring `llmo-brand-presence.js#parseShowTrends`.
+ */
+function parseShowTrends(q) {
+  const v = q?.showTrends ?? q?.show_trends;
+  if (v === true || v === 1) {
+    return true;
+  }
+  if (typeof v === 'string') {
+    const s = v.toLowerCase().trim();
+    return s === 'true' || s === '1';
+  }
+  return false;
+}
+
+/**
  * Extracts and validates the IMS bearer token from the inbound Authorization header.
  * Throws 401 if missing or if the caller authenticated via a non-IMS mechanism.
  *
@@ -739,6 +755,53 @@ export default function ElementsController(context, log, env) {
   };
   /* c8 ignore stop */
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats
+   * Scaffold for the Elements-backed equivalent of the mysticat
+   * `GET /org/:spaceCatId/brands/:brandId/brand-presence/stats` endpoint (see
+   * llmo-brand-presence.js#createBrandPresenceStatsHandler): same response shape
+   * (`{ stats, trends? }`) and the same query params (startDate/endDate, model/
+   * platform, showTrends/show_trends, siteId/site_id, categoryId(s), topicIds,
+   * regionCode(s), origin), but the Elements aggregation itself is not wired yet
+   * — always returns zeroed stats (and an empty trends array when requested).
+   */
+  const getStats = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId } = ctx?.params ?? {};
+      const { brand } = auth;
+      const query = extractQuery(ctx);
+      const siteId = query.siteId || query.site_id;
+
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      const response = {
+        stats: {
+          total_executions: 0,
+          average_visibility_score: 0,
+          total_mentions: 0,
+          total_citations: 0,
+        },
+      };
+      if (parseShowTrends(query)) {
+        response.trends = [];
+      }
+
+      return cachedOk(response);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
@@ -746,5 +809,6 @@ export default function ElementsController(context, log, env) {
     listCitedDomains,
     listOwnedUrls,
     listDomainUrls,
+    getStats,
   };
 }
