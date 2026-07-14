@@ -74,7 +74,7 @@ export default function OnboardingController(context, log, env) {
       return createResponse({ message: 'Failed to send onboarding notification' }, status);
     }
 
-    return ok({ notified: true, workspaceId: workspaceId ?? null });
+    return ok({ notified: true, workspaceId });
   };
 
   return { triggerOnboarding };
