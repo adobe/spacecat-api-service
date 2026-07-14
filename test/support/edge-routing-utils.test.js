@@ -276,12 +276,14 @@ describe('edge-routing-utils', () => {
   describe('detectAemCsFastlyForDomain', () => {
     let dnsPromises;
     let edgeUtilsDns;
+    let detectCdnStub;
 
     beforeEach(async () => {
       dnsPromises = {
         resolveCname: sandbox.stub(),
         resolve4: sandbox.stub(),
       };
+      detectCdnStub = sandbox.stub().resolves(null);
       edgeUtilsDns = await esmock('../../src/support/edge-routing-utils.js', {
         dns: { promises: dnsPromises },
         '@adobe/spacecat-shared-utils': {
@@ -297,6 +299,11 @@ describe('edge-routing-utils', () => {
         },
         '@adobe/spacecat-shared-tokowaka-client': {
           calculateForwardedHost: sandbox.stub(),
+        },
+        '../../src/support/cdn-detection.js': {
+          AEM_CS_FASTLY_CNAME_PATTERNS: ['cdn.adobeaemcloud.com', 'adobe-aem.map.fastly.net'],
+          AEM_CS_FASTLY_IPS: new Set(['151.101.195.10', '151.101.67.10', '151.101.3.10', '151.101.131.10']),
+          detectAemCsFastlyWafSimpleProxy: detectCdnStub,
         },
       });
     });
@@ -354,6 +361,67 @@ describe('edge-routing-utils', () => {
       expect(dnsLog.info).to.have.been.calledThrice;
       expect(dnsLog.info.secondCall.args[0]).to.include('CNAMES');
       expect(dnsLog.info.thirdCall.args[0]).to.include('IPs');
+    });
+
+    it('falls back to Phase 1.5 and returns aem-cs-fastly when DNS misses but full detection confirms Case 0', async () => {
+      dnsPromises.resolveCname.resolves([]);
+      dnsPromises.resolve4.resolves([]);
+      detectCdnStub.resolves(CDN_TYPES.AEM_CS_FASTLY);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
+      expect(detectCdnStub).to.have.been.calledOnceWith('example.com', undefined);
+    });
+
+    it('returns null when DNS misses and Phase 1.5 probes are inconclusive', async () => {
+      dnsPromises.resolveCname.resolves([]);
+      dnsPromises.resolve4.resolves([]);
+      detectCdnStub.resolves(null);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
+      expect(result).to.equal(null);
+    });
+
+    it('skips Phase 1.5 fallback when DNS already confirms aem-cs-fastly', async () => {
+      dnsPromises.resolveCname.withArgs('example.com').resolves(['origin.example.cdn.adobeaemcloud.com']);
+      dnsPromises.resolve4.resolves([]);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
+      expect(detectCdnStub).to.not.have.been.called;
+    });
+  });
+
+  describe('hasSubpath', () => {
+    let hasSubpath;
+
+    before(async () => {
+      ({ hasSubpath } = await import('../../src/support/edge-routing-utils.js'));
+    });
+
+    it('returns true for a URL with a subpath', () => {
+      expect(hasSubpath('https://example.com/docs')).to.be.true;
+    });
+
+    it('returns false for a URL without protocol', () => {
+      expect(hasSubpath('example.com/docs')).to.be.false;
+    });
+
+    it('returns false for a root URL', () => {
+      expect(hasSubpath('https://example.com')).to.be.false;
+    });
+
+    it('returns false for a URL with a trailing slash only', () => {
+      expect(hasSubpath('https://example.com/')).to.be.false;
+    });
+
+    it('returns false for a malformed URL', () => {
+      expect(hasSubpath('not a url %%')).to.be.false;
+    });
+
+    it('returns false for a URL with only a port and no path', () => {
+      expect(hasSubpath('https://example.com:8080')).to.be.false;
+    });
+
+    it('returns true for a URL with a path and a port', () => {
+      expect(hasSubpath('https://example.com:8080/subpath')).to.be.true;
     });
   });
 

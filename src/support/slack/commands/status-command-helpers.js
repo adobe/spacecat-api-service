@@ -14,6 +14,10 @@ import { extractURLFromSlackInput, sendFile } from '../../../utils/slack/base.js
 
 export const DETAIL_ROW_LIMIT = 8;
 export const REPORT_CHUNK_LIMIT = 2800;
+// Cap each uploaded report file at ~200KB so the Slack files API
+// completeUploadExternal call stays well under the WebClient's default
+// 10s timeout for large reports (e.g., status checks across 500+ sites).
+export const REPORT_FILE_BYTES_LIMIT = 200 * 1024;
 export const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -210,6 +214,26 @@ async function sayChunkedReport(slackContext, lines) {
   }
 }
 
+export function splitLinesIntoFileChunks(lines, maxBytes = REPORT_FILE_BYTES_LIMIT) {
+  const chunks = [];
+  let current = [];
+  let currentBytes = 0;
+  for (const line of lines) {
+    const lineBytes = Buffer.byteLength(line, 'utf8') + 1; // +1 for newline
+    if (currentBytes + lineBytes > maxBytes && current.length > 0) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(line);
+    currentBytes += lineBytes;
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
 export async function postReport(
   slackContext,
   lines,
@@ -232,15 +256,35 @@ export async function postReport(
     return;
   }
 
-  try {
-    await sendFile(
-      slackContext,
-      Buffer.from(fullText, 'utf8'),
-      `${filename}.txt`,
-      title,
-      initialComment,
-    );
-  } catch (e) {
-    await slackContext.say(`:warning: Full report upload failed: ${e.message}`);
+  const fileChunks = splitLinesIntoFileChunks(fullLines);
+  const totalChunks = fileChunks.length;
+
+  for (let i = 0; i < totalChunks; i += 1) {
+    const partNum = i + 1;
+    const chunkText = fileChunks[i].join('\n');
+    const chunkFilename = totalChunks === 1
+      ? `${filename}.txt`
+      : `${filename}-part-${partNum}-of-${totalChunks}.txt`;
+    const chunkTitle = totalChunks === 1
+      ? title
+      : `${title} (part ${partNum} of ${totalChunks})`;
+    const chunkComment = totalChunks === 1
+      ? initialComment
+      : `${initialComment} — part ${partNum} of ${totalChunks}`;
+
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await sendFile(
+        slackContext,
+        Buffer.from(chunkText, 'utf8'),
+        chunkFilename,
+        chunkTitle,
+        chunkComment,
+      );
+    } catch (e) {
+      const partLabel = totalChunks === 1 ? '' : ` (part ${partNum}/${totalChunks})`;
+      // eslint-disable-next-line no-await-in-loop
+      await slackContext.say(`:warning: Full report upload${partLabel} failed: ${e.message}`);
+    }
   }
 }

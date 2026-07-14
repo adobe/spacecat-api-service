@@ -1,0 +1,371 @@
+# Customer-edit endpoints for auto-derived URL classification rules.
+# Two parallel dimensions (categories + page-types) sharing one shape:
+#   - `agentic_url_category_rules`
+#   - `agentic_url_page_type_rules`
+# Customers paste sample URLs; the server computes a matching regex via
+# the regex-from-urls 4-strategy ladder (common-prefix → universal-token
+# → disjoint-cover → literal-fallback). See src/support/regex-from-urls.js.
+
+# ───────────────────────────── categories ─────────────────────────────
+
+agentic-categories-list:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - agentic rules
+    summary: List URL category rules for a site
+    description: Returns auto-derived + customer-edited URL category rules.
+    operationId: listAgenticCategories
+    responses:
+      '200':
+        description: List of category rules
+        content:
+          application/json:
+            schema:
+              $ref: '#/AgenticRuleListResponse'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - site
+      - agentic rules
+    summary: Create a URL category rule from sample URLs
+    description: |
+      Computes a matching regex from the supplied sample URLs and persists
+      it with `source='human'`. Returns 409 if a sample URL already belongs
+      to another active rule on the same site, if the rule name collides
+      with an existing active rule, or if the site already has the maximum of
+      20 active category rules.
+    operationId: createAgenticCategory
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AgenticRuleCreateRequest'
+    responses:
+      '201':
+        description: Rule created
+        content:
+          application/json:
+            schema:
+              $ref: '#/AgenticRule'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '409': { $ref: '#/AgenticRuleConflictResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+agentic-categories-one:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: name
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Rule name (unique per site).
+  patch:
+    tags:
+      - site
+      - agentic rules
+    summary: Edit a URL category rule
+    description: |
+      Edit `name`, `urls`, or `newRegex`. Any customer edit marks the rule
+      `source='human'`; `updated_at` is bumped automatically. Returns 409 if
+      a supplied sample URL already belongs to a different active rule.
+    operationId: updateAgenticCategory
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AgenticRuleUpdateRequest'
+    responses:
+      '200':
+        description: Rule updated
+        content:
+          application/json:
+            schema:
+              $ref: '#/AgenticRule'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404' }
+      '409': { $ref: '#/AgenticRuleConflictResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  delete:
+    tags:
+      - site
+      - agentic rules
+    summary: Delete a URL category rule
+    description: |
+      Soft delete — flips the rule's `status` to `deleted` and stamps
+      `updated_by`, retaining the row for audit. The deleted name becomes
+      free to re-create. Runtime classification and the list endpoint only
+      return active rules.
+    operationId: deleteAgenticCategory
+    responses:
+      '200':
+        description: Rule deleted
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deleted: { type: boolean }
+                name: { type: string }
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+# ───────────────────────────── page-types ─────────────────────────────
+# Identical shape to categories — re-uses the same schemas.
+
+agentic-page-types-list:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - agentic rules
+    summary: List URL page-type rules for a site
+    operationId: listAgenticPageTypes
+    responses:
+      '200':
+        description: List of page-type rules
+        content:
+          application/json:
+            schema:
+              $ref: '#/AgenticRuleListResponse'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - site
+      - agentic rules
+    summary: Create a URL page-type rule from sample URLs
+    description: |
+      Computes a matching regex from the supplied sample URLs and persists
+      it with `source='human'`. Returns 409 if a sample URL already belongs
+      to another active rule on the same site, if the rule name collides
+      with an existing active rule, or if the site already has the maximum of
+      20 active page-type rules.
+    operationId: createAgenticPageType
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AgenticRuleCreateRequest'
+    responses:
+      '201':
+        description: Rule created
+        content:
+          application/json:
+            schema:
+              $ref: '#/AgenticRule'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '409': { $ref: '#/AgenticRuleConflictResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+agentic-page-types-one:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: name
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Rule name (unique per site).
+  patch:
+    tags:
+      - site
+      - agentic rules
+    summary: Edit a URL page-type rule
+    description: |
+      Edit `name`, `urls`, or `newRegex`. Any customer edit marks the rule
+      `source='human'`; `updated_at` is bumped automatically. Returns 409 if
+      a supplied sample URL already belongs to a different active rule.
+    operationId: updateAgenticPageType
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AgenticRuleUpdateRequest'
+    responses:
+      '200':
+        description: Rule updated
+        content:
+          application/json:
+            schema:
+              $ref: '#/AgenticRule'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404' }
+      '409': { $ref: '#/AgenticRuleConflictResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  delete:
+    tags:
+      - site
+      - agentic rules
+    summary: Delete a URL page-type rule
+    description: |
+      Soft delete — flips the rule's `status` to `deleted` and stamps
+      `updated_by`, retaining the row for audit. The deleted name becomes
+      free to re-create. Runtime classification and the list endpoint only
+      return active rules.
+    operationId: deleteAgenticPageType
+    responses:
+      '200':
+        description: Rule deleted
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deleted: { type: boolean }
+                name: { type: string }
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+# ─────────────────────────────── schemas ──────────────────────────────
+
+AgenticRule:
+  type: object
+  description: |
+    A single URL classification rule. The same shape is used for both
+    categories and page-types.
+  properties:
+    id: { type: string, format: uuid }
+    siteId: { type: string, format: uuid }
+    name: { type: string }
+    regex: { type: string }
+    sortOrder: { type: [integer, 'null'] }
+    source:
+      type: string
+      enum: [ai, human]
+      description: Provenance — `ai` (audit-worker auto-derivation) or `human` (customer create, edit, or confirm).
+    sampleUrls:
+      type: array
+      items: { type: string }
+      description: Representative URLs that define the rule (hard cap 50, each ≤ 2048 chars).
+    derivationMethod:
+      type: [string, 'null']
+      enum: [llm, common-prefix, universal-token, disjoint-cover, literal-fallback, customer, null]
+      description: How the regex was produced. `llm` for auto-derived; customer-edit API writes `customer` (or a regex-from-urls strategy). NULL for legacy rules.
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    createdBy:
+      type: [string, 'null']
+      description: Identifier of the user or system that first created the rule. Set once on create and never modified.
+    updatedBy:
+      type: [string, 'null']
+      description: Identifier of the user or system that last wrote the rule. Rewritten on every edit.
+
+AgenticRuleListResponse:
+  type: object
+  description: |
+    List of active rules. v1 has no cursor pagination; the result is capped at
+    1000 rules per site (well above expected cardinality). A truncated response
+    is logged server-side.
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/AgenticRule' }
+
+AgenticRuleConflictResponse:
+  description: |
+    Conflict — the rule name already exists for an active rule on the site, a
+    supplied sample URL already belongs to another active rule, or the site has
+    reached the maximum of 20 active rules for this dimension.
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string }
+
+AgenticRuleCreateRequest:
+  type: object
+  required: [name, urls]
+  properties:
+    name: { type: string, maxLength: 200 }
+    urls:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items:
+        type: string
+        maxLength: 2048
+        description: >-
+          A URL path (e.g. `/en/home`, with or without a leading slash) or a full
+          http(s) URL. Whitespace, control characters, backslashes, protocol-relative
+          references (`//host`), and non-http schemes are rejected with a 400.
+
+AgenticRuleUpdateRequest:
+  type: object
+  description: |
+    All fields are optional. Provide either `urls` (regex re-derived) or
+    `newRegex` (advanced — verbatim, validated for compile + length cap).
+  properties:
+    newName: { type: string, maxLength: 200 }
+    urls:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items:
+        type: string
+        maxLength: 2048
+        description: >-
+          A URL path (e.g. `/en/home`, with or without a leading slash) or a full
+          http(s) URL. Whitespace, control characters, backslashes, protocol-relative
+          references (`//host`), and non-http schemes are rejected with a 400.
+    newRegex: { type: string }

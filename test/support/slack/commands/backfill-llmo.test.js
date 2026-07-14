@@ -90,28 +90,43 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage.callCount).to.equal(1);
     });
 
-    it('triggers cdn-logs-report backfill with default weeks', async () => {
+    it('triggers cdn-logs-report daily backfill with default weeks (last 2 completed ISO weeks)', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime()); // Wednesday
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`], slackContext);
+      clock.restore();
 
-      expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_REPORT} for https://example.com (4 previous weeks)...`);
-      expect(sqsStub.sendMessage.called).to.be.true;
-      expect(sqsStub.sendMessage.callCount).to.equal(4);
+      expect(slackContext.say.firstCall.args[0]).to.include(
+        `:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_REPORT} for https://example.com (last 2 completed ISO weeks (2026-04-20..2026-05-03) → 14 daily DB imports)...`,
+      );
+      expect(sqsStub.sendMessage.callCount).to.equal(14);
     });
 
-    it('triggers cdn-logs-report backfill for current week only when weeks=0', async () => {
+    it('triggers cdn-logs-report daily backfill for current week to date when weeks=0', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime()); // Wednesday
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=0'], slackContext);
+      clock.restore();
 
-      expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_REPORT} for https://example.com (current week only)...`);
-      expect(sqsStub.sendMessage.called).to.be.true;
-      expect(sqsStub.sendMessage.callCount).to.equal(1);
+      // Mon 2026-05-04 + Tue 2026-05-05 (Wed is "today", still incomplete)
+      expect(slackContext.say.firstCall.args[0]).to.include('current week to date');
+      expect(sqsStub.sendMessage.callCount).to.equal(2);
+    });
+
+    it('warns when weeks=0 has no completed days yet (Monday)', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-04T08:00:00Z').getTime()); // Monday
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=0'], slackContext);
+      clock.restore();
+
+      expect(slackContext.say.calledWith(':warning: No completed traffic days to backfill for the requested range.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
     it('triggers llmo-referral-traffic backfill with default weeks', async () => {
@@ -152,7 +167,7 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage.callCount).to.equal(2);
     });
 
-    it('adds a 5-second gap between multi-day cdn-logs-analysis messages for the same site', async () => {
+    it('adds a 30-second gap between multi-day cdn-logs-analysis messages for the same site', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
@@ -160,95 +175,98 @@ describe('BackfillLlmoCommand', () => {
 
       expect(sqsStub.sendMessage.callCount).to.equal(3);
       expect(sqsStub.sendMessage.firstCall.args[3]).to.deep.equal({ delaySeconds: 0 });
-      expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 5 });
-      expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 10 });
+      expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 30 });
+      expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 60 });
     });
 
-    it('sends correct SQS message structure for cdn-logs-report', async () => {
+    it('sends date-based per-day SQS messages for cdn-logs-report (traffic day + 1), staggered', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime()); // Wednesday
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=1'], slackContext);
+      clock.restore();
 
-      expect(sqsStub.sendMessage.called).to.be.true;
-      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      // 1 ISO week = 7 days (Mon 2026-04-27 .. Sun 2026-05-03)
+      expect(sqsStub.sendMessage.callCount).to.equal(7);
+      const [queueUrl, message, group, opts] = sqsStub.sendMessage.firstCall.args;
       expect(queueUrl).to.equal('test-audits-queue-url');
-      expect(message).to.have.property('type', AUDIT_TYPES.CDN_LOGS_REPORT);
-      expect(message).to.have.property('siteId', 'test-site-id');
-      expect(message).to.have.property('auditContext');
-      expect(message.auditContext).to.have.property('weekOffset', -1);
+      expect(message).to.deep.equal({
+        type: AUDIT_TYPES.CDN_LOGS_REPORT,
+        siteId: 'test-site-id',
+        // oldest day first: Mon 2026-04-27 traffic → reference date 2026-04-28
+        auditContext: { date: '2026-04-28' },
+      });
+      expect(group).to.equal(undefined);
+      expect(opts).to.deep.equal({ delaySeconds: 0 });
+      expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 5 });
+      expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 10 });
     });
 
-    it('sends correct SQS message structure for current week (weeks=0)', async () => {
-      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
-      const command = BackfillLlmoCommand(context);
-
-      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=0'], slackContext);
-
-      expect(sqsStub.sendMessage.called).to.be.true;
-      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
-      expect(queueUrl).to.equal('test-audits-queue-url');
-      expect(message).to.have.property('type', AUDIT_TYPES.CDN_LOGS_REPORT);
-      expect(message).to.have.property('siteId', 'test-site-id');
-      expect(message).to.have.property('auditContext');
-      expect(message.auditContext).to.have.property('weekOffset', 0);
-    });
-
-    it('sends a cdn-logs-report daily DB import message using traffic date + 1 as auditContext.date', async () => {
+    it('sends a single date-based message for a specific traffic day', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime());
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution([
         'baseurl=https://example.com',
         `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
-        'mode=db',
         'date=2026-04-27',
       ], slackContext);
+      clock.restore();
 
-      expect(slackContext.say.firstCall.args[0]).to.include(
-        `:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_REPORT} for https://example.com (daily DB import for 2026-04-27 (audit context date 2026-04-28))...`,
-      );
+      expect(slackContext.say.firstCall.args[0]).to.include('traffic day 2026-04-27');
       expect(sqsStub.sendMessage.callCount).to.equal(1);
       const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
       expect(queueUrl).to.equal('test-audits-queue-url');
       expect(message).to.deep.equal({
         type: AUDIT_TYPES.CDN_LOGS_REPORT,
         siteId: 'test-site-id',
-        auditContext: {
-          date: '2026-04-28',
-          refreshAgenticDailyExport: true,
-        },
+        auditContext: { date: '2026-04-28' },
       });
     });
 
-    it('supports year month day for cdn-logs-report daily DB import', async () => {
+    it('supports year/month/day for a specific traffic day', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime());
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution([
         'baseurl=https://example.com',
         `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
-        'mode=db',
         'year=2026',
         'month=4',
         'day=27',
       ], slackContext);
+      clock.restore();
 
       expect(sqsStub.sendMessage.callCount).to.equal(1);
       const [, message] = sqsStub.sendMessage.firstCall.args;
-      expect(message.auditContext).to.deep.equal({
-        date: '2026-04-28',
-        refreshAgenticDailyExport: true,
-      });
+      expect(message.auditContext).to.deep.equal({ date: '2026-04-28' });
     });
 
-    it('rejects invalid cdn-logs-report daily DB import date', async () => {
+    it('rejects a future traffic day', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime());
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution([
         'baseurl=https://example.com',
         `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
-        'mode=db',
+        'date=2026-05-06',
+      ], slackContext);
+      clock.restore();
+
+      expect(slackContext.say.calledWith(':warning: date must be yesterday (UTC) or earlier.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects an invalid traffic day', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
         'date=2026-04-31',
       ], slackContext);
 
@@ -256,13 +274,12 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
-    it('rejects malformed cdn-logs-report daily DB import date syntax', async () => {
+    it('rejects a malformed traffic day', async () => {
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution([
         'baseurl=https://example.com',
         `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
-        'mode=db',
         'date=2026/04/27',
       ], slackContext);
 
@@ -270,32 +287,134 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
-    it('requires mode=db for cdn-logs-report daily DB import date', async () => {
+    it('backfills a trailing window of days (oldest first)', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime());
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution([
         'baseurl=https://example.com',
         `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
-        'date=2026-04-27',
+        'days=10',
+      ], slackContext);
+      clock.restore();
+
+      expect(slackContext.say.firstCall.args[0]).to.include('last 10 days');
+      expect(sqsStub.sendMessage.callCount).to.equal(10);
+      // yesterday = 2026-05-05; 10 days back → oldest traffic 2026-04-26 → reference 2026-04-27
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.equal({ date: '2026-04-27' });
+    });
+
+    it('rejects too many days', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=40',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(`:warning: Max 31 days for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`)).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects non-positive days', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=0',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: days must be a positive integer.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects non-numeric days', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=abc',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: days must be a positive integer.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects days with trailing garbage (e.g. 7x)', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=7x',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: days must be a positive integer.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects conflicting range selectors (days + weeks)', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=7',
+        'weeks=0',
       ], slackContext);
 
       expect(slackContext.say.calledWith(
-        ':warning: For cdn-logs-report DB refreshes, use mode=db or mode=weekly-db with date=YYYY-MM-DD.',
+        ':warning: Specify only one of date=, days=, or weeks= (got: days, weeks).',
       )).to.be.true;
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
-    it('requires date when cdn-logs-report mode=db is used', async () => {
+    it('rejects conflicting range selectors (date + weeks)', async () => {
       const command = BackfillLlmoCommand(context);
 
       await command.handleExecution([
         'baseurl=https://example.com',
         `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
-        'mode=db',
+        'date=2026-05-01',
+        'weeks=2',
       ], slackContext);
 
       expect(slackContext.say.calledWith(
-        ':warning: mode=db requires date=YYYY-MM-DD for the traffic date.',
+        ':warning: Specify only one of date=, days=, or weeks= (got: date, weeks).',
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects non-numeric weeks instead of defaulting', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'weeks=foo',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        `:warning: weeks must be an integer between 0 and 4 for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`,
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects weeks with trailing garbage (e.g. 2x) instead of truncating', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'weeks=2x',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        `:warning: weeks must be an integer between 0 and 4 for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`,
       )).to.be.true;
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
@@ -492,7 +611,7 @@ describe('BackfillLlmoCommand', () => {
       ], slackContext);
 
       expect(slackContext.say.calledWith(
-        ':warning: Unsupported mode. Use mode=db for daily DB imports or mode=weekly-db for weekly DB refresh.',
+        ':warning: Unsupported mode. Use mode=weekly-db for a weekly DB rollup refresh (daily DB import is the default — just pass weeks/days/date).',
       )).to.be.true;
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
@@ -539,7 +658,7 @@ describe('BackfillLlmoCommand', () => {
       ], slackContext);
 
       expect(slackContext.say.calledWith(
-        ':warning: Unsupported mode. Use mode=db for daily DB imports or mode=weekly-db for weekly DB refresh.',
+        ':warning: Unsupported mode. Use mode=weekly-db for a weekly DB rollup refresh (daily DB import is the default — just pass weeks/days/date).',
       )).to.be.true;
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
@@ -663,7 +782,7 @@ describe('BackfillLlmoCommand', () => {
 
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=5'], slackContext);
 
-      expect(slackContext.say.calledWith(`:warning: Max 4 weeks for ${AUDIT_TYPES.CDN_LOGS_REPORT}`)).to.be.true;
+      expect(slackContext.say.calledWith(`:warning: weeks must be between 0 and 4 for ${AUDIT_TYPES.CDN_LOGS_REPORT}.`)).to.be.true;
     });
 
     it('rejects unsupported audit type', async () => {
@@ -715,6 +834,21 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=all', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=1'], slackContext);
 
       expect(sqsStub.sendMessage.callCount).to.equal(2);
+    });
+
+    it('queues per-day cdn-logs-report imports for every site with baseurl=all', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime()); // Wednesday
+      const site1 = { getId: () => 'site-1' };
+      const site2 = { getId: () => 'site-2' };
+      dataAccessStub.Site.all.resolves([site1, site2]);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=all', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=1'], slackContext);
+      clock.restore();
+
+      // 2 sites * 7 days (1 ISO week) = 14 messages; confirms sites.length * msgsPerSite.
+      expect(sqsStub.sendMessage.callCount).to.equal(14);
+      expect(slackContext.say.calledWith(':white_check_mark: Done! 14 messages queued.')).to.be.true;
     });
 
     it('reports no sites enabled when baseurl=all and none enabled', async () => {

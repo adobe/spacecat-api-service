@@ -20,12 +20,12 @@ import {
   isValidUrl,
   isObject,
   isNonEmptyObject,
-  resolveCanonicalUrl,
   isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
   wwwUrlResolver as sharedWwwUrlResolver,
   getLastNumberOfWeeks,
+  resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import RUMAPIClient, { RUM_BUNDLER_API_HOST } from '@adobe/spacecat-shared-rum-api-client';
@@ -35,7 +35,11 @@ import worldCountries from 'world-countries';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
+  STATUS_UNAUTHORIZED,
+  X_PROMISE_TOKEN_HEADER,
+  PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
+import { updateRumConfig } from './rum-config-service.js';
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -566,13 +570,22 @@ export async function findDeliveryType(url) {
 }
 
 /**
- * Error class with a status code property.
+ * Error class with a status code property. An optional machine-readable `code`
+ * may be assigned by callers after construction (e.g. serenity handlers tag
+ * errors with `ERROR_CODES.*` for downstream branching).
  * @extends Error
  */
 export class ErrorWithStatusCode extends Error {
+  /**
+   * @param {string} message human-readable error message
+   * @param {number} status HTTP status code to surface
+   */
   constructor(message, status) {
     super(message);
+    /** @type {number} */
     this.status = status;
+    /** @type {string|undefined} */
+    this.code = undefined;
   }
 }
 
@@ -628,17 +641,7 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
         return true;
       }
     }
-    const { Configuration, Entitlement } = context.dataAccess || {};
-    if (!Configuration) {
-      return false;
-    }
-    const configuration = await Configuration.findLatest();
-    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
-      return false;
-    }
-    if (!configuration.isHandlerEnabledForSite('summit-plg', site)) {
-      return false;
-    }
+    const { Entitlement } = context.dataAccess || {};
 
     const organizationId = site.getOrganizationId();
     if (!Entitlement || !organizationId) {
@@ -670,6 +673,53 @@ export function getImsUserToken(context) {
     throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
   }
   return authorizationHeader.substring(BEARER_PREFIX.length);
+}
+
+/**
+ * Get the IMS user token, but ONLY when the caller authenticated via IMS.
+ * The Semrush gateway only understands IMS user tokens, so any flow that
+ * forwards the caller's bearer upstream (serenity proxy, brand provisioning,
+ * brand-edit re-sync) must refuse a non-IMS credential rather than proxy it.
+ * An S2S consumer reaching an `organization:write` route would otherwise have
+ * its non-IMS bearer forwarded to Semrush.
+ * @param {object} context - The request context (attributes.authInfo + headers).
+ * @returns {string} imsUserToken - The validated IMS user access token.
+ * @throws {ErrorWithStatusCode} 401 when the caller is not IMS-authenticated.
+ */
+export function getImsUserTokenStrict(context) {
+  const authInfo = context?.attributes?.authInfo;
+  // Local/automated-E2E escape hatch — mirrors the serenity controller's
+  // requireImsBearer. When SERENITY_ALLOW_NON_IMS_AUTH is set, trust the present
+  // bearer even if the authInfo is not IMS-typed: locally `SKIP_AUTH=true`
+  // injects a mock (non-IMS) admin authInfo, and these flows forward the bearer
+  // to the Semrush vendor MOCK, which ignores it. NO deployed environment sets
+  // this flag (it is never written to Vault), so production auth is unaffected —
+  // the real Semrush gateway still validates the forwarded token end to end.
+  //
+  // Defense-in-depth: the hatch is HARD-DISABLED in production regardless of the
+  // flag, so an accidental SERENITY_ALLOW_NON_IMS_AUTH in prod can never open the
+  // gate — prod always fails closed and requires real IMS auth. Both AWS_ENV and
+  // ENV are checked because the codebase reads prod from either.
+  const isProd = context?.env?.AWS_ENV === 'prod' || context?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && context?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  // Fail closed: forward the bearer upstream ONLY for a caller we can positively
+  // confirm authenticated via IMS (or when the escape hatch is explicitly set).
+  // A missing/non-standard authInfo (no getType) is treated as "not IMS" and
+  // refused, rather than falling through to proxy an unverified bearer to the
+  // Semrush gateway.
+  if (!allowNonIms && (typeof authInfo?.getType !== 'function' || authInfo.getType() !== 'ims')) {
+    // Reached only when resolveSemrushImsToken's x-promise-token check found
+    // nothing (it never falls through to here when the header is present) —
+    // a non-IMS caller has no other way to authenticate to Semrush, so point
+    // them at the promise-token flow instead of a bare "not authenticated".
+    const err = new ErrorWithStatusCode(
+      `IMS authentication required; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
+      STATUS_UNAUTHORIZED,
+    );
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
+    throw err;
+  }
+  return getImsUserToken(context);
 }
 
 /**
@@ -723,6 +773,55 @@ export async function exchangePromiseToken(context, promiseToken) {
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   )).access_token;
   return accessToken;
+}
+
+/**
+ * Resolves the IMS access token to forward to the Semrush gateway for a request.
+ *
+ * Preferred path: the caller sends `x-promise-token` (minted by POST /auth/v2/promise).
+ * This lets a caller authenticate to spacecat itself with a NON-IMS credential (e.g. a
+ * spacecat JWT on `Authorization`) while still supplying an IMS-exchangeable token for
+ * the upstream Semrush call. The promise token is checked FIRST and, when present,
+ * `getImsUserTokenStrict` (and its `authInfo.getType() === 'ims'` gate) is never invoked.
+ *
+ * Fallback path: no `x-promise-token` — behaves exactly as `getImsUserTokenStrict`,
+ * requiring IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+ *
+ * Shared by every "forward the user's bearer to Semrush" surface: the serenity and
+ * elements proxies, and brand create/edit/provisioning re-sync. The serenity and
+ * elements proxies pass their own IMS-bearer gate (which additionally supports a
+ * test-only non-IMS escape hatch) as `fallback`; callers with no such escape hatch
+ * can omit it and get the strict `getImsUserTokenStrict` behavior.
+ * @param {object} context - The request context.
+ * @param {object} [log] - Logger used to record a promise-token exchange failure.
+ * @param {string} [logLabel] - Prefix for the exchange-failure log line (e.g. 'brands').
+ * @param {(context: object) => string} [fallback] - Called when no promise token is
+ *   present; defaults to `getImsUserTokenStrict`.
+ * @returns {Promise<string>} The IMS access token to forward upstream.
+ * @throws {ErrorWithStatusCode} 401 when neither a promise token nor the fallback works.
+ */
+export async function resolveSemrushImsToken(
+  context,
+  log,
+  logLabel = 'utils',
+  fallback = getImsUserTokenStrict,
+) {
+  const promiseTokenHeader = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
+  if (hasText(promiseTokenHeader)) {
+    let decoded = promiseTokenHeader;
+    try {
+      decoded = decodeURIComponent(promiseTokenHeader);
+    } catch {
+      // Bearer-style tokens may contain literal %; use as-is.
+    }
+    try {
+      return await exchangePromiseToken(context, decoded);
+    } catch (e) {
+      log?.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
+      throw new ErrorWithStatusCode('Invalid or expired promise token', STATUS_UNAUTHORIZED);
+    }
+  }
+  return fallback(context);
 }
 
 /**
@@ -1676,6 +1775,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1684,6 +1784,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1702,12 +1803,14 @@ export const onboardSingleSite = async (
       }
     }
 
-    // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
-    if (resolvedUrl === null) {
+    // Falsy check covers null (timeout), undefined (unexpected), and '' (empty resolution)
+    if (!resolvedUrl) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+      await say(`:warning: Could not resolve canonical URL for ${baseURL}. Using base URL as fallback.`);
       resolvedUrl = baseURL;
     }
+
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
     log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
@@ -1731,6 +1834,8 @@ export const onboardSingleSite = async (
       ...(additionalParams.force ? { forcedOverride: true } : {}),
     }, { maxHistory: MAX_ONBOARD_HISTORY });
 
+    const hasDomainKey = await updateRumConfig(site, context, { save: false });
+    siteConfig.updateRumConfig(hasDomainKey);
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
@@ -1783,16 +1888,23 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
+    // Determine scheduledRun early so we only enable audits in config for paid profiles
+    const scheduledRun = additionalParams.scheduledRun !== undefined
+      ? additionalParams.scheduledRun
+      : (profile.config?.scheduledRun || false);
+
     const latestConfiguration = await Configuration.findLatest();
 
-    // Check which audits are not already enabled
+    // Only enable audits in configuration when scheduledRun is true (paid profiles)
     const auditsEnabled = [];
-    for (const auditType of auditTypes) {
-      /* eslint-disable no-await-in-loop */
-      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-      if (!isEnabled) {
-        latestConfiguration.enableHandlerForSite(auditType, site);
-        auditsEnabled.push(auditType);
+    if (scheduledRun) {
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+        if (!isEnabled) {
+          latestConfiguration.enableHandlerForSite(auditType, site);
+          auditsEnabled.push(auditType);
+        }
       }
     }
 
@@ -1800,12 +1912,15 @@ export const onboardSingleSite = async (
       try {
         await latestConfiguration.save();
         log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+        await say(
+          `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
+        );
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
     } else {
-      log.debug(`All audits are already enabled for site ${siteID}`);
+      log.debug(`All the required audits for the given profile are already enabled for site ${siteID}`);
     }
 
     reportLine.audits = auditTypes.join(', ');
@@ -1819,17 +1934,13 @@ export const onboardSingleSite = async (
     }
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-      } else {
-        await triggerAuditForSite(
-          site,
-          auditType,
-          undefined,
-          slackContext,
-          context,
-        );
-      }
+      await triggerAuditForSite(
+        site,
+        auditType,
+        undefined,
+        slackContext,
+        context,
+      );
     }
 
     // Opportunity status job
@@ -1849,29 +1960,7 @@ export const onboardSingleSite = async (
       },
     };
 
-    const scheduledRun = additionalParams.scheduledRun !== undefined
-      ? additionalParams.scheduledRun
-      : (profile.config?.scheduledRun || false);
-
     await say(`:information_source: Scheduled run: ${scheduledRun}`);
-
-    // Disable imports and audits job - only disable what was enabled during onboarding
-    const disableImportAndAuditJob = {
-      type: 'disable-import-audit-processor',
-      siteId: siteID,
-      siteUrl: baseURL,
-      imsOrgId: imsOrgID,
-      organizationId,
-      taskContext: {
-        importTypes: importsEnabled || [],
-        auditTypes: auditsEnabled || [],
-        scheduledRun,
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
-      },
-    };
 
     // Demo URL job
     const demoURLJob = {
@@ -1905,10 +1994,29 @@ export const onboardSingleSite = async (
       },
     };
 
-    // Prepare and start step function workflow with the necessary parameters
+    // Prepare and start step function workflow with the necessary parameters.
+    // Always send disableImportAndAuditJob so imports can be disabled (avoid exhausting Ahrefs).
+    // auditsEnabled is not sent to the task handler; only log/Slack the info here.
     const workflowInput = {
       opportunityStatusJob,
-      disableImportAndAuditJob,
+      disableImportAndAuditJob: {
+        type: 'disable-import-audit-processor',
+        siteId: siteID,
+        siteUrl: baseURL,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
+          importTypes: importsEnabled || [],
+          // Not sent to task handler; audits are enabled in config only when scheduledRun is true,
+          // so no separate audit-disable list is needed here.
+          auditTypes: [],
+          scheduledRun,
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      },
       demoURLJob,
       cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,

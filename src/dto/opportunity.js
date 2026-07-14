@@ -17,7 +17,19 @@ export const OpportunityDto = {
 
   /**
    * Converts an Opportunity object into a JSON object.
+   * scopeType and scopeId are intentionally omitted — they are brand-internal fields
+   * that must only appear in the brand-scoped endpoint response, added by the brand
+   * controller directly. Including them here would expose brand UUIDs on shared sites
+   * to users who have site access but not brand access.
+   *
+   * Translations for `title` and `description` are stored by audit workers in
+   * `opportunity.data.i18n` as a map of locale → { title, description }.
+   * When `locale` is supplied the matching translation is promoted to the top-level
+   * fields and `data.i18n` is stripped from the response so the shape stays stable.
+   * Falls back to the original English values when the locale is absent or not found.
+   *
    * @param {Readonly<Opportunity>} oppty - Opportunity object.
+   * @param {string|null} [locale] - Optional locale code (e.g. 'fr_fr', 'ja_jp').
    * @returns {{
     * id: string,
     * siteId: string,
@@ -31,28 +43,47 @@ export const OpportunityDto = {
     * guidance: object,
     * tags: Array<string>,
     * createdAt: date,
-    * createdBy: string,
     * updatedAt: date,
     * updatedBy: string,
     * lastAuditedAt: date
     * }} JSON object.
    */
-  toJSON: (oppty) => ({
-    id: oppty.getId(),
-    siteId: oppty.getSiteId(),
-    auditId: oppty.getAuditId(),
-    runbook: oppty.getRunbook(),
-    type: oppty.getType(),
-    data: oppty.getData(),
-    origin: oppty.getOrigin(),
-    title: oppty.getTitle(),
-    description: oppty.getDescription(),
-    guidance: oppty.getGuidance(),
-    tags: oppty.getTags(),
-    status: oppty.getStatus(),
-    createdAt: oppty.getCreatedAt(),
-    updatedAt: oppty.getUpdatedAt(),
-    updatedBy: oppty.getUpdatedBy(),
-    lastAuditedAt: oppty.getLastAuditedAt(),
-  }),
+  toJSON: (oppty, locale = null) => {
+    const rawData = oppty.getData();
+    // eslint-disable-next-line no-unused-vars
+    const { i18n, ...strippedData } = rawData ?? {};
+    const data = rawData != null ? strippedData : rawData;
+
+    let title = oppty.getTitle();
+    let description = oppty.getDescription();
+
+    if (locale && i18n?.[locale]) {
+      const localized = i18n[locale];
+      if (localized.title != null) {
+        title = localized.title;
+      }
+      if (localized.description != null) {
+        description = localized.description;
+      }
+    }
+
+    return {
+      id: oppty.getId(),
+      siteId: oppty.getSiteId(),
+      auditId: oppty.getAuditId(),
+      runbook: oppty.getRunbook(),
+      type: oppty.getType(),
+      data,
+      origin: oppty.getOrigin(),
+      title,
+      description,
+      guidance: oppty.getGuidance(),
+      tags: oppty.getTags(),
+      status: oppty.getStatus(),
+      createdAt: oppty.getCreatedAt(),
+      updatedAt: oppty.getUpdatedAt(),
+      updatedBy: oppty.getUpdatedBy(),
+      lastAuditedAt: oppty.getLastAuditedAt(),
+    };
+  },
 };

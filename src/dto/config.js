@@ -68,7 +68,12 @@ const toListJSON = (config) => {
     result.brandConfig = json.brandConfig;
   }
   if (isNonEmptyObject(json.fetchConfig)) {
-    result.fetchConfig = json.fetchConfig;
+    // Only expose overrideBaseURL in list responses. headers can hold credentials
+    // (Authorization, Cookie, etc.) and shouldn't be returned in bulk.
+    const { overrideBaseURL } = json.fetchConfig;
+    if (overrideBaseURL) {
+      result.fetchConfig = { overrideBaseURL };
+    }
   }
   if (isNonEmptyObject(json.handlers)) {
     result.handlers = json.handlers;

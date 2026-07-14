@@ -16,6 +16,7 @@ import {
 import AccessControlUtil from '../../../support/access-control-util.js';
 import { OpportunityDto } from '../../../dto/opportunity.js';
 import { getBrandById } from '../../../support/brands-storage.js';
+import { isValidLocale } from '../../../utils/validations.js';
 
 const MAX_CONCURRENT_SITES = 5;
 const MAX_SITES_FOR_COUNT = 40;
@@ -141,7 +142,7 @@ function LlmoOpportunitiesController(ctx) {
       return ok({ total, bySite });
     } catch (error) {
       log.error(`Error counting opportunities: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('An internal error occurred while counting opportunities');
     }
   };
 
@@ -150,12 +151,28 @@ function LlmoOpportunitiesController(ctx) {
    * GET /org/:spaceCatId/brands/all/opportunities
    * Returns all LLMO opportunities for sites under the given brand (or all org sites).
    * Accepts optional ?siteId query parameter to scope results to a single site.
+   *
+   * For a specific brandId, queries by scope_type='brand' AND scope_id=brandId directly —
+   * this correctly handles the case where multiple brands share the same site (e.g. nba.com
+   * with kings and lakers brands), since each opportunity is tagged with its specific brand.
+   *
+   * NOTE on `all` vs brand-specific divergence: the `all` path aggregates by isElmo tag
+   * across every org site, while brand-specific paths require an explicit scope_id row.
+   * An opportunity tagged isElmo but without a scope_id appears in the `all` response yet
+   * in none of the brand-specific responses. The paths are NOT additive — the sum of every
+   * per-brand response does not equal `all`. Consumers building coverage reports must
+   * account for this gap. The paths converge once every LLMO opportunity carries scope tags.
    */
   const getBrandOpportunities = async (context) => {
     const { dataAccess, log } = context;
     const { Site, Opportunity } = dataAccess;
     const brandId = context.params.brandId || 'all';
     const filterSiteId = context.data?.siteId || context.data?.site_id;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     let organization;
     try {
@@ -172,71 +189,129 @@ function LlmoOpportunitiesController(ctx) {
 
     try {
       const orgId = organization.getId();
-      let siteIds;
-      let brandName = 'All';
 
       if (brandId === 'all') {
-        // Fetch all sites for the organization
+        // Fetch all LLMO opportunities across every org site
         const sites = await Site.allByOrganizationId(orgId);
-        siteIds = sites.map((s) => s.getId());
-      } else {
-        // Look up brand to get its associated site IDs
-        const postgrestClient = dataAccess?.services?.postgrestClient;
-        if (!postgrestClient?.from) {
-          return badRequest('Brand data requires PostgreSQL data service');
+        let siteIds = sites.map((s) => s.getId());
+
+        if (filterSiteId) {
+          if (!siteIds.includes(filterSiteId)) {
+            return forbidden('Site does not belong to the organization or brand');
+          }
+          siteIds = [filterSiteId];
         }
 
-        const brand = await getBrandById(orgId, brandId, postgrestClient);
-        if (!brand) {
-          return notFound(`Brand not found: ${brandId}`);
+        if (siteIds.length === 0) {
+          return ok({
+            brandId, brandName: 'All', opportunities: [], total: 0,
+          });
         }
 
-        siteIds = brand.siteIds || [];
-        brandName = brand.name;
-      }
+        const fetchForSite = async (siteId) => {
+          try {
+            const site = await Site.findById(siteId);
+            if (!site) {
+              return [];
+            }
+            const opportunities = await Opportunity.allBySiteId(siteId);
+            return opportunities
+              .filter((opp) => isLlmoOpportunity(opp) && VALID_STATUSES.has(opp.getStatus()))
+              .map((opp) => ({
+                ...OpportunityDto.toJSON(opp, locale),
+                siteBaseURL: site.getBaseURL(),
+              }));
+          } catch (siteError) {
+            log.warn(`Failed to fetch opportunities for site ${siteId}: ${siteError.message}`);
+            return [];
+          }
+        };
 
-      if (filterSiteId) {
-        if (!siteIds.includes(filterSiteId)) {
-          return forbidden('Site does not belong to the organization or brand');
-        }
-        siteIds = [filterSiteId];
-      }
+        const results = await processBatch(siteIds, fetchForSite, MAX_CONCURRENT_SITES);
+        const opportunities = results.flat();
 
-      if (siteIds.length === 0) {
         return ok({
-          brandId, brandName, opportunities: [], total: 0,
+          brandId, brandName: 'All', opportunities, total: opportunities.length,
         });
       }
 
-      const fetchForSite = async (siteId) => {
+      // Brand-specific query: validate brand belongs to org, then query by scope directly
+      const postgrestClient = dataAccess?.services?.postgrestClient;
+      if (!postgrestClient?.from) {
+        // Client-safe message; reason logged server-side (the previous message leaked
+        // backend implementation details into the response body).
+        log.error('Brand lookup unavailable: PostgreSQL data service not configured');
+        return badRequest('Brand lookup service unavailable');
+      }
+
+      const brand = await getBrandById(orgId, brandId, postgrestClient);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const brandName = brand.name;
+      const brandSiteIdSet = new Set(brand.siteIds || []);
+
+      if (filterSiteId) {
+        if (!brandSiteIdSet.has(filterSiteId)) {
+          return forbidden('Site does not belong to this brand');
+        }
+      }
+
+      // Query opportunities directly by brand scope — avoids cross-brand contamination
+      // on sites shared by multiple brands (e.g. nba.com with kings and lakers brands).
+      // NOTE: allByScope is not yet published in @adobe/spacecat-shared-data-access; the
+      // test suite stubs this method. Remove this note once the published version ships.
+      const allScopedOpps = await Opportunity.allByScope('brand', brandId);
+
+      // Detect orphans — opps whose siteId is no longer in the brand's canonical site list.
+      // These arise when a site is reassigned to a different brand without a scope cleanup.
+      const orphanedOpps = allScopedOpps.filter((opp) => !brandSiteIdSet.has(opp.getSiteId()));
+      if (orphanedOpps.length > 0) {
+        log.warn(`Brand ${brandId} has ${orphanedOpps.length} scoped opportunities with siteIds not in brand.siteIds`);
+      }
+
+      const filteredOpps = allScopedOpps.filter(
+        (opp) => isLlmoOpportunity(opp)
+          && VALID_STATUSES.has(opp.getStatus())
+          && brandSiteIdSet.has(opp.getSiteId())
+          && (!filterSiteId || opp.getSiteId() === filterSiteId),
+      );
+
+      // Resolve site data for unique siteIds with bounded concurrency and error isolation
+      const uniqueSiteIds = [...new Set(filteredOpps.map((opp) => opp.getSiteId()))];
+      const siteMap = new Map();
+
+      await processBatch(uniqueSiteIds, async (siteId) => {
         try {
           const site = await Site.findById(siteId);
-          if (!site) {
-            return [];
-          }
-
-          const opportunities = await Opportunity.allBySiteId(siteId);
-          return opportunities
-            .filter((opp) => isLlmoOpportunity(opp) && VALID_STATUSES.has(opp.getStatus()))
-            .map((opp) => ({
-              ...OpportunityDto.toJSON(opp),
-              siteBaseURL: site.getBaseURL(),
-            }));
+          siteMap.set(siteId, site ?? null);
         } catch (siteError) {
-          log.warn(`Failed to fetch opportunities for site ${siteId}: ${siteError.message}`);
-          return [];
+          log.warn(`Failed to fetch site ${siteId}: ${siteError.message}`);
+          siteMap.set(siteId, null);
         }
-      };
+      }, MAX_CONCURRENT_SITES);
 
-      const results = await processBatch(siteIds, fetchForSite, MAX_CONCURRENT_SITES);
-      const opportunities = results.flat();
+      // scopeType and scopeId are explicitly set here — this is the brand-scoped endpoint,
+      // values are validated and in scope. They are intentionally absent from OpportunityDto.
+      //
+      // IMPORTANT: scopeId here is the URL parameter (already validated against the brand
+      // by getBrandById above), NOT opp.getScopeId(). Do not change to opp data — that
+      // would allow row-level claims to override the endpoint's asserted scope and re-open
+      // the cross-brand contamination this controller exists to prevent.
+      const opportunities = filteredOpps.map((opp) => ({
+        ...OpportunityDto.toJSON(opp, locale),
+        scopeType: 'brand',
+        scopeId: brandId,
+        siteBaseURL: siteMap.get(opp.getSiteId())?.getBaseURL() ?? null,
+      }));
 
       return ok({
         brandId, brandName, opportunities, total: opportunities.length,
       });
     } catch (error) {
       log.error(`Error fetching brand opportunities: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('An internal error occurred while fetching brand opportunities');
     }
   };
 

@@ -11,6 +11,8 @@ Data is queried from mysticat-data-service PostgreSQL via PostgREST RPC function
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/sites/:siteId/agentic-traffic/by-url` | Per-URL traffic breakdown with performance metrics |
+| POST | `/sites/:siteId/agentic-traffic/urls/export` | Start or reuse an async CSV export for per-URL aggregates |
+| GET | `/sites/:siteId/agentic-traffic/urls/export/:exportId` | Check export status and fetch presigned CSV URLs |
 | GET | `/sites/:siteId/agentic-traffic/by-user-agent` | Traffic grouped by page type × agent type |
 | GET | `/sites/:siteId/agentic-traffic/movers` | Top and bottom URL movers by hit-count change |
 
@@ -32,6 +34,8 @@ All three endpoints share the standard agentic traffic filters. See [Agentic Tra
 | `agentType` | `agent_type` | string | — | Filter by agent type |
 | `userAgent` | `user_agent` | string | — | Filter by user agent string |
 | `contentType` | `content_type` | string | — | Filter by content type |
+| `successRate` | `success_rate` | string | — | Filter by success-rate bucket |
+| `urlPathSearch` | `url_path_search` | string | — | Substring filter on `url_path` |
 
 ---
 
@@ -97,6 +101,74 @@ Returns a **paginated** per-URL breakdown with traffic volume, performance, and 
 | `rows[].deployedAtEdge` | boolean | Whether the URL is deployed at the edge |
 
 **Pagination pattern:** use `pageOffset = page × pageSize` for cursor-free offset pagination. Use `totalCount` to determine whether more pages exist (`loadedCount < totalCount`).
+
+---
+
+### POST `/sites/:siteId/agentic-traffic/urls/export`
+
+Starts an asynchronous CSV export for the same filter set used by the URL table. The API normalizes the filters, computes a deterministic export ID, and checks S3 first. If the exact export already exists, the response is `200 ready`; otherwise the API queues a reporting-worker job and returns `202 processing`.
+
+**Request body:**
+
+```json
+{
+  "startDate": "2026-03-01",
+  "endDate": "2026-03-31",
+  "platform": "chatgpt",
+  "categoryName": "Poster Maker",
+  "agentType": "Chatbots",
+  "userAgent": "ChatGPT-User",
+  "contentType": "owned",
+  "successRate": "high",
+  "urlPathSearch": "/express/create"
+}
+```
+
+**Processing RPC:** `wrpc_agentic_traffic_urls_export_to_s3`
+
+The RPC exports directly from `agentic_traffic` plus `agentic_url_classifications` to S3 with `aws_s3.query_export_to_s3`. It does not read daily, weekly, or rollup serving tables.
+
+**CSV columns:**
+
+`url`, `host`, `url_path`, `total_hits`, `unique_agent_count`, `unique_agent_names`, `top_agent`, `top_agent_type`, `response_codes`, `success_rate`, `avg_ttfb_ms`, `category_name`, `page_type`, `content_type`, `avg_citability_score`, `deployed_at_edge`
+
+**Processing response:**
+
+```json
+{
+  "exportId": "b8d70f4ce07b44a1c46ef6d1a9f83a0678d8c0c14f82121161db725e9d4c7b9a",
+  "status": "processing"
+}
+```
+
+**Ready response:**
+
+```json
+{
+  "exportId": "b8d70f4ce07b44a1c46ef6d1a9f83a0678d8c0c14f82121161db725e9d4c7b9a",
+  "status": "ready",
+  "downloadUrls": [
+    "https://example-bucket.s3.amazonaws.com/agentic-traffic/url-exports/site-id/v1/hash/urls.csv?...",
+    "https://example-bucket.s3.amazonaws.com/agentic-traffic/url-exports/site-id/v1/hash/urls.csv_part2?..."
+  ],
+  "expiresAt": "2026-05-12T10:15:30.000Z",
+  "rowCount": 9900000,
+  "filesUploaded": 2,
+  "bytesUploaded": 1428000000
+}
+```
+
+For large exports, Aurora can split the CSV into multiple S3 objects. The UI should download every URL in `downloadUrls` in order.
+
+---
+
+### GET `/sites/:siteId/agentic-traffic/urls/export/:exportId`
+
+Checks status for the deterministic export ID returned by the POST endpoint. The response is one of:
+
+- `processing` — S3 has no CSV object yet and metadata is not failed
+- `ready` — returns one or more presigned CSV URLs
+- `failed` — returns `failureReason`
 
 ---
 
