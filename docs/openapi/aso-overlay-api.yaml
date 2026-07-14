@@ -102,6 +102,11 @@ get-aso-redirects:
             schema:
               type: string
               example: max-age=10
+          Content-Length:
+            description: Always `0` — RFC 7230 §3.3.3 forbids a body on 304.
+            schema:
+              type: integer
+              example: 0
       '400':
         $ref: './responses.yaml#/400'
       '401':
