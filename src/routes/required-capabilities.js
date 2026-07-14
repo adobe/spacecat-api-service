@@ -244,17 +244,6 @@ const routeRequiredCapabilities = {
   'GET /consent-banner/:jobId': 'organization:read',
 
   // Configuration
-  'GET /configurations/latest': 'configuration:read',
-  'PATCH /configurations/latest': 'configuration:write',
-  'POST /configurations/:version/restore': 'configuration:write',
-  'GET /configurations/:version': 'configuration:read',
-  'POST /configurations/audits': 'configuration:write',
-  'DELETE /configurations/audits/:auditType': 'configuration:write',
-  'PUT /configurations/latest/queues': 'configuration:write',
-  'PATCH /configurations/latest/jobs/:jobType': 'configuration:write',
-  'PATCH /configurations/latest/handlers/:handlerType': 'configuration:write',
-  'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': 'configuration:write',
-  'PATCH /configurations/sites/audits': 'configuration:write',
   'GET /configurations/latest': CAP_CONFIGURATION_READ,
   'PATCH /configurations/latest': CAP_CONFIGURATION_WRITE,
   'POST /configurations/:version/restore': CAP_CONFIGURATION_WRITE,
@@ -264,6 +253,8 @@ const routeRequiredCapabilities = {
   'PUT /configurations/latest/queues': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/jobs/:jobType': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/handlers/:handlerType': CAP_CONFIGURATION_WRITE,
+  /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
+  'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
 
   // Organizations
