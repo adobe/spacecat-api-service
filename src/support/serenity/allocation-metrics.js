@@ -33,15 +33,20 @@
  * Metric catalog (CloudWatch namespace `Mysticat/SerenityAllocation`):
  * - `HeadroomCheck` (Count, dims: Outcome=hot-path|topped-up) — the hot-path ratio
  *   (serenity-docs#22 plan §21): a rising topped-up share is the leading indicator of pool drain.
- * - `TopUpLatencyMs` (Milliseconds) — wall-clock time of a single top-up transfer attempt.
+ * - `TopUpLatencyMs` (Milliseconds, dims: Path=settle|fail-fast) — wall-clock time of a transfer.
+ *   `Path` distinguishes `transferAndSettle` (includes retry-loop sleeps, up to tens of seconds)
+ *   from `transferOnce` (a single transport call, the hot-path fail-fast shape) — the two are NOT
+ *   comparable durations, so an unpartitioned p99 would be bimodal and useless for alerting
+ *   (MysticatBot review, LLMO-6191).
  * - `PoolFreeRatio` (Percent, dims: Dim) — the master/parent workspace's advisory `free/total`
  *   ratio, read at the same point `ensureAiHeadroom` already does its (non-gating) pool check.
  * - `AllocationRejection` (Count, dims: Reason=orgPoolExhausted|brandAiLimit|workspaceBusy) —
  *   every typed rejection the allocator throws.
  * - `NotReadyRetry` (Count) — one per `workspace not ready` retry attempt in `transferAndSettle`.
- * - `ReleaseOutcome` (Count, dims: Reason=released|nothing-to-release|requires-decommission|error)
- *   — `releaseAiSurplus` outcomes; `requires-decommission` is a standing pool-leak signal (surplus
- *   that cannot be reclaimed short of workspace delete).
+ * - `ReleaseOutcome` (Count, dims: Reason=released|nothing-to-release|requires-decommission|error|
+ *   dry-run) — `releaseAiSurplus` outcomes; `requires-decommission` is a standing pool-leak signal
+ *   (surplus that cannot be reclaimed short of workspace delete); `dry-run` is the sweep script's
+ *   preview mode, so a dry-run pass is visible in the same dashboard as a real one.
  * - `MeteredQuotaClassifier` (Count, dims: Matched=true|false) — how often the disguised-405
  *   quota classifier (`isMeteredQuota`, errors.js) fires. NOTE: as of this PR `isMeteredQuota` has
  *   no production call site yet (see errors.js doc comment) — this metric exists so a future
@@ -92,10 +97,15 @@ export function recordHeadroomCheck(toppedUp) {
 
 /**
  * @param {number} ms wall-clock duration of one transfer attempt.
+ * @param {'settle'|'fail-fast'} path `settle` for `transferAndSettle` (poll + retry-loop sleeps
+ *   included), `fail-fast` for `transferOnce` (a single transport call) — see the module doc; the
+ *   two are not comparable durations and must never share an unpartitioned percentile.
  * @returns {void}
  */
-export function recordTopUpLatency(ms) {
-  emit({ name: 'TopUpLatencyMs', value: ms, unit: 'Milliseconds' });
+export function recordTopUpLatency(ms, path) {
+  emit({
+    name: 'TopUpLatencyMs', value: ms, unit: 'Milliseconds', dimensions: { Path: path },
+  });
 }
 
 /**
@@ -129,7 +139,7 @@ export function recordNotReadyRetry() {
 }
 
 /**
- * @param {'released'|'nothing-to-release'|'requires-decommission'|'error'} reason
+ * @param {'released'|'nothing-to-release'|'requires-decommission'|'error'|'dry-run'} reason
  * @returns {void}
  */
 export function recordReleaseOutcome(reason) {

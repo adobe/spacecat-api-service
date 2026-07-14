@@ -162,11 +162,16 @@ export function readAiTotals(resources) {
 // `.code` (part of the public contract); the detailed context (ids, numbers) is logged at the throw
 // site instead.
 
+// NOTE (MysticatBot review, LLMO-6191): these factories are plain, side-effect-free constructors —
+// deliberately mirroring the peer predicates in errors.js (`isPoolExhausted`,
+// `isWorkspaceNotReady`), which are also pure. The rejection metric is recorded at each THROW site
+// (see the `recordRejection` calls below), not here, so constructing one of these for comparison/
+// logging/testing never fires a phantom rejection metric.
+
 /** @returns {ErrorWithStatusCode} */
 function orgPoolExhausted() {
   const e = new ErrorWithStatusCode('Organization AI resource pool is exhausted', 409);
   e.code = ERROR_CODES.ORG_POOL_EXHAUSTED;
-  recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal load on a small pool
   return e;
 }
 
@@ -174,7 +179,6 @@ function orgPoolExhausted() {
 function brandAiLimit() {
   const e = new ErrorWithStatusCode('Brand AI resource allocation limit reached', 409);
   e.code = ERROR_CODES.BRAND_AI_LIMIT;
-  recordRejection('brandAiLimit'); // dashboard-only — expected under normal load on a small pool
   return e;
 }
 
@@ -186,9 +190,6 @@ function brandAiLimit() {
 function workspaceBusy() {
   const e = new ErrorWithStatusCode('Sub-workspace is provisioning, retry', 503);
   e.code = ERROR_CODES.WORKSPACE_BUSY;
-  // Pager-worthy: JIT top-up itself is degraded (a transfer never cleared the async lock), not just
-  // an exhausted pool — see docs/runbooks/serenity-zombie-workspace-recovery.md.
-  recordRejection('workspaceBusy');
   return e;
 }
 
@@ -219,6 +220,7 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
       } catch (e) {
         if (isPoolExhausted(e)) {
           log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
+          recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
           throw orgPoolExhausted();
         }
         if (!isWorkspaceNotReady(e)) {
@@ -235,9 +237,11 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
     }
     // Lock contention, not a full pool — surface a retryable 503, not orgPoolExhausted.
     log?.warn?.('SERENITY_ALLOC transfer never cleared workspace-not-ready', { workspaceId });
+    // Pager-worthy: JIT top-up itself is degraded (never cleared the async lock) — see the runbook.
+    recordRejection('workspaceBusy');
     throw workspaceBusy();
   } finally {
-    recordTopUpLatency(Date.now() - startedAt);
+    recordTopUpLatency(Date.now() - startedAt, 'settle');
   }
 }
 
@@ -265,16 +269,19 @@ async function transferOnce(transport, workspaceId, totals, log) {
   } catch (e) {
     if (isPoolExhausted(e)) {
       log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
+      recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
       throw orgPoolExhausted();
     }
     if (isWorkspaceNotReady(e)) {
       // Still settling — do NOT poll. Fail fast with a retryable 503; the transfer is idempotent.
       log?.info?.('SERENITY_ALLOC workspace not ready on transfer — returning 503', { workspaceId });
+      // Pager-worthy: JIT top-up itself is degraded (never cleared the async lock) — see runbook.
+      recordRejection('workspaceBusy');
       throw workspaceBusy();
     }
     throw e;
   } finally {
-    recordTopUpLatency(Date.now() - startedAt);
+    recordTopUpLatency(Date.now() - startedAt, 'fail-fast');
   }
 }
 
@@ -324,6 +331,7 @@ export async function ensureAiHeadroom(transport, {
         log?.warn?.('SERENITY_ALLOC brand ceiling reached', {
           subWorkspaceId, dim, target, cap,
         });
+        recordRejection('brandAiLimit'); // dashboard-only — expected under normal pool load
         throw brandAiLimit();
       }
       newTotal[dim] = target;
@@ -458,6 +466,7 @@ export async function releaseAiSurplus(transport, {
       return { released: false, reason: 'nothing-to-release' };
     }
     if (dryRun) {
+      recordReleaseOutcome('dry-run'); // so a sweep dry-run pass is visible in the same dashboard
       return {
         released: false, reason: 'dry-run', target,
       };

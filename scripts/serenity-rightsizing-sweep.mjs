@@ -82,7 +82,9 @@
 import { createDataAccess } from '@adobe/spacecat-shared-data-access';
 import { parseArgs } from 'node:util';
 import { env, exit } from 'node:process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  readFileSync, writeFileSync, existsSync, renameSync,
+} from 'node:fs';
 import { listBrands } from '../src/support/brands-storage.js';
 import { createSerenityTransport } from '../src/support/serenity/rest-transport.js';
 import {
@@ -112,6 +114,27 @@ const { values } = parseArgs({
   },
 });
 
+/**
+ * Parses a numeric CLI option, exiting with a clear error on non-numeric input rather than
+ * silently producing `NaN` (which would make e.g. `consecutiveUnexpectedErrors >= NaN` always
+ * false — a silent no-op abort threshold — MysticatBot review, LLMO-6191).
+ * @param {string} flag the --flag name, for the error message.
+ * @param {string|undefined} raw the raw string value from parseArgs.
+ * @param {number} fallback default when `raw` is absent.
+ * @returns {number}
+ */
+function parseNumericOption(flag, raw, fallback) {
+  if (raw === undefined) {
+    return fallback;
+  }
+  const n = Number(raw);
+  if (Number.isNaN(n)) {
+    console.error(`ERROR: ${flag} must be a number, got "${raw}"`);
+    exit(1);
+  }
+  return n;
+}
+
 const dryRun = values['dry-run'];
 const orgIdFilter = values['org-ids']
   ? new Set(values['org-ids'].split(',').map((s) => s.trim()).filter(Boolean))
@@ -119,11 +142,9 @@ const orgIdFilter = values['org-ids']
 const brandIdFilter = values['brand-ids']
   ? new Set(values['brand-ids'].split(',').map((s) => s.trim()).filter(Boolean))
   : null;
-const limit = values.limit ? Number(values.limit) : Infinity;
-const rateLimitMs = values['rate-limit-ms'] ? Number(values['rate-limit-ms']) : DEFAULT_RATE_LIMIT_MS;
-const maxConsecutiveErrors = values['max-consecutive-errors']
-  ? Number(values['max-consecutive-errors'])
-  : DEFAULT_MAX_CONSECUTIVE_ERRORS;
+const limit = parseNumericOption('--limit', values.limit, Infinity);
+const rateLimitMs = parseNumericOption('--rate-limit-ms', values['rate-limit-ms'], DEFAULT_RATE_LIMIT_MS);
+const maxConsecutiveErrors = parseNumericOption('--max-consecutive-errors', values['max-consecutive-errors'], DEFAULT_MAX_CONSECUTIVE_ERRORS);
 const checkpointFile = values['checkpoint-file'];
 
 if (brandIdFilter && !orgIdFilter) {
@@ -172,8 +193,13 @@ function saveCheckpoint(processedBrandIds) {
   if (!checkpointFile) {
     return;
   }
+  // Write-to-tmp + rename (atomic on the same filesystem) rather than writing the checkpoint file
+  // directly — a crash mid-write of a direct write can leave a truncated/corrupt JSON file, losing
+  // the entire progress set on the very next resume attempt (MysticatBot review, LLMO-6191).
   const payload = { processedBrandIds: [...processedBrandIds] };
-  writeFileSync(checkpointFile, JSON.stringify(payload, null, 2));
+  const tmpFile = `${checkpointFile}.tmp`;
+  writeFileSync(tmpFile, JSON.stringify(payload, null, 2));
+  renameSync(tmpFile, checkpointFile);
 }
 
 const processedBrandIds = loadCheckpoint();

@@ -88,17 +88,22 @@ export function isWorkspaceNotReady(e) {
  * `405`, so a legitimate Method-Not-Allowed is not absorbed. The exact disguised-405 body is pinned
  * by the PR-4 live-gateway canary; widen the signal here only from that pinned shape.
  *
- * Emits the `MeteredQuotaClassifier` observability metric (LLMO-6191 item 2) on every call,
- * dimensioned by match/no-match, so the "405-classifier match ratio" the rollout-hardening ticket
- * asks for is available the moment a caller wires this predicate into a metered handler's catch
- * path. NOTE: as of this PR no production call site invokes `isMeteredQuota` yet — see the module
- * doc above — so this metric will read zero in every environment until one is added.
+ * Emits the `MeteredQuotaClassifier` observability metric (LLMO-6191 item 2) ONLY when `e` is an
+ * actual `405` (the metric's denominator is "how many 405s", not "how many errors of any kind" —
+ * see the non-405 early return), dimensioned by match/no-match, so the "405-classifier match
+ * ratio" the rollout-hardening ticket asks for is available the moment a caller wires this
+ * predicate into a metered handler's catch path. NOTE: as of this PR no production call site
+ * invokes `isMeteredQuota` yet — see the module doc above — so this metric will read zero in
+ * every environment until one is added.
  * @param {unknown} e
  * @returns {boolean}
  */
 export function isMeteredQuota(e) {
   if (!(e instanceof SerenityTransportError) || e.status !== 405) {
-    recordMeteredQuotaClassifier(false);
+    // Not a 405 at all — outside the classifier's domain (the metric's denominator is "how many
+    // 405s", not "how many errors of any kind"), so no metric here (MysticatBot review, LLMO-6191):
+    // emitting `Matched=false` for every unrelated error (a TypeError, a timeout, a 409, ...) would
+    // drown the actual 405-classifier signal once a real caller is wired up.
     return false;
   }
   const text = bodyText(e);

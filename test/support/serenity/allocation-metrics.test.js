@@ -44,11 +44,15 @@ describe('serenity allocation-metrics', () => {
     expect(emitMetricStub.secondCall.args[0].dimensions).to.deep.equal({ Outcome: 'topped-up' });
   });
 
-  it('recordTopUpLatency emits a Milliseconds metric with the given value', () => {
-    metrics.recordTopUpLatency(42);
-    expect(emitMetricStub).to.have.been.calledOnce;
+  it('recordTopUpLatency emits a Milliseconds metric dimensioned by Path (settle vs fail-fast)', () => {
+    metrics.recordTopUpLatency(42, 'settle');
+    metrics.recordTopUpLatency(7, 'fail-fast');
+    expect(emitMetricStub).to.have.been.calledTwice;
     expect(emitMetricStub.firstCall.args[0]).to.deep.equal({
-      name: 'TopUpLatencyMs', value: 42, unit: 'Milliseconds',
+      name: 'TopUpLatencyMs', value: 42, unit: 'Milliseconds', dimensions: { Path: 'settle' },
+    });
+    expect(emitMetricStub.secondCall.args[0]).to.deep.equal({
+      name: 'TopUpLatencyMs', value: 7, unit: 'Milliseconds', dimensions: { Path: 'fail-fast' },
     });
   });
 
@@ -81,6 +85,13 @@ describe('serenity allocation-metrics', () => {
     metrics.recordReleaseOutcome('requires-decommission');
     expect(emitMetricStub.firstCall.args[0]).to.deep.equal({
       name: 'ReleaseOutcome', dimensions: { Reason: 'requires-decommission' },
+    });
+  });
+
+  it('recordReleaseOutcome accepts dry-run as a reason (sweep preview visibility)', () => {
+    metrics.recordReleaseOutcome('dry-run');
+    expect(emitMetricStub.firstCall.args[0]).to.deep.equal({
+      name: 'ReleaseOutcome', dimensions: { Reason: 'dry-run' },
     });
   });
 
