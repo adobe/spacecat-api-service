@@ -42,12 +42,13 @@ const PARENT = 'parent-ws';
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
 function proj({
-  id = 'p1', geo = 2840, lang = 'en', status = 'live',
+  id = 'p1', geo = 2840, lang = 'en', status = 'live', domain = undefined,
 } = {}) {
   return {
     id,
     publish_status: status,
     updated_at: '2026-06-02T00:00:00Z',
+    ...(domain === undefined ? {} : { domain }),
     settings: { ai: { location: { id: geo }, language: { name: lang } } },
   };
 }
@@ -71,12 +72,6 @@ function makeTransport(overrides = {}) {
     listProjectTags: makeListProjectTagsStub(),
     createPromptsByIds: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
-    // Identity url/resolve: echoes its input as a valid canonical value, so the
-    // handler's brand-URL attach behaves as before for these tests (the www→apex
-    // normalization itself is unit-tested in brand-urls.test.js).
-    resolveUrl: sinon.stub().callsFake(
-      (url) => Promise.resolve({ domain: url, primary_url: url, is_valid: true }),
-    ),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
     createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
     deleteBenchmarks: sinon.stub().resolves(null),
@@ -315,6 +310,67 @@ describe('markets-subworkspace handlers', () => {
         { url: 'https://news/b', type: 'earned' },
       ]);
       expect(transport.createBrandUrls).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('skips the brand\'s own primary domain (apex and www) when pushing brand URLs', async () => {
+      const transport = makeTransport();
+      // createBody.brandDomain is 'example.com' — the project's own-brand benchmark
+      // already carries it, so neither the apex nor the www form may be written as a
+      // `website` brand URL (serenity-docs#25). A secondary site still goes through.
+      const brandUrlSources = {
+        urls: [
+          'https://example.com',
+          'https://www.example.com',
+          'https://shop.example.com',
+        ],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { brandUrlSources },
+      );
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
+        { url: 'https://shop.example.com', type: 'website' },
+      ]);
+    });
+
+    it('skips ANOTHER market\'s primary domain when pushing brand URLs (market-mirror brand)', async () => {
+      // A sibling CA project already exists on acme.ca. Creating the US market
+      // (brandDomain example.com) must skip BOTH primaries: example.com because it
+      // is this market's own, acme.ca because it is CA's — neither may be written
+      // as a website brand URL here. Only the genuine secondary site survives.
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({
+            id: 'ca-proj', geo: 2124, lang: 'en', domain: 'acme.ca',
+          })],
+        }),
+      });
+      const brandUrlSources = {
+        urls: ['https://example.com', 'https://acme.ca', 'https://shop.example.com'],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { brandUrlSources },
+      );
+      expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
+        { url: 'https://shop.example.com', type: 'website' },
+      ]);
     });
 
     it('tracks region-filtered competitors as benchmarks before publishing', async () => {

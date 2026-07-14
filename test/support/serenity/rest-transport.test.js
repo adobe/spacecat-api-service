@@ -486,7 +486,7 @@ describe('Semrush REST transport', () => {
       expect(call.body).to.equal(undefined);
     });
 
-    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls', async () => {
+    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls (published view by default)', async () => {
       fetchStub.resolves(fetchOk({ brand_urls: [] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -494,7 +494,19 @@ describe('Semrush REST transport', () => {
 
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
+      // No `draft` query → the default (published) view.
       expect(call.url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+    });
+
+    it('listBrandUrls sends ?draft=true when the draft view is requested', async () => {
+      fetchStub.resolves(fetchOk({ brand_urls: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID, { draft: true });
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls\?draft=true$/);
     });
 
     it('createBrandUrls POSTs the entries array as the body', async () => {
@@ -777,24 +789,6 @@ describe('Semrush REST transport', () => {
         'https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/ai_models?page=1&limit=100',
       );
       expect(result.items[0].id).to.equal('cat-gpt');
-    });
-  });
-
-  describe('resolveUrl', () => {
-    it('GETs /v1/url/resolve with the primary_url query param and returns the body', async () => {
-      fetchStub.resolves(fetchOk({ domain: 'lovesac.com', primary_url: 'lovesac.com', is_valid: true }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const result = await transport.resolveUrl('https://www.lovesac.com');
-
-      const call = await callOf(fetchStub);
-      expect(call.method).to.equal('GET');
-      const url = new URL(call.url);
-      expect(url.pathname).to.equal('/enterprise/projects/api/v1/url/resolve');
-      // The raw URL is passed verbatim as the query value (decoded here to stay
-      // robust to the client's query-encoding).
-      expect(url.searchParams.get('primary_url')).to.equal('https://www.lovesac.com');
-      expect(result).to.deep.equal({ domain: 'lovesac.com', primary_url: 'lovesac.com', is_valid: true });
     });
   });
 

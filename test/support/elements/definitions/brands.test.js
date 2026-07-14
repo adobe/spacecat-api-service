@@ -74,10 +74,10 @@ describe('brands definitions', () => {
       expect(transformBrandsToFilterDimensions({})).to.deep.equal([]);
     });
 
-    it('always sets id to null', () => {
+    it('sets id to the brand label', () => {
       const raw = { blocks: { value: [{ value: 'Adobe' }] } };
       const [item] = transformBrandsToFilterDimensions(raw);
-      expect(item.id).to.be.null;
+      expect(item.id).to.equal('Adobe');
     });
 
     it('uses item.value as label', () => {

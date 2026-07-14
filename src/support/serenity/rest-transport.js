@@ -633,23 +633,6 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * GET /v1/url/resolve — canonicalize a raw URL to the form Semrush stores as
-     * a brand URL. Returns `{ domain, primary_url, is_valid }`: `primary_url`
-     * strips the scheme and a leading `www.` (subdomain + path preserved),
-     * `domain` is the registrable apex. Unresolvable/garbage input comes back
-     * `{ domain: '', primary_url: '', is_valid: false }` at HTTP 200 (NOT an
-     * error), so callers MUST check `is_valid` and never write the empty value.
-     * Used to normalize brand URLs before writing them so the value matches the
-     * canonical benchmark Semrush already holds (avoids www-vs-apex duplicates).
-     */
-    async resolveUrl(primaryUrl) {
-      return unwrap('GET', await projects.GET(
-        '/v1/url/resolve',
-        { params: { query: { primary_url: primaryUrl } } },
-      ));
-    },
-
-    /**
      * GET /v1/languages — returns Semrush's language catalog. Used to resolve
      * the language_id UUID from an ISO 639-1 code (e.g. 'en' → UUID). The
      * caller is expected to cache the result (catalog is stable).
@@ -904,13 +887,29 @@ export function createSerenityTransport({ env, imsToken }) {
      * GET /v2/.../aio/benchmarks/{bid}/brand_urls — list a benchmark's brand
      * URLs. Returns `{ brand_urls: [{ id, url, type, ... }] }`. Used by the
      * brand-edit re-sync to diff the live set before adding/removing.
+     *
+     * The default is the PUBLISHED view: a brand URL that has been written but not
+     * yet published is INVISIBLE to it (live-verified 2026-07-13 — create → the row
+     * is absent from the default list and present under `?draft=true`; a project
+     * publish then promotes it into the default view, the row itself unchanged).
+     * `draft: true` selects the pending view — writes and deletes act on the DRAFT,
+     * so a diff that means to converge the draft must read the draft (see
+     * `syncBrandUrlsAcrossMarkets`); reading the published view compares against a
+     * stale snapshot whenever the project has unpublished changes.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {string} benchmarkId
+     * @param {object} [opts]
+     * @param {boolean} [opts.draft=false] - read the draft (pending) view.
      */
-    async listBrandUrls(workspaceId, projectId, benchmarkId) {
+    async listBrandUrls(workspaceId, projectId, benchmarkId, { draft = false } = {}) {
       return unwrap('GET', await projects.GET(
         '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
+            ...(draft ? { query: { draft: true } } : {}),
           },
         },
       ));

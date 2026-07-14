@@ -37,7 +37,8 @@ import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { DIMENSION, STANDARD_PROMPT_TAG_VALUES } from '../prompt-tags.js';
 import { provisionDimensionTree } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
-import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
+import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
+import { resolveProjects } from '../resolve-projects.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
@@ -459,9 +460,24 @@ export async function handleCreateMarketSubworkspace(
   // own-brand benchmark (created on demand when Semrush hasn't provisioned one),
   // region-filtered to the market. Done before publish so the URLs are part of
   // the same published version. Best-effort: URL enrichment must never abort the
-  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated.
-  const brandUrlEntries = collectBrandUrlEntries(brandUrlSources, body.market);
+  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated,
+  // so the whole block (INCLUDING the project listing the skip set needs) sits
+  // inside the try.
   try {
+    // Skip EVERY market's primary domain, not just this one's: a market-mirror
+    // brand's other-market primary must not surface as a website URL here either
+    // (skip-primary-domain, #25 — see collectBrandUrlEntries). This market's own
+    // domain comes from the payload; its project may not be in the listing yet.
+    const siblings = await resolveProjects(transport, workspaceId);
+    const primaryDomains = primaryDomainSet([
+      body.brandDomain,
+      ...siblings.map((p) => p?.domain),
+    ]);
+    const brandUrlEntries = collectBrandUrlEntries(
+      brandUrlSources,
+      body.market,
+      primaryDomains,
+    );
     await attachBrandUrlsToProject(
       transport,
       workspaceId,
