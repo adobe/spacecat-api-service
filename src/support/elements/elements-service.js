@@ -32,6 +32,8 @@ import {
   buildOwnedUrlsStatsPayload,
   buildOwnedUrlsTrendPayload,
   transformOwnedUrlsResponse,
+  buildDomainUrlsPayload,
+  transformDomainUrlsResponse,
 } from './definitions/index.js';
 
 /**
@@ -259,6 +261,59 @@ export function createElementsService(transport) {
         },
       );
       return transformOwnedUrlsResponse(projectResults);
+    },
+    /* c8 ignore stop */
+
+    /**
+     * Fetches the URL Inspector Domain URLs table (Phase 2 drilldown: the URLs
+     * within one cited domain), backed by the same Stats-per-URL element (9af5ed83)
+     * as owned-urls — but with NO trend element and NO Postgres traffic hybrid, and
+     * filtered to a single domain instead of `domain_type='Owned'`.
+     *
+     * Fans out per project (region) — each project stays under the 50k-row cap and
+     * carries its region — then merges + host-filters to the legacy shape. The
+     * `hostname` filter is applied client-side in the transform (the element ignores
+     * a server-side domain filter — verified live). Returns the paginated slice +
+     * post-filter totalCount.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {Array<{region?: string, projectId?: string}>} [params.projects] -
+     *   Projects to query. Empty → one unscoped (workspace-wide) fetch.
+     * @param {string} params.hostname - Registered domain to drill into (required).
+     * @param {string} [params.channel] - Content-type filter, applied client-side.
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD.
+     * @param {string} [params.category] - Category tag filter.
+     * @param {string|number} [params.page] / [params.pageSize] - Client-side slice.
+     * @returns {Promise<{ urls: object[], totalCount: number }>} Legacy contract.
+     */
+    /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
+    async getDomainUrls(workspaceId, {
+      projects = [], hostname, channel, model, platform, startDate, endDate, category,
+      page, pageSize,
+    }) {
+      const scopes = projects.length > 0 ? projects : [{}];
+      // Bound the per-project fan-out (mirrors owned-urls) so a brand with many
+      // markets can't spawn unbounded parallel Semrush requests (429 / pool risk).
+      const DOMAIN_URLS_PROJECT_CONCURRENCY = 8;
+      const projectResults = await mapWithConcurrency(
+        scopes,
+        DOMAIN_URLS_PROJECT_CONCURRENCY,
+        async ({ region, projectId }) => {
+          const stats = await transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.STATS_PER_URL,
+            buildDomainUrlsPayload({
+              model, platform, startDate, endDate, category, projectId,
+            }),
+          );
+          return { region, stats };
+        },
+      );
+      return transformDomainUrlsResponse(projectResults, {
+        hostname, channel, page, pageSize,
+      });
     },
     /* c8 ignore stop */
   };

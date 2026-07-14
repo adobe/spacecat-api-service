@@ -63,8 +63,8 @@ import {
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
+import { isDynamicAllocationEnabled } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
-import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -421,6 +421,11 @@ function SerenityController(context, log, env) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
 
+  // Global dynamic-allocation kill-switch for this request (env/Vault boolean, default OFF). Read
+  // per request off ctx.env, mirroring buildTransport's env resolution. When OFF the metered
+  // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
+  const dynamicAllocationEnabled = (ctx) => isDynamicAllocationEnabled(ctx?.env || env);
+
   /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
@@ -435,10 +440,10 @@ function SerenityController(context, log, env) {
   }
 
   /**
-   * Builds the server-side `type:branded`/`type:non-branded` classifier for the
+   * Builds the server-side `branded`/`non-branded` `type`-value classifier for the
    * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
    * name + aliases ONCE per request, then returns a pure
-   * `(text, geoTargetId) => TYPE_TAG` closure: each prompt's market is derived
+   * `(text, geoTargetId) => TYPE_VALUE` closure: each prompt's market is derived
    * from its geoTargetId and the alias needles are region-clamped to that market
    * (memoized per market). This is the SAME classifier the AI-generation and
    * onboarding paths use, so a prompt is classified identically no matter how it
@@ -502,6 +507,10 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
+          },
         )
         : await handleCreatePrompts(
           transport,
@@ -680,8 +689,6 @@ function SerenityController(context, log, env) {
           {
             generateTopics: genMarketTopics,
             topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
-            standardTags: genMarketTopics ? [...STANDARD_PROMPT_TAGS] : [],
-            projectTags: genMarketTopics ? [...PROJECT_STANDARD_TAGS] : [],
             brandAliases,
             brandUrlSources,
             competitors,
@@ -692,6 +699,9 @@ function SerenityController(context, log, env) {
             // in depth: this options bag flows into markets-subworkspace.js and
             // shouldn't carry access to unrelated tables).
             dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
+            // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -796,11 +806,14 @@ function SerenityController(context, log, env) {
   };
 
   /**
-   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
-   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
-   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
-   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
-   * for one, is derived from the `category:` tags across a brand's markets.
+   * POST /serenity/tags — register a bare-named prompt tag beneath a dimension
+   * root, on a single market (the (geoTargetId, languageCode) slice in the body).
+   * `type` names the dimension (one of ALL_DIMENSIONS). An open `category` value
+   * is customer-authored and may name a `parentId` inside its own dimension; a
+   * closed dimension's value comes from a fixed vocabulary and is resolved or
+   * created under its own root, never under a caller-chosen parent. The UI's
+   * "Categories" view, for one, is derived from the `category` root's descendants
+   * across a brand's markets.
    * Dispatches by workspace mode, mirroring the tags/markets handlers.
    */
   const createTag = async (ctx) => {
@@ -982,7 +995,16 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const result = auth.mode === 'subworkspace'
-        ? await handleUpdateModelsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
+        ? await handleUpdateModelsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
+          },
+        )
         : await handleUpdateModels(
           transport,
           ctx.dataAccess,
@@ -1080,6 +1102,7 @@ function SerenityController(context, log, env) {
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
+          { dynamicAllocation: dynamicAllocationEnabled(ctx) },
         );
         let bareSucceeded = true;
         if (typeof brand.setStatus === 'function') {
@@ -1174,6 +1197,7 @@ function SerenityController(context, log, env) {
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
+        { dynamicAllocation: dynamicAllocationEnabled(ctx) },
       );
       const results = [];
       for (const m of markets) {
@@ -1207,8 +1231,6 @@ function SerenityController(context, log, env) {
               // the project is published empty (no prompts) — today's default.
               generateTopics: generatePrompts,
               topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
-              standardTags: generatePrompts ? [...STANDARD_PROMPT_TAGS] : [],
-              projectTags: generatePrompts ? [...PROJECT_STANDARD_TAGS] : [],
               // A project with neither models nor generated prompts publishes
               // "empty units" → Semrush's disguised quota 405. Tolerate it
               // (best-effort, leaves a draft) rather than failing activation; a
@@ -1224,6 +1246,8 @@ function SerenityController(context, log, env) {
               // Narrowed to the one model the mapping-row helpers touch — see
               // the single-market create call site for the same rationale.
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+              // JIT units pool = the org parent passed positionally above; not duplicated here.
+              dynamicAllocation: dynamicAllocationEnabled(ctx),
             },
           );
         } catch (e) {

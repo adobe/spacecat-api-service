@@ -1,3 +1,52 @@
+# [1.646.0](https://github.com/adobe/spacecat-api-service/compare/v1.645.0...v1.646.0) (2026-07-14)
+
+
+### Bug Fixes
+
+* **SITES-47960:** accept caller-supplied x-promise-token in page-relationships ([#2806](https://github.com/adobe/spacecat-api-service/issues/2806)) ([de3572b](https://github.com/adobe/spacecat-api-service/commit/de3572b974b70c8351123f43606f5f7a8ce1b726))
+* **slack:** forward mode to non-prerender audit types (LLMO-6167) ([#2807](https://github.com/adobe/spacecat-api-service/issues/2807)) ([50c98bb](https://github.com/adobe/spacecat-api-service/commit/50c98bbaacbeacf5c1399bceafabd2e539d11073))
+
+
+### Features
+
+* **serenity:** dynamic AI resource allocation — consolidated allocator + kill-switch + hot-path wiring (LLMO-5616) ([#2764](https://github.com/adobe/spacecat-api-service/issues/2764)) ([674334a](https://github.com/adobe/spacecat-api-service/commit/674334a8579fd709ea4213dcca9791d78246d7b3)), closes [#2750](https://github.com/adobe/spacecat-api-service/issues/2750)
+
+# [1.645.0](https://github.com/adobe/spacecat-api-service/compare/v1.644.0...v1.645.0) (2026-07-14)
+
+
+### Features
+
+* **serenity:** resolve tag dimensions from the tag tree, not a name prefix ([#2788](https://github.com/adobe/spacecat-api-service/issues/2788)) ([2c687f4](https://github.com/adobe/spacecat-api-service/commit/2c687f4f0336cee537c065f861adee53c597eb2e)), closes [Hi#level](https://github.com/Hi/issues/level) [serenity-docs#44](https://github.com/serenity-docs/issues/44) [serenity-docs#44](https://github.com/serenity-docs/issues/44)
+* **SITES-44690:** add task-management controller (connections, tickets, Jira integration) ([#2661](https://github.com/adobe/spacecat-api-service/issues/2661)) ([5c17023](https://github.com/adobe/spacecat-api-service/commit/5c1702342b6c7d19a8621bc38e9088898d5664b2))
+
+# [1.644.0](https://github.com/adobe/spacecat-api-service/compare/v1.643.1...v1.644.0) (2026-07-13)
+
+
+### Features
+
+* **ai-visibility:** server-side sort for brand list endpoints ([#2792](https://github.com/adobe/spacecat-api-service/issues/2792)) ([210627c](https://github.com/adobe/spacecat-api-service/commit/210627c1e01734f40a10d1bcf383d56b4ce092b4))
+
+## [1.643.1](https://github.com/adobe/spacecat-api-service/compare/v1.643.0...v1.643.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **serenity:** write brand URLs verbatim https, skip the brand's own primary domain ([#2799](https://github.com/adobe/spacecat-api-service/issues/2799)) ([8b2ba6f](https://github.com/adobe/spacecat-api-service/commit/8b2ba6fde24d9ee25e56c0a27237077937eb0f57)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.643.0](https://github.com/adobe/spacecat-api-service/compare/v1.642.0...v1.643.0) (2026-07-13)
+
+
+### Features
+
+* Serenity url-inspector/domain-urls endpoint | LLMO-6160 ([#2796](https://github.com/adobe/spacecat-api-service/issues/2796)) ([b9ca700](https://github.com/adobe/spacecat-api-service/commit/b9ca7008dab55d00c1abdc541e641bbef0f8bf88))
+
+# [1.642.0](https://github.com/adobe/spacecat-api-service/compare/v1.641.0...v1.642.0) (2026-07-13)
+
+
+### Features
+
+* enhance serenity filter-dimensions for sub categories ([#2791](https://github.com/adobe/spacecat-api-service/issues/2791)) ([8cf3973](https://github.com/adobe/spacecat-api-service/commit/8cf3973dff91618406e421549131a56a0edb0f17))
+
 # [1.641.0](https://github.com/adobe/spacecat-api-service/compare/v1.640.0...v1.641.0) (2026-07-13)
 
 
