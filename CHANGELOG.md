@@ -1,3 +1,11 @@
+# [1.645.0](https://github.com/adobe/spacecat-api-service/compare/v1.644.0...v1.645.0) (2026-07-14)
+
+
+### Features
+
+* **serenity:** resolve tag dimensions from the tag tree, not a name prefix ([#2788](https://github.com/adobe/spacecat-api-service/issues/2788)) ([2c687f4](https://github.com/adobe/spacecat-api-service/commit/2c687f4f0336cee537c065f861adee53c597eb2e)), closes [Hi#level](https://github.com/Hi/issues/level) [serenity-docs#44](https://github.com/serenity-docs/issues/44) [serenity-docs#44](https://github.com/serenity-docs/issues/44)
+* **SITES-44690:** add task-management controller (connections, tickets, Jira integration) ([#2661](https://github.com/adobe/spacecat-api-service/issues/2661)) ([5c17023](https://github.com/adobe/spacecat-api-service/commit/5c1702342b6c7d19a8621bc38e9088898d5664b2))
+
 # [1.644.0](https://github.com/adobe/spacecat-api-service/compare/v1.643.1...v1.644.0) (2026-07-13)
 
 
