@@ -42,6 +42,9 @@ import { projectionAudits } from './seed-data/projection-audits.js';
 import { featureFlags } from './seed-data/feature-flags.js';
 import { prompts } from './seed-data/prompts.js';
 import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
+import { taskManagementConnections } from './seed-data/task-management-connections.js';
+import { tickets } from './seed-data/tickets.js';
+import { ticketSuggestions } from './seed-data/ticket-suggestions.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -137,6 +140,7 @@ async function seed() {
     // feature_flags grants INSERT to postgrest_writer only (SELECT to anon), so
     // seed it with the writer JWT — same as the append-only audit tables.
     insertRows('feature_flags', featureFlags, { asWriter: true }),
+    insertRows('task_management_connections', taskManagementConnections),
   ]);
 
   // Level 1b: depend on projects
@@ -165,10 +169,14 @@ async function seed() {
     insertRows('audit_urls', auditUrls),
     insertRows('sentiment_guidelines', sentimentGuidelines),
     insertRows('brand_sites', brandSites),
+    insertRows('tickets', tickets),
   ]);
 
-  // Level 4: depend on fix_entities + suggestions
-  await insertRows('fix_entity_suggestions', fixEntitySuggestions);
+  // Level 4: depend on fix_entities + suggestions + tickets
+  await Promise.all([
+    insertRows('fix_entity_suggestions', fixEntitySuggestions),
+    insertRows('ticket_suggestions', ticketSuggestions),
+  ]);
 }
 
 /**
