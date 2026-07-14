@@ -1,3 +1,10 @@
+## [1.649.1](https://github.com/adobe/spacecat-api-service/compare/v1.649.0...v1.649.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **llmo:** read popularity rationale from topics table, not Mystique S3 ([#2814](https://github.com/adobe/spacecat-api-service/issues/2814)) ([fb576ac](https://github.com/adobe/spacecat-api-service/commit/fb576ac1097b1b51522b18a79689e0143fd2357e)), closes [#791](https://github.com/adobe/spacecat-api-service/issues/791) [adobe-rnd/llmo-data-retrieval-service#2689](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/2689)
+
 # [1.649.0](https://github.com/adobe/spacecat-api-service/compare/v1.648.0...v1.649.0) (2026-07-14)
 
 
