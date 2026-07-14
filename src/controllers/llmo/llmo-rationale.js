@@ -53,77 +53,83 @@ function filterTopics(topics, filters) {
   });
 }
 
+// LLM-estimated volume encoding → popularity label (see DRS popularity estimator).
+const VOLUME_TO_POPULARITY = { '-30': 'High', '-20': 'Medium', '-10': 'Low' };
+
+/**
+ * Maps the LLM-estimated volume encoding to a popularity label.
+ * @param {number} volume - -30 High, -20 Medium, -10 Low.
+ * @returns {string} High | Medium | Low | N/A
+ */
+function volumeToPopularity(volume) {
+  return VOLUME_TO_POPULARITY[String(volume)] || 'N/A';
+}
+
 /**
  * Handles the LLMO rationale retrieval logic after site validation.
- * This function contains all the logic that comes after getSiteAndValidateLlmo().
+ * Reads popularity reasoning from the topics table (mysticat PostgreSQL via
+ * PostgREST), replacing the decommissioned Mystique S3 cache.
  *
- * @param {object} context - The request context containing log, s3, env, and params
+ * @param {object} context - The request context containing log, dataAccess, and params
  * @returns {Promise<Response>} The rationale response
  */
 export async function handleLlmoRationale(context) {
-  const { log, s3, env } = context;
+  const { log, dataAccess } = context;
   const { siteId } = context.params;
 
-  // Extract query parameters
-  const {
-    topic, category, region, origin, popularity,
-  } = context.data;
+  // Extract query parameters (category/region/origin accepted for backwards
+  // compatibility but not applied — see note below).
+  const { topic, popularity } = context.data;
 
   // Validate mandatory parameters
   if (!topic) {
     return badRequest('topic parameter is required');
   }
 
-  if (!s3 || !s3.s3Client) {
-    return badRequest('S3 storage is not configured for this environment');
+  const { Site } = dataAccess;
+  if (!Site?.postgrestService) {
+    log.error('LLMO rationale requires PostgREST (DATA_SERVICE_PROVIDER=postgres)');
+    return badRequest('Rationale data is not available. PostgreSQL data service is required.');
+  }
+  const client = Site.postgrestService;
+
+  const site = await Site.findById(siteId);
+  if (!site) {
+    return notFound(`Site not found: ${siteId}`);
+  }
+  const organizationId = site.getOrganizationId();
+
+  log.info(`Getting LLMO rationale for site ${siteId} (org ${organizationId}) - topic: ${topic}, popularity: ${popularity || 'all'}`);
+
+  // Popularity reasoning now lives on the topics table (topics.popularity_reasoning /
+  // topics.popularity_volume), filled by the DRS brand-presence import + backfill. This
+  // replaces the decommissioned Mystique S3 cache this endpoint used to read. `topics`
+  // is org-scoped with no category/region column, so we match on topic name only —
+  // category/region query params are intentionally not applied here.
+  const { data, error } = await client
+    .from('topics')
+    .select('name,popularity_volume,popularity_reasoning,updated_at')
+    .eq('organization_id', organizationId);
+
+  if (error) {
+    log.error(`LLMO rationale PostgREST error for site ${siteId}: ${error.message}`);
+    return badRequest(`Error retrieving rationale: ${error.message}`);
   }
 
-  log.info(`Getting LLMO rationale for site ${siteId} with filters - topic: ${topic}, category: ${category || 'all'}, region: ${region || 'all'}, origin: ${origin || 'all'}, popularity: ${popularity || 'all'}`);
+  const topics = (data || [])
+    .filter((row) => row.popularity_reasoning)
+    .map((row) => ({
+      topic: row.name,
+      reasoning: row.popularity_reasoning,
+      popularity: volumeToPopularity(row.popularity_volume),
+      volume: row.popularity_volume,
+      added_date: row.updated_at,
+    }));
 
-  // Construct the S3 key for the topics popularity reasoning cache file
-  const bucketName = `spacecat-${env.ENV}-mystique-assets`;
-  const s3Key = `llm_cache/${siteId}/prompts/topics_popularity_reasoning_cache.json`;
+  // Only topic (mandatory) + popularity are applied; topics has no category/region/origin.
+  const filteredTopics = filterTopics(topics, { topic, popularity });
 
-  try {
-    // Fetch the file from S3
-    const { GetObjectCommand } = s3;
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: s3Key,
-    });
+  log.info(`Filtered ${topics.length} topics down to ${filteredTopics.length} results`);
 
-    const response = await s3.s3Client.send(command);
-    const fileContent = await response.Body.transformToString();
-
-    // Parse the JSON content
-    const jsonData = JSON.parse(fileContent);
-
-    // Extract topics array from the JSON data
-    const topics = jsonData.topics || [];
-
-    // Apply filtering based on query parameters
-    const filteredTopics = filterTopics(topics, {
-      topic, category, region, origin, popularity,
-    });
-
-    log.info(`Filtered ${topics.length} topics down to ${filteredTopics.length} results`);
-
-    return cachedOk(filteredTopics);
-  } catch (s3Error) {
-    if (s3Error.name === 'NoSuchKey') {
-      log.warn(`LLMO rationale file not found for site ${siteId} at ${s3Key}`);
-      return notFound(`Rationale file not found for site ${siteId}`);
-    }
-    if (s3Error.name === 'NoSuchBucket') {
-      log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
-    }
-    if (s3Error instanceof SyntaxError) {
-      log.error(`Invalid JSON in rationale file for site ${siteId}: ${s3Error.message}`);
-      return badRequest('Invalid JSON format in rationale file');
-    }
-
-    log.error(`S3 error retrieving rationale for site ${siteId}: ${s3Error.message}`);
-    return badRequest(`Error retrieving rationale: ${s3Error.message}`);
-  }
+  return cachedOk(filteredTopics);
 }
