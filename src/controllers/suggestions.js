@@ -2074,7 +2074,7 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('Missing required environment variables');
         }
         const hasPatternDeploy = domainWideSuggestions.length > 0 || pathSuggestions.length > 0;
-        // A single request can select multiple pattern suggestions (e.g. several segments).
+        // A single request can select multiple pattern suggestions
         const patternSuggestions = [
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
           ...pathSuggestions.map(({ suggestion }) => suggestion),
@@ -2101,9 +2101,6 @@ function SuggestionsController(ctx, sqs, env) {
             ...measurementSuggestions.map((s) => s.getId()),
           ])];
           urls = [...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean))];
-          // Actual patterns matched ('/*' domain-wide, or e.g. '/blog/*' segment-wide) — the UI
-          // derives domain-wide vs segment-wide naming from these values instead of a separate
-          // flag. An array since a request can select multiple segment patterns at once.
           metadataBase.patterns = patternSuggestions.map((ps) => (
             ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
           ));
@@ -2149,9 +2146,6 @@ function SuggestionsController(ctx, sqs, env) {
         });
         atomicStrategyCreated = true;
 
-        // Only the selected suggestion(s) block on the experiment; the measurement set (the
-        // ~100 high-impact URLs) is covered by the pattern instead (see below), which is what
-        // hides them on the UI — they don't need EXPERIMENT_IN_PROGRESS.
         validSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
@@ -2178,9 +2172,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         }
 
-        // Mark every suggestion under the opportunity that falls within each selected pattern's
-        // scope as covered (non-fatal) — not just the measurement set sent by the UI. Sequential
-        // so overlapping patterns don't race to save the same covered suggestion.
+        // marking suggestions covered by domain/pattern so that they get hidden on UI
         if (hasPatternDeploy) {
           const tokowakaClient = TokowakaClient.createFrom(context);
           for (const ps of patternSuggestions) {
