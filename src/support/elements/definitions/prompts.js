@@ -22,7 +22,7 @@ import { resolveElementModel } from '../constants.js';
  * - **intent coverage** — group the returned rows on `primary_intent`; no filter
  *   needed (the intent is on every row).
  * - **branded / unbranded** — the branded signal is NOT a row column; it is a
- *   `tags` value (`type:branded` / `type:non-branded`). So branded% is a
+ *   `tags` value (`type__branded` / `type__non-branded`). So branded% is a
  *   `tag`-filtered count over the total. Verified against prod (Lovesac, one
  *   project): branded 510 + non-branded 687 = total 1197 → 43%.
  *
@@ -33,9 +33,9 @@ import { resolveElementModel } from '../constants.js';
  *   the shape Semrush's own UI sends for this element.
  * - **tags** — each value becomes its own `tags contains <value>` clause; multiple
  *   tags are AND-ed (a prompt must carry all). Callers pass the FULL prefixed tag
- *   value — the element's tag taxonomy varies by workspace (`type:`, `category:`,
- *   `intent:`, `source:`, `topic:`), so no prefix is assumed here. e.g. pass
- *   `type:branded` for the branded count, `category:Brand` for a category filter.
+ *   value — the element's tag taxonomy varies by workspace (`type__`, `category__`,
+ *   `intent__`, `source__`, `topic__`), so no prefix is assumed here. e.g. pass
+ *   `type__branded` for the branded count, `category__Brand` for a category filter.
  * - **projectIds** — a `CBF_project` `or` group; omitted → all projects in the
  *   (sub-)workspace. The UI already surfaces these as `semrush_project_id` via the
  *   URL Inspector filter-dimensions `regions`.
@@ -45,7 +45,7 @@ import { resolveElementModel } from '../constants.js';
  *   platform code). Translated + validated via {@link resolveElementModel}.
  * @param {string} [params.platform] - Alias for `model`; `model` wins when both set.
  * @param {string[]} [params.tags] - Full tag values to filter on (AND-ed), e.g.
- *   `type:branded`, `category:Brand`. Empty/omitted → no tag filter.
+ *   `type__branded`, `category__Brand`. Empty/omitted → no tag filter.
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to scope to.
  *   Empty/omitted → all projects in the (sub-)workspace.
  */

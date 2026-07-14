@@ -1,3 +1,11 @@
+# [1.648.0](https://github.com/adobe/spacecat-api-service/compare/v1.647.0...v1.648.0) (2026-07-14)
+
+
+### Features
+
+* serenity apis to reflect tags changes in the elements api ([#2815](https://github.com/adobe/spacecat-api-service/issues/2815)) ([cc1d436](https://github.com/adobe/spacecat-api-service/commit/cc1d436f58e59b4e78593c3e498cb9b02d91aa62))
+* **serenity:** set brands.site_id on activation | LLMO-6176 ([#2803](https://github.com/adobe/spacecat-api-service/issues/2803)) ([ae51f7a](https://github.com/adobe/spacecat-api-service/commit/ae51f7ae06bbec4cd43d91726564540220d1ad37))
+
 # [1.647.0](https://github.com/adobe/spacecat-api-service/compare/v1.646.0...v1.647.0) (2026-07-14)
 
 
