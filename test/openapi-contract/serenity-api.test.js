@@ -301,6 +301,27 @@ const FIXTURES = {
       items: [{ id: 'lang-en', name: 'English' }],
     },
   },
+  // Unlike the rest of this file's fixtures, this operation is served by
+  // ElementsController (src/controllers/elements.js), not SerenityController —
+  // it wraps the Semrush Brands/Markets/Topics elements directly rather than
+  // going through the serenity handlers/*.js stack. `usesElementsController`
+  // routes it through a dedicated esmock load below instead of the shared one.
+  listSerenityUrlInspectorFilterDimensions: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listUrlInspectorFilterDimensions',
+    handlerResult: {
+      brands: [{ id: 'Test Brand', label: 'Test Brand', spacecat_brand_id: BRAND }],
+      regions: [{
+        id: 'US', semrush_project_id: 'proj-1', label: 'US-en',
+      }],
+      topics: [],
+      categories: [],
+      page_intents: [],
+      origins: [],
+      tags: [],
+    },
+  },
 };
 
 function makeAjv() {
@@ -343,6 +364,55 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
     it(`${operationId} response conforms to OpenAPI schema`, async () => {
       const op = opsByOperationId.get(operationId);
       expect(op, `operation ${operationId} not found in spec`).to.exist;
+
+      if (fx.usesElementsController) {
+        const ElementsController = (await esmock(
+          '../../src/controllers/elements.js',
+          {
+            '../../src/support/brands-storage.js': {
+              getBrandIdentity: () => Promise.resolve({ id: BRAND, name: 'Test Brand' }),
+              getBrandBySite: sinon.stub(),
+            },
+            '../../src/support/serenity/workspace-resolver.js': {
+              resolveBrandWorkspace: () => Promise.resolve({
+                mode: 'subworkspace', workspaceId: WORKSPACE, parentWorkspaceId: 'parent-ws',
+              }),
+            },
+            '../../src/support/access-control-util.js': {
+              default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+            },
+            '../../src/support/elements/elements-service.js': {
+              createElementsService: () => ({
+                getUrlInspectorFilterDimensions: sinon.stub().resolves(fx.handlerResult),
+              }),
+            },
+          },
+        )).default;
+
+        const ctx = fakeContext({
+          params: fx.params || {},
+          data: fx.data,
+          query: fx.query || {},
+        });
+        const controller = ElementsController(ctx, fakeLog(), { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' });
+        const response = await controller[fx.controllerMethod](ctx);
+
+        expect(response.status).to.equal(fx.expectedStatus);
+
+        const responseSchema = op.responseSchema(fx.expectedStatus);
+        expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;
+
+        const body = await readJsonBody(response);
+        const ajv = makeAjv();
+        const validate = ajv.compile(responseSchema);
+        const validBody = validate(body);
+        if (!validBody) {
+          const detail = validate.errors.map((e) => `${e.instancePath || '/'} ${e.message} (${JSON.stringify(e.params)})`).join('\n  ');
+          throw new Error(`AJV validation failed for ${operationId} ${fx.expectedStatus} response:\n  ${detail}\nbody: ${JSON.stringify(body, null, 2)}`);
+        }
+        expect(validBody).to.equal(true);
+        return;
+      }
 
       const handlerStubs = {
         handleListPrompts: sinon.stub(),

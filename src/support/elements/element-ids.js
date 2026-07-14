@@ -24,6 +24,25 @@ export const ELEMENT_IDS = Object.freeze({
   WEEKS: 'afa7458b-d34f-43d9-8cc5-e8794753551c',
 
   // Aggregated Stats
+  // URL Inspector — Cited Domains ("Stats per Domain"). `table` envelope. Honors: date +
+  // `CBF_model` + `CBF_tags` (category) filters, and a top-level `project_id` (region/market).
+  // Brand scoping is via the request's sub-workspace, not a filter (`CBF_ws_brand` is a no-op).
+  CITED_DOMAINS: '98b91d00-9531-4120-b3b5-17cc27489fce',
+
+  // URL Inspector — Owned URLs ("Your cited URLs" table). Two elements, both
+  // scoped by a top-level `project_id` (region/market) + date + `CBF_model`;
+  // neither honors a server-side content-type filter, so `domain_type='Owned'`
+  // is applied client-side (verified). Brand scoping is via the sub-workspace.
+  //  - STATS_PER_URL (`table`): one row per cited URL —
+  //    { source(=url), citations, prompts_with_citation, domain_type, avg_position,
+  //      project_id, url_cbf }. Shared with domain-urls.
+  //  - URL_TRENDS (`line`): weekly per-URL trend — one row per (url, week):
+  //    { legend(=url), project_id, x(=ISO week), y__mentions, y__positions }.
+  //    Verified: returns ALL URLs in ONE call when scoped by project only (no
+  //    per-URL filter needed — the wiki's "one call per URL" claim is wrong).
+  STATS_PER_URL: '9af5ed83-049b-493a-85d7-99c7d4deddba',
+  URL_TRENDS: 'afb2e5d3-3955-4e0d-aeb1-7e28cdecd9f9',
+
   MENTIONS: 'e1a6811b-d0c9-4d6f-8a29-290a32db863f',
   VISIBILITY: '2724878e-e0e9-4217-ad21-d6bcb7887a09',
   CITATIONS_KPI: '588054fe-b987-40f6-9360-b5673738bdfa',
