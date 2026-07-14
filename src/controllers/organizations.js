@@ -391,12 +391,14 @@ function OrganizationsController(ctx, env) {
     // scope). Skip the filter entirely in this branch. See
     // mysticat-architecture/platform/decisions/multi-product-login-phase1.md.
     let visibleOwnSites = filteredSites;
-    const viewable = await resolveViewableSiteIds(context, organization);
-    if (viewable instanceof Response) {
-      return viewable;
-    }
-    if (viewable) {
-      visibleOwnSites = filteredSites.filter((site) => viewable.has(site.getId()));
+    if (!isCrossProduct) {
+      const viewable = await resolveViewableSiteIds(context, organization);
+      if (viewable instanceof Response) {
+        return viewable;
+      }
+      if (viewable) {
+        visibleOwnSites = filteredSites.filter((site) => viewable.has(site.getId()));
+      }
     }
 
     return ok([...visibleOwnSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
