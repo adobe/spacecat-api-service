@@ -1,3 +1,10 @@
+# [1.644.0](https://github.com/adobe/spacecat-api-service/compare/v1.643.1...v1.644.0) (2026-07-13)
+
+
+### Features
+
+* **ai-visibility:** server-side sort for brand list endpoints ([#2792](https://github.com/adobe/spacecat-api-service/issues/2792)) ([210627c](https://github.com/adobe/spacecat-api-service/commit/210627c1e01734f40a10d1bcf383d56b4ce092b4))
+
 ## [1.643.1](https://github.com/adobe/spacecat-api-service/compare/v1.643.0...v1.643.1) (2026-07-13)
 
 
