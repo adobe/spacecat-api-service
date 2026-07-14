@@ -31,6 +31,7 @@ import {
 import { handleCreatePromptsSubworkspace } from '../../../src/support/serenity/handlers/prompts-subworkspace.js';
 import { clearTagCache } from '../../../src/support/serenity/handlers/markets.js';
 import { clearResourceLocks } from '../../../src/support/serenity/resource-lock.js';
+import { makeProvisioningTransportStubs } from './fixtures/tag-tree.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -62,6 +63,10 @@ function makeTransport(overrides = {}) {
   const getWorkspaceResources = sinon.stub();
   getWorkspaceResources.withArgs(WS).resolves(COVERED_CHILD);
   getWorkspaceResources.withArgs(MASTER).resolves(AMPLE_MASTER);
+  // create-market provisions the dimension-root tag tree (provisionDimensionTree) before its
+  // metered ops; this test suite cares about JIT fronting, not tag-tree logic, so start from an
+  // empty project and let provisioning actually run against a stub that folds writes back in.
+  const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
   return {
     listProjects: sinon.stub().resolves({ items: [] }),
     getInitStatus: sinon.stub().resolves({ initialized: true }),
@@ -73,12 +78,13 @@ function makeTransport(overrides = {}) {
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     getWorkspaceResources,
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
-    createTaggedPrompts: sinon.stub().resolves({ ids: ['q1'] }),
+    createPromptsByIds: sinon.stub().resolves({ items: [{ id: 'prompt-1' }] }),
     listAiModels: sinon.stub().resolves({ items: [] }),
     listGlobalAiModels: sinon.stub().resolves({ items: [] }),
     addAiModel: sinon.stub().resolves(null),
     deleteAiModelsByIds: sinon.stub().resolves(null),
-    createProjectTags: sinon.stub().resolves(null),
+    listProjectTags,
+    createProjectTags,
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
     resolveUrl: sinon.stub().callsFake(
       (url) => Promise.resolve({ domain: url, primary_url: url, is_valid: true }),
@@ -169,7 +175,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       WS,
       {
         prompts: [{
-          text: 'q', geoTargetId: 2840, languageCode: 'en', tags: [],
+          text: 'q', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
         }],
       },
       log,
@@ -187,7 +193,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       WS,
       {
         prompts: [{
-          text: 'q', geoTargetId: 2840, languageCode: 'en', tags: [],
+          text: 'q', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
         }],
       },
       log,
@@ -342,7 +348,7 @@ describe('dynamic-allocation — enforcement choke point', () => {
         WS,
         {
           prompts: [{
-            text: 'q', geoTargetId: 2840, languageCode: 'en', tags: [],
+            text: 'q', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
           }],
         },
         log,

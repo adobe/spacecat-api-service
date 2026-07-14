@@ -65,7 +65,6 @@ import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/seren
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { isDynamicAllocationEnabled } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
-import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -441,10 +440,10 @@ function SerenityController(context, log, env) {
   }
 
   /**
-   * Builds the server-side `type:branded`/`type:non-branded` classifier for the
+   * Builds the server-side `branded`/`non-branded` `type`-value classifier for the
    * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
    * name + aliases ONCE per request, then returns a pure
-   * `(text, geoTargetId) => TYPE_TAG` closure: each prompt's market is derived
+   * `(text, geoTargetId) => TYPE_VALUE` closure: each prompt's market is derived
    * from its geoTargetId and the alias needles are region-clamped to that market
    * (memoized per market). This is the SAME classifier the AI-generation and
    * onboarding paths use, so a prompt is classified identically no matter how it
@@ -690,8 +689,6 @@ function SerenityController(context, log, env) {
           {
             generateTopics: genMarketTopics,
             topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
-            standardTags: genMarketTopics ? [...STANDARD_PROMPT_TAGS] : [],
-            projectTags: genMarketTopics ? [...PROJECT_STANDARD_TAGS] : [],
             brandAliases,
             brandUrlSources,
             competitors,
@@ -809,11 +806,14 @@ function SerenityController(context, log, env) {
   };
 
   /**
-   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
-   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
-   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
-   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
-   * for one, is derived from the `category:` tags across a brand's markets.
+   * POST /serenity/tags — register a bare-named prompt tag beneath a dimension
+   * root, on a single market (the (geoTargetId, languageCode) slice in the body).
+   * `type` names the dimension (one of ALL_DIMENSIONS). An open `category` value
+   * is customer-authored and may name a `parentId` inside its own dimension; a
+   * closed dimension's value comes from a fixed vocabulary and is resolved or
+   * created under its own root, never under a caller-chosen parent. The UI's
+   * "Categories" view, for one, is derived from the `category` root's descendants
+   * across a brand's markets.
    * Dispatches by workspace mode, mirroring the tags/markets handlers.
    */
   const createTag = async (ctx) => {
@@ -1223,8 +1223,6 @@ function SerenityController(context, log, env) {
               // the project is published empty (no prompts) — today's default.
               generateTopics: generatePrompts,
               topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
-              standardTags: generatePrompts ? [...STANDARD_PROMPT_TAGS] : [],
-              projectTags: generatePrompts ? [...PROJECT_STANDARD_TAGS] : [],
               // A project with neither models nor generated prompts publishes
               // "empty units" → Semrush's disguised quota 405. Tolerate it
               // (best-effort, leaves a draft) rather than failing activation; a

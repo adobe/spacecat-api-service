@@ -47,14 +47,44 @@ const MAX_ACTIVE_RULES_PER_SITE = 20;
 // Defensive cap on the active-rule scans (list + cross-rule dedup).
 const MAX_ACTIVE_RULES_SCAN = 1000;
 
+// Valid entry: a path ("/en/home", or bare "en/home" — some customers store
+// paths without a leading slash) or a full http(s) URL. Resolving against a base
+// accepts both. Whitespace/control chars and backslashes are screened first (URL
+// parsing would silently percent-encode or rewrite them); protocol-relative
+// "//host" and non-http schemes are rejected.
+function isValidSampleUrl(u) {
+  if (!hasText(u) || u.length > MAX_URL_LEN) {
+    return false;
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001f\u007f]/.test(u)) {
+    return false;
+  }
+  // A backslash (char 92) has no place in these values; the URL parser would
+  // rewrite it to a slash, letting "/\host" masquerade as a path.
+  if (u.includes(String.fromCharCode(92))) {
+    return false;
+  }
+  // Protocol-relative "//host" resolves to a foreign host against the base.
+  if (u.startsWith('//')) {
+    return false;
+  }
+  try {
+    const { protocol } = new URL(u, 'https://example.com');
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function isValidUrlListBody(urls) {
   return isArray(urls)
     && urls.length > 0
     && urls.length <= MAX_SAMPLE_URLS
-    && urls.every((u) => hasText(u) && u.length <= MAX_URL_LEN);
+    && urls.every(isValidSampleUrl);
 }
 
-const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} strings, each at most ${MAX_URL_LEN} characters`;
+const URL_LIST_ERROR = `urls must be a non-empty array of at most ${MAX_SAMPLE_URLS} entries, each a path (e.g. "/en/home") or a full http(s) URL, at most ${MAX_URL_LEN} characters`;
 
 // The router stores path segments raw (route-utils.js leaves them URL-encoded),
 // so a rule name with spaces/special chars arrives as e.g. 'Blog%20Posts'.

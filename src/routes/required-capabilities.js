@@ -107,6 +107,15 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
+  // LLMO Akamai onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
+  // uses caller-supplied EdgeGrid credentials via x-akamai-* headers, not S2S JWT
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',
@@ -177,6 +186,17 @@ export const INTERNAL_ROUTES = [
   // monitoring endpoint.
   'GET /monitoring/drs-bp-pg-audit',
 
+  // Task management (Jira OAuth 3LO) - org-scoped, JWT-authenticated; not exposed to S2S
+  // consumers in v1. A dedicated capability (e.g. `taskManagement:write`) will be
+  // introduced in v2 when S2S ticket creation is required.
+  'GET /organizations/:organizationId/task-management/connections',
+  'GET /organizations/:organizationId/task-management/connections/:connectionId',
+  'GET /organizations/:organizationId/task-management/tickets',
+  'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
+  'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
+  'POST /organizations/:organizationId/task-management/:provider/tickets',
+  'GET /organizations/:organizationId/task-management/connections/:connectionId/projects',
+  'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types',
   // Hybrid permission model — state-layer management + capability
   // introspection. Customer-org admins manage their own ReBAC bindings here,
   // self-gated in the controller by `<product>/can_manage_users` (CRUD) and
@@ -288,6 +308,9 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
@@ -596,6 +619,7 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
+  'GET /sites/:siteId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',

@@ -249,6 +249,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockFixesController = {
+    getAllForSite: () => null,
     getAllForOpportunity: () => null,
     getByStatus: () => null,
     getByID: () => null,
@@ -366,6 +367,15 @@ describe('getRouteHandlers', () => {
     deploy: () => null,
     plan: () => null,
     getPermissions: () => null,
+  };
+
+  const mockLlmoAkamaiController = {
+    getConfig: () => null,
+    listProperties: () => null,
+    plan: () => null,
+    deploy: () => null,
+    activate: () => null,
+    activationStatus: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -592,6 +602,17 @@ describe('getRouteHandlers', () => {
     getPreview: sinon.stub(),
   };
 
+  const mockTaskManagementController = {
+    listConnections: sinon.stub(),
+    getConnection: sinon.stub(),
+    listTickets: sinon.stub(),
+    getTicketBySuggestion: sinon.stub(),
+    listTicketsByOpportunity: sinon.stub(),
+    createTicket: sinon.stub(),
+    listProjects: sinon.stub(),
+    listIssueTypes: sinon.stub(),
+  };
+
   const mockRedirectsController = {
     getRedirects: sinon.stub(),
   };
@@ -626,6 +647,7 @@ describe('getRouteHandlers', () => {
       mockLlmoController,
       mockLlmoCloudflareController,
       mockLlmoCloudFrontController,
+      mockLlmoAkamaiController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -660,6 +682,7 @@ describe('getRouteHandlers', () => {
       mockSerenityController,
       mockElementsController,
       mockProxyController,
+      mockTaskManagementController,
       mockRedirectsController,
     );
 
@@ -888,6 +911,9 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
@@ -1104,6 +1130,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'GET /tools/scrape/jobs/by-url/:url/:processingType',
       'GET /tools/scrape/jobs/by-url/:url',
+      'GET /sites/:siteId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
@@ -1174,6 +1201,12 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
@@ -1267,6 +1300,14 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'GET /organizations/:organizationId/task-management/connections',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId',
+      'GET /organizations/:organizationId/task-management/tickets',
+      'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
+      'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
+      'POST /organizations/:organizationId/task-management/:provider/tickets',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId/projects',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
