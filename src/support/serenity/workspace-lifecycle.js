@@ -36,11 +36,17 @@ export function resourceAllocation(marketCount) {
 // Object.freeze so a caller can't mutate the shared singleton.
 export const CREATE_ALLOCATION = Object.freeze({ ai: { projects: 1, prompts: 500 } });
 
-// "Release everything back to the parent pool" payload. The EXACT shape is a
-// Gate-A live-smoke contract pin (design §6/§11) — release-to-parent is
-// unobservable on the limits-disabled dev parent until verified. Zeroing the
-// ai allocation is the documented intent; adjust here once Gate-A pins it.
-export const RELEASE_ALLOCATION = Object.freeze({ ai: { projects: 0, prompts: 0 } });
+// HISTORICAL NOTE (LLMO-6189): a payload of `{ ai: { projects: 0, prompts: 0 } }` was the
+// documented "release everything back to the parent pool" shape, sent via
+// transferWorkspaceResources. The Gate-A live smoke this comment used to defer to has since run:
+// it confirmed a transfer that sets a dimension to ZERO is silently ignored by the Semrush gateway
+// (2xx, no units moved). Every call site that sent this payload was therefore logging false success
+// while permanently stranding the released workspace's ENTIRE carve on the parent pool — brand
+// deactivation, the ensureSubworkspace concurrency-loser cleanup, and both brand-provisioning
+// failure-cleanup paths. There is deliberately no re-exported constant here to accidentally reuse:
+// full reclamation of an allocation is possible ONLY via workspace DELETE (see
+// {@link releaseFullAllocation} below) — never via transfer. Do not reintroduce a to-zero transfer
+// payload at any call site.
 
 // Workspace create normally settles `not ready → created` in seconds (workspace
 // doc §4), but a busy upstream can take noticeably longer — so we poll up to ~30s
@@ -235,6 +241,113 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
 }
 
 /**
+ * Deletes every project currently listed in `workspaceId` (404-as-success, convergent /
+ * idempotent). Extracted so it is shared by `decommissionBrandWorkspace` and every other
+ * LLMO-6189 full-allocation-release call site that must empty a sub-workspace's projects before
+ * {@link releaseFullAllocation} can safely delete the (now-empty) workspace itself.
+ * @param {object} transport
+ * @param {string} workspaceId
+ * @returns {Promise<number>} the number of projects the listing returned (i.e. attempted deletes).
+ */
+export async function deleteAllProjects(transport, workspaceId) {
+  const listing = await transport.listProjects(workspaceId);
+  const projects = Array.isArray(listing?.items) ? listing.items : [];
+  for (const project of projects) {
+    const projectId = project?.id;
+    if (!hasText(projectId)) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await transport.deleteProject(workspaceId, projectId);
+    } catch (e) {
+      if (!isUpstreamGone(e)) {
+        throw e;
+      }
+    }
+  }
+  return projects.length;
+}
+
+/**
+ * Fully reclaims `workspaceId`'s ENTIRE AI resource carve back to the parent pool (LLMO-6189).
+ *
+ * A transfer that sets a dimension to ZERO is a silently-ignored no-op against the Semrush gateway
+ * (live-verified) — there is no transfer payload that can express "reclaim everything"; only a
+ * workspace DELETE actually frees the units (mirrors the conclusion `releaseAiSurplus` already
+ * reaches for a target that floors to 0 — see resource-manager.js). So this function has exactly
+ * two outcomes and NEVER reports success when nothing was actually reclaimed:
+ *
+ *   - `allowDelete` false (the caller's resolved `SERENITY_ALLOW_WORKSPACE_DELETE !== 'true'` —
+ *     every deployed environment today): logs LOUDLY that the allocation cannot be reclaimed via
+ *     transfer and remains stranded on the (already project-emptied) workspace, and returns
+ *     `{ released: false, reason: 'requires-decommission' }`. This is the current, deliberate,
+ *     default-off state (docs/serenity.md: "the sub-workspace shell is never deleted... reclaimed
+ *     only by Semrush CS"). Callers MUST NOT log this outcome as success.
+ *   - `allowDelete` true (an explicit environment opt-in): deletes the workspace outright
+ *     (idempotent — an upstream 404 on an already-gone workspace is treated as success, same
+ *     convergence contract as `deleteAllProjects`) and returns
+ *     `{ released: true, reason: 'deleted' }`.
+ *     The CALLER is responsible for having already emptied the workspace's projects
+ *     (`deleteAllProjects`) before calling this — the delete does NOT rely on `deleteWorkspace`'s
+ *     documented project cascade, so every lifecycle path stays consistent (explicit project
+ *     deletion first, everywhere) rather than leaning on an upstream behavior no other call site
+ *     depends on.
+ *
+ * `assertNotParent` guards EVERY call (delete or not) — a captured/adopted id that turns out to be
+ * the org parent (a gateway bug; see the create-path comment on `assertNotParent`) must never be
+ * deleted or reported reclaimable, regardless of the flag.
+ *
+ * @param {object} transport
+ * @param {string} workspaceId - the (already project-emptied) sub-workspace to reclaim.
+ * @param {string} [parentWorkspaceId] - the org parent workspace; assertNotParent guard.
+ * @param {object} [log]
+ * @param {object} [options]
+ * @param {boolean} [options.allowDelete=false] - caller-resolved
+ *   `SERENITY_ALLOW_WORKSPACE_DELETE === 'true'`. Read from env by the CALLER (controller/handler);
+ *   this function never reads env itself.
+ * @returns {Promise<{
+ *   released: boolean,
+ *   reason: 'deleted' | 'requires-decommission' | 'no-workspace',
+ * }>}
+ */
+export async function releaseFullAllocation(
+  transport,
+  workspaceId,
+  parentWorkspaceId,
+  log,
+  { allowDelete = false } = {},
+) {
+  if (!hasText(workspaceId)) {
+    return { released: false, reason: 'no-workspace' };
+  }
+  assertNotParent(workspaceId, parentWorkspaceId);
+
+  if (!allowDelete) {
+    log?.warn?.(
+      'SERENITY_ALLOC releaseFullAllocation: cannot reclaim allocation via transfer (a to-zero '
+      + 'transfer is a silent no-op) — workspace remains resourced, pending decommission',
+      { workspaceId },
+    );
+    return { released: false, reason: 'requires-decommission' };
+  }
+
+  try {
+    await transport.deleteWorkspace(workspaceId);
+  } catch (e) {
+    if (!isUpstreamGone(e)) {
+      throw e;
+    }
+  }
+  log?.info?.(
+    'SERENITY_ALLOC releaseFullAllocation: workspace deleted, allocation fully reclaimed',
+    { workspaceId },
+  );
+  return { released: true, reason: 'deleted' };
+}
+
+/**
  * Guarantees the brand has a resourced subworkspace and returns its id
  * (design §6). Three cases:
  *   - column set        → the brand is already bound to a sub-workspace
@@ -262,6 +375,9 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
  * @param {object} [options] - feature-flag toggles for the dual-mode carve.
  * @param {boolean} [options.dynamicAllocation] - when true (LLMO/dynamic-allocation ON), skip
  *   the flat re-grant on an existing sub-workspace; JIT top-up owns sizing. Default false.
+ * @param {boolean} [options.allowDelete] - caller-resolved `SERENITY_ALLOW_WORKSPACE_DELETE ===
+ *   'true'` (LLMO-6189). Threaded into the concurrency-loser release below via
+ *   {@link releaseFullAllocation} — see that function's doc for what this actually changes.
  * @returns {Promise<string>} the subworkspace id.
  */
 export async function ensureSubworkspace(
@@ -274,7 +390,7 @@ export async function ensureSubworkspace(
   reloadPointer = null,
   options = {},
 ) {
-  const { dynamicAllocation = false } = options;
+  const { dynamicAllocation = false, allowDelete = false } = options;
   const poll = {
     attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
     intervalMs: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
@@ -383,7 +499,19 @@ export async function ensureSubworkspace(
         releasedWorkspaceId: workspaceId,
       });
       try {
-        await transport.transferWorkspaceResources(workspaceId, RELEASE_ALLOCATION);
+        // The loser's workspace is provably project-empty here — the create-or-adopt path above
+        // never creates a project itself (that only happens in the CALLER, strictly after this
+        // function returns). Still run deleteAllProjects defensively (cheap, idempotent) so this
+        // stays uniform with the other 3 release sites (LLMO-6189) rather than leaning on that
+        // invariant holding forever.
+        await deleteAllProjects(transport, workspaceId);
+        await releaseFullAllocation(
+          transport,
+          workspaceId,
+          parentWorkspaceId,
+          log,
+          { allowDelete },
+        );
       } catch (e) {
         // Best-effort: a failed release leaves the orphan resourced, but we
         // still must NOT clobber the winner's pointer below.
@@ -407,19 +535,23 @@ export async function ensureSubworkspace(
 
 /**
  * Decommissions a brand's sub-workspace (design §6) — convergent and
- * idempotent. NEVER deletes the workspace; it is emptied and de-resourced.
- * Self-defending: refuses if the target is the org parent OR still has active
- * linked (child) sub-workspaces. Steps:
+ * idempotent. Steps:
  *   1. delete every project from the listing (404-as-success)
- *   2. release the ai allocation back to the parent pool
+ *   2. reclaim the ai allocation back to the parent pool via
+ *      {@link releaseFullAllocation} — genuinely reclaimed (workspace deleted) when
+ *      `SERENITY_ALLOW_WORKSPACE_DELETE === 'true'`; otherwise the allocation is
+ *      logged as stranded rather than falsely reported as released (LLMO-6189).
  *   3. (member removal is best-effort and currently deferred — parent admins
  *      inherit access regardless, workspace doc §7; enumerating members needs
  *      a listMembers transport method not added in this phase)
  *
+ * Self-defending: refuses if the target is the org parent OR still has active
+ * linked (child) sub-workspaces.
+ *
  * This touches only the upstream workspace. Clearing the brand's
  * `semrush_sub_workspace_id` pointer (the disconnect) is the CALLER's job —
  * the deactivate handler does it after this resolves, leaving the
- * sub-workspace empty and unowned.
+ * sub-workspace empty and unowned (or, with the flag on, gone).
  *
  * @param {object} transport
  * @param {string} subworkspaceId
@@ -437,13 +569,16 @@ export async function ensureSubworkspace(
  *   the dev gateway is probed, then flip the flag on
  *   (SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD=true). The parent-equality guard
  *   below is always on - that invariant is verified and safe.
+ * @param {boolean} [options.allowDelete=false] - caller-resolved
+ *   `SERENITY_ALLOW_WORKSPACE_DELETE === 'true'` (LLMO-6189); threaded straight into
+ *   {@link releaseFullAllocation}.
  */
 export async function decommissionBrandWorkspace(
   transport,
   subworkspaceId,
   log,
   parentWorkspaceId,
-  { enforceLinkedGuard = false } = {},
+  { enforceLinkedGuard = false, allowDelete = false } = {},
 ) {
   if (!hasText(subworkspaceId)) {
     return;
@@ -476,27 +611,21 @@ export async function decommissionBrandWorkspace(
     }
   }
 
-  const listing = await transport.listProjects(subworkspaceId);
-  const projects = Array.isArray(listing?.items) ? listing.items : [];
-  for (const project of projects) {
-    const projectId = project?.id;
-    if (!hasText(projectId)) {
-      // eslint-disable-next-line no-continue
-      continue;
-    }
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await transport.deleteProject(subworkspaceId, projectId);
-    } catch (e) {
-      if (!isUpstreamGone(e)) {
-        throw e;
-      }
-    }
-  }
-  // Release allocation back to the parent pool (payload Gate-A-pinned).
-  await transport.transferWorkspaceResources(subworkspaceId, RELEASE_ALLOCATION);
-  log?.info?.('decommissionBrandWorkspace: emptied and released', {
+  const deletedProjects = await deleteAllProjects(transport, subworkspaceId);
+  const release = await releaseFullAllocation(
+    transport,
     subworkspaceId,
-    deletedProjects: projects.length,
-  });
+    parentWorkspaceId,
+    log,
+    { allowDelete },
+  );
+  log?.info?.(
+    release.released
+      ? 'decommissionBrandWorkspace: emptied and workspace deleted — allocation fully reclaimed'
+      : 'decommissionBrandWorkspace: emptied projects, but AI allocation could not be reclaimed via '
+        + 'transfer — units remain stranded on the (now-empty) workspace pending decommission',
+    {
+      subworkspaceId, deletedProjects, released: release.released, reason: release.reason,
+    },
+  );
 }

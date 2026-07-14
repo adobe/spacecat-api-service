@@ -233,13 +233,15 @@ export function createSerenityTransport({ env, imsToken }) {
   // calls hit a separate (mock) host independently of Project Engine.
   const usersRoot = usersBaseUrl(env);
 
-  // Fail-closed guard for the destructive workspace delete. Deleting a
-  // sub-workspace must be IMPOSSIBLE in every deployed environment
-  // (dev/stage/prod) — production decommission empties and releases a
-  // workspace but never deletes it (design §6); upstream deprovisioning is
-  // Semrush CS's act. The capability is retained only so the net-zero live
-  // smoke can tidy up after itself, and is unlocked solely by this explicit
-  // opt-in flag, which no deployed environment sets (local test-cleanup only).
+  // Fail-closed guard for the destructive workspace delete. Deleting a sub-workspace is
+  // IMPOSSIBLE unless this exact flag is explicitly set — the default in every deployed
+  // environment (dev/stage/prod) today. Two distinct callers share this ONE capability gate
+  // (LLMO-6189): the net-zero live smoke / IT-harness teardown (original use), and the
+  // decommission/cleanup lifecycle paths in workspace-lifecycle.js / brand-provisioning.js, which
+  // fall back to a "log the stranding, don't delete" behavior when the flag is off rather than
+  // gating on a second flag name for the same underlying operation. Flipping it on in a real
+  // environment is a deliberate operator decision to let those paths genuinely reclaim allocations
+  // instead of leaving them stranded pending Semrush CS's manual deprovisioning (design §6).
   const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
   // Shared IMS-bearer getter for both typed clients. Raises the transport's own
@@ -725,21 +727,23 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY, and fail-closed: throws
-     * unless SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which
-     * no deployed environment (dev/stage/prod) does. Production flows NEVER
-     * delete sub-workspaces (decommission empties and disconnects them but
-     * never deletes — design §6); workspace deprovisioning at offboarding is
-     * Semrush CS's act. Kept here so the
-     * net-zero live smoke can tidy up after itself. Delete cascades over the
-     * workspace's projects; subsequent reads return 403 (workspace doc §4).
+     * DELETE /v1/workspaces/{ws} — fail-closed: throws unless
+     * SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which is unset (off) in every
+     * deployed environment by default. Two capabilities share this one gate (LLMO-6189): the
+     * net-zero live smoke / IT-harness teardown (original use), and, when an operator explicitly
+     * opts an environment in, the production decommission/cleanup lifecycle paths in
+     * workspace-lifecycle.js's `releaseFullAllocation` — the only way to genuinely reclaim a
+     * sub-workspace's FULL AI allocation (a to-zero transfer is a proven no-op against the
+     * gateway). With the flag off, those paths log the allocation as stranded instead of calling
+     * this. Delete cascades over the workspace's projects (subsequent reads return 403, workspace
+     * doc §4); every lifecycle caller of this method deletes projects explicitly first regardless,
+     * rather than relying on that cascade.
      */
     async deleteWorkspace(workspaceId) {
       if (!allowWorkspaceDelete) {
         throw new Error(
-          'Serenity workspace deletion is disabled. It is test-cleanup only and '
-          + 'must never run in a deployed environment; set '
-          + 'SERENITY_ALLOW_WORKSPACE_DELETE=true to enable it locally.',
+          'Serenity workspace deletion is disabled. Set SERENITY_ALLOW_WORKSPACE_DELETE=true to '
+          + 'enable it (test cleanup, or a deliberate production reclaim-capability opt-in).',
         );
       }
       return unwrap('DELETE', await users.DELETE(

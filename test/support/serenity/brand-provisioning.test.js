@@ -197,6 +197,8 @@ describe('provisionBrandSubworkspace', () => {
       brandUrlSources: null,
       competitors: [],
       publishMode: 'require',
+      // LLMO-6189: workspace-delete capability defaults OFF (env unset in buildContext()).
+      allowDelete: false,
     });
     // The stub drives the sub-workspace title off the brand's name + id.
     expect(brandStub.getName()).to.equal('Acme');
@@ -388,13 +390,27 @@ describe('provisionBrandSubworkspace', () => {
     expect(handleCreateMarketSubworkspace.called).to.equal(false);
   });
 
-  it('releases the created sub-workspace allocation when provisioning throws after creation', async () => {
+  function makeReleaseTransport(overrides = {}) {
+    return {
+      transferWorkspaceResources: sinon.stub().resolves({}),
+      listProjects: sinon.stub().resolves({ items: [] }),
+      deleteProject: sinon.stub().resolves(null),
+      deleteWorkspace: sinon.stub().resolves(null),
+      ...overrides,
+    };
+  }
+
+  it('LLMO-6189: logs the stranded allocation (never a zero-payload transfer) when provisioning throws after creation, allowDelete off (default)', async () => {
     // ensureSubworkspace creates the workspace (captured via the stub) and THEN
-    // a later step returns a 4xx — provisioning throws, and the orphaned
-    // allocation must be released back to the parent pool (else it leaks: the
-    // brand row is never written, so the caller's compensation can't fire).
-    const transfer = sinon.stub().resolves({});
-    const handler = sinon.stub().callsFake(async (transport, brand) => {
+    // a later step returns a 4xx — provisioning throws. The orphaned workspace's
+    // projects are emptied; its allocation cannot be reclaimed via transfer (a
+    // to-zero transfer is a proven no-op), so — with the delete capability off,
+    // the default in every deployed env — it is logged as stranded rather than
+    // falsely reported as released.
+    const transport = makeReleaseTransport({
+      listProjects: sinon.stub().resolves({ items: [{ id: 'proj-1' }] }),
+    });
+    const handler = sinon.stub().callsFake(async (t, brand) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
       return { status: 502, body: { message: 'upstream blew up' } };
     });
@@ -403,7 +419,7 @@ describe('provisionBrandSubworkspace', () => {
         resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
       },
       '../../../src/support/serenity/rest-transport.js': {
-        createSerenityTransport: () => ({ transferWorkspaceResources: transfer }),
+        createSerenityTransport: () => transport,
         SerenityTransportError,
       },
       '../../../src/support/serenity/handlers/markets-subworkspace.js': {
@@ -416,22 +432,56 @@ describe('provisionBrandSubworkspace', () => {
     } catch (e) {
       expect(e.status).to.equal(502);
     }
-    expect(transfer.calledOnce).to.equal(true);
-    expect(transfer.firstCall.args[0]).to.equal(NEW_WS);
-    expect(transfer.firstCall.args[1]).to.deep.equal({ ai: { projects: 0, prompts: 0 } });
+    expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'proj-1');
+    expect(transport.transferWorkspaceResources).to.not.have.been.called;
+    expect(transport.deleteWorkspace).to.not.have.been.called;
+  });
+
+  it('LLMO-6189: deletes the orphaned sub-workspace outright when allowDelete is on', async () => {
+    const transport = makeReleaseTransport({
+      listProjects: sinon.stub().resolves({ items: [{ id: 'proj-1' }] }),
+    });
+    const handler = sinon.stub().callsFake(async (t, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      return { status: 502, body: { message: 'upstream blew up' } };
+    });
+    const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
+      '../../../src/support/serenity/workspace-resolver.js': {
+        resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
+      },
+      '../../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: () => transport,
+        SerenityTransportError,
+      },
+      '../../../src/support/serenity/handlers/markets-subworkspace.js': {
+        handleCreateMarketSubworkspace: handler,
+      },
+    });
+    try {
+      await mod.provisionBrandSubworkspace(
+        { ...buildContext(), env: { SERENITY_ALLOW_WORKSPACE_DELETE: 'true' } },
+        baseParams,
+      );
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(502);
+    }
+    expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'proj-1');
+    expect(transport.deleteWorkspace).to.have.been.calledOnceWithExactly(NEW_WS);
+    expect(transport.transferWorkspaceResources).to.not.have.been.called;
   });
 
   it('does NOT attempt a release when provisioning fails before the workspace is created', async () => {
     // ensureSubworkspace never set the workspace id (e.g. parent-workspace
     // lookup failed inside the handler) → nothing to release.
-    const transfer = sinon.stub().resolves({});
+    const transport = makeReleaseTransport();
     const handler = sinon.stub().rejects(new SerenityTransportError(500, 'early boom'));
     const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
       '../../../src/support/serenity/workspace-resolver.js': {
         resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
       },
       '../../../src/support/serenity/rest-transport.js': {
-        createSerenityTransport: () => ({ transferWorkspaceResources: transfer }),
+        createSerenityTransport: () => transport,
         SerenityTransportError,
       },
       '../../../src/support/serenity/handlers/markets-subworkspace.js': {
@@ -444,61 +494,124 @@ describe('provisionBrandSubworkspace', () => {
     } catch (e) {
       expect(e.status).to.equal(500);
     }
-    expect(transfer.called).to.equal(false);
+    expect(transport.listProjects.called).to.equal(false);
+    expect(transport.transferWorkspaceResources.called).to.equal(false);
+    expect(transport.deleteWorkspace.called).to.equal(false);
   });
 });
 
 describe('releaseProvisionedWorkspace', () => {
-  function buildAuthedContext() {
+  function buildAuthedContext(extraEnv = {}) {
     return {
-      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
+      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example', ...extraEnv },
       pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
       attributes: { authInfo: { getType: () => 'ims' } },
     };
   }
 
+  function makeTransport(overrides = {}) {
+    return {
+      transferWorkspaceResources: sinon.stub().resolves({}),
+      listProjects: sinon.stub().resolves({ items: [] }),
+      deleteProject: sinon.stub().resolves(null),
+      deleteWorkspace: sinon.stub().resolves(null),
+      ...overrides,
+    };
+  }
+
   async function loadWithTransport(
-    transferWorkspaceResources,
-    { resolveSemrushImsToken, createSerenityTransport } = {},
+    transport,
+    {
+      resolveSemrushImsToken, createSerenityTransport, resolveWorkspaceId,
+    } = {},
   ) {
     const overrides = {
       '../../../src/support/serenity/rest-transport.js': {
-        createSerenityTransport: createSerenityTransport
-          || (() => ({ transferWorkspaceResources })),
+        createSerenityTransport: createSerenityTransport || (() => transport),
         SerenityTransportError,
       },
     };
     if (resolveSemrushImsToken) {
       overrides['../../../src/support/utils.js'] = { resolveSemrushImsToken };
     }
+    if (resolveWorkspaceId) {
+      overrides['../../../src/support/serenity/workspace-resolver.js'] = { resolveWorkspaceId };
+    }
     return esmock('../../../src/support/serenity/brand-provisioning.js', overrides);
   }
 
-  it('releases the orphaned workspace allocation back to the parent pool', async () => {
-    const transfer = sinon.stub().resolves({});
-    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer);
-    const log = { info: sinon.stub(), error: sinon.stub() };
-    await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, log);
-    expect(transfer.calledOnce).to.equal(true);
-    const [wsArg, allocArg] = transfer.firstCall.args;
-    expect(wsArg).to.equal(NEW_WS);
-    expect(allocArg).to.deep.equal({ ai: { projects: 0, prompts: 0 } });
+  it('LLMO-6189: allowDelete off (default) — empties projects, logs the stranded allocation, never sends a zero-payload transfer', async () => {
+    const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }) });
+    const resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
+    const { releaseProvisionedWorkspace } = await loadWithTransport(
+      transport,
+      { resolveWorkspaceId },
+    );
+    const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+    await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, 'org-1', log);
+    expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'p1');
+    expect(transport.transferWorkspaceResources.called).to.equal(false);
+    expect(transport.deleteWorkspace.called).to.equal(false);
     expect(log.error.called).to.equal(false);
+    expect(log.info.calledOnce).to.equal(true);
+    expect(log.info.firstCall.args[1]).to.include({ released: false, reason: 'requires-decommission' });
+  });
+
+  it('LLMO-6189: allowDelete on — deletes the workspace, a genuine reclaim', async () => {
+    const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }) });
+    const resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
+    const { releaseProvisionedWorkspace } = await loadWithTransport(
+      transport,
+      { resolveWorkspaceId },
+    );
+    const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+    await releaseProvisionedWorkspace(
+      buildAuthedContext({ SERENITY_ALLOW_WORKSPACE_DELETE: 'true' }),
+      NEW_WS,
+      'org-1',
+      log,
+    );
+    expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'p1');
+    expect(transport.deleteWorkspace).to.have.been.calledOnceWithExactly(NEW_WS);
+    expect(transport.transferWorkspaceResources.called).to.equal(false);
+    expect(log.error.called).to.equal(false);
+    // releaseFullAllocation logs its own info line first; releaseProvisionedWorkspace's summary
+    // (the one carrying released/reason) is the LAST info call.
+    expect(log.info.lastCall.args[1]).to.include({ released: true, reason: 'deleted' });
+  });
+
+  it('resolves the org parent workspace via spaceCatId and refuses to act on it (assertNotParent)', async () => {
+    const transport = makeTransport();
+    const resolveWorkspaceId = sinon.stub().resolves(NEW_WS); // parent === the id we're releasing
+    const { releaseProvisionedWorkspace } = await loadWithTransport(
+      transport,
+      { resolveWorkspaceId },
+    );
+    const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+    // Must NOT throw — the caller is already on an error path; the guard failure is swallowed +
+    // logged like any other best-effort release failure.
+    await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, 'org-1', log);
+    expect(resolveWorkspaceId).to.have.been.calledOnceWith(sinon.match.any, 'org-1');
+    expect(log.error.calledOnce).to.equal(true);
+    expect(log.error.firstCall.args[1].error).to.match(/must not be the organization parent workspace/);
   });
 
   it('is a no-op when no workspace id is given', async () => {
-    const transfer = sinon.stub().resolves({});
-    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer);
-    await releaseProvisionedWorkspace(buildAuthedContext(), '', { error: sinon.stub() });
-    expect(transfer.called).to.equal(false);
+    const transport = makeTransport();
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transport);
+    await releaseProvisionedWorkspace(buildAuthedContext(), '', 'org-1', { error: sinon.stub() });
+    expect(transport.transferWorkspaceResources.called).to.equal(false);
+    expect(transport.deleteWorkspace.called).to.equal(false);
   });
 
   it('swallows a release failure and logs it at error with the workspace id', async () => {
-    const transfer = sinon.stub().rejects(new SerenityTransportError(500, 'boom'));
-    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer);
-    const log = { info: sinon.stub(), error: sinon.stub() };
+    const transport = makeTransport({
+      listProjects: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+    });
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transport);
+    const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
     // Must NOT throw — the caller is already on an error path.
-    await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, log);
+    await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, 'org-1', log);
     expect(log.error.calledOnce).to.equal(true);
     expect(log.error.firstCall.args[1].semrushWorkspaceId).to.equal(NEW_WS);
   });
@@ -509,17 +622,16 @@ describe('releaseProvisionedWorkspace', () => {
       pathInfo: { headers: { 'x-promise-token': 'raw-promise-token' } },
       attributes: { authInfo: { getType: () => 'jwt' } },
     };
-    const transfer = sinon.stub().resolves({});
+    const transport = makeTransport();
     const resolveSemrushImsTokenStub = sinon.stub().resolves('exchanged-ims-token');
-    const createSerenityTransportStub = sinon.stub()
-      .returns({ transferWorkspaceResources: transfer });
-    const { releaseProvisionedWorkspace } = await loadWithTransport(transfer, {
+    const createSerenityTransportStub = sinon.stub().returns(transport);
+    const { releaseProvisionedWorkspace } = await loadWithTransport(transport, {
       resolveSemrushImsToken: resolveSemrushImsTokenStub,
       createSerenityTransport: createSerenityTransportStub,
     });
-    const log = { info: sinon.stub(), error: sinon.stub() };
+    const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
 
-    await releaseProvisionedWorkspace(context, NEW_WS, log);
+    await releaseProvisionedWorkspace(context, NEW_WS, undefined, log);
 
     expect(resolveSemrushImsTokenStub.calledOnce).to.equal(true);
     expect(resolveSemrushImsTokenStub.firstCall.args[0]).to.equal(context);
@@ -556,10 +668,11 @@ describe('defensive branch coverage', () => {
 
   describe('releaseCapturedOnFailure catch block (lines 141-145)', () => {
     it('logs error when provisioning fails after workspace creation AND the release itself throws', async () => {
-      // The catch on line 140 fires when: handleCreateMarketSubworkspace captures a
-      // workspaceId (via brand.setSemrushSubWorkspaceId) and then returns a 4xx result
-      // triggering releaseCapturedOnFailure, AND transferWorkspaceResources throws.
-      const transfer = sinon.stub().rejects(new Error('release network error'));
+      // The catch fires when: handleCreateMarketSubworkspace captures a workspaceId (via
+      // brand.setSemrushSubWorkspaceId) and then returns a 4xx result triggering
+      // releaseCapturedOnFailure, AND emptying the workspace's projects (deleteAllProjects,
+      // the first step of any release attempt post-LLMO-6189) throws.
+      const listProjects = sinon.stub().rejects(new Error('release network error'));
       const handler = sinon.stub().callsFake(async (transport, brand) => {
         brand.setSemrushSubWorkspaceId(NEW_WS);
         return { status: 422, body: {} };
@@ -570,7 +683,12 @@ describe('defensive branch coverage', () => {
           resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
         },
         '../../../src/support/serenity/rest-transport.js': {
-          createSerenityTransport: () => ({ transferWorkspaceResources: transfer }),
+          createSerenityTransport: () => ({
+            listProjects,
+            deleteProject: sinon.stub().resolves(null),
+            deleteWorkspace: sinon.stub().resolves(null),
+            transferWorkspaceResources: sinon.stub().resolves({}),
+          }),
           SerenityTransportError,
         },
         '../../../src/support/serenity/handlers/markets-subworkspace.js': {
@@ -585,7 +703,7 @@ describe('defensive branch coverage', () => {
       }
       // The release was attempted but failed; log.error must have been called
       // from the catch block with the 'failed to release' message.
-      expect(transfer.calledOnce).to.equal(true);
+      expect(listProjects.calledOnce).to.equal(true);
       expect(log.error.called).to.equal(true);
       const [msg, meta] = log.error.firstCall.args;
       expect(msg).to.include('failed to release');

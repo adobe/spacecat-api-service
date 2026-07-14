@@ -426,6 +426,12 @@ function SerenityController(context, log, env) {
   // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
   const dynamicAllocationEnabled = (ctx) => isDynamicAllocationEnabled(ctx?.env || env);
 
+  // LLMO-6189: whether workspace DELETE is unlocked in this environment (default OFF everywhere
+  // today — see rest-transport.js's deleteWorkspace gate). Threaded into decommission/cleanup
+  // lifecycle calls as `allowDelete` so a full allocation release can genuinely reclaim the units
+  // (workspace deleted) instead of only logging that they are stranded.
+  const allowWorkspaceDeleteEnabled = (ctx) => (ctx?.env || env)?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
+
   /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
@@ -702,6 +708,7 @@ function SerenityController(context, log, env) {
             // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
             // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            allowDelete: allowWorkspaceDeleteEnabled(ctx),
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -1094,7 +1101,10 @@ function SerenityController(context, log, env) {
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
-          { dynamicAllocation: dynamicAllocationEnabled(ctx) },
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            allowDelete: allowWorkspaceDeleteEnabled(ctx),
+          },
         );
         let bareSucceeded = true;
         if (typeof brand.setStatus === 'function') {
@@ -1189,7 +1199,10 @@ function SerenityController(context, log, env) {
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
-        { dynamicAllocation: dynamicAllocationEnabled(ctx) },
+        {
+          dynamicAllocation: dynamicAllocationEnabled(ctx),
+          allowDelete: allowWorkspaceDeleteEnabled(ctx),
+        },
       );
       const results = [];
       for (const m of markets) {
@@ -1240,6 +1253,7 @@ function SerenityController(context, log, env) {
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
               // JIT units pool = the org parent passed positionally above; not duplicated here.
               dynamicAllocation: dynamicAllocationEnabled(ctx),
+              allowDelete: allowWorkspaceDeleteEnabled(ctx),
             },
           );
         } catch (e) {
@@ -1408,14 +1422,17 @@ function SerenityController(context, log, env) {
 
   /**
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
-   * (design flow 6): delete every project and release the allocation back to
+   * (design flow 6): delete every project and reclaim the allocation back to
    * the parent pool, then DISCONNECT the brand by clearing its
-   * semrush_sub_workspace_id pointer. The sub-workspace itself is NEVER deleted
-   * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
-   * is left empty and unowned. Clearing the pointer flips the brand back to
-   * flat mode, so a future activate allocates a fresh sub-workspace. Sets
-   * brands.status = 'pending'. No-op decommission (still 200) for a brand with
-   * no sub-workspace.
+   * semrush_sub_workspace_id pointer. The sub-workspace itself is deleted ONLY
+   * when `SERENITY_ALLOW_WORKSPACE_DELETE === 'true'` (unset in every deployed
+   * environment today — upstream deprovisioning is otherwise Semrush CS's act);
+   * with the flag off it is left empty, unowned, and its allocation logged as
+   * stranded rather than falsely reported as released (LLMO-6189 — a to-zero
+   * transfer is a silent gateway no-op, so it can never actually reclaim units).
+   * Clearing the pointer flips the brand back to flat mode, so a future
+   * activate allocates a fresh sub-workspace. Sets brands.status = 'pending'.
+   * No-op decommission (still 200) for a brand with no sub-workspace.
    */
   const deactivate = async (ctx) => {
     try {
@@ -1436,11 +1453,12 @@ function SerenityController(context, log, env) {
           {
             enforceLinkedGuard:
               (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
+            allowDelete: allowWorkspaceDeleteEnabled(ctx),
           },
         );
-        // Disconnect the brand from the now-emptied sub-workspace. The
-        // sub-workspace is kept (never deleted); clearing the pointer is what
-        // returns the brand to flat mode. Invalidate the resolver cache HERE —
+        // Disconnect the brand from the now-emptied (or, with the flag on, now-deleted)
+        // sub-workspace; clearing the pointer is what returns the brand to flat mode.
+        // Invalidate the resolver cache HERE —
         // before the save — so that even if save() throws, the resolver can't
         // keep routing to the already-emptied sub-workspace for the full
         // positive-TTL window (the upstream is empty the moment decommission

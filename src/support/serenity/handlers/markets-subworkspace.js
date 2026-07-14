@@ -340,6 +340,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
  *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
  *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
+ * @param {boolean} [options.allowDelete=false] - caller-resolved
+ *   `SERENITY_ALLOW_WORKSPACE_DELETE === 'true'` (LLMO-6189); threaded straight into
+ *   `ensureSubworkspace`'s concurrency-loser release.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -359,6 +362,7 @@ export async function handleCreateMarketSubworkspace(
     publishMode = 'require',
     dataAccess = null,
     dynamicAllocation = false,
+    allowDelete = false,
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -392,7 +396,7 @@ export async function handleCreateMarketSubworkspace(
       log,
       {},
       reloadPointer,
-      { dynamicAllocation },
+      { dynamicAllocation, allowDelete },
     );
 
   // JIT top-up choke point. The sub-workspace id is only known after ensureSubworkspace resolves
