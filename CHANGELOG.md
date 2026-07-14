@@ -1,3 +1,10 @@
+# [1.650.0](https://github.com/adobe/spacecat-api-service/compare/v1.649.1...v1.650.0) (2026-07-14)
+
+
+### Features
+
+* **aso-overlay:** add ETag + If-None-Match (304) to GET /config/:service/redirects.txt ([#2809](https://github.com/adobe/spacecat-api-service/issues/2809)) ([4df7a60](https://github.com/adobe/spacecat-api-service/commit/4df7a60d5285b6820efc15c5d604071a5ccef503)), closes [#2808](https://github.com/adobe/spacecat-api-service/issues/2808)
+
 ## [1.649.1](https://github.com/adobe/spacecat-api-service/compare/v1.649.0...v1.649.1) (2026-07-14)
 
 
