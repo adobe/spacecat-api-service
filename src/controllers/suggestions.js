@@ -2181,6 +2181,7 @@ function SuggestionsController(ctx, sqs, env) {
               await tokowakaClient.markPatternCoveredSuggestions(
                 ps,
                 allSuggestions,
+                siteId,
                 profile?.email || 'geo-experiment',
               );
             } catch (coverError) {
