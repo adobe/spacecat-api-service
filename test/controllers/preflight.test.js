@@ -1649,11 +1649,11 @@ describe('Preflight Controller', () => {
       expect(mockDataAccess.Organization.findById).to.have.been.calledWith('org-123');
     });
 
-    it('returns 500 when the Organization has no imsOrgId (SITES-48037 fail-closed)', async () => {
-      // Empty imsOrgId cannot be forwarded to mysticat (which now rejects the
-      // request without it). Fail here where the log line can name the site
-      // and organization; deferring the same failure by one hop to mysticat's
-      // 422 wouldn't add diagnostic value.
+    it('returns 400 when the Organization has no imsOrgId (SITES-48037 fail-closed)', async () => {
+      // Empty imsOrgId is a config gap — the site is registered but its parent
+      // org wasn't fully onboarded. 400 (not 500) because this isn't a
+      // retryable server error; the caller's admin needs to populate the org's
+      // imsOrgId before this site can preflight.
       mockDataAccess.Organization.findById.resolves({
         getId: () => 'org-123',
         getImsOrgId: () => '',
@@ -1663,12 +1663,15 @@ describe('Preflight Controller', () => {
         data: { url: 'https://main--example-site.aem.page/test.html' },
         attributes: { authInfo: mockAuthInfo },
       });
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(400);
       const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
       expect(result.message).to.equal('Site organization is missing imsOrgId');
-      // Never reached the mysticat call.
-      expect(fetchStub.secondCall).to.be.null;
+      // Fail-closed happens after hasAccess but BEFORE the HEAD probe (which
+      // is fetch call 1) and the mysticat call (fetch call 2). Assert fetch
+      // was never invoked — cleaner than `secondCall.to.be.null` and order-
+      // independent of any future HEAD-probe placement changes.
+      expect(fetchStub).to.not.have.been.called;
     });
 
     it('returns 500 when Organization.findById throws (SITES-48037)', async () => {
@@ -1684,10 +1687,13 @@ describe('Preflight Controller', () => {
       expect(result.message).to.equal('Failed to resolve site organization');
     });
 
-    it('returns 500 when Organization.findById returns null (SITES-48037)', async () => {
-      // Site row exists but its Organization row was deleted / never existed.
-      // The optional-chain in the controller (`organization?.getImsOrgId()`)
-      // handles this; the missing-imsOrgId branch takes over.
+    it('returns 500 when Organization.findById returns null — dangling FK (SITES-48037)', async () => {
+      // Distinct from the empty-imsOrgId case: null org = data-integrity issue
+      // at the FK level (site.organization_id points to a row that doesn't
+      // exist — needs cleanup). Empty imsOrgId = config gap at the field
+      // level (needs org onboarding). Different remediation paths → different
+      // error messages, and 500 (not 400) because it's genuinely broken data
+      // in our tables that no client action can fix.
       mockDataAccess.Organization.findById.resolves(null);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
@@ -1697,7 +1703,7 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(500);
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
-      expect(result.message).to.equal('Site organization is missing imsOrgId');
+      expect(result.message).to.equal('Site organization not found');
     });
 
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {

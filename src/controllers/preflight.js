@@ -528,22 +528,34 @@ function PreflightController(ctx, log, env) {
     // source of truth for the site → organization mapping; mysticat requires
     // us to supply it and does not fall back to any local projection.
     //
-    // Fail-closed on Organization load failure or missing/empty imsOrgId —
-    // mysticat's analyze route rejects the request with 422 if the field is
-    // absent, so let-it-through-and-fail-late would just defer the same 500
-    // by one hop. Better to surface the data issue here where the error
-    // message can name the site and organization directly.
-    let imsOrgId;
+    // Three distinct failure modes, each with its own remediation path:
+    //   1. Organization.findById throws (DB unreachable / transient) → 500;
+    //      retryable, alerting-worthy.
+    //   2. Organization row not found (FK integrity issue — dangling
+    //      site.organization_id) → 500; not retryable, needs data cleanup.
+    //   3. Organization exists but imsOrgId is empty/missing (config gap —
+    //      site is registered but its parent org wasn't fully onboarded) →
+    //      400; not retryable by us, the caller's admin needs to populate the
+    //      org's imsOrgId before this site can preflight.
+    //
+    // Distinguishing (2) and (3) in the log message matters for triage —
+    // they surface different data-quality issues with different owners.
+    const orgId = site.getOrganizationId();
+    let organization;
     try {
-      const organization = await dataAccess.Organization.findById(site.getOrganizationId());
-      imsOrgId = organization?.getImsOrgId();
+      organization = await dataAccess.Organization.findById(orgId);
     } catch (e) {
-      log.error(`[Preflight] Failed to load Organization ${site.getOrganizationId()} for site ${siteId}: ${e.message}`);
+      log.error(`[Preflight] Failed to load Organization ${orgId} for site ${siteId}: ${e.message}`);
       return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to resolve site organization', 500);
     }
+    if (!organization) {
+      log.error(`[Preflight] Organization ${orgId} not found for site ${siteId} — dangling FK, needs data cleanup.`);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Site organization not found', 500);
+    }
+    const imsOrgId = organization.getImsOrgId();
     if (!hasText(imsOrgId)) {
-      log.error(`[Preflight] Organization ${site.getOrganizationId()} for site ${siteId} has no imsOrgId — cannot proceed with preflight (mysticat requires it).`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Site organization is missing imsOrgId', 500);
+      log.error(`[Preflight] Organization ${orgId} for site ${siteId} has no imsOrgId — org not fully onboarded; cannot proceed with preflight (mysticat requires it).`);
+      return preflightError('PREFLIGHT_INVALID_REQUEST', 'Site organization is missing imsOrgId', 400);
     }
 
     // Validate the URL belongs to this site
