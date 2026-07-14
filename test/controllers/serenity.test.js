@@ -1261,7 +1261,12 @@ describe('SerenityController', () => {
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+          // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
+          dynamicAllocation: false,
         });
+      // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
+      // options bag — the same id given to ensureSubworkspace.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[2]).to.equal(WORKSPACE);
     });
 
     it('createMarket forwards the brand URL sources so the project carries them', async () => {
@@ -1857,10 +1862,14 @@ describe('SerenityController', () => {
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+        dynamicAllocation: false,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       expect(firstCall.args[7]).to.deep.equal(expectedOpts);
       expect(secondCall.args[7]).to.deep.equal(expectedOpts);
+      // Org parent (JIT units pool) threaded positionally (arg index 2), not in the options bag.
+      expect(firstCall.args[2]).to.equal(WORKSPACE);
+      expect(secondCall.args[2]).to.equal(WORKSPACE);
     });
 
     it('activate reads the brand URL sources once and applies them to every market', async () => {
