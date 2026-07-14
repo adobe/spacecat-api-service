@@ -429,7 +429,7 @@ describe('LlmoCloudFrontController', () => {
       connectContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        data: { accountId: '120569600543' },
         env: {},
       };
     });
@@ -443,6 +443,8 @@ describe('LlmoCloudFrontController', () => {
       expect(body.accountId).to.equal('120569600543');
       expect(body.roleArn).to.include('AdobeLLMOptimizerCloudFrontConnectorRole');
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      // The external ID reaching STS is the server-derived org id, not a client-supplied value.
+      expect(assumeConnectorRoleStub.firstCall.args[0].externalId).to.equal(TEST_IMS_ORG_ID);
     });
 
     it('returns connected false (not erroring) when the role is not yet assumable', async () => {
@@ -457,7 +459,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.connect({ ...connectContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.connect({ ...connectContext, data: { accountId: '123' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -534,7 +536,7 @@ describe('LlmoCloudFrontController', () => {
       distributionsContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        data: { accountId: '120569600543' },
         env: {},
       };
     });
@@ -551,7 +553,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.listDistributions({ ...distributionsContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.listDistributions({ ...distributionsContext, data: { accountId: '123' } });
 
       expect(result.status).to.equal(400);
     });
@@ -597,7 +599,7 @@ describe('LlmoCloudFrontController', () => {
       prereqContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        data: { accountId: '120569600543' },
         env: {},
       };
     });
@@ -640,7 +642,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.checkPrerequisites({ ...prereqContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.checkPrerequisites({ ...prereqContext, data: { accountId: '123' } });
 
       expect(result.status).to.equal(400);
     });
@@ -703,7 +705,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
         },
         env: {},
@@ -759,7 +760,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.fetchOrigins({ ...originsContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.fetchOrigins({ ...originsContext, data: { accountId: '120569600543' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -824,7 +825,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
         },
         env: {},
@@ -865,7 +865,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.fetchBehaviors({ ...behaviorsContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.fetchBehaviors({ ...behaviorsContext, data: { accountId: '120569600543' } });
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -927,7 +927,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
         },
         env: {},
@@ -999,7 +998,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.createOrigin({ ...originContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.createOrigin({ ...originContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('distributionId');
@@ -1056,7 +1055,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
         },
         env: {},
@@ -1133,7 +1131,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.createRoutingFunction({ ...functionContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.createRoutingFunction({ ...functionContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
     });
 
@@ -1183,7 +1181,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
           pathPattern: '/api/*',
         },
@@ -1214,7 +1211,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.applyCache({ ...cacheContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.applyCache({ ...cacheContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
     });
 
@@ -1265,7 +1262,7 @@ describe('LlmoCloudFrontController', () => {
       lambdaContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5', distributionId: 'E2EXAMPLE123' },
+        data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' },
         env: {},
       };
     });
@@ -1281,14 +1278,14 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.createLambda({ ...lambdaContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.createLambda({ ...lambdaContext, data: { accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distribution id is missing', async () => {
       const result = await controller.createLambda({
         ...lambdaContext,
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        data: { accountId: '120569600543' },
       });
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -1339,7 +1336,7 @@ describe('LlmoCloudFrontController', () => {
       statusContext = {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5', distributionId: 'E2EXAMPLE123' },
+        data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' },
         env: {},
       };
     });
@@ -1364,14 +1361,14 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 for an invalid account id', async () => {
-      const result = await controller.fetchLambdaStatus({ ...statusContext, data: { accountId: '123', externalId: 'ext' } });
+      const result = await controller.fetchLambdaStatus({ ...statusContext, data: { accountId: '123' } });
       expect(result.status).to.equal(400);
     });
 
     it('returns 400 when the distribution id is missing', async () => {
       const result = await controller.fetchLambdaStatus({
         ...statusContext,
-        data: { accountId: '120569600543', externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5' },
+        data: { accountId: '120569600543' },
       });
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -1418,7 +1415,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
           pathPattern: '/api/*',
           lambdaVersionArn: 'arn:aws:lambda:us-east-1:120569600543:function:edgeoptimize-origin:1',
@@ -1544,7 +1540,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
         },
         env: {},
@@ -1591,7 +1586,7 @@ describe('LlmoCloudFrontController', () => {
     });
 
     it('returns 400 when the distributionId is missing', async () => {
-      const result = await controller.verifyRouting({ ...verifyContext, data: { accountId: '120569600543', externalId: 'ext' } });
+      const result = await controller.verifyRouting({ ...verifyContext, data: { accountId: '120569600543' } });
       expect(result.status).to.equal(400);
     });
 
@@ -1627,7 +1622,6 @@ describe('LlmoCloudFrontController', () => {
   describe('distribution↔site guardrail (granular endpoints) + validation', () => {
     const creds = {
       accountId: '120569600543',
-      externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
       distributionId: 'E2EXAMPLE123',
     };
     const ctxWith = (data) => ({
@@ -1759,7 +1753,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
           originId: 'origin-aem',
           behavior: 'default',
@@ -1959,7 +1952,6 @@ describe('LlmoCloudFrontController', () => {
         params: { siteId: TEST_SITE_ID },
         data: {
           accountId: '120569600543',
-          externalId: '7ff9518a-cf59-40b4-aa53-68a3cb2e24a5',
           distributionId: 'E2EXAMPLE123',
           originId: 'origin-aem',
           behavior: 'default',
