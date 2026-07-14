@@ -36,6 +36,12 @@ export function buildTopicsPayload({ model, platform, projectId } = {}) {
   };
 }
 
+// Semrush's Elements API tag encoding: `prefix__value`, with `__` also used for
+// `parent__child` nesting within the value. This replaced an earlier `prefix:value`
+// encoding (colon-delimited, `Parent__Child` nesting only within the value). The
+// cutover is a one-time, atomic migration on Semrush's side — all workspaces/customers
+// were migrated to `__` together, so there is no dual-format transition period and no
+// need to parse both encodings here.
 const SEP = '__';
 
 /**

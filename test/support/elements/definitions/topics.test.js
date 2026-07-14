@@ -214,6 +214,32 @@ describe('topics definitions', () => {
       });
     });
 
+    it('handles a parent label identical to the child label (real production data)', () => {
+      // Live Semrush taxonomy sometimes repeats the leaf name as its own parent,
+      // e.g. "category__Product__Product" — label/parent_label must not be swapped.
+      const raw = { blocks: { value: [{ value: 'category__Product__Product' }] } };
+      const [item] = transformCategoriesToFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: 'category__Product__Product',
+        label: 'Product',
+        parent_id: 'category__Product',
+        parent_label: 'Product',
+      });
+    });
+
+    it('preserves non-ASCII characters and parentheses in the label untouched (real production data)', () => {
+      const raw = {
+        blocks: { value: [{ value: 'category__Brand__Marca Lovesac (ES)' }] },
+      };
+      const [item] = transformCategoriesToFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: 'category__Brand__Marca Lovesac (ES)',
+        label: 'Marca Lovesac (ES)',
+        parent_id: 'category__Brand',
+        parent_label: 'Brand',
+      });
+    });
+
     it('sets id to the original tag value (including prefix) for each entry', () => {
       const raw = { blocks: { value: [{ value: 'category__Creative' }] } };
       const [item] = transformCategoriesToFilterDimensions(raw);
