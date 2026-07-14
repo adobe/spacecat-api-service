@@ -10,12 +10,19 @@
  * governing permissions and limitations under the License.
  */
 
-import { ctx } from './harness.js';
-import { resetPostgres } from './seed.js';
-import { resetSemrushMocks, setUmMockQuota, dumpUmMock } from './setup.js';
-import serenityTests from '../shared/tests/serenity.js';
-
-serenityTests(() => ctx.httpClient, resetPostgres, resetSemrushMocks, {
-  setUmMockQuota,
-  dumpUmMock,
-});
+export const TaskManagementConnectionDto = {
+  toJSON(conn) {
+    return {
+      id: conn.getId(),
+      organizationId: conn.getOrganizationId(),
+      provider: conn.getProvider(),
+      status: conn.getStatus(),
+      displayName: conn.getDisplayName?.(),
+      instanceUrl: conn.getInstanceUrl?.(),
+      connectedBy: conn.getConnectedBy?.(),
+      metadata: conn.getMetadata(),
+      createdAt: conn.getCreatedAt?.(),
+      updatedAt: conn.getUpdatedAt?.(),
+    };
+  },
+};

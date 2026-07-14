@@ -10,12 +10,27 @@
  * governing permissions and limitations under the License.
  */
 
-import { ctx } from './harness.js';
-import { resetPostgres } from './seed.js';
-import { resetSemrushMocks, setUmMockQuota, dumpUmMock } from './setup.js';
-import serenityTests from '../shared/tests/serenity.js';
+/**
+ * Baseline ticket-suggestion bridge rows for IT tests.
+ *
+ * - TICKET_SUGG_1: links TICKET_1 ↔ TASK_MGMT_SUGGESTION_ID (logical DynamoDB ID, no FK)
+ *
+ * suggestion_id is a TEXT column (not a FK) — suggestions live in DynamoDB.
+ */
+import {
+  TICKET_SUGG_1_ID,
+  TICKET_1_ID,
+  OPPTY_1_ID,
+  TASK_MGMT_SUGGESTION_ID,
+} from '../../shared/seed-ids.js';
 
-serenityTests(() => ctx.httpClient, resetPostgres, resetSemrushMocks, {
-  setUmMockQuota,
-  dumpUmMock,
-});
+export const ticketSuggestions = [
+  {
+    id: TICKET_SUGG_1_ID,
+    ticket_id: TICKET_1_ID,
+    suggestion_id: TASK_MGMT_SUGGESTION_ID,
+    opportunity_id: OPPTY_1_ID,
+    created_by: 'test-user-sub',
+    created_at: '2026-01-01T00:00:00.000Z',
+  },
+];
