@@ -18,6 +18,7 @@ export {
   transformCategoriesToFilterDimensions,
   transformIntentsToFilterDimensions,
   transformOriginsToFilterDimensions,
+  transformOtherTagsForFilterDimensions,
 } from './topics.js';
 export { buildWeeksPayload, transformWeeksResponse } from './weeks.js';
 export { buildPromptsPayload, transformPromptsResponse } from './prompts.js';
@@ -27,3 +28,4 @@ export {
   buildOwnedUrlsTrendPayload,
   transformOwnedUrlsResponse,
 } from './owned-urls.js';
+export { buildDomainUrlsPayload, transformDomainUrlsResponse } from './domain-urls.js';

@@ -31,12 +31,16 @@ import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
-import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
+import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS, getEntitledProductCodes } from '../support/utils.js';
 import { resolveViewableSiteIds } from '../support/facs-site-visibility.js';
 import {
   ensureOrgEntitlement,
   resolveProductCode,
 } from '../support/tier-provisioning.js';
+
+// Cross-product sites-listing scope (SITES-46454, Phase 1 of multi-product login support).
+// See mysticat-architecture/platform/decisions/cross-product-sites-listing-via-client-id-scope.md
+const SITES_LIST_CROSS_PRODUCT_SCOPE = 'sites:list:cross_product';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -321,15 +325,47 @@ function OrganizationsController(ctx, env) {
       }
     }
 
-    // Own sites go through the enrollment filter (delegate org's entitlement).
-    // Delegated sites have already been validated against the target org's entitlement above.
-    const filteredSites = await filterSitesForProductCode(
-      context,
-      organization,
-      ownSites,
-      productCode,
-      accessControlUtil,
-    );
+    // Cross-product branch (SITES-46454). When the session JWT carries
+    // sites:list:cross_product (minted by spacecat-auth-service for allow-listed IMS
+    // client_ids), widen the per-product filter to a union across every product the
+    // org is entitled to — preserving today's entitlement, tier-visibility, and
+    // enrollment gates and dropping only the single-product restriction. Delegated
+    // sites are NOT touched; their flow above stays product-pinned to x-product.
+    const authInfo = context?.attributes?.authInfo;
+    const isCrossProduct = authInfo?.hasScope?.(SITES_LIST_CROSS_PRODUCT_SCOPE) === true;
+
+    let filteredSites;
+    if (isCrossProduct) {
+      ctx.log.info(`[sites] cross-product listing for org=${organizationId} user=${authInfo?.getProfile?.()?.userId || 'n/a'}`);
+      const entitledProductCodes = await getEntitledProductCodes(context, organization);
+      const byId = new Map();
+      // Sequential (not parallel) so log lines and DB call ordering stay predictable;
+      // the entitled-product set is small (one entry per SpaceCat product, currently 3).
+      for (const code of entitledProductCodes) {
+        // eslint-disable-next-line no-await-in-loop
+        const perProduct = await filterSitesForProductCode(
+          context,
+          organization,
+          ownSites,
+          code,
+          accessControlUtil,
+        );
+        for (const s of perProduct) {
+          byId.set(s.getId(), s);
+        }
+      }
+      filteredSites = [...byId.values()];
+    } else {
+      // Own sites go through the enrollment filter (delegate org's entitlement).
+      // Delegated sites have already been validated against the target org's entitlement above.
+      filteredSites = await filterSitesForProductCode(
+        context,
+        organization,
+        ownSites,
+        productCode,
+        accessControlUtil,
+      );
+    }
 
     // ReBAC collection filter. When facsWrapper marks this session as
     // FACS-enrolled and resource-scoped (no org-wide can_view — see
@@ -338,10 +374,22 @@ function OrganizationsController(ctx, env) {
     // delegation grant itself and pass through unchanged. Absent flag (admin /
     // internal org / non-ReBAC org / org-wide viewer) => full list.
     //
-    // Cross-product bypass: only filter when the current product actually
+    // Product-shape bypass: only filter when the current product actually
     // ReBAC-scopes `site` (ASO). Under LLMO, `site` is not a ReBAC resource
     // (LLMO scopes `brand`), so the state layer holds no per-site grants and
     // filtering would wrongly hide every site — return the full list instead.
+    //
+    // Cross-product (SITES-46454) bypass: when the session carries
+    // `sites:list:cross_product` (minted at login via `unique_client_id` or
+    // `cdn_origin_verified`), the caller is trusted at the CLIENT level to see
+    // the union of sites the org is entitled to across every product. That
+    // client-level trust intentionally supersedes the per-user, per-product
+    // ReBAC filter — the ReBAC filter is keyed on a single product's `site`
+    // resource, and applying it under the cross-product branch would filter
+    // out sites from other products that don't have any per-user grant on the
+    // FACS-enrolled product (they are still authorised by the client-level
+    // scope). Skip the filter entirely in this branch. See
+    // mysticat-architecture/platform/decisions/multi-product-login-phase1.md.
     let visibleOwnSites = filteredSites;
     const viewable = await resolveViewableSiteIds(context, organization);
     if (viewable instanceof Response) {

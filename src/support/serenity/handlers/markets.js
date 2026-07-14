@@ -953,6 +953,59 @@ export async function listSliceModels(transport, semrushWorkspaceId, projectId) 
   return { items };
 }
 
+/**
+ * Counts the project's currently-PUBLISHED prompts (the live layer), by paginating
+ * `listPromptsByTags` with an empty tag filter — the same live-layer walk `listTagsForProject`
+ * uses, with the same page ceiling. Used by the dynamic allocator to size the prompt re-meter of a
+ * model-set change: attaching Δ models to a project re-meters every published text
+ * (`publishedTexts × Δmodels`, plan §12 / resource-manager `modelChangeUnits`). Bounded by
+ * `PROMPT_COUNT_PAGE_LIMIT` pages; on a truncated walk it returns the counted-so-far (a floor),
+ * which can only UNDER-state the need — the transfer 422 remains the authoritative backstop.
+ *
+ * @param {any} transport - Serenity transport.
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {any} [log]
+ * @returns {Promise<number>} number of published prompts on the project.
+ */
+export async function countPublishedPrompts(transport, semrushWorkspaceId, projectId, log) {
+  const LIMIT = 200;
+  const PROMPT_COUNT_PAGE_LIMIT = 50;
+  let count = 0;
+  let page = 1;
+  while (page <= PROMPT_COUNT_PAGE_LIMIT) {
+    let resp;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+        tag_ids: [], page, limit: LIMIT,
+      });
+    } catch (e) {
+      // An upstream failure MID-WALK is truncation, same as hitting the page ceiling below: return
+      // the counted-so-far (a floor) instead of propagating the rejection and failing the WHOLE
+      // metered write over a partial-page read error. The transfer 422 remains the authoritative
+      // backstop if this under-states the real need.
+      log?.warn?.('countPublishedPrompts: upstream failure mid-walk; returning counted-so-far', {
+        semrushWorkspaceId, projectId, page, error: e?.message,
+      });
+      return count;
+    }
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    count += items.length;
+    if (items.length < LIMIT) {
+      break;
+    }
+    if (page === PROMPT_COUNT_PAGE_LIMIT) {
+      log?.warn?.('countPublishedPrompts: page ceiling hit; published-prompt count may be under-stated', {
+        semrushWorkspaceId, projectId, pages: PROMPT_COUNT_PAGE_LIMIT,
+      });
+      break;
+    }
+    page += 1;
+  }
+  return count;
+}
+
 export async function handleListModels(
   transport,
   dataAccess,
