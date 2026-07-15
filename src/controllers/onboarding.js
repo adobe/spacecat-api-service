@@ -18,13 +18,31 @@ import {
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import AccessControlUtil from '../support/access-control-util.js';
-import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
 import { notifyOnboarding } from '../support/onboarding/slack-notifier.js';
+
+/**
+ * Best-effort per-org notification cooldown. Guards against a buggy client or MFE
+ * retry loop hammering the Slack channel with duplicate onboarding pings.
+ *
+ * Deliberately minimal: this Map is module-scoped, so — like the workspace cache
+ * — it is PER LAMBDA CONTAINER. It de-dupes serial retries that land on the same
+ * warm container but does NOT bound a flood fanned out across many concurrent
+ * containers. A hard cross-instance guarantee would need shared state (an org
+ * `lastNotifiedAt` column or a shared store); that is not warranted for this
+ * low-QPS, authenticated, `hasAccess`-gated endpoint today. The cooldown is armed
+ * only AFTER a successful send, so a failed notification stays immediately
+ * retryable.
+ */
+const ONBOARDING_COOLDOWN_MS = 30 * 1000; // 30s per org
+const onboardingCooldown = new Map();
 
 /**
  * Controller for the Semrush onboarding notification endpoint.
  *
- * @param {object} context - Request context (dataAccess, attributes, env, log).
+ * @param {object} context - Boot-time context injected by the route wiring in
+ *   index.js. Unused here: all per-request data (dataAccess, params, attributes)
+ *   comes from the `ctx` argument passed to each handler. Kept in the signature
+ *   to match the positional factory convention (see ElementsController).
  * @param {object} log - Logger.
  * @param {object} env - Runtime env.
  * @returns {{ triggerOnboarding: (ctx: object) => Promise<Response> }}
@@ -54,7 +72,20 @@ export default function OnboardingController(context, log, env) {
       return badRequest('Unable to determine customer email from the request identity');
     }
 
-    const workspaceId = await resolveWorkspaceId(ctx, spaceCatId);
+    // We already fetched `org` above for the access check. Read the workspace
+    // id straight off it rather than routing through resolveWorkspaceId — that
+    // avoids a second Organization.findById on a cold cache, and (since the
+    // resolver can serve a 30s negative-cached null) reports the org's true
+    // current workspace for an org that was just given one.
+    const workspaceId = typeof org.getSemrushWorkspaceId === 'function'
+      ? (org.getSemrushWorkspaceId() ?? null)
+      : null;
+
+    const lastNotified = onboardingCooldown.get(spaceCatId);
+    if (lastNotified && Date.now() - lastNotified < ONBOARDING_COOLDOWN_MS) {
+      log.info(`[onboarding] skipping notification for org=${spaceCatId}: within ${ONBOARDING_COOLDOWN_MS}ms cooldown`);
+      return ok({ notified: false, workspaceId, reason: 'recently notified' });
+    }
 
     try {
       await notifyOnboarding(env, { email, workspaceId, spaceCatId });
@@ -73,6 +104,10 @@ export default function OnboardingController(context, log, env) {
       log.error(`[onboarding] notification failed for org=${spaceCatId} status=${status}: ${reason}`);
       return createResponse({ message: 'Failed to send onboarding notification' }, status);
     }
+
+    // Arm the cooldown only after a confirmed send so a failed notification
+    // (the catch above returns before this) stays immediately retryable.
+    onboardingCooldown.set(spaceCatId, Date.now());
 
     return ok({ notified: true, workspaceId });
   };
