@@ -5763,7 +5763,10 @@ describe('LLMO Onboarding Functions', () => {
     let onboardingModule;
     let sandbox;
 
-    before(async () => {
+    before(async function loadOnboardingModule() {
+      // Cold esmock load of the onboarding module (which pulls in many deps) can
+      // exceed the 2000ms default on a first, un-warmed run.
+      this.timeout(30000);
       onboardingModule = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
     });
 
@@ -5784,8 +5787,6 @@ describe('LLMO Onboarding Functions', () => {
     const buildParams = (drsClient) => ({
       drsClient,
       siteId: 'site-123',
-      orgId: 'org-123',
-      imsOrgId: 'ABC123@AdobeOrg',
       log: {
         info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
       },
@@ -5793,8 +5794,8 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     const HELPERS = [
-      ['triggerSemrushPromptJob', 'prompt_generation_semrush', 'twice-monthly'],
-      ['triggerCitationAttemptJob', 'prompt_generation_agentic_traffic', 'twice-monthly'],
+      ['triggerSemrushPromptJob', 'prompt_generation_semrush', 'twice_monthly'],
+      ['triggerCitationAttemptJob', 'prompt_generation_agentic_traffic', 'twice_monthly'],
       ['triggerSyntheticPersonasJob', 'prompt_generation_synthetic_personas', 'quarterly'],
     ];
 
@@ -5804,15 +5805,17 @@ describe('LLMO Onboarding Functions', () => {
         const result = await onboardingModule[fnName](buildParams(drsClient));
 
         expect(drsClient.createSchedule).to.have.been.calledOnce;
-        expect(drsClient.createSchedule.firstCall.args[0]).to.deep.include({
+        const arg = drsClient.createSchedule.firstCall.args[0];
+        expect(arg).to.deep.include({
           siteId: 'site-123',
-          orgId: 'org-123',
-          imsOrgId: 'ABC123@AdobeOrg',
-          providerId,
           cadence,
           enableBrandPresence: false,
           triggerImmediately: true,
         });
+        expect(arg.providerIds).to.deep.equal([providerId]);
+        // DRS derives the tenant key from siteId and rejects caller imsOrgId — never thread it.
+        expect(arg).to.not.have.property('imsOrgId');
+        expect(arg).to.not.have.property('orgId');
         expect(result).to.deep.equal({ scheduleId: 'sched-1', alreadyExisted: false });
       });
 
@@ -5892,7 +5895,7 @@ describe('LLMO Onboarding Functions', () => {
       const instance = mockDrsClient.createFrom();
       expect(instance.submitJob).to.have.been.calledOnce; // Brandalf fired first
       expect(instance.createSchedule).to.have.been.calledThrice;
-      const providerIds = instance.createSchedule.getCalls().map((c) => c.args[0].providerId);
+      const providerIds = instance.createSchedule.getCalls().map((c) => c.args[0].providerIds[0]);
       expect(providerIds).to.have.members([
         'prompt_generation_semrush',
         'prompt_generation_agentic_traffic',

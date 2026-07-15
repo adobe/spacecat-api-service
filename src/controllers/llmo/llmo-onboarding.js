@@ -176,13 +176,18 @@ export async function triggerBrandalfOnboardingJob({
 }
 
 // Cadence labels accepted by DRS `createSchedule` for the recurring
-// "prompt suggestion" pipelines. DRS derives the concrete cron expression
-// server-side from the label (frequency:'cron') — we never send raw cron, so a
-// misconfigured/leaked caller cannot schedule a fleet-wide Fargate storm.
-//   'twice-monthly' → 1st & 15th (honest label; not a true 14-day interval)
+// "prompt suggestion" pipelines (the `SCHEDULE_CADENCES` enum in the drs-client).
+// DRS derives the concrete cron expression server-side from the label
+// (frequency:'cron', with per-site hour jitter for twice_monthly) — we never send
+// raw cron, so a misconfigured/leaked caller cannot schedule a fleet-wide Fargate
+// storm; an unknown value is rejected server-side.
+//   'twice_monthly' → 1st & 15th (honest label; not a true 14-day interval)
 //   'quarterly'     → 1st of Jan/Apr/Jul/Oct
+// Kept as local literals (matching SCHEDULE_CADENCES values) so this module loads
+// against the currently-installed client; can be swapped for the imported
+// SCHEDULE_CADENCES const once drs-client 1.14.0 is installed.
 // See local/drs-prompt-suggestions-schedules-onboarding-plan.md ("Cadence expression").
-const DRS_CADENCE_TWICE_MONTHLY = 'twice-monthly';
+const DRS_CADENCE_TWICE_MONTHLY = 'twice_monthly';
 const DRS_CADENCE_QUARTERLY = 'quarterly';
 
 /**
@@ -196,19 +201,21 @@ const DRS_CADENCE_QUARTERLY = 'quarterly';
  * schedule and nothing self-heals, so it propagates to the caller which logs it
  * at ERROR. This helper therefore does not swallow the failure itself.
  *
+ * NOTE: `createSchedule` derives the tenant-isolation key from `siteId`
+ * server-side and REJECTS any caller-supplied imsOrgId, so we deliberately do not
+ * thread imsOrgId/orgId into it.
+ *
  * @param {object} params
  * @param {object} params.drsClient - Configured DRS client.
  * @param {string} params.providerId - DRS provider id to schedule.
  * @param {string} params.cadence - One of DRS_CADENCE_* labels.
  * @param {string} params.siteId - SpaceCat site UUID.
- * @param {string} params.orgId - SpaceCat organization UUID.
- * @param {string} params.imsOrgId - IMS org id (isolation key; DRS re-derives server-side).
  * @param {object} params.log - Logger.
  * @param {Function} [params.say] - Optional Slack say callback.
  * @returns {Promise<object|null>} The createSchedule result, or null when DRS is not configured.
  */
 async function registerPromptSuggestionSchedule({
-  drsClient, providerId, cadence, siteId, orgId, imsOrgId, log, say = () => {},
+  drsClient, providerId, cadence, siteId, log, say = () => {},
 }) {
   if (!drsClient.isConfigured()) {
     log.debug(`DRS client not configured, skipping ${providerId} schedule for site ${siteId}`);
@@ -217,13 +224,13 @@ async function registerPromptSuggestionSchedule({
 
   // Default enable_brand_presence off (plan Phase 0.4): these prompt-suggestion
   // pipelines must not push unexpected load into the brand-presence pipeline / SNS
-  // allowlist unless a site is explicitly BP-enabled.
+  // allowlist unless a site is explicitly BP-enabled. `providerIds` is an array
+  // (the job_config.provider_ids envelope) even for a single-provider pipeline.
   const result = await drsClient.createSchedule({
     siteId,
-    providerId,
+    providerIds: [providerId],
     cadence,
-    orgId,
-    imsOrgId,
+    description: `${providerId} prompt-suggestion schedule (onboarding)`,
     enableBrandPresence: false,
     triggerImmediately: true,
   });
@@ -1550,8 +1557,6 @@ export async function activateBrandAndGeneratePrompts({
           await trigger({
             drsClient: scheduleDrsClient,
             siteId: site.getId(),
-            orgId: organization.getId(),
-            imsOrgId,
             log,
             say,
           });
