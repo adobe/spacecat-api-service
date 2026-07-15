@@ -1,3 +1,10 @@
+## [1.654.2](https://github.com/adobe/spacecat-api-service/compare/v1.654.1...v1.654.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* domain/segement wide deployment support in IVE ([#2800](https://github.com/adobe/spacecat-api-service/issues/2800)) ([344c45c](https://github.com/adobe/spacecat-api-service/commit/344c45c0a88eae9cef72e52649cb4f5a1ec82a72))
+
 ## [1.654.1](https://github.com/adobe/spacecat-api-service/compare/v1.654.0...v1.654.1) (2026-07-15)
 
 
