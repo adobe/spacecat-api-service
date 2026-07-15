@@ -25,19 +25,19 @@
 export const ASO_OVERLAY_NAMESPACE = 'Mysticat/AsoOverlay';
 
 export const ASO_OVERLAY_METRICS = Object.freeze([
-  'AsoOverlayRequestTotal', // Count · dims: Environment, Outcome, Tier
+  'AsoOverlayRequestTotal', // Count · dims: Environment, Outcome
   'AsoOverlayRequestDurationMs', // Milliseconds · dims: Environment, Outcome
   'AsoOverlayEtagPresent', // Count · dims: Environment (subset of 200)
   'AsoOverlayConditionalGet304', // Count · dims: Environment (INM matched)
   'AsoOverlayIfNoneMatchInvalid', // Count · dims: Environment, Reason
-  'AsoOverlayS3ReadDurationMs', // Milliseconds · dims: Environment, Outcome
+  'AsoOverlayS3ReadDurationMs', // Milliseconds · dims: Environment, S3Result
   'AsoOverlayAuthKeyUsed', // Count · dims: Environment, Slot (rotation-in-flight signal)
   'AsoOverlayAuthFailed', // Count · dims: Environment, Reason
 ]);
 
-// Outcome enum for AsoOverlayRequestTotal / AsoOverlayRequestDurationMs /
-// AsoOverlayS3ReadDurationMs. Distinguishes 404 sub-reasons so on-call can tell
-// authz-fail from S3-object-missing (indistinguishable to clients by design).
+// Outcome enum for AsoOverlayRequestTotal / AsoOverlayRequestDurationMs.
+// Distinguishes 404 sub-reasons so on-call can tell authz-fail from
+// S3-object-missing (indistinguishable to clients by design).
 export const OUTCOME = Object.freeze({
   OK_200: '200',
   NOT_MODIFIED_304: '304',
@@ -51,11 +51,21 @@ export const OUTCOME = Object.freeze({
   S3_UNEXPECTED: '500-s3',
 });
 
+// S3Result enum for AsoOverlayS3ReadDurationMs. Kept separate from OUTCOME so
+// dashboards querying "filter by Outcome" don't ambiguously match S3-scoped
+// metrics — the two share the axis name only, not the semantic domain.
+export const S3_RESULT = Object.freeze({
+  SUCCESS: 'success',
+  NO_SUCH_KEY: 'nosuchkey',
+  ACCESS_DENIED: 'accessdenied',
+  UNEXPECTED: 'unexpected',
+});
+
 // Reason enum for AsoOverlayAuthFailed.
 export const AUTH_FAIL_REASON = Object.freeze({
-  MISSING: 'missing', // Header absent OR not path-scoped to overlay
+  MISSING: 'missing', // Overlay route, X-ASO-API-Key header absent
   INVALID: 'invalid', // Header present but doesn't match either key slot
-  MALFORMED: 'malformed', // ASO_OVERLAY_API_KEY env var not configured
+  CONFIG_MISSING: 'config-missing', // Server-side ASO_OVERLAY_API_KEY env var unset (deploy misconfig)
 });
 
 // Reason enum for AsoOverlayIfNoneMatchInvalid. Whitespace-only values are

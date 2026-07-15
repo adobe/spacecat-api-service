@@ -94,7 +94,7 @@ class AsoOverlayKeyHandler extends AbstractHandler {
     if (!expectedKey) {
       this.log('ASO_OVERLAY_API_KEY is not configured', 'error');
       emitMetric(
-        { name: 'AsoOverlayAuthFailed', dimensions: { Reason: AUTH_FAIL_REASON.MALFORMED } },
+        { name: 'AsoOverlayAuthFailed', dimensions: { Reason: AUTH_FAIL_REASON.CONFIG_MISSING } },
         emitOpts,
       );
       return null;

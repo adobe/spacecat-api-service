@@ -23,7 +23,9 @@ import sinon from 'sinon';
 import RedirectsController from '../../src/controllers/redirects.js';
 import {
   ASO_OVERLAY_NAMESPACE,
+  ASO_OVERLAY_METRICS,
   OUTCOME,
+  S3_RESULT,
   INM_INVALID_REASON,
 } from '../../src/support/aso-overlay-metrics.js';
 
@@ -64,7 +66,7 @@ function metricsFrom(logStub) {
         value: env[metric.Name],
         environment: env.Environment,
         outcome: env.Outcome,
-        tier: env.Tier,
+        s3result: env.S3Result,
         reason: env.Reason,
         slot: env.Slot,
       };
@@ -138,13 +140,13 @@ describe('RedirectsController — CloudWatch EMF metrics', () => {
     expect(response.status).to.equal(200);
 
     const em = metricsFrom(logStub);
-    const req = findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.OK_200, tier: 'dev' });
+    const req = findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.OK_200 });
     expect(req).to.exist;
     expect(req.value).to.equal(1);
     expect(req.environment).to.equal('dev');
     expect(findMetric(em, 'AsoOverlayRequestDurationMs', { outcome: OUTCOME.OK_200 })).to.exist;
     expect(findMetric(em, 'AsoOverlayEtagPresent')).to.exist;
-    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { outcome: OUTCOME.OK_200 })).to.exist;
+    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { s3result: S3_RESULT.SUCCESS })).to.exist;
   });
 
   it('200 without S3 ETag — emits RequestTotal but not EtagPresent', async () => {
@@ -228,7 +230,7 @@ describe('RedirectsController — CloudWatch EMF metrics', () => {
     expect(response.status).to.equal(400);
 
     const em = metricsFrom(logStub);
-    expect(findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.BAD_REQUEST_400, tier: 'dev' })).to.exist;
+    expect(findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.BAD_REQUEST_400 })).to.exist;
     // Never reached S3 → no S3 read metric.
     expect(findMetric(em, 'AsoOverlayS3ReadDurationMs')).to.not.exist;
   });
@@ -270,7 +272,7 @@ describe('RedirectsController — CloudWatch EMF metrics', () => {
     expect(findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.AUTHZ_NOT_ENROLLED })).to.exist;
   });
 
-  it('404 S3 NoSuchKey — emits RequestTotal(404-s3-nosuchkey) and S3ReadDurationMs', async () => {
+  it('404 S3 NoSuchKey — emits RequestTotal(404-s3-nosuchkey) and S3ReadDurationMs{nosuchkey}', async () => {
     const err = new Error('nope');
     err.name = 'NoSuchKey';
     mockS3.s3Client.send.rejects(err);
@@ -280,10 +282,10 @@ describe('RedirectsController — CloudWatch EMF metrics', () => {
 
     const em = metricsFrom(logStub);
     expect(findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.S3_NO_SUCH_KEY })).to.exist;
-    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { outcome: OUTCOME.S3_NO_SUCH_KEY })).to.exist;
+    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { s3result: S3_RESULT.NO_SUCH_KEY })).to.exist;
   });
 
-  it('404 S3 AccessDenied — emits RequestTotal(404-s3-accessdenied)', async () => {
+  it('404 S3 AccessDenied — emits RequestTotal(404-s3-accessdenied) and S3ReadDurationMs{accessdenied}', async () => {
     const err = new Error('denied');
     err.name = 'AccessDenied';
     err.$metadata = { httpStatusCode: 403 };
@@ -294,42 +296,73 @@ describe('RedirectsController — CloudWatch EMF metrics', () => {
 
     const em = metricsFrom(logStub);
     expect(findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.S3_ACCESS_DENIED })).to.exist;
-    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { outcome: OUTCOME.S3_ACCESS_DENIED })).to.exist;
+    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { s3result: S3_RESULT.ACCESS_DENIED })).to.exist;
   });
 
-  it('500 unexpected S3 error — emits RequestTotal(500-s3)', async () => {
+  it('500 unexpected S3 error — emits RequestTotal(500-s3) and S3ReadDurationMs{unexpected}', async () => {
     mockS3.s3Client.send.rejects(new Error('boom'));
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(500);
 
     const em = metricsFrom(logStub);
     expect(findMetric(em, 'AsoOverlayRequestTotal', { outcome: OUTCOME.S3_UNEXPECTED })).to.exist;
+    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { s3result: S3_RESULT.UNEXPECTED })).to.exist;
   });
 
-  it('Tier dimension is parsed from URL suffix', async () => {
+  it('200 happy path — emits S3ReadDurationMs{success}', async () => {
     mockS3.s3Client.send.resolves({
       ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves('a b\n') },
     });
-    requestContext.pathInfo.suffix = `config/prod/${SERVICE}/redirects.txt`;
 
     await controller.getRedirects(requestContext);
 
     const em = metricsFrom(logStub);
-    expect(findMetric(em, 'AsoOverlayRequestTotal', { tier: 'prod' })).to.exist;
+    expect(findMetric(em, 'AsoOverlayS3ReadDurationMs', { s3result: S3_RESULT.SUCCESS })).to.exist;
   });
 
-  it('missing pathInfo suffix → Tier=unknown, no throw', async () => {
-    mockS3.s3Client.send.resolves({
-      ETag: ETAG,
-      Body: { transformToString: sandbox.stub().resolves('a b\n') },
-    });
-    delete requestContext.pathInfo;
-
-    const response = await controller.getRedirects(requestContext);
-    expect(response.status).to.equal(200);
-
-    const em = metricsFrom(logStub);
-    expect(findMetric(em, 'AsoOverlayRequestTotal', { tier: 'unknown' })).to.exist;
+  it('drift guard — every metric emitted by getRedirects appears in ASO_OVERLAY_METRICS', async () => {
+    // Exercise a mix of terminal branches so the emitter fires most metrics.
+    const scenarios = [
+      // 200 with ETag + INM matching = 304
+      async () => {
+        mockS3.s3Client.send.resolves({
+          ETag: ETAG, Body: { transformToString: sandbox.stub().resolves('x\n') },
+        });
+        withIfNoneMatch(ETAG);
+        await controller.getRedirects(requestContext);
+      },
+      // 200 with unquoted INM
+      async () => {
+        mockS3.s3Client.send.resolves({
+          ETag: ETAG, Body: { transformToString: sandbox.stub().resolves('x\n') },
+        });
+        withIfNoneMatch('bare-token');
+        await controller.getRedirects(requestContext);
+      },
+      // 500 unexpected S3
+      async () => {
+        mockS3.s3Client.send.rejects(new Error('boom'));
+        await controller.getRedirects(requestContext);
+      },
+    ];
+    // Sequential execution is intentional: each scenario re-stubs the sandbox
+    // so parallel awaits would race. The catalog check runs against the union.
+    await scenarios.reduce(async (acc, run) => {
+      await acc;
+      sandbox.restore();
+      sandbox = sinon.createSandbox();
+      logStub = sandbox.stub(console, 'log');
+      mockS3.s3Client.send = sandbox.stub();
+      await run();
+    }, Promise.resolve());
+    const emitted = new Set(metricsFrom(logStub).map((e) => e.name));
+    for (const name of emitted) {
+      expect(ASO_OVERLAY_METRICS).to.include(
+        name,
+        `Emitted metric "${name}" is not in the ASO_OVERLAY_METRICS drift-guard catalog. `
+        + 'Either add it to src/support/aso-overlay-metrics.js or fix the emit site.',
+      );
+    }
   });
 });

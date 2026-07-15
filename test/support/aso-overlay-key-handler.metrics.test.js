@@ -117,12 +117,12 @@ describe('AsoOverlayKeyHandler — metrics', () => {
     expect(findMetric(em, 'AsoOverlayAuthFailed', { reason: AUTH_FAIL_REASON.INVALID })).to.exist;
   });
 
-  it('ASO_OVERLAY_API_KEY unset — emits AuthFailed{Reason=malformed}', async () => {
+  it('ASO_OVERLAY_API_KEY unset — emits AuthFailed{Reason=config-missing}', async () => {
     context.env.ASO_OVERLAY_API_KEY = '';
     const result = await handler.checkAuth(request, context);
     expect(result).to.equal(null);
     const em = metricsFrom(logStub);
-    expect(findMetric(em, 'AsoOverlayAuthFailed', { reason: AUTH_FAIL_REASON.MALFORMED })).to.exist;
+    expect(findMetric(em, 'AsoOverlayAuthFailed', { reason: AUTH_FAIL_REASON.CONFIG_MISSING })).to.exist;
   });
 
   it('non-overlay route — NO metric emitted (path scope guard)', async () => {

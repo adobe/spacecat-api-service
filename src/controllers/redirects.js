@@ -21,7 +21,9 @@ import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
 import { getHeader } from '../support/http-headers.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
-import { ASO_OVERLAY_NAMESPACE, OUTCOME, INM_INVALID_REASON } from '../support/aso-overlay-metrics.js';
+import {
+  ASO_OVERLAY_NAMESPACE, OUTCOME, S3_RESULT, INM_INVALID_REASON,
+} from '../support/aso-overlay-metrics.js';
 
 // Cloud Manager service identifier, e.g. cm-p154709-e1629980. Digit runs are
 // capped to a realistic length to avoid arbitrarily long lookups; the capture
@@ -138,10 +140,6 @@ function RedirectsController(ctx) {
     const { service } = context.params;
     // Capture start time up front so every terminal branch reports duration.
     const startedAt = Date.now();
-    // Tier segment (`dev` / `prod`) is the second path element in
-    // `/config/<tier>/<service>/redirects.txt`. Path here is the route's suffix,
-    // so this is a small, allocation-light split. Unknown -> 'unknown'.
-    const tier = (context.pathInfo?.suffix || '').split('/').filter(Boolean)[1] || 'unknown';
     const emitOpts = {
       environment: resolveEnvironment(env),
       namespace: ASO_OVERLAY_NAMESPACE,
@@ -149,9 +147,14 @@ function RedirectsController(ctx) {
 
     // Single call-site helper: emits RequestTotal + RequestDurationMs together
     // so on-call always has both a rate and a latency view for the same outcome.
+    // Note: no `Tier` dimension — the origin route is `/config/:service/...`
+    // (Fastly strips the public `/config/<tier>/...` prefix before proxying), so
+    // any tier extraction from the origin path would be either wrong or
+    // per-tenant, blowing up CloudWatch cardinality. Environment (auto-added by
+    // emitMetric from AWS_ENV) already carries dev-vs-prod.
     const emitFinal = (outcome) => {
       emitMetric(
-        { name: 'AsoOverlayRequestTotal', dimensions: { Outcome: outcome, Tier: tier } },
+        { name: 'AsoOverlayRequestTotal', dimensions: { Outcome: outcome } },
         emitOpts,
       );
       emitMetric(
@@ -213,20 +216,22 @@ function RedirectsController(ctx) {
     // Read the overlay with the Lambda's own execution role (no SigV4 from caller).
     const key = `config/${service}/redirects.txt`;
     const s3StartedAt = Date.now();
+    // Emits AsoOverlayS3ReadDurationMs with the S3-scoped result. Kept separate
+    // from `emitFinal`'s request-level Outcome so dashboards don't ambiguously
+    // slice S3 latency by request-level codes (e.g. "S3 success on a 304").
+    const emitS3Duration = (s3Result) => emitMetric(
+      {
+        name: 'AsoOverlayS3ReadDurationMs',
+        value: Date.now() - s3StartedAt,
+        unit: 'Milliseconds',
+        dimensions: { S3Result: s3Result },
+      },
+      emitOpts,
+    );
     try {
       const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
       const response = await s3Client.send(command);
-      // Successful S3 read — record its duration under the "reached S3" outcome
-      // family. The final Outcome (200 vs 304) is emitted separately by emitFinal.
-      emitMetric(
-        {
-          name: 'AsoOverlayS3ReadDurationMs',
-          value: Date.now() - s3StartedAt,
-          unit: 'Milliseconds',
-          dimensions: { Outcome: OUTCOME.OK_200 },
-        },
-        emitOpts,
-      );
+      emitS3Duration(S3_RESULT.SUCCESS);
 
       // S3 returns the object's ETag already quoted (RFC 7232 opaque-tag form),
       // e.g. `"d41d8cd98f00b204e9800998ecf8427e"`. Passthrough gives the client
@@ -238,10 +243,11 @@ function RedirectsController(ctx) {
       // a plain 200 rather than breaking.
       const etag = response.ETag;
       const ifNoneMatch = getHeader(context, 'if-none-match');
+      const inmMatched = ifNoneMatchMatches(ifNoneMatch, etag);
       // Track shell-stripped / malformed If-None-Match separately: a spike here
       // means a specific sidecar rollout parses ETags wrong (RFC 7232 §2.3
       // requires quoted opaque-tag; unquoted → rejected → falls through to 200).
-      if (ifNoneMatch !== null && !ifNoneMatchMatches(ifNoneMatch, etag)) {
+      if (ifNoneMatch !== null && !inmMatched) {
         const trimmed = ifNoneMatch.trim();
         // Every token failed the opaque-tag check — likely unquoted. Non-matching
         // but well-formed validators (client's stale copy) are normal cache
@@ -254,7 +260,7 @@ function RedirectsController(ctx) {
           );
         }
       }
-      if (ifNoneMatchMatches(ifNoneMatch, etag)) {
+      if (inmMatched) {
         emitMetric({ name: 'AsoOverlayConditionalGet304' }, emitOpts);
         emitFinal(OUTCOME.NOT_MODIFIED_304);
         // 304 MUST NOT include a message body (RFC 7230 §3.3.3); MUST carry any
@@ -284,15 +290,7 @@ function RedirectsController(ctx) {
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
       if (err.name === 'NoSuchKey' || code === 404) {
-        emitMetric(
-          {
-            name: 'AsoOverlayS3ReadDurationMs',
-            value: Date.now() - s3StartedAt,
-            unit: 'Milliseconds',
-            dimensions: { Outcome: OUTCOME.S3_NO_SUCH_KEY },
-          },
-          emitOpts,
-        );
+        emitS3Duration(S3_RESULT.NO_SUCH_KEY);
         emitFinal(OUTCOME.S3_NO_SUCH_KEY);
         return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
@@ -308,28 +306,12 @@ function RedirectsController(ctx) {
           + '— missing object or missing s3:GetObject grant',
           err,
         );
-        emitMetric(
-          {
-            name: 'AsoOverlayS3ReadDurationMs',
-            value: Date.now() - s3StartedAt,
-            unit: 'Milliseconds',
-            dimensions: { Outcome: OUTCOME.S3_ACCESS_DENIED },
-          },
-          emitOpts,
-        );
+        emitS3Duration(S3_RESULT.ACCESS_DENIED);
         emitFinal(OUTCOME.S3_ACCESS_DENIED);
         return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
       log.error(`[aso-overlay] failed to read ${key} from ${bucketName}`, err);
-      emitMetric(
-        {
-          name: 'AsoOverlayS3ReadDurationMs',
-          value: Date.now() - s3StartedAt,
-          unit: 'Milliseconds',
-          dimensions: { Outcome: OUTCOME.S3_UNEXPECTED },
-        },
-        emitOpts,
-      );
+      emitS3Duration(S3_RESULT.UNEXPECTED);
       emitFinal(OUTCOME.S3_UNEXPECTED);
       return internalServerError('Failed to retrieve redirect overlay', NO_STORE_HEADERS);
     }
