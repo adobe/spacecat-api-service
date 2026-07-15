@@ -27,6 +27,7 @@ import {
   listGlobalModelCatalog,
   listSliceModels,
   syncModelsForProject,
+  countPublishedPrompts,
   MAX_MODEL_IDS,
   validateParentIdQuery,
 } from './markets.js';
@@ -34,9 +35,15 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
-import { topicTag } from '../prompt-tags.js';
+import { createHeadroomGuard } from '../dynamic-allocation-active.js';
+import {
+  modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
+} from '../resource-manager.js';
+import { DIMENSION, STANDARD_PROMPT_TAG_VALUES } from '../prompt-tags.js';
+import { provisionDimensionTree } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
-import { collectBrandUrlEntries, attachBrandUrlsToProject } from '../brand-urls.js';
+import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
+import { resolveProjects } from '../resolve-projects.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
@@ -170,13 +177,21 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * `topic:<TopicName>`, the caller's `standardTags`, and a branded/non-branded
- * `type:` tag derived from `brandNames` (brand name + aliases). Returns the
- * topic/prompt counts. A generation that yields nothing is a clean no-op (no
- * upstream write).
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}) plus
+ * a branded / non-branded `type` value derived from `brandNames` (brand name +
+ * aliases). Returns the topic/prompt counts. A generation that yields nothing is
+ * a clean no-op (no upstream write).
  *
- * Prompt text is the createTaggedPrompts key, so identical text across topics
- * collapses to one entry (last tag set wins) — acceptable and rare.
+ * The generated topic name is NOT attached. Under the dimension-root model a
+ * topic is a sub-category — a depth-3 descendant of a customer category — and
+ * the AI-SEO service returns topics with no category to hang them under, so
+ * there is no correct parent to create them below. Generated prompts therefore
+ * arrive uncategorized and are categorized later (adobe/serenity-docs#44).
+ *
+ * Writes are id-based: `createPromptsByIds` takes ONE shared `tag_ids` array per
+ * call, so the texts are partitioned by their resolved tag-id set — which, with
+ * topics gone, is exactly two groups (branded and non-branded). Identical text
+ * collapses to one entry per group.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} workspaceId - sub-workspace the project lives in.
@@ -185,14 +200,16 @@ function validateCreateBody(body) {
  * @param {string} options.domain - brand domain to generate topics for.
  * @param {string} options.country - market/country code to generate topics for.
  * @param {number} [options.topicCap=0] - keep the top N topics by volume (0 = all).
- * @param {string[]} [options.standardTags=[]] - tags added to every generated prompt.
  * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
  *   classification via the shared {@link classifyBrandedTag} (whole-word match,
  *   diacritic-folded, case-insensitive).
+ * @param {{ values: Map<string, Map<string, string>> }} options.provisioned - the
+ *   already-provisioned dimension tree. The caller provisions it unconditionally,
+ *   so re-resolving it here would read the whole taxonomy a second time per request.
  * @param {object} log - logger.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
-  domain, country, topicCap = 0, standardTags = [], brandNames = [],
+  domain, country, topicCap = 0, brandNames = [], provisioned,
 }, log) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
@@ -212,25 +229,53 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // so a prompt is classified identically no matter how it is written.
   const needles = needlesFromNames(Array.isArray(brandNames) ? brandNames : []);
 
-  const promptsByText = {};
-  selected.forEach((t) => {
-    const topic = topicTag(t.topic);
-    (Array.isArray(t.prompts) ? t.prompts : []).forEach((p) => {
+  // Dedupe by text FIRST: an identical prompt under two topics is one prompt, and
+  // its classification depends only on its text, so the winner is unambiguous.
+  const texts = new Set();
+  for (const t of selected) {
+    for (const p of (Array.isArray(t.prompts) ? t.prompts : [])) {
       if (hasText(p)) {
-        promptsByText[p] = [topic, ...standardTags, classifyBrandedTag(p, needles)];
+        texts.add(p);
       }
-    });
-  });
-
-  const promptCount = Object.keys(promptsByText).length;
-  if (promptCount === 0) {
+    }
+  }
+  if (texts.size === 0) {
     log?.info?.('generateAndAttachPrompts: no prompts generated', {
       workspaceId, projectId, domain, country,
     });
     return { topicCount: 0, promptCount: 0 };
   }
-  await transport.createTaggedPrompts(workspaceId, projectId, promptsByText);
-  return { topicCount: selected.length, promptCount };
+
+  // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
+  // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
+  // `provisionDimensionTree` resolved every closed value or threw a 502, so the
+  // standard values and the whole `type` vocabulary are present here by construction.
+  const { values } = provisioned;
+  const standardIds = STANDARD_PROMPT_TAG_VALUES.map(
+    ({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)),
+  );
+  const typeValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.TYPE));
+
+  /** @type {Map<string, string[]>} bare type value → prompt texts */
+  const byTypeValue = new Map();
+  for (const text of texts) {
+    const value = classifyBrandedTag(text, needles);
+    const bucket = byTypeValue.get(value);
+    if (bucket) {
+      bucket.push(text);
+    } else {
+      byTypeValue.set(value, [text]);
+    }
+  }
+
+  for (const [value, items] of byTypeValue) {
+    // `branded` / `non-branded` are the classifier's only outputs and both are in
+    // the `type` vocabulary provisioned above.
+    const typeId = /** @type {string} */ (typeValues.get(value));
+    // eslint-disable-next-line no-await-in-loop
+    await transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]);
+  }
+  return { topicCount: selected.length, promptCount: texts.size };
 }
 
 /**
@@ -258,23 +303,19 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * @param {string[]} [options.modelIds=[]] - AI models (LLMs) to attach to the
  *   project before publishing. A project needs models to track anything.
  * @param {boolean} [options.generateTopics=false] - generate topics+prompts from
- *   `body.brandDomain` + `body.market` and attach them, tagged `topic:<NAME>` +
- *   `standardTags`.
+ *   `body.brandDomain` + `body.market` and attach them, carrying the standard
+ *   closed-dimension values and a branded / non-branded `type` value.
  * @param {number} [options.topicCap=0] - keep only the top N generated topics by
  *   search volume (0 = keep all).
- * @param {string[]} [options.standardTags=[]] - tags added to every generated
- *   prompt in addition to its `topic:<NAME>` and branded `type:` tag.
  * @param {Array<string|{name: string, regions?: string[]}>} [options.brandAliases=[]]
  *   - brand aliases; brand-level names the brand is also known by. Region-clamped
  *   to THIS market (a region-scoped alias only applies to the markets it lists;
  *   region-less / 'ww' apply everywhere; a bare string is treated as region-less).
  *   The market-applicable names are added to the project's `brand_names`
  *   (alongside the primary name) so the project carries them, and — together with
- *   the brand name(s) — used to classify each generated prompt as `type:branded`
- *   (text mentions a name/alias as a whole word, diacritic-folded) or
- *   `type:non-branded`.
- * @param {string[]} [options.projectTags=[]] - project-level tag taxonomy to
- *   register on the project (via createProjectTags) independent of any prompt.
+ *   the brand name(s) — used to classify each generated prompt's `type` value as
+ *   `branded` (text mentions a name/alias as a whole word, diacritic-folded) or
+ *   `non-branded`.
  * @param {object} [options.brandUrlSources=null] - the brand's URL sources
  *   ({ urls, socialAccounts, earnedContent }, V2 shape) to push onto this
  *   market's project benchmark. Brand `urls` go to every market; social/earned
@@ -294,6 +335,11 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted
  *   row — see `mapping-rows.js` `upsertMappingRow` doc.
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, JIT
+ *   top-up fronts the project-create and publish seams (fail-fast) and the flat re-grant in
+ *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
+ *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
+ *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -307,13 +353,12 @@ export async function handleCreateMarketSubworkspace(
     modelIds = [],
     generateTopics = false,
     topicCap = 0,
-    standardTags = [],
     brandAliases = [],
-    projectTags = [],
     brandUrlSources = null,
     competitors = [],
     publishMode = 'require',
     dataAccess = null,
+    dynamicAllocation = false,
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -339,7 +384,24 @@ export async function handleCreateMarketSubworkspace(
   // path passes nothing, so we ensure on the spot, sized for one market.
   const workspaceId = preResolvedWorkspaceId && hasText(preResolvedWorkspaceId)
     ? preResolvedWorkspaceId
-    : await ensureSubworkspace(transport, brand, parentWorkspaceId, 1, log, {}, reloadPointer);
+    : await ensureSubworkspace(
+      transport,
+      brand,
+      parentWorkspaceId,
+      1,
+      log,
+      {},
+      reloadPointer,
+      { dynamicAllocation },
+    );
+
+  // JIT top-up choke point. The sub-workspace id is only known after ensureSubworkspace resolves
+  // it; OFF (or a missing parent) yields a no-op guard so the flag-OFF path issues zero reads.
+  const headroom = createHeadroomGuard(
+    transport,
+    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    log,
+  );
 
   const existing = await resolveProject(
     transport,
@@ -363,6 +425,9 @@ export async function handleCreateMarketSubworkspace(
     if (!languageId) {
       return { status: 400, body: { error: 'unknownLanguage', message: `Language '${languageCode}' not found` } };
     }
+    // PROJECT metering seam: ensure one project of headroom before creating a new project (no-op
+    // when the flag is OFF). Not needed on the adopt-existing-draft branch above (no new project).
+    await headroom.ensure({ projects: 1 });
     const createResp = await transport.createProject(
       workspaceId,
       buildCreateProjectBody(body, location, languageId, aliasNames),
@@ -373,11 +438,12 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
-  // Register the standard tag taxonomy on the project (independent of prompts),
-  // so classification can later apply intent/source/type values per prompt.
-  if (Array.isArray(projectTags) && projectTags.length > 0) {
-    await transport.createProjectTags(workspaceId, projectId, projectTags);
-  }
+  // Provision the dimension-root taxonomy on the project (independent of prompts),
+  // so classification can later apply intent/source/type values per prompt and the
+  // Categories surface has a `category` root to hang customer categories under.
+  // Idempotent (resolve-before-create), and unconditional: every project carries
+  // exactly the four dimension roots, whether or not it has prompts yet.
+  const provisioned = await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /
   // publishing — a project with no models can't track anything. Stage only
@@ -395,8 +461,10 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
-  // Generate topics+prompts from the brand domain + market and attach them,
-  // tagging each prompt with its `topic:<NAME>` plus the standard tag set.
+  // Generate topics+prompts from the brand domain + market and attach them. The
+  // topic seeds the prompt TEXT only and is not attached as a tag: the AI-SEO
+  // service returns topics with no category to hang them under, so the generated
+  // prompts arrive uncategorized, carrying only the standard tag set.
   let generated = { topicCount: 0, promptCount: 0 };
   if (generateTopics) {
     generated = await generateAndAttachPrompts(
@@ -407,7 +475,7 @@ export async function handleCreateMarketSubworkspace(
         domain: body.brandDomain,
         country: body.market,
         topicCap,
-        standardTags,
+        provisioned,
         // Branded classification needles: the brand's own name(s) + the
         // market-applicable aliases.
         brandNames: [
@@ -423,9 +491,24 @@ export async function handleCreateMarketSubworkspace(
   // own-brand benchmark (created on demand when Semrush hasn't provisioned one),
   // region-filtered to the market. Done before publish so the URLs are part of
   // the same published version. Best-effort: URL enrichment must never abort the
-  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated.
-  const brandUrlEntries = collectBrandUrlEntries(brandUrlSources, body.market);
+  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated,
+  // so the whole block (INCLUDING the project listing the skip set needs) sits
+  // inside the try.
   try {
+    // Skip EVERY market's primary domain, not just this one's: a market-mirror
+    // brand's other-market primary must not surface as a website URL here either
+    // (skip-primary-domain, #25 — see collectBrandUrlEntries). This market's own
+    // domain comes from the payload; its project may not be in the listing yet.
+    const siblings = await resolveProjects(transport, workspaceId);
+    const primaryDomains = primaryDomainSet([
+      body.brandDomain,
+      ...siblings.map((p) => p?.domain),
+    ]);
+    const brandUrlEntries = collectBrandUrlEntries(
+      brandUrlSources,
+      body.market,
+      primaryDomains,
+    );
     await attachBrandUrlsToProject(
       transport,
       workspaceId,
@@ -473,6 +556,14 @@ export async function handleCreateMarketSubworkspace(
     log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_COMPETITOR_SYNC_DIVERGENCE — competitor benchmark sync failed (non-fatal); market live without competitor benchmarks', {
       workspaceId, projectId, error: e?.message,
     });
+  }
+
+  // PROMPT metering seam: before publishing, ensure prompt headroom sized from `used + drafted`
+  // (includeDrafted) — the just-staged models + generated prompts are drafted synchronously and
+  // meter at publish, while the post-publish `used` reconciles asynchronously (stale-low). No-op
+  // when the flag is OFF. Skipped when we won't publish at all.
+  if (publishMode !== 'skip') {
+    await headroom.ensure({}, { includeDrafted: true });
   }
 
   // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
@@ -568,6 +659,12 @@ export async function handleDeleteMarketSubworkspace(
   if (dataAccess) {
     await tombstoneMappingRow(dataAccess, project.id, log);
   }
+  // SCOPE NOTE (serenity-docs#22): this market DELETE does NOT yet call `releaseAiSurplus` to hand
+  // the freed project/prompt units back to the parent pool — release wiring on the delete path is a
+  // deliberate fast-follow, not built here. The stranded units self-heal (next `ensureAiHeadroom`
+  // reuse, a later release, or decommission — see the `releaseAiSurplus` scope note). When it
+  // lands, follow the model-update seam (`handleUpdateModelsSubworkspace`): inline, fail-fast
+  // (`releaseAiSurplus({ failFast: true })`), best-effort, post-publish — no async queue/worker.
   return { status: 204 };
 }
 
@@ -577,6 +674,11 @@ export async function handleDeleteMarketSubworkspace(
  * (page/limit); walk until a short page ends it, bounded by a page ceiling for an
  * unexpectedly huge set — mirroring `listTagsForProject`'s prompt-page walk so
  * standalone categories beyond the first page are not silently dropped.
+ *
+ * Reads the DRAFT view. Tag writes land in the project's draft layer and the
+ * live view hides them until the project is published, so a default (live) read
+ * cannot see a category this proxy just created — which is the one thing this
+ * function exists to surface.
  *
  * @param {any} transport - Serenity transport.
  * @param {string} workspaceId - Semrush (sub-)workspace id.
@@ -591,7 +693,9 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
   let page = 1;
   while (page <= PAGE_LIMIT) {
     // eslint-disable-next-line no-await-in-loop
-    const resp = await transport.listProjectTags(workspaceId, projectId, { page, limit: LIMIT });
+    const resp = await transport.listProjectTags(workspaceId, projectId, {
+      page, limit: LIMIT, draft: true,
+    });
     const batch = Array.isArray(resp?.items) ? resp.items : [];
     items.push(...batch);
     if (batch.length < LIMIT) {
@@ -644,7 +748,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   }
   // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
   // prompt vocabulary) OR standalone (registered via createProjectTags but not yet
-  // carried by any prompt — e.g. a just-created, still-empty `category:<NAME>`).
+  // carried by any prompt — e.g. a just-created, still-empty category).
   // The Categories surface must round-trip BOTH, so merge them by tag name. The
   // standalone list is best-effort: a hiccup there must not regress the
   // prompt-derived behavior that already worked.
@@ -659,27 +763,48 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
         return { items: [] };
       }),
   ]);
-  const byName = new Map();
+  // Merge by ID, not by name. Names are unique only per (project, parent), so a
+  // sub-category `human` and the `source` value `human` are two distinct tags —
+  // keying by name silently drops one of them.
+  const byId = new Map();
+  // Both sources back-fill a missing upstream id with the tag's own name (a
+  // prompt can carry a tag as a bare string, and a standalone row can predate its
+  // id). Such an entry is a name-shaped PLACEHOLDER, recognisable by `id === name`
+  // — an upstream id never equals the bare name it labels. Hold placeholders aside
+  // so a canonical id for the same name can supersede them.
+  // Placeholders are keyed by name, not by a synthetic composite: an id-less
+  // entry carries ONLY its bare name (`id === name`), so two id-less tags sharing
+  // a name are indistinguishable here — there is no id to tell a `category` value
+  // `human` from a `source` value `human` once both arrive without one. Keying by
+  // `(name, source)` would just emit two identical `{ id: name, name }` rows, a
+  // duplicate that is worse than the collapse. So they intentionally collapse to
+  // one; the by-id merge above is what actually preserves two same-named tags,
+  // and it fires whenever either carries a real upstream id (the common case).
+  const synthetic = new Map();
   // listTagsForProject and listStandaloneProjectTags (and its catch) each always
   // resolve `{ items: [...] }`, so no defensive `?.`/`|| []` is needed here.
   const all = [...fromPrompts.items, ...standalone.items];
   for (const t of all) {
     if (t && hasText(t.name)) {
       const id = hasText(t.id) ? String(t.id) : t.name;
-      const existing = byName.get(t.name);
-      if (!existing) {
-        byName.set(t.name, { id, name: t.name });
-      } else if (existing.id === existing.name && id !== t.name) {
-        // Upgrade a synthetic (id === name) entry — e.g. a prompt-derived tag that
-        // arrived as a bare string — to the canonical upstream id once the
-        // standalone listing supplies it, regardless of merge order. Prevents a
-        // synthetic id from shadowing the real one just because the prompt-derived
-        // entry was seen first.
-        existing.id = id;
+      if (id === t.name) {
+        if (!synthetic.has(t.name)) {
+          synthetic.set(t.name, { id, name: t.name });
+        }
+      } else if (!byId.has(id)) {
+        byId.set(id, { id, name: t.name });
       }
     }
   }
-  return { items: [...byName.values()] };
+  // Drop a placeholder once a real, id-carrying tag of the same name exists, so
+  // the canonical id never sits beside a name-shaped stand-in for it.
+  const realNames = new Set([...byId.values()].map((t) => t.name));
+  for (const [name, entry] of synthetic) {
+    if (!realNames.has(name)) {
+      byId.set(entry.id, entry);
+    }
+  }
+  return { items: [...byId.values()] };
 }
 
 /**
@@ -712,8 +837,25 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  * PUT /serenity/models (subworkspace) — replace the AI-model set for a slice. Resolves
  * the slice's project from the live listing (404 if absent), then reuses the
  * shared diff-based sync. Validation mirrors the flat-mode handler exactly.
+ *
+ * @param {object} transport
+ * @param {string} workspaceId
+ * @param {object} body
+ * @param {object} log
+ * @param {object} [options]
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch. When on, size on the
+ *   SIGNED net model delta: top up (`publishedTexts × netDelta`) before the sync's publish on a net
+ *   ADD, and release the freed units after it on a net REMOVAL. Lives at this mode-guarded caller,
+ *   NOT inside the shared `syncModelsForProject`, so flat mode is untouched (byte-for-byte).
+ * @param {string} [options.parentWorkspaceId=''] - org parent/master workspace id (units pool).
  */
-export async function handleUpdateModelsSubworkspace(transport, workspaceId, body, log) {
+export async function handleUpdateModelsSubworkspace(
+  transport,
+  workspaceId,
+  body,
+  log,
+  { dynamicAllocation = false, parentWorkspaceId = '' } = {},
+) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -734,12 +876,66 @@ export async function handleUpdateModelsSubworkspace(transport, workspaceId, bod
   if (!project) {
     throw new ErrorWithStatusCode('Market not found for this brand', 404);
   }
-  return syncModelsForProject(
+  const projectId = String(project.id);
+
+  // PROMPT re-meter seam. PUT /models is REPLACE semantics — one request may add AND remove models
+  // — so size on the SIGNED NET model delta (`finalModelCount − currentModelCount`), not adds.
+  // published consumption is `publishedTexts × finalModelCount`, so a swap (net 0) or a net removal
+  // consumes nothing extra and must NOT top up (gross-add sizing over-grants and can spuriously
+  // 409 ORG_POOL_EXHAUSTED). A net ADD tops up before the sync's publish; a net REMOVAL frees units
+  // that are handed back after it. No-op when OFF (guarded on `enabled` → zero extra reads).
+  const headroom = createHeadroomGuard(
+    transport,
+    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    log,
+  );
+  let netDelta = 0;
+  if (headroom.enabled) {
+    // Reads the current model set to size the delta; syncModelsForProject below reads it again to
+    // diff — one duplicate ai_models fetch on the flag-ON path (latency-only, not a correctness
+    // concern; deduping needs a shared pre-mutation diff seam in syncModelsForProject — PR-4).
+    // listSliceModels returns one cleaned item per attached model, so its length IS the current
+    // attached-model count (all we need for the net delta — not the id set).
+    const current = await listSliceModels(transport, workspaceId, projectId);
+    const finalModelCount = new Set(modelIds.map(String)).size;
+    netDelta = finalModelCount - current.items.length;
+    if (netDelta > 0) {
+      const publishedTexts = await countPublishedPrompts(transport, workspaceId, projectId, log);
+      // RESOLVED (serenity-docs#22 §2, write-only metering): the prompt dimension is consumed at
+      // prompt WRITE, not re-gated at publish, so the sync's publish converting this project's
+      // DRAFTED prompts to `used` triggers NO prompt-dimension quota check — only the published
+      // texts re-meter against the added models. Sizing `publishedTexts × netDelta` is therefore
+      // correct, and this seam deliberately does NOT pass `includeDrafted` (unlike the
+      // create/bulk-prompt seams — theirs guards read-staleness of a SUBSEQUENT op's `used`, a
+      // different concern from a publish-time gate). The §8 canary confirms §2 empirically.
+      await headroom.ensure({ prompts: modelChangeUnits(publishedTexts, netDelta) });
+    }
+  }
+
+  const result = await syncModelsForProject(
     transport,
     workspaceId,
-    String(project.id),
+    projectId,
     modelIds,
     { geoTargetId, languageCode },
     log,
   );
+
+  // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then
+  // the child's `used` reflects the removal, so releaseAiSurplus reads it and lowers `total` to it
+  // (ordering §3 requires: publish → read → release). Fail-fast (one transfer, no settle poll) +
+  // best-effort per the release scope decision; the sub-workspace id is present (headroom.enabled).
+  if (headroom.enabled && netDelta < 0) {
+    // Non-zero floor is the PRIMARY guard against the all-zero-transfer no-op: a release target of
+    // 0 for any dim is silently ignored by the gateway (only workspace delete reclaims to zero).
+    // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
+    // transfer (which it would refuse anyway — this just keeps the request off that path).
+    await releaseAiSurplus(transport, {
+      subWorkspaceId: workspaceId,
+      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+      failFast: true,
+    }, log);
+  }
+
+  return result;
 }

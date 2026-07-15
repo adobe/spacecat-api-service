@@ -5089,8 +5089,11 @@ llmo-referral-traffic-has-data:
     description: |
       Returns whether the site has any referral traffic data and which sources
       are available. Uses a direct table existence check (no RPC). Ignores the
-      `source` query param. Response is cacheable. `availableSources` items are
-      `optel` or `cdn` only, in priority order (optel first).
+      `source` query param. Response is cacheable. `availableSources` lists all
+      sources with data in resolution-priority order
+      (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`); callers use the
+      first entry as the active source. `activeSource` exposes that highest-priority
+      source directly, or null when no source has data.
     operationId: getReferralTrafficHasData
     responses:
       '200':
@@ -5971,3 +5974,515 @@ site-llmo-cloudflare-routes:
         $ref: './responses.yaml#/502'
     security:
       - ims_key: [ ]
+
+site-llmo-akamai-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    operationId: getLlmoAkamaiConfig
+    summary: Get the Akamai onboarding configuration for the UI
+    description: |
+      Returns the supported activation networks and the EdgeGrid credential headers the caller
+      must supply on the other Akamai onboarding endpoints, so the onboarding UI can prompt for the
+      right values. EdgeGrid credentials are client-supplied per request (never persisted or logged
+      by the service), so there is no server-side "configured" state.
+
+      **PAPI permissions:** the supplied EdgeGrid credentials must grant both READ access (used by
+      `properties` and `plan` to search properties and read the rule tree) and WRITE access (used by
+      `deploy` and `activate` to create a version, update rules, and activate). Read-only credentials
+      succeed on `properties`/`plan` but fail with 403 on `deploy`/`activate`.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: Akamai onboarding configuration
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                networks:
+                  type: array
+                  description: Activation networks supported by the flow.
+                  items:
+                    type: string
+                    enum: [STAGING, PRODUCTION]
+                credentialHeaders:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: >-
+                    Map of credential key to the HTTP header carrying it (host, clientToken,
+                    clientSecret, accessToken, accountSwitchKey).
+                requiredCredentialHeaders:
+                  type: array
+                  description: The credential headers that are required (accountSwitchKey is optional).
+                  items:
+                    type: string
+                  example:
+                    - x-akamai-host
+                    - x-akamai-client-token
+                    - x-akamai-client-secret
+                    - x-akamai-access-token
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+site-llmo-akamai-properties:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+  get:
+    operationId: listLlmoAkamaiProperties
+    summary: List Akamai properties serving the site's domain
+    description: |
+      Searches Akamai Property Manager (PAPI) for the properties that serve the site's domain, so
+      the onboarding UI can offer the candidate property/contract/group to operate on. Read-only.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: Properties serving the site's domain
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                domain:
+                  type: string
+                  description: The normalized site hostname the search was run for.
+                  example: 'www.example.com'
+                properties:
+                  type: array
+                  items:
+                    $ref: '#/akamai-property'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
+site-llmo-akamai-plan:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+  post:
+    operationId: planLlmoAkamai
+    summary: Preview the Edge Optimize rule-tree merge (dry run)
+    description: |
+      Fetches the property's latest version and rule tree, merges the managed Edge Optimize rules
+      in memory, and returns the before/after top-level rule names plus the full merged tree for the
+      UI to preview and diff. No mutation — no new property version is created. The managed rules
+      (origin, cache-key, headers, failover) are derived server-side from the site's hostname and
+      LLMO API key.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/akamai-property-ref'
+    responses:
+      '200':
+        description: The dry-run merge result
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                latestVersion:
+                  type: integer
+                ruleFormat:
+                  type: string
+                  description: The property's PAPI rule format (e.g. `v2024-01-01`).
+                managedRules:
+                  type: array
+                  items:
+                    type: string
+                  description: Names of the rules the merge manages.
+                currentChildRules:
+                  type: array
+                  items:
+                    type: string
+                  description: Top-level rule names before the merge.
+                mergedChildRules:
+                  type: array
+                  items:
+                    type: string
+                  description: Top-level rule names after the merge.
+                merged:
+                  type: object
+                  additionalProperties: true
+                  description: The full merged PAPI rule tree.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        description: LLMO API key is not configured for this site, or another internal error.
+        $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
+site-llmo-akamai-deploy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+  post:
+    operationId: deployLlmoAkamai
+    summary: Create a new property version with the Edge Optimize rules
+    description: |
+      Creates a NEW property version from the latest, merges the managed Edge Optimize rules into
+      it, and PUTs the rule tree with Akamai-side validation. Does NOT activate — activation is a
+      separate, explicit step. Guarded so the target property must serve the site's own domain on an
+      active hostname. Idempotent by rule name: the merge replaces any previously-managed rules
+      rather than duplicating them.
+
+      If Akamai rejects the rule tree, the response is `422` with the PAPI `papiErrors` (and any
+      `warnings`).
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/akamai-property-ref'
+    responses:
+      '200':
+        description: The new property version and applied managed rules
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                baseVersion:
+                  type: integer
+                  description: The latest version the new version was created from.
+                newVersion:
+                  type: integer
+                  description: The newly-created property version carrying the managed rules.
+                managedRules:
+                  type: array
+                  items:
+                    type: string
+                warnings:
+                  type: array
+                  description: Non-fatal PAPI validation warnings, if any.
+                  items:
+                    type: object
+                    additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: >-
+          The caller lacks access, or the target property does not serve the site's domain on an
+          active hostname (mutation guard).
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '422':
+        description: Akamai rejected the merged rule tree.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                newVersion:
+                  type: integer
+                papiErrors:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                warnings:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        description: LLMO API key is not configured for this site, or another internal error.
+        $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
+site-llmo-akamai-activate:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+  post:
+    operationId: activateLlmoAkamai
+    summary: Activate a property version to STAGING or PRODUCTION
+    description: |
+      Activates a property version (the given `version`, or the latest when omitted) to `STAGING`
+      or `PRODUCTION`. Akamai requires at least one address to notify about activation progress; it
+      is derived server-side from the authenticated caller's IMS profile and is never
+      client-supplied. Guarded so the target property must serve the site's own domain on an active
+      hostname. Returns the activation id/link the UI polls with the activation-status endpoint.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/akamai-property-ref'
+              - type: object
+                properties:
+                  network:
+                    type: string
+                    enum: [STAGING, PRODUCTION]
+                    default: STAGING
+                    description: Activation network. Defaults to STAGING.
+                  version:
+                    type: integer
+                    minimum: 1
+                    description: >-
+                      Property version to activate. When omitted, the property's latest version is
+                      activated.
+    responses:
+      '200':
+        description: Activation submitted
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                version:
+                  type: integer
+                network:
+                  type: string
+                  enum: [STAGING, PRODUCTION]
+                activationId:
+                  type: string
+                  example: 'atv_123'
+                activationLink:
+                  type: string
+                  description: The PAPI activation link.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: >-
+          The caller lacks access, the target property does not serve the site's domain, or no
+          notify email could be derived from the authenticated caller.
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
+site-llmo-akamai-activation-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+    - name: propertyId
+      in: query
+      required: true
+      description: Akamai property ID (e.g. `prp_1253269`).
+      schema:
+        type: string
+        pattern: '^prp_[A-Za-z0-9]+$'
+    - name: contractId
+      in: query
+      required: true
+      description: Akamai contract ID (e.g. `ctr_1-ABC123`).
+      schema:
+        type: string
+        pattern: '^ctr_[A-Za-z0-9-]+$'
+    - name: groupId
+      in: query
+      required: true
+      description: Akamai group ID (e.g. `grp_18385`).
+      schema:
+        type: string
+        pattern: '^grp_[A-Za-z0-9]+$'
+    - name: network
+      in: query
+      required: false
+      description: >-
+        Network to look up the most recent activation for. Defaults to STAGING. Ignored when
+        `activationId` is supplied.
+      schema:
+        type: string
+        enum: [STAGING, PRODUCTION]
+    - name: activationId
+      in: query
+      required: false
+      description: >-
+        Specific activation to check (fast, precise — use right after activate). When omitted, the
+        most recent activation for `network` is returned.
+      schema:
+        type: string
+  get:
+    operationId: getLlmoAkamaiActivationStatus
+    summary: Check the status of an Akamai activation
+    description: |
+      Returns the status of an activation. With `activationId`, checks that specific activation
+      directly; without it, returns the most recent activation for the given network. Read-only.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The activation status
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                activation:
+                  type: object
+                  additionalProperties: true
+                  description: >-
+                    The PAPI activation record (status, network, propertyVersion, submitDate,
+                    updateDate, note, ...).
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: No matching activation was found.
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
+akamai-property-ref:
+  type: object
+  required:
+    - propertyId
+    - contractId
+    - groupId
+  properties:
+    propertyId:
+      type: string
+      pattern: '^prp_[A-Za-z0-9]+$'
+      description: Akamai property ID.
+      example: 'prp_1253269'
+    contractId:
+      type: string
+      pattern: '^ctr_[A-Za-z0-9-]+$'
+      description: Akamai contract ID.
+      example: 'ctr_1-ABC123'
+    groupId:
+      type: string
+      pattern: '^grp_[A-Za-z0-9]+$'
+      description: Akamai group ID.
+      example: 'grp_18385'
+    insertIndex:
+      type: integer
+      minimum: 0
+      description: >-
+        Optional position among the existing (non-managed) top-level rules to insert the managed
+        wrapper at. Defaults to 0 (before everything); clamped to the number of existing children.
+
+akamai-property:
+  type: object
+  additionalProperties: true
+  properties:
+    propertyId:
+      type: string
+      example: 'prp_1253269'
+    propertyName:
+      type: string
+    contractId:
+      type: string
+      example: 'ctr_1-ABC123'
+    groupId:
+      type: string
+      example: 'grp_18385'
+    propertyVersion:
+      type: integer
+    matchedOn:
+      type: array
+      description: Why this property matched (e.g. `hostname`, `propertyName`).
+      items:
+        type: string
+    matchedValues:
+      type: array
+      items:
+        type: string

@@ -65,10 +65,6 @@ export const INTERNAL_ROUTES = [
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 
-  // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
-  'GET /org/:spaceCatId/brands/all/brand-presence/stats',
-  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
-
   // Agentic traffic PG dashboard endpoints (site-scoped) - non-mutating POST queries
   // (complex payloads / export trigger); UI only, not yet required by S2S
   'POST /sites/:siteId/agentic-traffic/hits-by-urls',
@@ -106,6 +102,15 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+
+  // LLMO Akamai onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
+  // uses caller-supplied EdgeGrid credentials via x-akamai-* headers, not S2S JWT
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+  'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
@@ -164,9 +169,6 @@ export const INTERNAL_ROUTES = [
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
 
-  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
-  'GET /v2/regions',
-
   // Monitoring - DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
   // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
   // registration). Kept internal because reusing `audit:read` would silently broaden that
@@ -177,6 +179,17 @@ export const INTERNAL_ROUTES = [
   // monitoring endpoint.
   'GET /monitoring/drs-bp-pg-audit',
 
+  // Task management (Jira OAuth 3LO) - org-scoped, JWT-authenticated; not exposed to S2S
+  // consumers in v1. A dedicated capability (e.g. `taskManagement:write`) will be
+  // introduced in v2 when S2S ticket creation is required.
+  'GET /organizations/:organizationId/task-management/connections',
+  'GET /organizations/:organizationId/task-management/connections/:connectionId',
+  'GET /organizations/:organizationId/task-management/tickets',
+  'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
+  'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
+  'POST /organizations/:organizationId/task-management/:provider/tickets',
+  'GET /organizations/:organizationId/task-management/connections/:connectionId/projects',
+  'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types',
   // Hybrid permission model — state-layer management + capability
   // introspection. Customer-org admins manage their own ReBAC bindings here,
   // self-gated in the controller by `<product>/can_manage_users` (CRUD) and
@@ -233,7 +246,13 @@ const routeRequiredCapabilities = {
   'PUT /configurations/latest/queues': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/jobs/:jobType': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/handlers/:handlerType': CAP_CONFIGURATION_WRITE,
+  /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
+  'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
+
+  // Regions lookup - global table, no org scope; readable by any consumer
+  // (session-token or S2S) holding organization:read
+  'GET /v2/regions': 'organization:read',
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
@@ -288,12 +307,17 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/fanout-report': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/stats': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': 'brand:read',
@@ -596,6 +620,7 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
+  'GET /sites/:siteId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',

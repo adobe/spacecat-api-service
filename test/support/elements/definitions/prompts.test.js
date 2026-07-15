@@ -59,17 +59,17 @@ describe('prompts definitions', () => {
     });
 
     it('adds a raw `tags contains <value>` clause for a single tag (no prefixing)', () => {
-      const payload = buildPromptsPayload({ tags: ['type:branded'] });
+      const payload = buildPromptsPayload({ tags: ['type__branded'] });
       const tagClause = advancedFilters(payload).find((f) => f.col === 'tags');
-      expect(tagClause).to.deep.equal({ op: 'contains', val: 'type:branded', col: 'tags' });
+      expect(tagClause).to.deep.equal({ op: 'contains', val: 'type__branded', col: 'tags' });
     });
 
     it('ANDs multiple tags as separate clauses (must match all)', () => {
-      const payload = buildPromptsPayload({ tags: ['type:branded', 'category:Brand'] });
+      const payload = buildPromptsPayload({ tags: ['type__branded', 'category__Brand'] });
       const tagClauses = advancedFilters(payload).filter((f) => f.col === 'tags');
       expect(tagClauses).to.deep.equal([
-        { op: 'contains', val: 'type:branded', col: 'tags' },
-        { op: 'contains', val: 'category:Brand', col: 'tags' },
+        { op: 'contains', val: 'type__branded', col: 'tags' },
+        { op: 'contains', val: 'category__Brand', col: 'tags' },
       ]);
     });
 
@@ -90,7 +90,7 @@ describe('prompts definitions', () => {
 
     it('combines model, tags and projects into one AND group', () => {
       const payload = buildPromptsPayload({
-        model: 'search-gpt', tags: ['type:branded'], projectIds: ['proj-a'],
+        model: 'search-gpt', tags: ['type__branded'], projectIds: ['proj-a'],
       });
       const af = advancedFilters(payload);
       expect(af).to.have.length(3);

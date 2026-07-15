@@ -1430,6 +1430,63 @@ site-opportunity-suggestion-fixes:
     security:
       - ims_key: [ ]
 
+site-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
+    - name: status
+      description: Optional fix status to filter by (e.g. `PENDING`, `FAILED`).
+      in: query
+      required: false
+      schema:
+        type: string
+    - name: limit
+      description: |
+        Maximum number of fixes to return. The aggregation spans every opportunity
+        belonging to the site, so the result set is capped to bound response size
+        and downstream user-name enrichment cost.
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 200
+        example: 200
+  get:
+    operationId: getSiteFixes
+    summary: |
+      Retrieve all fixes for a site, across every opportunity
+    description: |
+      Aggregates fixes across every opportunity belonging to the site, avoiding the need to
+      enumerate opportunities and fetch fixes per-opportunity. Optionally filtered by status.
+      Capped by `limit` (default 200, max 1000).
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of fixes
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
