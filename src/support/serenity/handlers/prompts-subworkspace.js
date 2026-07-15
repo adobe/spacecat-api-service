@@ -34,6 +34,7 @@ import {
 } from './prompts.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
+import { createHeadroomGuard } from '../dynamic-allocation-active.js';
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -125,6 +126,7 @@ export async function handleCreatePromptsSubworkspace(
   body,
   log,
   classifyPromptType,
+  { dynamicAllocation = false, parentWorkspaceId = '' } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -204,6 +206,20 @@ export async function handleCreatePromptsSubworkspace(
 
   for (const pid of new Set(affectedProjectIds)) {
     invalidateTagCacheForProject(workspaceId, pid);
+  }
+
+  // PROMPT metering seam: the just-created prompts are drafted synchronously across the affected
+  // projects of THIS child; size headroom from `used + drafted` (includeDrafted, staleness-immune)
+  // before the publish. One workspace-level top-up covers all affected projects (the allocation is
+  // per sub-workspace, not per project). No-op when the flag is OFF; skipped when nothing was
+  // created so the OFF path and the empty path issue zero headroom reads.
+  if (affectedProjectIds.length > 0) {
+    const headroom = createHeadroomGuard(
+      transport,
+      { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+      log,
+    );
+    await headroom.ensure({}, { includeDrafted: true });
   }
 
   const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);

@@ -678,6 +678,21 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * GET /v1/workspaces/{ws}/resources — the workspace's own AI resources
+     * (`NewWorkspaceResources`: `product_resources.ai.resources.{projects,prompts,weekly_prompts}`
+     * as `{ used, drafted, total }`). Read by the dynamic-allocation allocator before a metered op
+     * (child headroom) and against the MASTER workspace for the org pool (`free = total − used`).
+     * NOTE: use this on the master id for the pool — `/parent/resources` returns the workspace's
+     * OWN allocation, not the master pool (live-verified 2026-07-02).
+     */
+    async getWorkspaceResources(workspaceId) {
+      return unwrap('GET', await users.GET(
+        '/v1/workspaces/{id}/resources',
+        { params: { path: { id: workspaceId } } },
+      ));
+    },
+
+    /**
      * GET /v1/workspaces/{parent}/family — list the parent's sub-workspaces
      * (and nested sub-workspaces). Used for ambiguous-create recovery: on a
      * timed-out create, match the exact title and adopt a `created`,

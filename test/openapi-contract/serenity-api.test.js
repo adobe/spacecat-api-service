@@ -503,20 +503,25 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/serenity-active.js': {
             isSerenityActiveForOrg: () => Promise.resolve(true),
           },
-          // activate reads brand-level aliases/URLs/competitors once per batch;
-          // stub them so the contract test doesn't hit the fake postgrest client.
+          // activate reads brand-level aliases/URLs/competitors once per batch, and
+          // persists the active-flip + primary site (brands.site_id) via updateBrand;
+          // stub them so the contract test doesn't hit the fake postgrest client and
+          // exercises the documented 200 (full-success) shape.
           '../../src/support/brands-storage.js': {
             getBrandAliases: () => Promise.resolve([]),
             getBrandUrlSources: () => Promise.resolve({
               urls: [], socialAccounts: [], earnedContent: [],
             }),
             getBrandCompetitors: () => Promise.resolve([]),
+            updateBrand: () => Promise.resolve({ getId: () => 'brand-x' }),
           },
           // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
           // succeed; stub it to a site id so the documented 200 (full success)
-          // shape is exercised rather than the 207/502 partial-failure paths.
+          // shape is exercised rather than the 207/502 partial-failure paths. Must
+          // be a valid UUID — it is now also written as the brand's baseSiteId,
+          // which the response schema types as format: uuid.
           '../../src/support/serenity/site-linkage.js': {
-            ensureMarketSite: () => Promise.resolve('site-x'),
+            ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
           },
         },
       )).default;
