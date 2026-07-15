@@ -1264,6 +1264,21 @@ site-opportunity-suggestion-backoffice-reviews:
                 type: string
                 maxLength: 8192
                 description: Optional ESE rationale (markdown). Required on reject by the UI; sanitised + 8 KB cap server-side.
+              guidanceMarkdown:
+                type: string
+                maxLength: 65536
+                description: >-
+                  AI-generated issue context (title + description) for the reviewed issue.
+                  Gives the Learning Agent "what the issue was" alongside the generated
+                  patch (previousFix) and the review. Sanitised + 64 KB cap server-side.
+              feedbackSubjectId:
+                type: string
+                maxLength: 200
+                description: >-
+                  Optional SpaceCat-internal id of the sub-item this review is about
+                  within the suggestion (e.g. a CWV issue id), so the Backoffice can group
+                  per-issue "previous feedback" when issues share one suggestionId.
+                  Independent of the Fix-entity issue id. Not exported to S3.
               rejectionCategory:
                 type: string
                 enum: [product_bug, bad_recommendation, other]
