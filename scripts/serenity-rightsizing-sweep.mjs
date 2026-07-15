@@ -168,7 +168,11 @@ if (!env.SEMRUSH_IMS_TOKEN) {
 // Init
 // ---------------------------------------------------------------------------
 const log = console;
-const dataAccess = createDataAccess({ POSTGREST_URL: env.POSTGREST_URL }, log);
+const dataAccess = createDataAccess({
+  postgrestUrl: env.POSTGREST_URL,
+  postgrestSchema: env.POSTGREST_SCHEMA,
+  postgrestApiKey: env.POSTGREST_API_KEY,
+}, log);
 const { Organization } = dataAccess;
 const postgrestClient = dataAccess.services?.postgrestClient;
 const transport = createSerenityTransport({ env, imsToken: env.SEMRUSH_IMS_TOKEN });
