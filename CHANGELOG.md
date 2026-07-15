@@ -1,3 +1,10 @@
+## [1.654.1](https://github.com/adobe/spacecat-api-service/compare/v1.654.0...v1.654.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **preflight:** thread ims_org_id to mysticat analyze; fail-closed when missing (SITES-48037) ([#2818](https://github.com/adobe/spacecat-api-service/issues/2818)) ([123db03](https://github.com/adobe/spacecat-api-service/commit/123db03dc71a7d64b27a96bfe88cb010fc2b8c43)), closes [let-it-throu#and-fail-late](https://github.com/let-it-throu/issues/and-fail-late) [#3408](https://github.com/adobe/spacecat-api-service/issues/3408)
+
 # [1.654.0](https://github.com/adobe/spacecat-api-service/compare/v1.653.0...v1.654.0) (2026-07-15)
 
 
