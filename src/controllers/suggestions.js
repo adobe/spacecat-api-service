@@ -2180,24 +2180,6 @@ function SuggestionsController(ctx, sqs, env) {
           });
         }
 
-        // Mark suggestions covered by domain/pattern so they get hidden on the UI
-        if (hasPatternDeploy) {
-          const tokowakaClient = TokowakaClient.createFrom(context);
-          for (const ps of patternSuggestions) {
-            try {
-              // eslint-disable-next-line no-await-in-loop
-              await tokowakaClient.markPatternCoveredSuggestions(
-                ps,
-                allSuggestions,
-                siteId,
-                profile?.email || 'geo-experiment',
-              );
-            } catch (coverError) {
-              context.log.warn(`[geo-experiment-failed] Failed to mark pattern-covered suggestions for ${ps.getId()}: ${coverError.message}`, coverError);
-            }
-          }
-        }
-
         const experimentResponse = {
           suggestions: [
             ...validSuggestionEntities.map((suggestion) => ({
@@ -2220,6 +2202,25 @@ function SuggestionsController(ctx, sqs, env) {
           prePhaseScheduleId: null,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
+
+        // Mark suggestions covered by domain/pattern so they get hidden on the UI (non-fatal).
+        if (hasPatternDeploy) {
+          const tokowakaClient = TokowakaClient.createFrom(context);
+          for (const ps of patternSuggestions) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.markPatternCoveredSuggestions(
+                ps,
+                allSuggestions,
+                siteId,
+                profile?.email || 'geo-experiment',
+              );
+            } catch (coverError) {
+              context.log.warn(`[geo-experiment-failed] Failed to mark pattern-covered suggestions for ${ps.getId()}: ${coverError.message}`, coverError);
+            }
+          }
+        }
+
         return createResponse(experimentResponse, 207);
       } catch (error) {
         context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
