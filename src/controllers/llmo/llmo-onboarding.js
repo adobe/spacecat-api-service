@@ -175,6 +175,115 @@ export async function triggerBrandalfOnboardingJob({
   return drsJob;
 }
 
+// Cadence labels accepted by DRS `createSchedule` for the recurring
+// "prompt suggestion" pipelines. DRS derives the concrete cron expression
+// server-side from the label (frequency:'cron') — we never send raw cron, so a
+// misconfigured/leaked caller cannot schedule a fleet-wide Fargate storm.
+//   'twice-monthly' → 1st & 15th (honest label; not a true 14-day interval)
+//   'quarterly'     → 1st of Jan/Apr/Jul/Oct
+// See local/drs-prompt-suggestions-schedules-onboarding-plan.md ("Cadence expression").
+const DRS_CADENCE_TWICE_MONTHLY = 'twice-monthly';
+const DRS_CADENCE_QUARTERLY = 'quarterly';
+
+/**
+ * Registers a recurring DRS schedule for one prompt-suggestion provider, with an
+ * immediate first run. Shared body for the three onboarding triggers below.
+ *
+ * Split error semantics (see the V2 caller): the immediate first run is
+ * best-effort — if it produces nothing (e.g. brand/base-prompt data not present
+ * yet) the next scheduled run self-heals. A `createSchedule` (schedule
+ * REGISTRATION) failure is NOT best-effort: the site would never get a recurring
+ * schedule and nothing self-heals, so it propagates to the caller which logs it
+ * at ERROR. This helper therefore does not swallow the failure itself.
+ *
+ * @param {object} params
+ * @param {object} params.drsClient - Configured DRS client.
+ * @param {string} params.providerId - DRS provider id to schedule.
+ * @param {string} params.cadence - One of DRS_CADENCE_* labels.
+ * @param {string} params.siteId - SpaceCat site UUID.
+ * @param {string} params.orgId - SpaceCat organization UUID.
+ * @param {string} params.imsOrgId - IMS org id (isolation key; DRS re-derives server-side).
+ * @param {object} params.log - Logger.
+ * @param {Function} [params.say] - Optional Slack say callback.
+ * @returns {Promise<object|null>} The createSchedule result, or null when DRS is not configured.
+ */
+async function registerPromptSuggestionSchedule({
+  drsClient, providerId, cadence, siteId, orgId, imsOrgId, log, say = () => {},
+}) {
+  if (!drsClient.isConfigured()) {
+    log.debug(`DRS client not configured, skipping ${providerId} schedule for site ${siteId}`);
+    return null;
+  }
+
+  // Default enable_brand_presence off (plan Phase 0.4): these prompt-suggestion
+  // pipelines must not push unexpected load into the brand-presence pipeline / SNS
+  // allowlist unless a site is explicitly BP-enabled.
+  const result = await drsClient.createSchedule({
+    siteId,
+    providerId,
+    cadence,
+    orgId,
+    imsOrgId,
+    enableBrandPresence: false,
+    triggerImmediately: true,
+  });
+
+  log.info(`Registered DRS ${providerId} schedule ${result?.scheduleId ?? 'unknown'} `
+    + `(cadence=${cadence}) for site ${siteId}${result?.alreadyExisted ? ' (already existed)' : ''}`);
+  say(`:calendar_spiral: Registered DRS ${providerId} schedule for site ${siteId}`);
+  return result;
+}
+
+/**
+ * Registers the recurring SEMrush prompt-generation schedule (twice-monthly) for
+ * a newly onboarded site, triggering an immediate first run.
+ * @param {object} params - See {@link registerPromptSuggestionSchedule}.
+ * @returns {Promise<object|null>}
+ */
+export async function triggerSemrushPromptJob(params) {
+  return registerPromptSuggestionSchedule({
+    ...params,
+    providerId: 'prompt_generation_semrush',
+    cadence: DRS_CADENCE_TWICE_MONTHLY,
+  });
+}
+
+/**
+ * Registers the recurring "citation attempts" schedule (twice-monthly) for a
+ * newly onboarded site, triggering an immediate first run.
+ *
+ * NOTE: "Citation Attempt" is the renamed *output* of the agentic-traffic
+ * pipeline — there is no standalone citation-attempt provider — so the provider
+ * id below (`prompt_generation_agentic_traffic`) will NOT grep from the word
+ * "citation". DRS's per-provider Fargate whitelist (`AT_FARGATE_WHITELIST`) is
+ * the real enablement gate; leave agentic-traffic un-whitelisted in an env until
+ * its Postgres-format migration is confirmed healthy (plan Phase 0.2) so the
+ * best-effort first run cannot automate a known-failing pipeline.
+ * @param {object} params - See {@link registerPromptSuggestionSchedule}.
+ * @returns {Promise<object|null>}
+ */
+export async function triggerCitationAttemptJob(params) {
+  return registerPromptSuggestionSchedule({
+    ...params,
+    providerId: 'prompt_generation_agentic_traffic',
+    cadence: DRS_CADENCE_TWICE_MONTHLY,
+  });
+}
+
+/**
+ * Registers the recurring synthetic-personas schedule (quarterly) for a newly
+ * onboarded site, triggering an immediate first run.
+ * @param {object} params - See {@link registerPromptSuggestionSchedule}.
+ * @returns {Promise<object|null>}
+ */
+export async function triggerSyntheticPersonasJob(params) {
+  return registerPromptSuggestionSchedule({
+    ...params,
+    providerId: 'prompt_generation_synthetic_personas',
+    cadence: DRS_CADENCE_QUARTERLY,
+  });
+}
+
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
 // triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
@@ -1422,6 +1531,45 @@ export async function activateBrandAndGeneratePrompts({
       log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
       say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
     }
+
+    // Register the recurring "prompt suggestion" schedules (SEMrush, citation
+    // attempts, synthetic personas), each with an immediate first run. Done AFTER
+    // the Brandalf trigger above (which chains base prompt generation on
+    // completion, LLMO-4258) — not fired in parallel before brand data exists, so
+    // the first run has base prompts to work from (plan Phase 0.3). The immediate
+    // run is best-effort; the durable outcome is the recurring schedule row.
+    const promptSuggestionSchedules = [
+      { name: 'SEMrush prompts', providerId: 'prompt_generation_semrush', trigger: triggerSemrushPromptJob },
+      { name: 'citation attempts', providerId: 'prompt_generation_agentic_traffic', trigger: triggerCitationAttemptJob },
+      { name: 'synthetic personas', providerId: 'prompt_generation_synthetic_personas', trigger: triggerSyntheticPersonasJob },
+    ];
+    const scheduleDrsClient = DrsClient.createFrom(context);
+    await Promise.allSettled(
+      promptSuggestionSchedules.map(async ({ name, providerId, trigger }) => {
+        try {
+          await trigger({
+            drsClient: scheduleDrsClient,
+            siteId: site.getId(),
+            orgId: organization.getId(),
+            imsOrgId,
+            log,
+            say,
+          });
+        } catch (scheduleError) {
+          // Schedule-REGISTRATION failure (distinct from the best-effort immediate
+          // run): the site would never get a recurring schedule and nothing
+          // self-heals, so surface it loudly with full context — never swallow it.
+          // Onboarding still succeeds, mirroring the brand-activation side-effect
+          // handling in brands.js (activateBrand). `status` is the upstream HTTP
+          // status when the DRS client attaches one.
+          const status = scheduleError.status ?? 'unknown';
+          log.error(`Failed to register DRS ${name} schedule provider_id=${providerId} `
+            + `site_id=${site.getId()} status=${status}: ${scheduleError.message}`);
+          say(`:warning: Failed to register DRS ${name} schedule for site ${site.getId()} `
+            + '(will need manual trigger)');
+        }
+      }),
+    );
   } else {
     // V1 has no Brandalf trigger, so DRS will not submit prompt generation
     // automatically. Submit it directly here so v1 onboardings still get

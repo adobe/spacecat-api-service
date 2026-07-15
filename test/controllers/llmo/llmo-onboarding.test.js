@@ -198,12 +198,14 @@ describe('LLMO Onboarding Functions', () => {
       isConfigured = true,
       submitJob = sandbox.stub().resolves({ job_id: 'test-brandalf-job-123' }),
       submitPromptGenerationJob = sandbox.stub().resolves({ job_id: 'test-drs-job-123' }),
+      createSchedule = sandbox.stub().resolves({ scheduleId: 'test-schedule-123', alreadyExisted: false }),
     } = options;
 
     const instance = {
       isConfigured: sandbox.stub().returns(isConfigured),
       submitJob,
       submitPromptGenerationJob,
+      createSchedule,
     };
 
     return {
@@ -5754,6 +5756,177 @@ describe('LLMO Onboarding Functions', () => {
         },
       };
       expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
+    });
+  });
+
+  describe('prompt-suggestion schedule triggers (Phase 3)', () => {
+    let onboardingModule;
+    let sandbox;
+
+    before(async () => {
+      onboardingModule = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    });
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    const buildDrsClient = (createScheduleImpl) => ({
+      isConfigured: sandbox.stub().returns(true),
+      createSchedule: createScheduleImpl
+        || sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
+    });
+
+    const buildParams = (drsClient) => ({
+      drsClient,
+      siteId: 'site-123',
+      orgId: 'org-123',
+      imsOrgId: 'ABC123@AdobeOrg',
+      log: {
+        info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
+      },
+      say: sandbox.stub(),
+    });
+
+    const HELPERS = [
+      ['triggerSemrushPromptJob', 'prompt_generation_semrush', 'twice-monthly'],
+      ['triggerCitationAttemptJob', 'prompt_generation_agentic_traffic', 'twice-monthly'],
+      ['triggerSyntheticPersonasJob', 'prompt_generation_synthetic_personas', 'quarterly'],
+    ];
+
+    HELPERS.forEach(([fnName, providerId, cadence]) => {
+      it(`${fnName} registers a ${cadence} schedule for ${providerId} with an immediate first run`, async () => {
+        const drsClient = buildDrsClient();
+        const result = await onboardingModule[fnName](buildParams(drsClient));
+
+        expect(drsClient.createSchedule).to.have.been.calledOnce;
+        expect(drsClient.createSchedule.firstCall.args[0]).to.deep.include({
+          siteId: 'site-123',
+          orgId: 'org-123',
+          imsOrgId: 'ABC123@AdobeOrg',
+          providerId,
+          cadence,
+          enableBrandPresence: false,
+          triggerImmediately: true,
+        });
+        expect(result).to.deep.equal({ scheduleId: 'sched-1', alreadyExisted: false });
+      });
+
+      it(`${fnName} skips (no createSchedule) when the DRS client is not configured`, async () => {
+        const drsClient = buildDrsClient();
+        drsClient.isConfigured.returns(false);
+        const params = buildParams(drsClient);
+
+        const result = await onboardingModule[fnName](params);
+
+        expect(drsClient.createSchedule).to.not.have.been.called;
+        expect(result).to.equal(null);
+        expect(params.log.debug).to.have.been.calledWithMatch(providerId);
+      });
+
+      it(`${fnName} propagates a schedule-registration failure to the caller (not swallowed)`, async () => {
+        const err = new Error('DRS POST /schedules failed: 500');
+        const drsClient = buildDrsClient(sandbox.stub().rejects(err));
+
+        await expect(onboardingModule[fnName](buildParams(drsClient)))
+          .to.be.rejectedWith('DRS POST /schedules failed: 500');
+      });
+    });
+  });
+
+  describe('activateBrandAndGeneratePrompts — V2 prompt-suggestion schedules', () => {
+    let sandbox;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    const buildV2Context = () => {
+      const brandsMaybeSingle = sandbox.stub().resolves({ data: null, error: null });
+      const eqName = sandbox.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const eqOrg = sandbox.stub().returns({ eq: eqName });
+      const select = sandbox.stub().returns({ eq: eqOrg });
+      const postgrestClient = { from: sandbox.stub().returns({ select }) };
+      const log = {
+        info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
+      };
+      return {
+        log,
+        dataAccess: { services: { postgrestClient } },
+      };
+    };
+
+    const buildV2Params = (context) => ({
+      onboardingMode: 'v2',
+      organization: { getId: sandbox.stub().returns('org-123') },
+      site: { getId: sandbox.stub().returns('site-123') },
+      siteConfig: { getFetchConfig: sandbox.stub().returns({}) },
+      brandName: 'Test Brand',
+      imsOrgId: 'ABC123@AdobeOrg',
+      baseURL: 'https://example.com',
+      context,
+      say: sandbox.stub(),
+    });
+
+    it('registers all three prompt-suggestion schedules after the Brandalf trigger', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const instance = mockDrsClient.createFrom();
+      expect(instance.submitJob).to.have.been.calledOnce; // Brandalf fired first
+      expect(instance.createSchedule).to.have.been.calledThrice;
+      const providerIds = instance.createSchedule.getCalls().map((c) => c.args[0].providerId);
+      expect(providerIds).to.have.members([
+        'prompt_generation_semrush',
+        'prompt_generation_agentic_traffic',
+        'prompt_generation_synthetic_personas',
+      ]);
+    });
+
+    it('logs a schedule-registration failure at ERROR with context but still completes onboarding', async () => {
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 500;
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        createSchedule: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      // Must resolve (onboarding succeeds) despite every schedule registration failing.
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      const semrushLog = errorLogs.find((m) => m.includes('prompt_generation_semrush'));
+      expect(semrushLog, 'expected an ERROR log for the failed semrush schedule').to.be.a('string');
+      expect(semrushLog).to.include('site_id=site-123');
+      expect(semrushLog).to.include('status=500');
+      // All three providers are surfaced, none swallowed.
+      expect(context.log.error).to.have.been.calledThrice;
+      // Brandalf still fired — the schedule failures did not abort onboarding.
+      expect(mockDrsClient.createFrom().submitJob).to.have.been.calledOnce;
     });
   });
 });
