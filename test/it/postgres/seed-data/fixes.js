@@ -12,12 +12,14 @@
 
 /**
  * Immutable baseline fix entities for IT tests.
- * All under OPPTY_1 (SITE_1, accessible).
+ * FIX_1..FIX_3 are under OPPTY_1 (SITE_1, accessible).
  *
  * - FIX_1: CODE_CHANGE, PENDING — linked to SUGG_1 via junction
  * - FIX_2: CODE_CHANGE, DEPLOYED — different status for by-status filter
  * - FIX_3: CODE_CHANGE, DEPLOYED — NO junction entry; must still be returned
  *   with an empty suggestions array (the silent-drop bug this PR fixes)
+ * - FIX_4: CODE_CHANGE, FAILED — under OPPTY_4 (also SITE_1), for site-wide
+ *   aggregation tests that need fixes spread across more than one opportunity
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -47,6 +49,14 @@ export const fixes = [
     type: 'CODE_CHANGE',
     status: 'DEPLOYED',
     change_details: { file: '/blocks/header/header.js', diff: '-a +b' },
+    origin: 'spacecat',
+  },
+  {
+    id: 'cc444444-4444-4444-a444-444444444444',
+    opportunity_id: 'aa444444-4444-4444-a444-444444444444',
+    type: 'CODE_CHANGE',
+    status: 'FAILED',
+    change_details: { file: '/blocks/structured-data/schema.js', diff: '+schema fix' },
     origin: 'spacecat',
   },
 ];

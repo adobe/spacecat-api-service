@@ -17,8 +17,6 @@ import esmock from 'esmock';
 import {
   initialMarketProjectName,
   MAX_TOPICS_ON_CREATE,
-  STANDARD_PROMPT_TAGS,
-  PROJECT_STANDARD_TAGS,
 } from '../../../src/support/serenity/brand-provisioning.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
@@ -187,15 +185,15 @@ describe('provisionBrandSubworkspace', () => {
     expect(body.languageCode).to.equal('en');
     expect(body.brandDomain).to.equal('acme.com');
     expect(body.brandNames).to.deep.equal(['Acme']);
-    // Brand-create attaches LLMs, generates+attaches topic-tagged prompts, then
-    // publishes best-effort.
+    // Brand-create attaches LLMs, generates+attaches prompts (each carrying the
+    // standard closed-dimension values + its branded/non-branded `type` value),
+    // then publishes best-effort. The dimension-root taxonomy is provisioned by
+    // createMarket itself, so it is not passed through here.
     expect(options).to.deep.equal({
       modelIds: ['m-1', 'm-2'],
       generateTopics: true,
       topicCap: MAX_TOPICS_ON_CREATE,
-      standardTags: STANDARD_PROMPT_TAGS,
       brandAliases: [],
-      projectTags: PROJECT_STANDARD_TAGS,
       brandUrlSources: null,
       competitors: [],
       publishMode: 'require',

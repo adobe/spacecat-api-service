@@ -392,6 +392,57 @@ describe('prompts-storage', () => {
       expect(overlapsCall.value).to.have.lengthOf(2);
     });
 
+    // Records every .eq() call so the assertion fails if the `.eq('source', source)`
+    // filter is deleted — a no-op `eq: () => chain` stub would pass regardless.
+    function makeEqRecordingClient(eqCalls) {
+      const recordingChain = (result) => {
+        const chain = {
+          select: () => chain,
+          eq: (column, value) => {
+            eqCalls.push({ column, value });
+            return chain;
+          },
+          neq: () => chain,
+          order: () => chain,
+          or: () => chain,
+          contains: () => chain,
+          overlaps: () => chain,
+          in: () => chain,
+          range: () => thenable(result),
+          maybeSingle: () => thenable(result),
+          single: () => thenable(result),
+          then: (resolve) => resolve(result),
+        };
+        return chain;
+      };
+      return {
+        from: (table) => (table === 'brands'
+          ? recordingChain({ data: { id: BRAND_UUID }, error: null })
+          : recordingChain({ data: [], error: null, count: 0 })),
+      };
+    }
+
+    it('applies the source filter as an exact match when source is provided', async () => {
+      const eqCalls = [];
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        source: 'gsc',
+        postgrestClient: makeEqRecordingClient(eqCalls),
+      });
+      expect(eqCalls).to.deep.include({ column: 'source', value: 'gsc' });
+    });
+
+    it('does not apply a source filter when source is omitted', async () => {
+      const eqCalls = [];
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: makeEqRecordingClient(eqCalls),
+      });
+      expect(eqCalls.some((c) => c.column === 'source')).to.equal(false);
+    });
+
     it('uses explicit limit and page values', async () => {
       const row = {
         prompt_id: PROMPT_ID,

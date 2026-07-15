@@ -12,7 +12,10 @@
 
 import { ctx } from './harness.js';
 import { resetPostgres } from './seed.js';
-import { resetSemrushMocks } from './setup.js';
+import { resetSemrushMocks, setUmMockQuota, dumpUmMock } from './setup.js';
 import serenityTests from '../shared/tests/serenity.js';
 
-serenityTests(() => ctx.httpClient, resetPostgres, resetSemrushMocks);
+serenityTests(() => ctx.httpClient, resetPostgres, resetSemrushMocks, {
+  setUmMockQuota,
+  dumpUmMock,
+});

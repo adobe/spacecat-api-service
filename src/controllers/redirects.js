@@ -19,12 +19,79 @@ import {
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
+import { getHeader } from '../support/http-headers.js';
+
 // Cloud Manager service identifier, e.g. cm-p154709-e1629980. Digit runs are
 // capped to a realistic length to avoid arbitrarily long lookups; the capture
 // groups yield the program id (pXXXX) and environment id (eYYYY).
 const SERVICE_RE = /^cm-p(\d{1,10})-e(\d{1,10})$/;
 // Aligns with the Fastly edge TTL for this path (fetch/100-aso-overlay-ttl.vcl).
+// Single source of truth so the 200 and 304 responses can't drift under future edits.
 const OVERLAY_TTL_SECONDS = 10;
+const OVERLAY_CACHE_CONTROL = `max-age=${OVERLAY_TTL_SECONDS}`;
+// Every non-2xx/3xx response advertises `no-store` so Fastly (and any other
+// intermediary) will not cache negative responses. Without this, the Fastly VCL
+// at `fastly/vcl/aso-prod/fetch/100-aso-overlay-ttl.vcl` applies its default
+// TTL (10s) + stale-while-revalidate (30s) + stale_if_error (86400s) uniformly
+// across all statuses, which pins a 404 for up to 24 h under any subsequent
+// origin blip — creating the customer-provisioning race where a dispatcher
+// poll made *before* a site's ASO entitlement lands keeps serving stale 404s
+// long after provisioning completes. `no-store` at the origin overrides that
+// VCL default (Fastly respects the response Cache-Control) so the negative
+// cache never sticks. Belt-and-braces: even if the VCL is later tightened
+// to short-TTL 4xx, the origin still declares "do not cache" and any future
+// consumer (different CDN, direct-to-origin traffic, offline replay) gets the
+// correct semantics without needing to replicate the VCL rule.
+const NEGATIVE_CACHE_CONTROL = 'no-store';
+const NO_STORE_HEADERS = { 'cache-control': NEGATIVE_CACHE_CONTROL };
+
+// RFC 7232 §2.3 opaque-tag: the validator MUST be a double-quoted string,
+// optionally preceded by the case-sensitive `W/` weak indicator. Anything that
+// doesn't parse as `"..."` (e.g. a shell-stripped `abc123`) is rejected — better
+// to force a body re-fetch than silently 304 against a corrupted validator.
+// `W/` is intentionally case-sensitive per §2.3; lowercase `w/` is malformed
+// and we do not normalize it.
+function normalizeValidator(v) {
+  const t = v.trim();
+  const stem = t.startsWith('W/') ? t.slice(2) : t;
+  if (stem.length < 2 || stem[0] !== '"' || stem[stem.length - 1] !== '"') {
+    return null;
+  }
+  return stem;
+}
+
+// RFC 7232 §3.2: If-None-Match matches when the header value is `*` (any
+// existing representation) or when any comma-separated validator in the list
+// weakly compares equal to the current ETag. S3 emits strong quoted ETags; we
+// still normalize both sides so a client tagging its cached validator weak
+// (`W/"..."`) matches. Note: this assumes opaque-tags don't contain commas,
+// which is true for every ETag S3 produces (hex digests / opaque part IDs).
+//
+// We deliberately compare in-app rather than pushing `IfNoneMatch` down to
+// `GetObjectCommand`: the S3 SDK only accepts a single strong validator, so
+// `*` and multi-value lists would still need app handling. At current fleet
+// scale the ~10 KB overlay body is cheap; revisit if bandwidth or Lambda
+// memory becomes measurable.
+function ifNoneMatchMatches(headerValue, currentEtag) {
+  if (!headerValue) {
+    return false;
+  }
+  const trimmed = headerValue.trim();
+  // `*` matches any existing representation — the caller has reached here
+  // only after a successful S3 GET, so a representation exists regardless
+  // of whether S3 surfaced an ETag on the response.
+  if (trimmed === '*') {
+    return true;
+  }
+  const normCurrent = normalizeValidator(currentEtag || '');
+  if (!normCurrent) {
+    return false;
+  }
+  return trimmed.split(',').some((tok) => {
+    const norm = normalizeValidator(tok);
+    return norm !== null && norm === normCurrent;
+  });
+}
 
 /**
  * Redirects Controller — serves the ASO dispatcher-layer redirect overlay
@@ -70,11 +137,11 @@ function RedirectsController(ctx) {
 
     const match = SERVICE_RE.exec(service);
     if (!match) {
-      return badRequest('Invalid service identifier');
+      return badRequest('Invalid service identifier', NO_STORE_HEADERS);
     }
     if (!bucketName) {
       log.error('[aso-overlay] S3_ASO_OVERLAYS_BUCKET is not configured');
-      return internalServerError('Overlay endpoint not configured');
+      return internalServerError('Overlay endpoint not configured', NO_STORE_HEADERS);
     }
 
     const [, programId, environmentId] = match;
@@ -88,7 +155,7 @@ function RedirectsController(ctx) {
     );
     if (!site) {
       log.info('[aso-overlay] no site resolves for service', { service });
-      return notFound('No redirect overlay found');
+      return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
 
     // Authorize: the site's org must hold an ASO entitlement AND the site must be
@@ -99,13 +166,13 @@ function RedirectsController(ctx) {
     );
     if (!entitlement) {
       log.info('[aso-overlay] site org not ASO-entitled', { siteId: site.getId() });
-      return notFound('No redirect overlay found');
+      return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
     const enrollments = await SiteEnrollment.allBySiteId(site.getId());
     const enrolled = enrollments.some((se) => se.getEntitlementId() === entitlement.getId());
     if (!enrolled) {
       log.info('[aso-overlay] site not enrolled for ASO', { siteId: site.getId() });
-      return notFound('No redirect overlay found');
+      return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
 
     // Read the overlay with the Lambda's own execution role (no SigV4 from caller).
@@ -113,16 +180,47 @@ function RedirectsController(ctx) {
     try {
       const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
       const response = await s3Client.send(command);
+
+      // S3 returns the object's ETag already quoted (RFC 7232 opaque-tag form),
+      // e.g. `"d41d8cd98f00b204e9800998ecf8427e"`. Passthrough gives the client
+      // a strong validator without hashing the body — the writer is single-part
+      // (small overlays), so this is an MD5 today; multipart uploads would
+      // surface an opaque S3 ETag which is still a valid strong validator.
+      // If S3 doesn't surface an ETag (defensive — mock or future backend), we
+      // just serve the body without ETag; the conditional-GET path degrades to
+      // a plain 200 rather than breaking.
+      const etag = response.ETag;
+      const ifNoneMatch = getHeader(context, 'if-none-match');
+      if (ifNoneMatchMatches(ifNoneMatch, etag)) {
+        // Deliberately no per-request 304 log — this is the *expected* path at
+        // steady state and would dominate log volume across the dispatcher fleet.
+        // If 304-rate visibility becomes necessary, emit a metric rather than a
+        // log line.
+        //
+        // 304 MUST NOT include a message body (RFC 7230 §3.3.3); MUST carry any
+        // Cache-Control / ETag we would have sent on a 200 (RFC 7232 §4.1).
+        // Content-type is set explicitly because createResponse would otherwise
+        // default to application/json for an empty body and run the JSON
+        // stringify branch — text/plain matches the 200 shape.
+        return createResponse('', 304, {
+          'content-type': 'text/plain; charset=utf-8',
+          ...(etag ? { etag } : {}),
+          'cache-control': OVERLAY_CACHE_CONTROL,
+        });
+      }
+
       const body = await response.Body.transformToString();
       return createResponse(body, 200, {
         'content-type': 'text/plain; charset=utf-8',
         // Cache-friendly for Fastly request-collapsing; edge TTL also set in VCL.
-        'cache-control': `max-age=${OVERLAY_TTL_SECONDS}`,
+        'cache-control': OVERLAY_CACHE_CONTROL,
+        // Include ETag so a subsequent poll can conditionally revalidate.
+        ...(etag ? { etag } : {}),
       });
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
       if (err.name === 'NoSuchKey' || code === 404) {
-        return notFound('No redirect overlay found');
+        return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
       // The reader role intentionally lacks s3:ListBucket (least privilege, no key
       // enumeration), so a *missing* object surfaces as 403 AccessDenied rather
@@ -136,10 +234,10 @@ function RedirectsController(ctx) {
           + '— missing object or missing s3:GetObject grant',
           err,
         );
-        return notFound('No redirect overlay found');
+        return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
       log.error(`[aso-overlay] failed to read ${key} from ${bucketName}`, err);
-      return internalServerError('Failed to retrieve redirect overlay');
+      return internalServerError('Failed to retrieve redirect overlay', NO_STORE_HEADERS);
     }
   }
 

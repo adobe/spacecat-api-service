@@ -446,6 +446,54 @@ x-ai-vis-fts-source-domains-sort-by: &ftsSourceDomainsSortByParam
     enum: [DOMAIN, SOURCES_COUNT, MENTIONS, ORGANIC_TRAFFIC]
     default: MENTIONS
 
+x-ai-vis-brands-cited-pages-sort-by: &brandsCitedPagesSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `SOURCES_REQUEST_ORDER_BY` for Semrush v2 `SourcesRequest.order.by`.
+    Default when omitted: `PROMPTS_COUNT`. Unknown values fall back to the default.
+  schema:
+    type: string
+    enum: [URL, PROMPTS_COUNT]
+    default: PROMPTS_COUNT
+
+x-ai-vis-brands-top-brands-sort-by: &brandsTopBrandsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    Sort key for the top-brands list (sorted in-process, not via gRPC order).
+    Default when omitted: `MENTIONS`. Unknown values fall back to the default.
+  schema:
+    type: string
+    enum: [NAME, MENTIONS]
+    default: MENTIONS
+
+x-ai-vis-brands-cited-sources-sort-by: &brandsCitedSourcesSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `DOMAINS_REQUEST_ORDER_BY` for Semrush v2 `DomainsRequest.order.by`.
+    Default when omitted: `PROMPTS_COUNT`. Unknown values fall back to the default.
+  schema:
+    type: string
+    enum: [DOMAIN, MENTIONS, SOURCES_COUNT, PROMPTS_COUNT, ORGANIC_TRAFFIC]
+    default: PROMPTS_COUNT
+
+x-ai-vis-brands-source-opportunities-sort-by: &brandsSourceOpportunitiesSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `DOMAINS_REQUEST_ORDER_BY` for Semrush v2 gap `GapSourceDomainsRequest.order.by`.
+    Default when omitted: `ORGANIC_TRAFFIC`. Unknown values fall back to the default.
+  schema:
+    type: string
+    enum: [DOMAIN, MENTIONS, SOURCES_COUNT, PROMPTS_COUNT, ORGANIC_TRAFFIC]
+    default: ORGANIC_TRAFFIC
+
 x-ai-vis-prompt-hash: &promptHashParam
   name: promptHash
   in: query
@@ -587,6 +635,8 @@ ai-visibility-brands-cited-pages:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - *brandsCitedPagesSortByParam
+      - *sortDirectionParam
       - *monthParam
     responses:
       '200':
@@ -640,6 +690,8 @@ ai-visibility-brands-top-brands:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - *brandsTopBrandsSortByParam
+      - *sortDirectionParam
     responses:
       '200':
         description: Top brands retrieved successfully
@@ -666,6 +718,8 @@ ai-visibility-brands-cited-sources:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - *brandsCitedSourcesSortByParam
+      - *sortDirectionParam
     responses:
       '200':
         description: Brand cited sources retrieved successfully
@@ -693,6 +747,8 @@ ai-visibility-brands-source-opportunities:
       - *engineParam
       - *limitParam
       - *offsetParam
+      - *brandsSourceOpportunitiesSortByParam
+      - *sortDirectionParam
     responses:
       '200':
         description: Brand source opportunities retrieved successfully
