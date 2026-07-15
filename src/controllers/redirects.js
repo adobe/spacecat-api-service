@@ -206,6 +206,11 @@ function RedirectsController(ctx) {
           'content-type': 'text/plain; charset=utf-8',
           ...(etag ? { etag } : {}),
           'cache-control': OVERLAY_CACHE_CONTROL,
+          // Same Surrogate-Key as the 200 so any 304 stragglers still on the
+          // old TTL can be purged by the same call. Fastly stores the header
+          // for edge state; RFC 7232 requires we carry cache-control + etag,
+          // and Surrogate-Key is an operationally-linked companion.
+          'surrogate-key': `aso-overlay-${service}`,
         });
       }
 
@@ -216,6 +221,12 @@ function RedirectsController(ctx) {
         'cache-control': OVERLAY_CACHE_CONTROL,
         // Include ETag so a subsequent poll can conditionally revalidate.
         ...(etag ? { etag } : {}),
+        // Fastly surrogate key so Mystique can targeted-purge this tenant's
+        // overlay on Deploy (see mystique#3381). Namespaced with `aso-overlay-`
+        // prefix so future overlays under different routes don't collide with
+        // this key space. Fastly VCL strips the /config/<tier>/ prefix before
+        // reaching origin, so we only need per-service uniqueness (not per-tier).
+        'surrogate-key': `aso-overlay-${service}`,
       });
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
