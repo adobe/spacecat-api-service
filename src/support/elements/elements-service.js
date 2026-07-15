@@ -12,6 +12,7 @@
 
 import { ELEMENT_IDS } from './element-ids.js';
 import { mapWithConcurrency } from './concurrency.js';
+import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
 import {
   buildBrandsPayload,
   transformBrandsToFilterDimensions,
@@ -34,7 +35,20 @@ import {
   transformOwnedUrlsResponse,
   buildDomainUrlsPayload,
   transformDomainUrlsResponse,
+  buildStatsTotalExecutionsPayload,
+  transformStatsTotalExecutionsResponse,
+  buildStatsMentionsPayload,
+  transformStatsMentionsResponse,
+  buildStatsVisibilityPayload,
+  transformStatsVisibilityResponse,
+  buildStatsCitationsPayload,
+  transformStatsCitationsResponse,
 } from './definitions/index.js';
+
+// Bounds parallel per-week upstream fan-out for the /stats trends array (up to
+// TRENDS_MAX_WEEKS=8 weeks x 4 element calls each) so a wide date range can't
+// spawn an unbounded number of parallel Semrush requests.
+const STATS_TRENDS_WEEK_CONCURRENCY = 4;
 
 /**
  * Creates the Elements service that composes transport calls with per-element
@@ -316,5 +330,97 @@ export function createElementsService(transport) {
       });
     },
     /* c8 ignore stop */
+
+    /**
+     * Fetches the Brand Presence Stats KPI cards (`GET .../brand-presence/stats`),
+     * backed by Total Executions (a4defa1a), Mentions (e1a6811b), Visibility
+     * (2724878e), and Citations (588054fe) — see
+     * docs/elements/brand-presence-stats-plan.md for the full design.
+     *
+     * `projectId` (single region selected) takes precedence over `projectIds`
+     * (aggregate "all regions" view, every project the brand owns). Exactly one
+     * should be populated by the caller.
+     *
+     * When `showTrends` is true, also fetches all four stats per week (up to 8
+     * weeks, built backward from `endDate`, bounded concurrency) — there is no
+     * Semrush element that returns all four metrics pre-bucketed by week, so each
+     * week reuses the same four element calls scoped to that week's date range.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD.
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region selected).
+     * @param {string[]} [params.projectIds] - All of the brand's project UUIDs (aggregate view).
+     * @param {string} params.brandName - Brand display name (Semrush brand filter value).
+     * @param {boolean} [params.showTrends] - Whether to include the `trends` array.
+     * @returns {Promise<{stats: object, trends?: object[]}>}
+     */
+    async getBrandPresenceStats(workspaceId, {
+      model, platform, startDate, endDate, projectId, projectIds, brandName, showTrends,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : projectIds;
+
+      const fetchStatsForRange = async (rangeStart, rangeEnd) => {
+        const totalExecutionsPayload = buildStatsTotalExecutionsPayload({
+          model, platform, startDate: rangeStart, endDate: rangeEnd, projectId,
+        });
+        const mentionsPayload = buildStatsMentionsPayload({
+          model,
+          platform,
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          projectIds: resolvedProjectIds,
+          brandName,
+        });
+        const visibilityPayload = buildStatsVisibilityPayload({
+          model,
+          platform,
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          projectIds: resolvedProjectIds,
+          brandName,
+        });
+        const citationsPayload = buildStatsCitationsPayload({
+          model,
+          platform,
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          projectIds: resolvedProjectIds,
+          brandName,
+        });
+        const [totalExec, mentions, visibility, citations] = await Promise.all([
+          transport.fetchElement(workspaceId, ELEMENT_IDS.TOTAL_EXECUTIONS, totalExecutionsPayload),
+          transport.fetchElement(workspaceId, ELEMENT_IDS.MENTIONS, mentionsPayload),
+          transport.fetchElement(workspaceId, ELEMENT_IDS.VISIBILITY, visibilityPayload),
+          transport.fetchElement(workspaceId, ELEMENT_IDS.CITATIONS_KPI, citationsPayload),
+        ]);
+        return {
+          total_executions: transformStatsTotalExecutionsResponse(totalExec),
+          total_mentions: transformStatsMentionsResponse(mentions),
+          average_visibility_score: transformStatsVisibilityResponse(visibility),
+          total_citations: transformStatsCitationsResponse(citations),
+        };
+      };
+
+      const stats = await fetchStatsForRange(startDate, endDate);
+      const response = { stats };
+
+      if (showTrends) {
+        const weeks = splitDateRangeIntoWeeksBackward(startDate, endDate);
+        const weekStats = await mapWithConcurrency(
+          weeks,
+          STATS_TRENDS_WEEK_CONCURRENCY,
+          (week) => fetchStatsForRange(week.startDate, week.endDate),
+        );
+        response.trends = weeks.map((week, i) => ({
+          startDate: week.startDate,
+          endDate: week.endDate,
+          data: { stats: weekStats[i] },
+        }));
+      }
+
+      return response;
+    },
   };
 }

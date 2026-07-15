@@ -49,6 +49,14 @@ const PROMPTS_RESULT = {
 const WEEKS_RESULT = {
   weeks: [{ week: '2026-W27', startDate: '2026-06-29', endDate: '2026-07-05' }],
 };
+const STATS_RESULT = {
+  stats: {
+    total_executions: 19528,
+    total_mentions: 14635,
+    average_visibility_score: 48.77,
+    total_citations: 158903,
+  },
+};
 
 function fakeLog() {
   return {
@@ -176,6 +184,8 @@ describe('ElementsController', () => {
       getUrlInspectorFilterDimensions: sinon.stub().resolves(URL_INSPECTOR_RESULT),
       getPrompts: sinon.stub().resolves(PROMPTS_RESULT),
       getWeeks: sinon.stub().resolves(WEEKS_RESULT),
+      getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
+      resolveRegionProjectId: sinon.stub().resolves(null),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -869,45 +879,127 @@ describe('ElementsController', () => {
     const statsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
       + `/brands/${BRAND_ID}/serenity/brand-presence/stats${qs}`;
 
-    it('returns 200 with zeroed stats and no trends key by default', async () => {
+    it('returns 200 with the service result by default (aggregate view, no trends)', async () => {
       const ctx = fakeContext({ url: statsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
       const body = await readBody(res);
-      expect(body).to.deep.equal({
-        stats: {
-          total_executions: 0,
-          average_visibility_score: 0,
-          total_mentions: 0,
-          total_citations: 0,
-        },
-      });
+      expect(body).to.deep.equal(STATS_RESULT);
+      const [workspaceId, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
+      expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.projectId).to.equal(undefined);
+      expect(params.projectIds).to.deep.equal([]);
+      expect(params.showTrends).to.equal(false);
+      expect(params.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(params.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
     });
 
-    it('includes an empty trends array when showTrends=true', async () => {
+    it('passes showTrends=true through to the service', async () => {
       const ctx = fakeContext({ url: statsUrl('?showTrends=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
-      const body = await readBody(res);
-      expect(body.trends).to.deep.equal([]);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.showTrends).to.equal(true);
     });
 
-    it('includes an empty trends array when show_trends=1 (snake_case alias)', async () => {
+    it('passes showTrends=true through when show_trends=1 (snake_case alias)', async () => {
       const ctx = fakeContext({ url: statsUrl('?show_trends=1') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
-      const res = await ctrl.getStats(ctx);
-      const body = await readBody(res);
-      expect(body.trends).to.deep.equal([]);
+      await ctrl.getStats(ctx);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.showTrends).to.equal(true);
     });
 
-    it('omits trends when showTrends=false', async () => {
+    it('passes showTrends=false through when showTrends=false', async () => {
       const ctx = fakeContext({ url: statsUrl('?showTrends=false') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getStats(ctx);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.showTrends).to.equal(false);
+    });
+
+    it('passes explicit startDate/endDate/model/platform through to the service', async () => {
+      const ctx = fakeContext({
+        url: statsUrl('?startDate=2026-07-01&endDate=2026-07-14&model=search-gpt&platform=chatgpt'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
-      const body = await readBody(res);
-      expect(body).to.not.have.property('trends');
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.startDate).to.equal('2026-07-01');
+      expect(params.endDate).to.equal('2026-07-14');
+      expect(params.model).to.equal('search-gpt');
+      expect(params.platform).to.equal('chatgpt');
+    });
+
+    it('returns 400 for a malformed startDate', async () => {
+      const ctx = fakeContext({ url: statsUrl('?startDate=not-a-date&endDate=2026-07-14') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for a malformed endDate', async () => {
+      const ctx = fakeContext({ url: statsUrl('?startDate=2026-07-01&endDate=not-a-date') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when startDate is after endDate', async () => {
+      const ctx = fakeContext({ url: statsUrl('?startDate=2026-07-14&endDate=2026-07-01') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('resolves regionCode to a single projectId via resolveRegionProjectId', async () => {
+      serviceStub.resolveRegionProjectId.resolves('proj-us');
+      const ctx = fakeContext({ url: statsUrl('?regionCode=US') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({ brandId: BRAND_ID, region: 'US' }),
+      );
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.projectId).to.equal('proj-us');
+      expect(params.projectIds).to.equal(undefined);
+    });
+
+    it('accepts region_code and region as aliases for regionCode', async () => {
+      serviceStub.resolveRegionProjectId.resolves('proj-us');
+      const ctx = fakeContext({ url: statsUrl('?region_code=US') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getStats(ctx);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({ region: 'US' }),
+      );
+    });
+
+    it('returns 404 when regionCode does not resolve to any Semrush market', async () => {
+      serviceStub.resolveRegionProjectId.resolves(null);
+      const ctx = fakeContext({ url: statsUrl('?regionCode=ZZ') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('resolves projectIds from the brand\'s BrandSemrushProject rows when no region is given', async () => {
+      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' });
+      const ctx = fakeContext({ withBrandSemrushProject: true, brandSemrushProjects: [project] });
+      ctx.dataAccess.BrandSemrushProject = { allByBrandId: sinon.stub().resolves([project]) };
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-1']);
+      expect(params.projectId).to.equal(undefined);
     });
 
     it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
@@ -970,6 +1062,14 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(404);
+    });
+
+    it('propagates upstream errors through mapError', async () => {
+      serviceStub.getBrandPresenceStats.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = fakeContext({ url: statsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(502);
     });
   });
 

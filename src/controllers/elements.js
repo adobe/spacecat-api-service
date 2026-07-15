@@ -130,6 +130,21 @@ function isYmdDate(value) {
 }
 
 /**
+ * Default 28-day trailing date range for `/stats`, mirroring
+ * `llmo-brand-presence.js#defaultDateRange`, used when the caller omits
+ * startDate/endDate.
+ */
+function defaultStatsDateRange() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 28);
+  return {
+    startDate: start.toISOString().slice(0, 10),
+    endDate: end.toISOString().slice(0, 10),
+  };
+}
+
+/**
  * Splits a comma-separated query value into a trimmed, non-empty string array.
  * `extractQuery` collapses repeated params (last value wins), so multi-valued
  * filters (topics, project ids) are passed as a single CSV value.
@@ -757,13 +772,15 @@ export default function ElementsController(context, log, env) {
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats
-   * Scaffold for the Elements-backed equivalent of the mysticat
-   * `GET /org/:spaceCatId/brands/:brandId/brand-presence/stats` endpoint (see
+   * Elements-backed equivalent of the Postgres-RPC `/stats` endpoint (see
    * llmo-brand-presence.js#createBrandPresenceStatsHandler): same response shape
-   * (`{ stats, trends? }`) and the same query params (startDate/endDate, model/
-   * platform, showTrends/show_trends, siteId/site_id, categoryId(s), topicIds,
-   * regionCode(s), origin), but the Elements aggregation itself is not wired yet
-   * — always returns zeroed stats (and an empty trends array when requested).
+   * (`{ stats, trends? }`) — aggregated `total_executions`, `average_visibility_score`,
+   * `total_mentions`, `total_citations`, plus an optional weekly `trends` array. See
+   * docs/elements/brand-presence-stats-plan.md for the full design + resolved decisions.
+   *
+   * `categoryId(s)`/`topicIds`/`origin` are accepted by the reference endpoint but are
+   * NOT yet supported here — the Elements API has no confirmed filter equivalent for
+   * them (see the plan doc's gap analysis); they are currently no-ops.
    */
   const getStats = async (ctx) => {
     try {
@@ -771,8 +788,8 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { spaceCatId } = ctx?.params ?? {};
-      const { brand } = auth;
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
       const siteId = query.siteId || query.site_id;
 
@@ -784,19 +801,54 @@ export default function ElementsController(context, log, env) {
         }
       }
 
-      const response = {
-        stats: {
-          total_executions: 0,
-          average_visibility_score: 0,
-          total_mentions: 0,
-          total_citations: 0,
-        },
-      };
-      if (parseShowTrends(query)) {
-        response.trends = [];
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const defaultRange = defaultStatsDateRange();
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // A single selected region+language maps 1:1 to a Semrush projectId — the
+      // common case, needing no fan-out. Absent → aggregate "all regions" view,
+      // scoped to every project this brand owns.
+      let projectId;
+      let projectIds;
+      const regionCode = query.regionCode || query.region_code || query.region;
+      if (hasText(regionCode)) {
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region: regionCode, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${regionCode}`);
+        }
+      } else {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
       }
 
-      return cachedOk(response);
+      const result = await service.getBrandPresenceStats(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate: startDate || defaultRange.startDate,
+        endDate: endDate || defaultRange.endDate,
+        projectId,
+        projectIds,
+        brandName: brand.name,
+        showTrends: parseShowTrends(query),
+      });
+
+      return cachedOk(result);
     } catch (e) {
       return mapError(e, log);
     }
