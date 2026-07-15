@@ -918,6 +918,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',

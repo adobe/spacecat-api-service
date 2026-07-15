@@ -145,6 +145,20 @@ function splitCsv(value) {
 }
 
 /**
+ * Default 28-day trailing `{ startDate, endDate }` (YYYY-MM-DD), used by endpoints
+ * whose date range is optional (e.g. market-tracking-trends) when the caller omits it.
+ */
+function defaultTrailingDateRange() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 28);
+  return {
+    startDate: start.toISOString().slice(0, 10),
+    endDate: end.toISOString().slice(0, 10),
+  };
+}
+
+/**
  * Extracts and validates the IMS bearer token from the inbound Authorization header.
  * Throws 401 if missing or if the caller authenticated via a non-IMS mechanism.
  *
@@ -739,6 +753,94 @@ export default function ElementsController(context, log, env) {
   };
   /* c8 ignore stop */
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends
+   * Weekly per-competitor mentions + citations for the Competitor Comparison chart on
+   * the brand-presence-sr-ui dashboard. Backed by two weekly `line` elements (TRENDS_MV
+   * for mentions, MARKET_CITATIONS_TREND for citations); competitors come back natively
+   * as tracked-benchmark legends, so no competitor list is needed as input. See
+   * docs/elements/market-tracking-trends-plan.md.
+   *
+   * Query params (all optional): `startDate`/`start_date` + `endDate`/`end_date`
+   * (default: 28-day trailing window), `model`/`platform` (default search-gpt),
+   * `regionCode`/`region_code`/`region` (a single region → its one Semrush project;
+   * `all`/absent → aggregate across every project the brand owns), `siteId`/`site_id`
+   * (cross-check only — must belong to `:brandId`).
+   */
+  const getMarketTrackingTrends = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // The path already names the brand; a siteId filter is only honored when it
+      // belongs to that brand (mirrors listWeeks / listCitedDomains).
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      // Date range is optional (defaults to a 28-day trailing window); when a value is
+      // sent it must be a valid YYYY-MM-DD and correctly ordered.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const defaultRange = defaultTrailingDateRange();
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // A single selected region+language → its one Semrush projectId. region=all/absent
+      // → every project the brand owns (the payload builder ORs them into one call, so
+      // neither path fans out).
+      let projectId;
+      let projectIds;
+      const region = query.regionCode || query.region_code || query.region;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      } else {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+      }
+
+      const result = await service.getMarketTrackingTrends(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate: startDate || defaultRange.startDate,
+        endDate: endDate || defaultRange.endDate,
+        projectId,
+        projectIds,
+        brandName: brand.name,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
@@ -746,5 +848,6 @@ export default function ElementsController(context, log, env) {
     listCitedDomains,
     listOwnedUrls,
     listDomainUrls,
+    getMarketTrackingTrends,
   };
 }

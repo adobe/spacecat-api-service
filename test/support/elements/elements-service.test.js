@@ -221,4 +221,84 @@ describe('createElementsService', () => {
       await expect(service.getPrompts('ws-1', {})).to.be.rejectedWith('prompts upstream failure');
     });
   });
+
+  describe('getMarketTrackingTrends', () => {
+    const MENTIONS_RAW = {
+      type: 'line',
+      blocks: {
+        lines: [
+          { legend: 'Acme', x: '2026-07-05T00:00:00Z', y__mentions: 900 },
+          { legend: 'Rival One', x: '2026-07-05T00:00:00Z', y__mentions: 150 },
+        ],
+      },
+    };
+    const CITATIONS_RAW = {
+      type: 'line',
+      blocks: {
+        lines: [
+          { legend: 'Acme', x: '2026-07-05T00:00:00Z', y__mentions: 5000 },
+          { legend: 'Rival One', x: '2026-07-05T00:00:00Z', y__mentions: 300 },
+        ],
+      },
+    };
+
+    beforeEach(() => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.TRENDS_MV, sinon.match.any).resolves(MENTIONS_RAW);
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.MARKET_CITATIONS_TREND, sinon.match.any).resolves(CITATIONS_RAW);
+    });
+
+    it('fetches both trend elements and returns merged weeklyTrends', async () => {
+      const result = await service.getMarketTrackingTrends('ws-1', {
+        model: 'search-gpt',
+        startDate: '2026-06-16',
+        endDate: '2026-07-15',
+        projectIds: ['p1', 'p2'],
+        brandName: 'Acme',
+      });
+      expect(transport.fetchElement).to.have.been.calledWith('ws-1', ELEMENT_IDS.TRENDS_MV, sinon.match.object);
+      expect(transport.fetchElement).to.have.been.calledWith('ws-1', ELEMENT_IDS.MARKET_CITATIONS_TREND, sinon.match.object);
+      expect(result.weeklyTrends).to.have.length(1);
+      expect(result.weeklyTrends[0]).to.deep.include({ mentions: 900, citations: 5000 });
+      expect(result.weeklyTrends[0].competitors).to.deep.equal([
+        { name: 'Rival One', mentions: 150, citations: 300 },
+      ]);
+    });
+
+    it('scopes mentions by CBF_project and citations by CBF_projects, both weekly', async () => {
+      await service.getMarketTrackingTrends('ws-1', {
+        startDate: '2026-06-16', endDate: '2026-07-15', projectIds: ['p1'], brandName: 'Acme',
+      });
+      const mentionsCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.TRENDS_MV);
+      const citationsCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.MARKET_CITATIONS_TREND);
+      expect(mentionsCall.args[2].auto_bucketing).to.equal('week');
+      expect(mentionsCall.args[2].filters.advanced.filters[1].filters[0].col).to.equal('CBF_project');
+      expect(citationsCall.args[2].filters.advanced.filters[1].filters[0].col).to.equal('CBF_projects');
+    });
+
+    it('prefers a single projectId over the projectIds list', async () => {
+      await service.getMarketTrackingTrends('ws-1', {
+        startDate: '2026-06-16',
+        endDate: '2026-07-15',
+        projectId: 'only-this',
+        projectIds: ['ignored-1', 'ignored-2'],
+        brandName: 'Acme',
+      });
+      const mentionsCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.TRENDS_MV);
+      const projectFilters = mentionsCall.args[2].filters.advanced.filters[1].filters;
+      expect(projectFilters).to.deep.equal([{ op: 'eq', val: 'only-this', col: 'CBF_project' }]);
+    });
+
+    it('propagates transport errors', async () => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.TRENDS_MV, sinon.match.any)
+        .rejects(new Error('trends upstream failure'));
+      await expect(service.getMarketTrackingTrends('ws-1', {
+        startDate: '2026-06-16', endDate: '2026-07-15', projectIds: [], brandName: 'Acme',
+      })).to.be.rejectedWith('trends upstream failure');
+    });
+  });
 });

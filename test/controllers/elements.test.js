@@ -893,4 +893,137 @@ describe('ElementsController', () => {
       expect(params.foo).to.equal('bar');
     });
   });
+
+  // ─── getMarketTrackingTrends ────────────────────────────────────────────────
+
+  describe('getMarketTrackingTrends', () => {
+    const MARKET_RESULT = {
+      weeklyTrends: [{
+        week: '2026-07-05',
+        weekNumber: 27,
+        year: 2026,
+        mentions: 900,
+        citations: 5000,
+        competitors: [{ name: 'Rival One', mentions: 150, citations: 300 }],
+      }],
+    };
+    const mttUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/market-tracking-trends${qs}`;
+
+    beforeEach(() => {
+      serviceStub.getMarketTrackingTrends = sinon.stub().resolves(MARKET_RESULT);
+      serviceStub.resolveRegionProjectId = sinon.stub().resolves('proj-1');
+    });
+
+    it('returns 200 with the weeklyTrends result', async () => {
+      const ctx = fakeContext({ url: mttUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal(MARKET_RESULT);
+    });
+
+    it('aggregates across every project the brand owns when no region is given', async () => {
+      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-9' });
+      const ctx = fakeContext({
+        url: mttUrl(), withBrandSemrushProject: true, brandSemrushProjects: [project],
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getMarketTrackingTrends(ctx);
+      const [workspaceId, params] = serviceStub.getMarketTrackingTrends.firstCall.args;
+      expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
+      expect(params.projectIds).to.deep.equal(['proj-9']);
+      expect(params.projectId).to.equal(undefined);
+      expect(params.brandName).to.equal('Adobe Brand');
+      expect(serviceStub.resolveRegionProjectId).to.not.have.been.called;
+    });
+
+    it('resolves a specific region to a single projectId', async () => {
+      const project = makeBrandSemrushProject();
+      const ctx = fakeContext({
+        url: mttUrl('?region=US'), withBrandSemrushProject: true, brandSemrushProjects: [project],
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getMarketTrackingTrends(ctx);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledOnce;
+      const [, params] = serviceStub.getMarketTrackingTrends.firstCall.args;
+      expect(params.projectId).to.equal('proj-1');
+      expect(params.projectIds).to.equal(undefined);
+    });
+
+    it('returns 404 when the requested region resolves to no market', async () => {
+      serviceStub.resolveRegionProjectId.resolves(null);
+      const ctx = fakeContext({ url: mttUrl('?region=ZZ'), withBrandSemrushProject: true });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(404);
+      expect(serviceStub.getMarketTrackingTrends).to.not.have.been.called;
+    });
+
+    it('defaults to a 28-day trailing window when no dates are given', async () => {
+      const ctx = fakeContext({ url: mttUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getMarketTrackingTrends(ctx);
+      const [, params] = serviceStub.getMarketTrackingTrends.firstCall.args;
+      expect(params.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(params.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(params.startDate < params.endDate).to.equal(true);
+    });
+
+    it('passes through and validates supplied dates and model', async () => {
+      const ctx = fakeContext({ url: mttUrl('?startDate=2026-06-16&endDate=2026-07-15&model=perplexity') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getMarketTrackingTrends(ctx);
+      const [, params] = serviceStub.getMarketTrackingTrends.firstCall.args;
+      expect(params).to.include({ startDate: '2026-06-16', endDate: '2026-07-15', model: 'perplexity' });
+    });
+
+    it('returns 400 for a malformed startDate', async () => {
+      const ctx = fakeContext({ url: mttUrl('?startDate=2026-13-99') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getMarketTrackingTrends).to.not.have.been.called;
+    });
+
+    it('returns 400 for a malformed endDate', async () => {
+      const ctx = fakeContext({ url: mttUrl('?endDate=nope') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when startDate is after endDate', async () => {
+      const ctx = fakeContext({ url: mttUrl('?startDate=2026-07-15&endDate=2026-06-16') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when siteId does not belong to the brand', async () => {
+      getBrandBySiteStub.resolves({ id: 'other-brand', name: 'Other' });
+      const ctx = fakeContext({ url: mttUrl('?siteId=some-site') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getMarketTrackingTrends).to.not.have.been.called;
+    });
+
+    it('proceeds when siteId resolves to the same brand', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = fakeContext({ url: mttUrl('?siteId=matching-site') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('propagates service errors through mapError', async () => {
+      serviceStub.getMarketTrackingTrends.rejects(new Error('boom'));
+      const ctx = fakeContext({ url: mttUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(500);
+    });
+  });
 });

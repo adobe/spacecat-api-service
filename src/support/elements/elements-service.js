@@ -34,6 +34,9 @@ import {
   transformOwnedUrlsResponse,
   buildDomainUrlsPayload,
   transformDomainUrlsResponse,
+  buildMarketMentionsTrendPayload,
+  buildMarketCitationsTrendPayload,
+  transformMarketTrackingTrends,
 } from './definitions/index.js';
 
 /**
@@ -316,5 +319,50 @@ export function createElementsService(transport) {
       });
     },
     /* c8 ignore stop */
+
+    /**
+     * Fetches weekly per-competitor mentions + citations for the Competitor
+     * Comparison chart (`GET .../brand-presence/market-tracking-trends`), backed by
+     * two weekly `line` elements fetched in parallel — TRENDS_MV (b5281393, mentions)
+     * and MARKET_CITATIONS_TREND (2e5a6f4e, citations). Both return one series per
+     * market participant keyed by `legend` = name; the transform splits the tracked
+     * brand from its competitors and merges the two metrics per ISO week. No per-week
+     * fan-out: the elements are already `auto_bucketing: "week"`.
+     *
+     * `projectId` (a single selected region) takes precedence over `projectIds` (the
+     * aggregate "all regions" view — every project the brand owns). Both are OR-ed into
+     * one call per element, so neither path fans out.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - YYYY-MM-DD.
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} params.brandName - Tracked brand display name (matches its legend).
+     * @returns {Promise<{weeklyTrends: object[]}>}
+     */
+    async getMarketTrackingTrends(workspaceId, {
+      model, platform, startDate, endDate, projectId, projectIds, brandName,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const [mentions, citations] = await Promise.all([
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.TRENDS_MV,
+          buildMarketMentionsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.MARKET_CITATIONS_TREND,
+          buildMarketCitationsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+      ]);
+      return { weeklyTrends: transformMarketTrackingTrends(mentions, citations, brandName) };
+    },
   };
 }
