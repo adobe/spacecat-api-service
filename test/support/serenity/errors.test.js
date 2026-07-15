@@ -15,6 +15,10 @@ import { expect } from 'chai';
 import {
   isUpstreamGone,
   ERROR_CODES,
+  isPoolExhausted,
+  isWorkspaceNotReady,
+  isMeteredQuota,
+  isRateLimited,
 } from '../../../src/support/serenity/errors.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
@@ -35,7 +39,41 @@ describe('serenity error classification', () => {
       expect(ERROR_CODES.MARKET_NOT_FOUND).to.equal('marketNotFound');
       expect(ERROR_CODES.AMBIGUOUS_WORKSPACE).to.equal('ambiguousWorkspace');
       expect(ERROR_CODES.LINKED_SUBWORKSPACES).to.equal('linkedSubworkspaces');
+      expect(ERROR_CODES.ORG_POOL_EXHAUSTED).to.equal('orgPoolExhausted');
+      expect(ERROR_CODES.BRAND_AI_LIMIT).to.equal('brandAiLimit');
       expect(Object.isFrozen(ERROR_CODES)).to.be.true;
+    });
+  });
+
+  describe('dynamic-allocation classifiers (body/message, not status alone)', () => {
+    const err = (status, body) => new SerenityTransportError(status, 'upstream', body);
+
+    it('isPoolExhausted: only a 422 whose message says insufficient units', () => {
+      expect(isPoolExhausted(err(422, { message: 'insufficient available units in subscription' }))).to.be.true;
+      expect(isPoolExhausted(err(422, { message: 'workspace not ready' }))).to.be.false; // transient, not exhaustion
+      expect(isPoolExhausted(err(422, {}))).to.be.false; // object without a message → no match
+      expect(isPoolExhausted(err(500, { message: 'insufficient available units' }))).to.be.false;
+      expect(isPoolExhausted(new Error('x'))).to.be.false;
+    });
+
+    it('isWorkspaceNotReady: only the transient 422 lock', () => {
+      expect(isWorkspaceNotReady(err(422, { message: 'workspace not ready' }))).to.be.true;
+      expect(isWorkspaceNotReady(err(422, { message: 'insufficient available units' }))).to.be.false;
+    });
+
+    it('isMeteredQuota: only a 405 with an explicit quota signal — never a bare Method-Not-Allowed', () => {
+      expect(isMeteredQuota(err(405, { message: 'Quota exceeded' }))).to.be.true;
+      expect(isMeteredQuota(err(405, 'quota exceeded'))).to.be.true; // string body
+      expect(isMeteredQuota(err(405, '<html>prompt allocation exhausted</html>'))).to.be.true;
+      expect(isMeteredQuota(err(405, { message: 'Method Not Allowed' }))).to.be.false; // legitimate 405
+      expect(isMeteredQuota(err(405, 'method not allowed'))).to.be.false;
+      expect(isMeteredQuota(err(405, null))).to.be.false; // no body signal → not quota
+      expect(isMeteredQuota(err(404, null))).to.be.false;
+    });
+
+    it('isRateLimited: a 429', () => {
+      expect(isRateLimited(err(429, null))).to.be.true;
+      expect(isRateLimited(err(503, null))).to.be.false;
     });
   });
 });

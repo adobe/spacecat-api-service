@@ -12,17 +12,17 @@
 
 // @ts-check
 
-import { TYPE_TAG } from './prompt-tags.js';
+import { TYPE_VALUE } from './prompt-tags.js';
 import { collectAliasNames } from './brand-aliases.js';
 
 /**
  * Server-side branded / non-branded classifier — the SINGLE implementation used
  * on every path that writes a Serenity (Semrush sub-workspace) prompt: manual
  * create / edit, CSV import (which reuses the create path), AI generation, and
- * onboarding/provisioning seeding. A prompt is `type:branded` when its text
- * mentions the brand name or an applicable alias as a WHOLE WORD — allowing the
- * regular English plural of that word (diacritics folded); otherwise
- * `type:non-branded`.
+ * onboarding/provisioning seeding. A prompt carries the `type` value `branded`
+ * when its text mentions the brand name or an applicable alias as a WHOLE WORD —
+ * allowing the regular English plural of that word (diacritics folded);
+ * otherwise `non-branded`.
  *
  * This replaces the earlier AI-only substring matcher (`brandedTypeTag`): the
  * match is now word-boundary + diacritic-folding, and it is shared everywhere so
@@ -161,25 +161,28 @@ function needleMatches(haystack, needle) {
 }
 
 /**
- * Classifies a prompt as `type:branded` when its text contains any needle as a
- * whole word — or that word's regular English plural — else `type:non-branded`.
- * A multi-word needle must match as a contiguous whole-word run. Both sides are
+ * Classifies a prompt as `branded` when its text contains any needle as a whole
+ * word — or that word's regular English plural — else `non-branded`. A
+ * multi-word needle must match as a contiguous whole-word run. Both sides are
  * normalized via {@link normalizeMatch} (which also strips the possessive `'s`,
  * so `Buick's` and `Buicks'` both classify as branded). Empty `needles` ⇒
- * `type:non-branded`.
+ * `non-branded`.
+ *
+ * Returns the BARE value beneath the `type` dimension root; the caller resolves
+ * it to an upstream tag id against the project's tree.
  *
  * @param {string} promptText - the prompt text.
  * @param {string[]} needles - normalized needles from {@link brandNeedles} /
  *   {@link needlesFromNames}.
- * @returns {typeof TYPE_TAG.BRANDED | typeof TYPE_TAG.NON_BRANDED}
+ * @returns {typeof TYPE_VALUE.BRANDED | typeof TYPE_VALUE.NON_BRANDED}
  */
 export function classifyBrandedTag(promptText, needles) {
   const list = Array.isArray(needles) ? needles : [];
   if (list.length === 0) {
-    return TYPE_TAG.NON_BRANDED;
+    return TYPE_VALUE.NON_BRANDED;
   }
   const haystack = ` ${normalizeMatch(promptText)} `;
   return list.some((n) => n && needleMatches(haystack, n))
-    ? TYPE_TAG.BRANDED
-    : TYPE_TAG.NON_BRANDED;
+    ? TYPE_VALUE.BRANDED
+    : TYPE_VALUE.NON_BRANDED;
 }
