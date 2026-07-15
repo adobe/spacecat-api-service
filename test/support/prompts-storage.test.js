@@ -975,6 +975,170 @@ describe('prompts-storage', () => {
       expect(result.prompts).to.have.lengthOf(1);
     });
 
+    it('treats same text+regions with a DIFFERENT source as a new row (SITES-47870)', async () => {
+      const existing = [{
+        id: 'u1', prompt_id: 'p-gsc', text: 'Shared prompt', regions: ['us'], status: 'active', source: 'gsc',
+      }];
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => thenable({ data: existing, error: null }) }),
+              }),
+              insert: insertStub,
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Shared prompt', regions: ['us'], source: 'base_url' }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.updated).to.equal(0);
+      expect(updateStub.called).to.equal(false);
+      expect(insertStub.firstCall.args[0][0].source).to.equal('base_url');
+    });
+
+    it('matches same text+regions+source to the existing row (updates, not inserts)', async () => {
+      const existing = [{
+        id: 'u1', prompt_id: 'p-gsc', text: 'Shared prompt', regions: ['us'], status: 'active', source: 'gsc',
+      }];
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [], error: null }),
+      });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => thenable({ data: existing, error: null }) }),
+              }),
+              insert: insertStub,
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Shared prompt', regions: ['us'], source: 'gsc' }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(result.created).to.equal(0);
+      expect(insertStub.called).to.equal(false);
+    });
+
+    it('rejects an unregistered source with a 400 (SITES-47870 chokepoint)', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const err = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'x', regions: [], source: 'totally-bogus' }],
+        postgrestClient: client,
+      }).catch((e) => e);
+      expect(err).to.be.an('error');
+      expect(err.message).to.match(/Unregistered prompt source/);
+      expect(err.status).to.equal(400);
+    });
+
+    it('preserves the stored source on an id-match update (SITES-47870 immutability)', async () => {
+      const existing = [{
+        id: 'u1', prompt_id: 'p1', text: 'Kept', regions: ['us'], status: 'active', source: 'gsc',
+      }];
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [], error: null }),
+      });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: existing, error: null }),
+                    in: () => thenable({ data: existing, error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      // Incoming matches by prompt_id but carries a DIFFERENT source; the stored
+      // 'gsc' must NOT be overwritten to 'semrush'.
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'p1', prompt: 'Kept', regions: ['us'], source: 'semrush',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(insertStub.called).to.equal(false);
+      expect(updateStub.firstCall.args[0].source).to.equal('gsc');
+      expect(result.prompts[0].source).to.equal('gsc');
+    });
+
+    it('keeps two new same-text/different-source prompts as separate inserts (dedup by source)', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'a' }, { prompt_id: 'b' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          { prompt: 'Shared', regions: ['us'], source: 'gsc' },
+          { prompt: 'Shared', regions: ['us'], source: 'base_url' },
+        ],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(2);
+      const insertedSources = insertStub.firstCall.args[0].map((r) => r.source).sort();
+      expect(insertedSources).to.deep.equal(['base_url', 'gsc']);
+    });
+
     it('persists normalized intent on insert (lowercases, remaps; invalid -> null)', async () => {
       const insertStub = sinon.stub().returns({
         select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
@@ -1239,7 +1403,7 @@ describe('prompts-storage', () => {
 
     it('reactivates a deleted prompt matched by prompt_id', async () => {
       const deletedRow = {
-        id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',
+        id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted', source: 'gsc',
       };
       const existingData = { data: [deletedRow], error: null };
       const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
@@ -1272,11 +1436,53 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(0);
       expect(result.skipped).to.equal(0);
       expect(updateStub.callCount).to.equal(1);
+      // Reactivation preserves the stored source (SITES-47870 immutability).
+      expect(updateStub.firstCall.args[0].source).to.equal('gsc');
+    });
+
+    it('reactivating a deleted row by prompt_id keeps the stored source, not the incoming one', async () => {
+      // Deleted row is gsc-sourced; the incoming reactivation carries a DIFFERENT
+      // source. The id-match must NOT move the row to 'semrush'.
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-1b', text: 'Reactivate me', regions: ['us'], status: 'deleted', source: 'gsc',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'del-1b', prompt: 'Reactivate me', regions: ['us'], source: 'semrush',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(updateStub.firstCall.args[0].source).to.equal('gsc');
+      expect(result.prompts[0].source).to.equal('gsc');
     });
 
     it('reactivates a deleted prompt matched by text+regions without inserting', async () => {
       const deletedRow = {
-        id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted',
+        id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted', source: 'gsc',
       };
       const existingData = { data: [deletedRow], error: null };
       const insertSpy = sinon.stub().returns({
@@ -1299,11 +1505,12 @@ describe('prompts-storage', () => {
           return makeChain({});
         },
       };
-      // Incoming prompt has no id but matches the deleted row by text+regions
+      // Incoming prompt has no id but matches the deleted row by text+regions.
+      // source is part of the match key, so it must carry the same source to match.
       const result = await upsertPrompts({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
-        prompts: [{ prompt: 'Same text', regions: ['us'] }],
+        prompts: [{ prompt: 'Same text', regions: ['us'], source: 'gsc' }],
         postgrestClient: client,
       });
       expect(result.updated).to.equal(1);
@@ -1311,6 +1518,7 @@ describe('prompts-storage', () => {
       expect(result.skipped).to.equal(0);
       expect(insertSpy.callCount).to.equal(0);
       expect(updateStub.callCount).to.equal(1);
+      expect(updateStub.firstCall.args[0].source).to.equal('gsc');
     });
 
     it('does not reactivate a pending prompt — keeps it skipped', async () => {

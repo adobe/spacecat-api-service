@@ -615,14 +615,14 @@ describe('ElementsController', () => {
 
     it('calls getPrompts with the brand SUB-workspace ID and parsed filters', async () => {
       const ctx = fakeContext({
-        url: promptsUrl('?model=perplexity&tag=type:branded,category:Brand&projectId=proj-a,proj-b'),
+        url: promptsUrl('?model=perplexity&tag=type__branded,category__Brand&projectId=proj-a,proj-b'),
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       expect(serviceStub.getPrompts).to.have.been.calledWith(SUB_WORKSPACE_ID, {
         model: 'perplexity',
         platform: undefined,
-        tags: ['type:branded', 'category:Brand'],
+        tags: ['type__branded', 'category__Brand'],
         projectIds: ['proj-a', 'proj-b'],
       });
     });
@@ -654,11 +654,11 @@ describe('ElementsController', () => {
     });
 
     it('trims blank CSV entries', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?tag=type:branded,%20,category:Brand') });
+      const ctx = fakeContext({ url: promptsUrl('?tag=type__branded,%20,category__Brand') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
-      expect(params.tags).to.deep.equal(['type:branded', 'category:Brand']);
+      expect(params.tags).to.deep.equal(['type__branded', 'category__Brand']);
     });
 
     // ── sub-workspace validation ──
