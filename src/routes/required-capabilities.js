@@ -253,6 +253,8 @@ const routeRequiredCapabilities = {
   'PUT /configurations/latest/queues': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/jobs/:jobType': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/handlers/:handlerType': CAP_CONFIGURATION_WRITE,
+  /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
+  'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
 
   // Organizations
