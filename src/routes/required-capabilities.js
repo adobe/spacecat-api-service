@@ -173,9 +173,6 @@ export const INTERNAL_ROUTES = [
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
 
-  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
-  'GET /v2/regions',
-
   // Monitoring - DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
   // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
   // registration). Kept internal because reusing `audit:read` would silently broaden that
@@ -256,6 +253,9 @@ const routeRequiredCapabilities = {
   /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
   'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
+
+  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
+  'GET /v2/regions': 'organization:read',
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
