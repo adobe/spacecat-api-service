@@ -9391,7 +9391,7 @@ describe('Suggestions Controller', () => {
       expect(deleteArgs).to.include.keys('siteId', 'strategyId', 's3', 'log');
     });
 
-    it('falls back to <type>-<date> name when geoExperiment.getName() returns falsy', async () => {
+    it('falls back to the derived opportunity-type name when geoExperiment.getName() returns falsy', async () => {
       // Override GeoExperiment.create to return a mock whose getName() yields ''
       mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => ({
         getId: () => payload.geoExperimentId,
@@ -9426,7 +9426,44 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(createAtomicStrategyStub).to.have.been.calledOnce;
       const args = createAtomicStrategyStub.firstCall.args[0];
-      expect(args.name).to.match(/^headings-\d{4}-\d{2}-\d{2}$/);
+      expect(args.name).to.equal('Headings');
+    });
+
+    it('derives the experiment name from the opportunity type (prerender → friendly label)', async () => {
+      const suggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({ url: 'https://example.com/a', prompts: [{ prompt: 'x', regions: ['US'] }] }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([suggestion]);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves({
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+        getData: sandbox.stub().returns({}),
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.name).to.equal('Recover content visibility');
     });
 
     it('does not invoke atomic-strategy helper when Prefer: respond-async is absent (sync path)', async () => {

@@ -79,6 +79,16 @@ const FEEDBACK_STATE_TRANSITIONS = [
 // and is backed by idx_feedback_event_suggestion (suggestion_id, event_time).
 const FEEDBACK_REVIEW_READ_LIMIT = 100;
 
+// Contextual experiment names by opportunity type to be visible on Oppty Workspace Strategy UI
+const EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE = {
+  prerender: 'Recover content visibility',
+  toc: 'Add table of contents',
+  summarization: 'Add LLM-Friendly Summaries',
+};
+
+const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE[opportunityType]
+  || `${opportunityType.charAt(0).toUpperCase()}${opportunityType.slice(1).replace(/-/g, ' ')}`;
+
 async function isSitePlgTier(site, log) {
   try {
     const enrollments = await site.getSiteEnrollments();
@@ -2110,13 +2120,14 @@ function SuggestionsController(ctx, sqs, env) {
           ];
         }
 
+        const experimentName = context.data?.name || getExperimentName(opportunity.getType());
+
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
           siteId,
           opportunityId,
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          name: context.data?.name
-            || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
+          name: experimentName,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           phase: GeoExperimentModel.PHASES.INITIATED,
           suggestionIds: validSuggestionIds,
@@ -2140,7 +2151,7 @@ function SuggestionsController(ctx, sqs, env) {
           geoExperimentId,
           opportunityId,
           opportunityType: opportunity.getType(),
-          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          name: geoExperiment.getName?.() || experimentName,
           profile,
           s3: context.s3,
           log: context.log,
@@ -2169,7 +2180,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         }
 
-        // marking suggestions covered by domain/pattern so that they get hidden on UI
+        // Mark suggestions covered by domain/pattern so they get hidden on the UI
         if (hasPatternDeploy) {
           const tokowakaClient = TokowakaClient.createFrom(context);
           for (const ps of patternSuggestions) {
