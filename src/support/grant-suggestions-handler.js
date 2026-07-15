@@ -143,6 +143,19 @@ const OPPORTUNITY_STRATEGIES = {
       return idA.localeCompare(idB);
     },
   },
+  // Decorative-image suggestions (data.recommendations[].isDecorative) are excluded
+  // from grant selection entirely, since they need no alt text fix and shouldn't
+  // consume one of the customer's limited PLG token slots. Remaining suggestions
+  // fall back to the default sort (rank ascending, then id ascending).
+  'alt-text': {
+    groupFn: (suggestions) => suggestions
+      .filter((s) => {
+        const data = typeof s?.getData === 'function' ? s.getData() : s?.data;
+        const recommendations = data?.recommendations ?? [];
+        return !recommendations.some((r) => r?.isDecorative === true);
+      })
+      .map((s) => createGroup([s])),
+  },
 };
 
 /**
