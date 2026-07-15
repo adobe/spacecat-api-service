@@ -233,9 +233,13 @@ export async function handleCreatePromptsSubworkspace(
 }
 
 /**
- * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — replace. Resolves the
- * slice's project from the live listing, then runs the shared DELETE-then-CREATE
- * (we never CREATE after a failed DELETE — that produced duplicate prompts).
+ * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — in-place edit.
+ * Resolves the slice's project from the live listing, then edits the prompt IN
+ * PLACE exactly like the flat-mode twin (see handleUpdatePrompt's contract):
+ * `rename` first (the one op that can refuse — upstream 404 → promptNotFound,
+ * 409 text collision → thrown for the controller's `conflict` mapping), then
+ * the replace-mode batch tag write. The prompt id is preserved end to end and
+ * echoed unchanged in the response; nothing is deleted on this path.
  */
 export async function handleUpdatePromptSubworkspace(
   transport,
@@ -274,15 +278,16 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
-  // Recompute the type tag from the NEW text BEFORE the delete (see the flat-mode
-  // twin): the unified layer must not run between delete and create.
+  // Recompute the type tag from the NEW text BEFORE any upstream write (see
+  // the flat-mode twin): a classification failure aborts cleanly with the
+  // prompt completely untouched.
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
   const typed = await injectComputedType(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
   });
 
   try {
-    await transport.deletePromptsByIds(workspaceId, projectId, [semrushPromptId]);
+    await transport.renamePrompt(workspaceId, projectId, semrushPromptId, nextText);
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -293,30 +298,19 @@ export async function handleUpdatePromptSubworkspace(
         },
       };
     }
-    log?.error?.('handleUpdatePromptSubworkspace: deletePromptsByIds failed; aborting before create to avoid duplicate', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
-    });
+    // A 409 (the new text collides with a sibling prompt's) and every other
+    // upstream error propagate to the controller's mapError; nothing has
+    // mutated upstream — the tag write below has not run.
     throw e;
   }
 
-  let newSemrushPromptId;
-  try {
-    newSemrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
-  } catch (e) {
-    // The DELETE above already succeeded, so the old prompt is gone upstream —
-    // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
-    // create) is a genuine data-loss event, not a retryable no-op. Log it
-    // distinctly from the pre-delete failure above so on-call can tell "nothing
-    // happened" apart from "the prompt is gone and must be recreated manually".
-    log?.error?.('handleUpdatePromptSubworkspace: createOnePrompt failed AFTER a successful delete; the prompt is now lost upstream and must be recreated manually', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
-    });
-    throw e;
-  }
+  // Full replace with the injector's output: the caller's tagIds minus any
+  // caller-supplied type value, plus the server-computed one. An unknown
+  // prompt id would be skipped silently (204) — the rename above has already
+  // established existence.
+  await transport.updatePromptTagsByIds(workspaceId, projectId, [
+    { id: semrushPromptId, references: typed.tagIds, replace: true },
+  ]);
 
   invalidateTagCacheForProject(workspaceId, projectId);
 
@@ -325,10 +319,10 @@ export async function handleUpdatePromptSubworkspace(
   return {
     status: 200,
     body: {
-      semrushPromptId: newSemrushPromptId,
+      semrushPromptId,
       geoTargetId,
       languageCode,
-      text: typed.text,
+      text: nextText,
       tagIds: typed.tagIds,
     },
   };

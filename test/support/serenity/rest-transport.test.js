@@ -471,6 +471,50 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('renamePrompt', () => {
+    it('POSTs /v2/.../aio/prompts/{prompt_id}/rename with { new_name } and returns the id-stable result', async () => {
+      fetchStub.resolves(fetchOk({ id: 'p1', name: 'Next text', is_updated: true }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.renamePrompt(WORKSPACE_ID, PROJECT_ID, 'p1', 'Next text');
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('POST');
+      expect(call.url).to.match(/\/aio\/prompts\/p1\/rename$/);
+      expect(JSON.parse(call.body)).to.deep.equal({ new_name: 'Next text' });
+      expect(result).to.deep.equal({ id: 'p1', name: 'Next text', is_updated: true });
+    });
+
+    it('surfaces the upstream 409 (text collision) as a SerenityTransportError(409)', async () => {
+      fetchStub.resolves(fetchFail(409, { message: 'conflict' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.renamePrompt(WORKSPACE_ID, PROJECT_ID, 'p1', 'A sibling\'s text'))
+        .to.be.rejected.then((err) => {
+          expect(err).to.be.instanceOf(SerenityTransportError);
+          expect(err.status).to.equal(409);
+        });
+    });
+  });
+
+  describe('updatePromptTagsByIds', () => {
+    it('PUTs /v2/.../aio/prompts/tags with { items } (id + references + replace)', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.updatePromptTagsByIds(WORKSPACE_ID, PROJECT_ID, [
+        { id: 'p1', references: ['tag-1', 'tag-2'], replace: true },
+      ]);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('PUT');
+      expect(call.url).to.match(/\/aio\/prompts\/tags$/);
+      expect(JSON.parse(call.body)).to.deep.equal({
+        items: [{ id: 'p1', references: ['tag-1', 'tag-2'], replace: true }],
+      });
+    });
+  });
+
   describe('brand URLs', () => {
     const BENCHMARK_ID = 'bench-9';
 

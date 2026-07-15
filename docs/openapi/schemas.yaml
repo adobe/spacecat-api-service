@@ -10976,7 +10976,7 @@ SerenityPrompt:
   properties:
     semrushPromptId:
       type: string
-      description: Upstream prompt id. Changes whenever the prompt is re-created (e.g. on PATCH).
+      description: Upstream prompt id. Stable across edits — PATCH updates the prompt in place and echoes the same id.
     geoTargetId:
       type: integer
       minimum: 1
@@ -11133,13 +11133,13 @@ SerenityCreatePromptsResponse:
 SerenityUpdatePromptRequest:
   type: object
   description: |
-    Replace the prompt's text and tags. Carries the owning slice in
+    Edit the prompt's text and tags in place. Carries the owning slice in
     `geoTargetId` + `languageCode` so the server can resolve the upstream
     project without scanning. `geoTargetId`, `languageCode`, and `text` are
-    always required — the upstream provider's API has no in-place update or
-    GET-by-id, so the server runs DELETE-old + POST-new and treats the body
-    as the full next state. `tagIds` (non-empty) is required; tags are addressed
-    by upstream id and never by name, so a `tags` key is rejected with 400.
+    always required — the upstream provider's API has no GET-by-id, so the
+    body is treated as the full next state. `tagIds` (non-empty) is required;
+    tags are addressed by upstream id and never by name, so a `tags` key is
+    rejected with 400.
   required: [geoTargetId, languageCode, text, tagIds]
   properties:
     geoTargetId:
@@ -11153,7 +11153,7 @@ SerenityUpdatePromptRequest:
       type: array
       items: { type: string }
       minItems: 1
-      description: Upstream tag ids to attach to the replacement prompt.
+      description: Upstream tag ids the prompt carries after the edit (full replacement set).
 
 SerenityBulkDeletePromptsRequest:
   type: object

@@ -688,6 +688,93 @@ export default function serenityTests(
       expect(list.status).to.equal(200);
       expect(list.body.items.filter((p) => p.text === text)).to.have.lengthOf(1);
     });
+
+    // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the
+    // upstream rename + batch tag write, so the id survives the edit — the
+    // response echoes it unchanged, the listing carries the new text under the
+    // SAME id, and the prompt count is unchanged (no duplicate was minted).
+    it('PATCH /serenity/prompts/:id edits the text in place — the id survives the edit', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Footwear');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{
+          text: 'What are the best running shoes?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(created.status).to.equal(200);
+      const promptId = created.body.created[0].semrushPromptId;
+
+      const patched = await getHttpClient().admin.patch(`${base}/prompts/${promptId}`, {
+        text: 'What are the best trail running shoes?',
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(patched.status).to.equal(200);
+      expect(patched.body.semrushPromptId).to.equal(promptId);
+      expect(patched.body.text).to.equal('What are the best trail running shoes?');
+
+      const list = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(list.status).to.equal(200);
+      const edited = list.body.items.find((p) => p.semrushPromptId === promptId);
+      expect(edited, 'the edited prompt lists under its ORIGINAL id').to.exist;
+      expect(edited.text).to.equal('What are the best trail running shoes?');
+      // No duplicate was minted: the old text is gone from the slice.
+      expect(list.body.items.filter((p) => /best (trail )?running shoes/.test(p.text)))
+        .to.have.lengthOf(1);
+    });
+
+    // Gate G2: a rename onto a SIBLING prompt's exact text is a 409 conflict
+    // with nothing mutated upstream — both prompts keep their text and ids.
+    it('PATCH /serenity/prompts/:id 409s when the new text collides with a sibling prompt', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [
+          {
+            text: 'Which DSLR is best for beginners?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+          },
+          {
+            text: 'Which mirrorless camera is best?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+          },
+        ],
+      });
+      expect(created.status).to.equal(200);
+      expect(created.body.created).to.have.lengthOf(2);
+      const [first, second] = created.body.created;
+
+      const res = await getHttpClient().admin.patch(`${base}/prompts/${second.semrushPromptId}`, {
+        text: 'Which DSLR is best for beginners?', // the FIRST prompt's exact text
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(res.status).to.equal(409);
+      expect(res.body.error).to.equal('conflict');
+
+      // Nothing mutated: both prompts still list with their original text + id.
+      const list = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      const byId = new Map(list.body.items.map((p) => [p.semrushPromptId, p.text]));
+      expect(byId.get(first.semrushPromptId)).to.equal('Which DSLR is best for beginners?');
+      expect(byId.get(second.semrushPromptId)).to.equal('Which mirrorless camera is best?');
+    });
+
+    it('PATCH /serenity/prompts/:id 404s promptNotFound for an unknown prompt id', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Ghosts');
+      const res = await getHttpClient().admin.patch(
+        `${base}/prompts/00000000-0000-4000-8000-00000000dead`,
+        {
+          text: 'x', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        },
+      );
+      expect(res.status).to.equal(404);
+      expect(res.body.error).to.equal('promptNotFound');
+    });
   });
 
   // Dynamic-allocation kill-switch ON — drives the JIT top-up FRONTING end-to-end against the live
