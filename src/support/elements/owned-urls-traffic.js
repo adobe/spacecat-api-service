@@ -21,8 +21,6 @@
  * there is no JS/SQL normalization drift.
  */
 
-/* c8 ignore start -- LLMO-6086 POC endpoint; unit tests intentionally deferred */
-
 // The referral source tables the RPC knows about. An unrecognized value makes the
 // RPC RAISE (→ caught below → silent empty), so we drop unknown values and let the
 // RPC apply its documented default ('optel') instead.
@@ -125,4 +123,3 @@ export function mergeOwnedUrlsTraffic(urls, trafficMap) {
     return t ? { ...u, ...t } : u;
   });
 }
-/* c8 ignore stop */
