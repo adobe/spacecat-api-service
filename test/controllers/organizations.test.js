@@ -1332,6 +1332,114 @@ describe('Organizations Controller', () => {
       expect(result.status).to.equal(403);
       expect(error).to.have.property('message', 'Only users belonging to the organization can view its projects');
     });
+
+    function fakeFacsPostgrest(rows) {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        is: () => builder,
+        order: () => builder,
+        range: () => builder,
+        then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+      };
+      return { from: () => builder };
+    }
+
+    it('filters projects to those with a ReBAC-viewable site when facs flag is set', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      mockDataAccess.Site.allByOrganizationId.resolves(sites);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([
+          { resource_id: 'site1', granted_capabilities: ['aso/can_view'] },
+        ]),
+      };
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Only Project 1 survives — it owns site1 (viewable); Project 2 owns only
+      // site3, which the caller cannot view.
+      expect(response).to.be.an('array').with.lengthOf(1);
+      expect(response[0]).to.have.property('id', '550e8400-e29b-41d4-a716-446655440000');
+    });
+
+    it('returns 503 when the facs flag is set but PostgREST is unavailable', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      // No context.dataAccess.services → postgrest guard trips.
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+
+      expect(result.status).to.equal(503);
+    });
+
+    it('returns an empty list when the caller can view none of the org\'s sites', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      mockDataAccess.Site.allByOrganizationId.resolves(sites);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([]),
+      };
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      // Zero viewable sites must fail closed to [] — never the full project list.
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('skips the project filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      // LLMO ReBAC-scopes `brand`, not `site`; the filter must not engage. No
+      // postgrestClient — if it wrongly engaged this would 503.
+      context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('skips the project filter when the JWT carries an org-wide can_view grant', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.attributes.authInfo.withProfile({
+        email: 'test@example.com',
+        is_admin: true,
+        facs_permissions: ['aso/can_view'],
+      });
+      // No postgrestClient — the org-wide grant must bypass the state-layer query.
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array').with.lengthOf(2);
+    });
   });
 
   describe('getSitesByProjectIdAndOrganizationId', () => {

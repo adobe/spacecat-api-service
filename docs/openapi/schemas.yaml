@@ -11559,12 +11559,12 @@ SerenityFilterDimensionItem:
   description: |
     A single id/label option for a Serenity Elements filter dropdown. `id` is
     the original, unmodified tag value returned by Semrush (including its
-    `prefix:` and any `Parent__Child` encoding, e.g. `topic:Furniture__Sofas`).
-    `parent_id`/`parent_label` are present only when the source tag encoded a
-    "Parent__Child" hierarchy; `parent_id` is the same `prefix:` reconstructed
-    over just the parent segment (e.g. for
-    `category:Living Room Furniture Retail__Living Room Furniture and Sofas`,
-    `parent_id` is `category:Living Room Furniture Retail`).
+    `prefix__` and any further `parent__child` encoding, e.g.
+    `topic__Furniture__Sofas`). `parent_id`/`parent_label` are present only
+    when the source tag encoded a "parent__child" hierarchy; `parent_id` is
+    the same `prefix__` reconstructed over just the parent segment (e.g. for
+    `category__Living Room Furniture Retail__Living Room Furniture and Sofas`,
+    `parent_id` is `category__Living Room Furniture Retail`).
   required: [id, label]
   properties:
     id: { type: string }
@@ -11581,10 +11581,12 @@ SerenityUrlInspectorFilterDimensions:
     `brands`, `regions`, `topics`, `categories`, `page_intents`, `origins`, and
     `tags` are always present (empty array when Semrush has no data). Any
     additional Semrush tag prefix not already covered by the fixed dimensions
-    (e.g. a future `type:branded` tag) surfaces as an extra dynamic array
+    (e.g. a future `type__branded` tag) surfaces as an extra dynamic array
     property keyed by that prefix — this is why the schema allows
     `additionalProperties`. Prefixes that would collide with one of the fixed
-    keys above are routed into `tags` instead of clobbering that key.
+    keys above are routed into `tags` instead of clobbering that key. Bare
+    prefix declarations with no value (e.g. a lone `category` row) are ignored
+    entirely and never appear in any dimension.
   required: [brands, regions, topics, categories, page_intents, origins, tags]
   properties:
     brands:
@@ -11617,25 +11619,25 @@ SerenityUrlInspectorFilterDimensions:
           languageCode: { type: [string, 'null'] }
     topics:
       type: array
-      description: Distinct `topic:`-prefixed tags.
+      description: Distinct `topic__`-prefixed tags.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     categories:
       type: array
-      description: Distinct `category:`-prefixed tags.
+      description: Distinct `category__`-prefixed tags.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     page_intents:
       type: array
-      description: Distinct `intent:`-prefixed tags. `id` is the original `intent:`-prefixed tag value.
+      description: Distinct `intent__`-prefixed tags. `id` is the original `intent__`-prefixed tag value.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     origins:
       type: array
-      description: Distinct `source:`-prefixed tags. `id` is the original `source:`-prefixed tag value.
+      description: Distinct `source__`-prefixed tags. `id` is the original `source__`-prefixed tag value.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     tags:
       type: array
       description: |
-        Prefix-less tags, plus any prefixed tag whose prefix collides with one
-        of this schema's other properties.
+        Any prefixed tag whose prefix collides with one of this schema's other
+        properties. Bare prefix declarations with no value are ignored.
       items: { $ref: '#/SerenityFilterDimensionItem' }
   additionalProperties:
     type: array
@@ -11665,14 +11667,24 @@ ReferralTrafficHasData:
       example: true
     availableSources:
       type: array
-      description: Available sources in priority order; items are `optel` or `cdn` only (optel first)
+      description: >-
+        Sources that have data for the site, in resolution-priority order
+        (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`). Callers use the
+        first entry as the active source. The ARRAY order — not the `enum`
+        order, which is an unordered set — is the priority contract.
       items:
         type: string
-        enum: [optel, cdn]
-      example: ['optel', 'cdn']
+        enum: [adobe_analytics, cja, ga4, cdn, optel]
+      example: ['adobe_analytics', 'cdn']
+    activeSource:
+      type: [string, 'null']
+      enum: [adobe_analytics, cja, ga4, cdn, optel, null]
+      description: The highest-priority available source (`availableSources[0]`) or null when none.
+      example: adobe_analytics
   required:
     - hasData
     - availableSources
+    - activeSource
 
 ReferralTrafficFilterDimensions:
   type: object
@@ -12565,4 +12577,3 @@ TicketCreateRequest:
       items:
         $ref: '#/TicketAttachment'
       maxItems: 10
-
