@@ -249,6 +249,58 @@ describe('Suggestions Controller - backoffice reviews', () => {
     expect(response.status).to.equal(413);
   });
 
+  it('captures guidance_markdown (issue context) alongside the generated patch', async () => {
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'free' }, error: null }) },
+    });
+    context.data.guidanceMarkdown = '# Slow hero image\n\nLCP element is a 1.2 MB PNG.';
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(201);
+    const inserted = context.dataAccess.services.postgrestClient.capturedInserts[0];
+    expect(inserted.guidance_markdown).to.equal('# Slow hero image\n\nLCP element is a 1.2 MB PNG.');
+    // the generated patch is stored too (the LA maps the review to it)
+    expect(inserted.previous_fix).to.deep.equal({ patch: 'before' });
+  });
+
+  it('rejects oversize guidance_markdown with 413 (64 KB cap)', async () => {
+    const context = makeContext();
+    context.data.guidanceMarkdown = 'x'.repeat(65537);
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(413);
+  });
+
+  it('rejects a non-string guidance_markdown with 400', async () => {
+    const context = makeContext();
+    context.data.guidanceMarkdown = { not: 'a string' };
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('stores feedback_subject_id (per-issue grouping key) on the row', async () => {
+    const context = makeContext({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'free' }, error: null }) },
+    });
+    context.data.feedbackSubjectId = 'issue-42';
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(201);
+    const inserted = context.dataAccess.services.postgrestClient.capturedInserts[0];
+    expect(inserted.feedback_subject_id).to.equal('issue-42');
+  });
+
+  it('rejects a non-string feedback_subject_id with 400', async () => {
+    const context = makeContext();
+    context.data.feedbackSubjectId = { not: 'a string' };
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('rejects an over-long feedback_subject_id with 400', async () => {
+    const context = makeContext();
+    context.data.feedbackSubjectId = 'x'.repeat(201);
+    const response = await controller.createBackofficeReview(context);
+    expect(response.status).to.equal(400);
+  });
+
   it('returns 404 when the site is not found', async () => {
     mockDataAccess.Site.findById.resolves(null);
     const response = await controller.createBackofficeReview(makeContext());
