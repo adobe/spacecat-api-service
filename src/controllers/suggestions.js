@@ -2046,7 +2046,6 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (isAsyncExperimentRequested) {
       context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
-      let urls;
       const geoExperimentId = crypto.randomUUID();
 
       context.log.info('[edge-geo-exp] Initiating experiment', {
@@ -2079,8 +2078,6 @@ function SuggestionsController(ctx, sqs, env) {
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
           ...pathSuggestions.map(({ suggestion }) => suggestion),
         ];
-        let experimentSuggestionIds = validSuggestionIds;
-        let measurementSuggestions = [];
         const metadataBase = {};
 
         if (hasPatternDeploy) {
@@ -2091,23 +2088,27 @@ function SuggestionsController(ctx, sqs, env) {
             throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
           }
           const highImpactIdSet = new Set(highImpactIds);
-          measurementSuggestions = allSuggestions.filter((s) => highImpactIdSet.has(s.getId()));
+          const measurementSuggestions = allSuggestions.filter(
+            (s) => highImpactIdSet.has(s.getId()),
+          );
           if (measurementSuggestions.length === 0) {
             context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for pattern deploy`);
             throw new Error('No high-impact suggestions found for the provided IDs');
           }
-          experimentSuggestionIds = [...new Set([
-            ...validSuggestionIds,
-            ...measurementSuggestions.map((s) => s.getId()),
-          ])];
-          urls = [...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean))];
+          // suggestionIds holds only what actually deploys (the pattern[s]); the high-impact
+          // measurement suggestions live in metadata and drive prompt generation only.
+          metadataBase.urls = [
+            ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
           metadataBase.patterns = patternSuggestions.map((ps) => (
             ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
           ));
+          metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
         } else {
-          urls = [...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean))];
+          metadataBase.urls = [
+            ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
         }
-        metadataBase.urls = urls;
 
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
@@ -2118,7 +2119,7 @@ function SuggestionsController(ctx, sqs, env) {
             || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           phase: GeoExperimentModel.PHASES.INITIATED,
-          suggestionIds: experimentSuggestionIds,
+          suggestionIds: validSuggestionIds,
           metadata: buildExperimentMetadata(
             context,
             metadataBase,
@@ -2146,11 +2147,7 @@ function SuggestionsController(ctx, sqs, env) {
         });
         atomicStrategyCreated = true;
 
-        validSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
+        validSuggestionEntities = [...validSuggestions, ...patternSuggestions];
 
         const markResults = await Promise.allSettled(
           validSuggestionEntities.map(async (suggestion) => {

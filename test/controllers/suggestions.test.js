@@ -7502,11 +7502,11 @@ describe('Suggestions Controller', () => {
           SUGGESTION_IDS[0], SUGGESTION_IDS[1],
         ]);
 
-        // Experiment tracks pattern + measurement IDs, the matched patterns, and stores the URL.
+        // suggestionIds holds only the deployed patterns; the measurement suggestion lives in
+        // metadata.highImpactSuggestionIds, alongside the matched patterns and the measured URL.
         const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
-        expect(createArg.suggestionIds).to.have.members([
-          SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2],
-        ]);
+        expect(createArg.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
+        expect(createArg.metadata.highImpactSuggestionIds).to.deep.equal([SUGGESTION_IDS[2]]);
         expect(createArg.metadata.patterns).to.deep.equal(['/*', '/kings/products/*']);
         expect(createArg.metadata.urls).to.deep.equal(['https://example.com/kings/blog-post']);
 
@@ -7638,7 +7638,8 @@ describe('Suggestions Controller', () => {
 
         expect(response.status).to.equal(207);
         const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
-        expect(createArg.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
+        expect(createArg.suggestionIds).to.have.members([SUGGESTION_IDS[0]]);
+        expect(createArg.metadata.highImpactSuggestionIds).to.deep.equal([SUGGESTION_IDS[1]]);
         expect(createArg.metadata.patterns).to.deep.equal(['/kings/*']);
         expect(createArg.metadata.urls).to.deep.equal(['https://example.com/kings/a']);
         // All opportunity suggestions are checked against the segment/path pattern.
@@ -7715,6 +7716,8 @@ describe('Suggestions Controller', () => {
 
         expect(response.status).to.equal(207);
         const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
+        expect(createArg.metadata.highImpactSuggestionIds).to.deep.equal([SUGGESTION_IDS[2]]);
         expect(createArg.metadata.patterns).to.deep.equal(['/blog/*', '/products/*']);
 
         // Each selected segment pattern is checked separately against the full opportunity.
