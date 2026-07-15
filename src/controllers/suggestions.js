@@ -461,7 +461,8 @@ function SuggestionsController(ctx, sqs, env) {
       );
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const filteredEntities = filterByExcludedPaths(grantedEntities, opportunity, site.getConfig?.());
+    const suggestions = filteredEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok(suggestions);
@@ -527,7 +528,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const filteredEntities = filterByExcludedPaths(grantedEntities, opportunity, site.getConfig?.());
+    const suggestions = filteredEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
 
@@ -590,7 +592,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const filteredEntities = filterByExcludedPaths(grantedEntities, opportunity, site.getConfig?.());
+    const suggestions = filteredEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok(suggestions);
@@ -656,7 +659,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const filteredEntities = filterByExcludedPaths(grantedEntities, opportunity, site.getConfig?.());
+    const suggestions = filteredEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok({
@@ -1186,6 +1190,21 @@ function SuggestionsController(ctx, sqs, env) {
       ? suggestionData?.contentFix?.page_patch?.original_page_url
       : null)
     || opp?.getData()?.page;
+
+  const filterByExcludedPaths = (suggestions, opportunity, siteConfig) => {
+    const excludedPrefixes = siteConfig?.getHandlerConfig?.(opportunity?.getType?.())?.excludedPathPrefixes;
+    if (!excludedPrefixes || excludedPrefixes.length === 0) return suggestions;
+    return suggestions.filter((suggestion) => {
+      const url = getSuggestionUrl(suggestion.getData(), opportunity);
+      if (!url) return true;
+      try {
+        const { pathname } = new URL(url);
+        return !excludedPrefixes.some((prefix) => pathname.startsWith(prefix));
+      } catch {
+        return true;
+      }
+    });
+  };
 
   /**
    * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
