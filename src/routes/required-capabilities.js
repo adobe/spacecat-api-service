@@ -254,7 +254,8 @@ const routeRequiredCapabilities = {
   'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
 
-  // Regions lookup - global table, no org scope; readable by any consumer (session-token or S2S) holding organization:read
+  // Regions lookup - global table, no org scope; readable by any consumer
+  // (session-token or S2S) holding organization:read
   'GET /v2/regions': 'organization:read',
 
   // Organizations
