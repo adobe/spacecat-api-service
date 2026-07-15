@@ -41,11 +41,11 @@ const RAW_MARKETS = {
 const RAW_TOPICS = {
   blocks: {
     value: [
-      { value: 'topic:SEO' },
-      { value: 'category:Firefly' },
-      { value: 'intent:Informational' },
-      { value: 'source:organic' },
-      { value: 'type:branded' },
+      { value: 'topic__SEO' },
+      { value: 'category__Firefly' },
+      { value: 'intent__Informational' },
+      { value: 'source__organic' },
+      { value: 'type__branded' },
       { value: 'plain-tag' },
     ],
   },
@@ -93,14 +93,14 @@ describe('createElementsService', () => {
       ]);
     });
 
-    it('groups unknown prefix:value tags under their own prefix key', async () => {
+    it('groups unknown prefix__value tags under their own prefix key', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.type).to.deep.equal([{ id: 'type:branded', label: 'branded' }]);
+      expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
     });
 
-    it('collects plain, prefix-less tags into the generic tags key', async () => {
+    it('ignores plain, separator-less tags (bare prefix declarations)', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.tags).to.deep.equal([{ id: 'plain-tag', label: 'plain-tag' }]);
+      expect(result.tags).to.deep.equal([]);
     });
 
     it('brands contains filter dimensions for each brand', async () => {
@@ -115,24 +115,24 @@ describe('createElementsService', () => {
       expect(result.regions[0].label).to.equal('US-en');
     });
 
-    it('topics contains only topic:-prefixed entries', async () => {
+    it('topics contains only topic__-prefixed entries', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.topics).to.deep.equal([{ id: 'topic:SEO', label: 'SEO' }]);
+      expect(result.topics).to.deep.equal([{ id: 'topic__SEO', label: 'SEO' }]);
     });
 
-    it('categories contains only category:-prefixed entries', async () => {
+    it('categories contains only category__-prefixed entries', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.categories).to.deep.equal([{ id: 'category:Firefly', label: 'Firefly' }]);
+      expect(result.categories).to.deep.equal([{ id: 'category__Firefly', label: 'Firefly' }]);
     });
 
-    it('page_intents contains only intent:-prefixed entries with the original tag as id', async () => {
+    it('page_intents contains only intent__-prefixed entries with the original tag as id', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.page_intents).to.deep.equal([{ id: 'intent:Informational', label: 'Informational' }]);
+      expect(result.page_intents).to.deep.equal([{ id: 'intent__Informational', label: 'Informational' }]);
     });
 
-    it('origins contains only source:-prefixed entries', async () => {
+    it('origins contains only source__-prefixed entries', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.origins).to.deep.equal([{ id: 'source:organic', label: 'organic' }]);
+      expect(result.origins).to.deep.equal([{ id: 'source__organic', label: 'organic' }]);
     });
 
     it('resolves spacecat_brand_id on brands when spacecatBrands are provided', async () => {
@@ -160,24 +160,22 @@ describe('createElementsService', () => {
       transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.TOPICS, sinon.match.any).resolves({
         blocks: {
           value: [
-            { value: 'constructor:evil' },
-            { value: '__proto__:evil' },
-            { value: 'toString:harmless' },
+            { value: 'constructor__evil' },
+            { value: 'toString__harmless' },
           ],
         },
       });
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      // constructor/__proto__ are explicitly reserved (see getUrlInspectorFilterDimensions),
-      // so they're routed into the generic `tags` array rather than becoming their own key.
+      // constructor is explicitly reserved (see getUrlInspectorFilterDimensions),
+      // so it's routed into the generic `tags` array rather than becoming its own key.
       expect(Object.getPrototypeOf(result)).to.equal(Object.prototype);
       expect(Object.prototype.hasOwnProperty.call(result, 'constructor')).to.equal(false);
       expect(result.tags).to.deep.equal([
-        { id: 'constructor:evil', label: 'evil' },
-        { id: '__proto__:evil', label: 'evil' },
+        { id: 'constructor__evil', label: 'evil' },
       ]);
       // toString isn't in the reserved list, so it becomes its own dynamic group —
       // this is safe (a plain data property shadowing the inherited one), just unusual.
-      expect(result.toString).to.deep.equal([{ id: 'toString:harmless', label: 'harmless' }]);
+      expect(result.toString).to.deep.equal([{ id: 'toString__harmless', label: 'harmless' }]);
     });
   });
 
@@ -203,7 +201,7 @@ describe('createElementsService', () => {
     });
 
     it('fetches the PROMPTS element and returns { count, prompts }', async () => {
-      const result = await service.getPrompts('ws-1', { tags: ['type:branded'], projectIds: ['proj-a'] });
+      const result = await service.getPrompts('ws-1', { tags: ['type__branded'], projectIds: ['proj-a'] });
       expect(transport.fetchElement).to.have.been.calledWith('ws-1', ELEMENT_IDS.PROMPTS, sinon.match.object);
       expect(result.count).to.equal(1);
       expect(result.prompts[0]).to.deep.include({ prompt_topic: 'AI Instagram Influencers', volume: 2119 });

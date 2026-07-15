@@ -24,20 +24,15 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import { Response } from '@adobe/fetch';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
-import {
-  filterSitesForProductCode,
-  getEntitledProductCodes,
-  CUSTOMER_VISIBLE_TIERS,
-} from '../support/utils.js';
-import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
-import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
-import { isFacsRebacResource } from '../routes/facs-capabilities.js';
+import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS, getEntitledProductCodes } from '../support/utils.js';
+import { resolveViewableSiteIds } from '../support/facs-site-visibility.js';
 import {
   ensureOrgEntitlement,
   resolveProductCode,
@@ -396,25 +391,14 @@ function OrganizationsController(ctx, env) {
     // scope). Skip the filter entirely in this branch. See
     // mysticat-architecture/platform/decisions/multi-product-login-phase1.md.
     let visibleOwnSites = filteredSites;
-    const facs = context.attributes?.facs;
-    const hasFACSCapability = facs?.enabled
-      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
-    if (!isCrossProduct
-      && facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
-      const unavailable = requirePostgrestForFacsMappings(context);
-      if (unavailable) {
-        return unavailable;
+    if (!isCrossProduct) {
+      const viewable = await resolveViewableSiteIds(context, organization);
+      if (viewable instanceof Response) {
+        return viewable;
       }
-      const viewable = await listViewableResourceIds(
-        context.dataAccess.services.postgrestClient,
-        {
-          imsOrgId: organization.getImsOrgId(),
-          product: facs.product,
-          resourceType: 'site',
-          subjectId: facs.subjectId,
-        },
-      );
-      visibleOwnSites = filteredSites.filter((site) => viewable.has(site.getId()));
+      if (viewable) {
+        visibleOwnSites = filteredSites.filter((site) => viewable.has(site.getId()));
+      }
     }
 
     return ok([...visibleOwnSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
@@ -542,6 +526,31 @@ function OrganizationsController(ctx, env) {
     }
 
     const projects = await Project.allByOrganizationId(organizationId);
+
+    // FACS ReBAC filter (mirrors getSitesForOrganization): when the caller is
+    // FACS-enrolled and resource-scoped (no org-wide `<product>/can_view`),
+    // restrict projects to those containing at least one site the caller may
+    // view. Only applies where `site` is a ReBAC resource for the product (ASO,
+    // not LLMO which scopes `brand`) — otherwise the state layer holds no
+    // per-site grants and filtering would wrongly hide everything.
+    const viewable = await resolveViewableSiteIds(context, organization);
+    if (viewable instanceof Response) {
+      return viewable;
+    }
+    if (viewable) {
+      const orgSites = await Site.allByOrganizationId(organizationId);
+      const viewableProjectIds = new Set(
+        orgSites
+          .filter((site) => viewable.has(site.getId()))
+          .map((site) => site.getProjectId())
+          .filter(Boolean),
+      );
+      return ok(
+        projects
+          .filter((project) => viewableProjectIds.has(project.getId()))
+          .map((project) => ProjectDto.toJSON(project)),
+      );
+    }
 
     return ok(projects.map((project) => ProjectDto.toJSON(project)));
   };
