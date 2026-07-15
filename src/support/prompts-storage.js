@@ -692,8 +692,24 @@ export async function getPromptById({
 }
 
 /**
+ * Canonical prompt-identity key: `lower(text):sorted(regions):source`, matching
+ * the store's partial unique index (brand_id, lower(text), sorted_regions, source)
+ * (SITES-47870). Both the incoming-match map and the pre-insert dedup use this so
+ * their normalization can't drift apart. `source` defaults to 'config' to mirror
+ * the column default for prompts that omit it.
+ *
+ * @param {{ text?: string, regions?: string[], source?: string }} p
+ * @returns {string}
+ */
+function buildPromptKey({ text, regions, source }) {
+  const t = String(text || '').trim().toLowerCase();
+  const r = (regions || []).map((x) => String(x).toLowerCase()).sort().join(',');
+  return `${t}:${r}:${source || 'config'}`;
+}
+
+/**
  * Upserts prompts into the prompts table.
- * Match by id (prompt_id) or by (text, regions). Regions normalized (lowercase, sorted).
+ * Match by id (prompt_id) or by (text, regions, source). Regions normalized (lowercase, sorted).
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
@@ -764,11 +780,11 @@ export async function upsertPrompts({
   // Match/dedup here must therefore key on source too, or an incoming prompt
   // would be matched to an existing same-text row of a DIFFERENT source and
   // update it (moving counts between columns) instead of inserting its own row.
-  const getKey = (p) => {
-    const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    const src = p.source || 'config';
-    return `${String(p.prompt || p.text || '').trim().toLowerCase()}:${norm.join(',')}:${src}`;
-  };
+  const getKey = (p) => buildPromptKey({
+    text: p.prompt || p.text,
+    regions: p.regions,
+    source: p.source,
+  });
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
   const existingByKey = new Map(
@@ -821,7 +837,11 @@ export async function upsertPrompts({
     // source. Overwriting it would silently move an existing row between report
     // columns (the exact corruption the source-aware key prevents) and could
     // raise an unmapped 23505 on the UPDATE. Preserve the stored source; source
-    // is only set at insert time. (Existing rows are NOT NULL source.)
+    // is only set at insert time. The `match.source ?? source` below is a
+    // defensive fallback only: the companion migration (#793) makes prompts.source
+    // NOT NULL, so match.source is always present for a real DB row — the `??`
+    // just keeps an in-memory/test row without a source from becoming `undefined`;
+    // it is NOT a backfill path.
     if (match && match.status !== 'active') {
       if (match.status === 'deleted') {
         const reactivated = {
@@ -858,11 +878,7 @@ export async function upsertPrompts({
   // customer data. Dropped entries are removed from processed so counts stay
   // honest. Guard is > 1: a single-row batch cannot collide with itself.
   if (toInsert.length > 1) {
-    const dedupKey = (row) => {
-      const t = String(row.text || '').trim().toLowerCase();
-      const r = [...(row.regions || [])].map((x) => String(x).toLowerCase()).sort().join(',');
-      return `${t}:${r}:${row.source}`;
-    };
+    const dedupKey = (row) => buildPromptKey(row);
     const sortedForDedup = [...toInsert].sort((a, b) => {
       const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
       return tCmp !== 0 ? tCmp : String(a.prompt_id).localeCompare(String(b.prompt_id));

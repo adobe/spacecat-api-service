@@ -28,6 +28,8 @@
 /**
  * Pipeline sources — mirror of DRS `TRACKED_PROMPT_SOURCES` keys. A new
  * prompt-generation pipeline registers its source here AND in the DRS module.
+ * @see llmo-data-retrieval-service/src/common/models/prompt_source.py
+ *   (`TRACKED_PROMPT_SOURCES`) — the canonical registry; keep this list in sync.
  * @type {string[]}
  */
 export const TRACKED_PROMPT_SOURCES = [

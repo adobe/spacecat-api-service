@@ -1399,7 +1399,7 @@ describe('prompts-storage', () => {
 
     it('reactivates a deleted prompt matched by prompt_id', async () => {
       const deletedRow = {
-        id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted',
+        id: 'row-uuid', prompt_id: 'del-1', text: 'Deleted text', regions: [], status: 'deleted', source: 'gsc',
       };
       const existingData = { data: [deletedRow], error: null };
       const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
@@ -1432,11 +1432,53 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(0);
       expect(result.skipped).to.equal(0);
       expect(updateStub.callCount).to.equal(1);
+      // Reactivation preserves the stored source (SITES-47870 immutability).
+      expect(updateStub.firstCall.args[0].source).to.equal('gsc');
+    });
+
+    it('reactivating a deleted row by prompt_id keeps the stored source, not the incoming one', async () => {
+      // Deleted row is gsc-sourced; the incoming reactivation carries a DIFFERENT
+      // source. The id-match must NOT move the row to 'semrush'.
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-1b', text: 'Reactivate me', regions: ['us'], status: 'deleted', source: 'gsc',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'del-1b', prompt: 'Reactivate me', regions: ['us'], source: 'semrush',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(updateStub.firstCall.args[0].source).to.equal('gsc');
+      expect(result.prompts[0].source).to.equal('gsc');
     });
 
     it('reactivates a deleted prompt matched by text+regions without inserting', async () => {
       const deletedRow = {
-        id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted',
+        id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted', source: 'gsc',
       };
       const existingData = { data: [deletedRow], error: null };
       const insertSpy = sinon.stub().returns({
@@ -1459,11 +1501,12 @@ describe('prompts-storage', () => {
           return makeChain({});
         },
       };
-      // Incoming prompt has no id but matches the deleted row by text+regions
+      // Incoming prompt has no id but matches the deleted row by text+regions.
+      // source is part of the match key, so it must carry the same source to match.
       const result = await upsertPrompts({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
-        prompts: [{ prompt: 'Same text', regions: ['us'] }],
+        prompts: [{ prompt: 'Same text', regions: ['us'], source: 'gsc' }],
         postgrestClient: client,
       });
       expect(result.updated).to.equal(1);
@@ -1471,6 +1514,7 @@ describe('prompts-storage', () => {
       expect(result.skipped).to.equal(0);
       expect(insertSpy.callCount).to.equal(0);
       expect(updateStub.callCount).to.equal(1);
+      expect(updateStub.firstCall.args[0].source).to.equal('gsc');
     });
 
     it('does not reactivate a pending prompt — keeps it skipped', async () => {

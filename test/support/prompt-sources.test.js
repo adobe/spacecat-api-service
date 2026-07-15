@@ -13,6 +13,7 @@
 import { expect } from 'chai';
 import {
   TRACKED_PROMPT_SOURCES,
+  PERMITTED_LEGACY_SOURCES,
   PERMITTED_PROMPT_SOURCES,
   isPermittedSource,
   assertPermittedSource,
@@ -26,9 +27,11 @@ describe('prompt-sources (SITES-47870 write chokepoint)', () => {
     }
   });
 
-  it("permits the schema default 'config' and legacy/UI sources", () => {
-    for (const source of ['config', 'sheet', 'brand-concierge', 'page-content']) {
+  it('permits every legacy/UI source (config, sheet, drift variants)', () => {
+    expect(PERMITTED_LEGACY_SOURCES).to.include('config');
+    for (const source of PERMITTED_LEGACY_SOURCES) {
       expect(isPermittedSource(source), source).to.equal(true);
+      expect(() => assertPermittedSource(source)).to.not.throw();
     }
   });
 
