@@ -17,7 +17,6 @@ import { resolveElementModel } from '../constants.js';
 // not import controller code (support/elements must never depend on controllers).
 const DEFAULT_WINDOW_DAYS = 28;
 
-/* c8 ignore start -- LLMO-6020 POC endpoint; unit tests intentionally deferred */
 function defaultDateRange() {
   const end = new Date();
   const start = new Date();
@@ -157,4 +156,3 @@ export function transformCitedDomainsResponse(raw, params = {}) {
   const offset = page * pageSize;
   return { domains: domains.slice(offset, offset + pageSize), totalCount };
 }
-/* c8 ignore stop */

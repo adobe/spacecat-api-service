@@ -13,8 +13,6 @@
 import { resolveElementModel } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
-/* c8 ignore start -- LLMO-6086 POC endpoint; unit tests intentionally deferred */
-
 /**
  * Builds the payload for the Stats-per-URL element (9af5ed83, "Stats per URL",
  * `table`). One row per cited URL in the (project, date, model) scope.
@@ -178,4 +176,3 @@ export function transformOwnedUrlsResponse(projectResults = []) {
   urls.sort((a, b) => b.citations - a.citations);
   return urls;
 }
-/* c8 ignore stop */

@@ -56,9 +56,7 @@ export const PLATFORM_TO_ELEMENT_MODEL = Object.freeze({
  * @param {string} [value] - Raw value from the `model` or `platform` query param.
  * @returns {string} A member of {@link ELEMENT_MODELS}.
  */
-/* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
 export function resolveElementModel(value) {
   const mapped = PLATFORM_TO_ELEMENT_MODEL[value] ?? value;
   return ELEMENT_MODELS.includes(mapped) ? mapped : DEFAULT_ELEMENT_MODEL;
 }
-/* c8 ignore stop */

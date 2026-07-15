@@ -25,7 +25,6 @@
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
 function parseIsoWeek(weekStr) {
   const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
   if (!match) {
@@ -113,4 +112,3 @@ export function generateIsoWeekRange(minDate, maxDate) {
 
   return result.sort((a, b) => b.localeCompare(a));
 }
-/* c8 ignore stop */

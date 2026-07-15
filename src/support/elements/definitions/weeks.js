@@ -29,7 +29,6 @@ import { generateIsoWeekRange, getWeekDateRange } from '../week-utils.js';
  *   `CBF_ws_brand` filter, mirroring the Markets element). Resolved from `siteId` by the
  *   controller. Omitted → workspace-wide weeks.
  */
-/* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
 export function buildWeeksPayload({ model, platform, brand } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
   const filters = [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }];
@@ -70,4 +69,3 @@ export function transformWeeksResponse(raw) {
     return { week, startDate, endDate };
   });
 }
-/* c8 ignore stop */
