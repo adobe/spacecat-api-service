@@ -20,6 +20,7 @@ import {
   buildFailoverTestRule,
   buildFragments,
   mergeIntoTree,
+  buildRuleTreePatch,
   managedRuleNames,
   redactApiKey,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
@@ -242,6 +243,100 @@ describe('llmo-akamai-utils', () => {
 
     it('throws when the tree has no top-level rules object', () => {
       expect(() => mergeIntoTree({}, cfg)).to.throw("missing a top-level 'rules' object");
+    });
+  });
+
+  describe('buildRuleTreePatch', () => {
+    let cfg;
+    beforeEach(() => {
+      cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+    });
+
+    const addChildOps = (ops) => ops.filter((o) => o.op === 'add' && o.path.startsWith('/rules/children'));
+    const removeOps = (ops) => ops.filter((o) => o.op === 'remove');
+
+    it('adds the managed wrapper (no remove) and declares the cache variable when none exist', () => {
+      const tree = {
+        rules: { name: 'default', children: [{ name: 'Existing Rule' }], variables: [] },
+      };
+      const ops = buildRuleTreePatch(tree, cfg);
+      expect(removeOps(ops)).to.have.length(0);
+      const add = ops.find((o) => o.op === 'add' && o.path === '/rules/children/0');
+      expect(add).to.exist;
+      expect(add.value.name).to.equal(cfg.ruleNames.parent);
+      const varOp = ops.find((o) => o.path === '/rules/variables/-');
+      expect(varOp.value.name).to.equal(cfg.cacheKeyVariable.name);
+    });
+
+    it('is idempotent for a legacy name with a trailing space (removes it by trimmed name)', () => {
+      const tree = {
+        rules: {
+          name: 'default',
+          children: [{ name: 'Existing' }, { name: 'Optimize at Edge ' }],
+          variables: [{ name: cfg.cacheKeyVariable.name, value: '' }],
+        },
+      };
+      const ops = buildRuleTreePatch(tree, cfg);
+      // The trailing-space rule is at index 1 and must be removed; no variable op (already there).
+      expect(removeOps(ops).map((o) => o.path)).to.deep.equal(['/rules/children/1']);
+      expect(ops.some((o) => o.path.startsWith('/rules/variables'))).to.equal(false);
+      expect(addChildOps(ops)[0].value.name).to.equal(cfg.ruleNames.parent);
+    });
+
+    it('removes multiple managed rules highest-index-first', () => {
+      const tree = {
+        rules: {
+          name: 'default',
+          children: [
+            { name: cfg.ruleNames.routing },
+            { name: 'Keep' },
+            { name: cfg.ruleNames.parent },
+            { name: cfg.ruleNames.failoverTest },
+          ],
+          variables: [{ name: cfg.cacheKeyVariable.name }],
+        },
+      };
+      const ops = buildRuleTreePatch(tree, cfg);
+      expect(removeOps(ops).map((o) => o.path)).to.deep.equal([
+        '/rules/children/3', '/rules/children/2', '/rules/children/0',
+      ]);
+    });
+
+    it('appends via `-` when insertIndex is clamped to the end', () => {
+      const tree = {
+        rules: {
+          name: 'default',
+          children: [{ name: 'A' }, { name: 'B' }],
+          variables: [{ name: cfg.cacheKeyVariable.name }],
+        },
+      };
+      const ops = buildRuleTreePatch(tree, cfg, 99);
+      expect(addChildOps(ops)[0].path).to.equal('/rules/children/-');
+    });
+
+    it('creates the children array when the default rule has none', () => {
+      const ops = buildRuleTreePatch({ rules: { name: 'default', variables: [] } }, cfg);
+      const add = ops.find((o) => o.path === '/rules/children');
+      expect(add.value).to.be.an('array').with.length(1);
+      expect(add.value[0].name).to.equal(cfg.ruleNames.parent);
+    });
+
+    it('creates the variables array when the tree has none', () => {
+      const ops = buildRuleTreePatch({ rules: { name: 'default', children: [] } }, cfg);
+      const varOp = ops.find((o) => o.path === '/rules/variables');
+      expect(varOp.value).to.be.an('array').with.length(1);
+    });
+
+    it('clamps a non-numeric insertIndex to 0', () => {
+      const tree = {
+        rules: { name: 'default', children: [{ name: 'A' }], variables: [{ name: cfg.cacheKeyVariable.name }] },
+      };
+      const ops = buildRuleTreePatch(tree, cfg, 'nope');
+      expect(addChildOps(ops)[0].path).to.equal('/rules/children/0');
+    });
+
+    it('throws when the tree has no top-level rules object', () => {
+      expect(() => buildRuleTreePatch({}, cfg)).to.throw("missing a top-level 'rules' object");
     });
   });
 

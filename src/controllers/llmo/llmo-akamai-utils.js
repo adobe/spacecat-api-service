@@ -366,19 +366,25 @@ export function buildFragments(cfg) {
 // Merge into an existing rule tree (idempotent)
 // ---------------------------------------------------------------------------
 
+// The PMUSER_* variable declaration the managed rules depend on. Shared by mergeIntoTree (PUT path)
+// and buildRuleTreePatch (PATCH path) so both emit an identical declaration.
+function managedCacheKeyVariable(varName) {
+  return {
+    name: varName,
+    value: '',
+    description: 'Edge Optimize cache key (managed by Adobe LLM Optimizer)',
+    hidden: false,
+    sensitive: false,
+  };
+}
+
 // PMUSER_* variables must be declared in the rule tree's `variables` list. Mutates the given
 // variables array in place (the caller owns a freshly-cloned tree), returning it for convenience.
 function ensureVariableDeclared(variables, varName) {
   if (variables.some((v) => v?.name === varName)) {
     return variables;
   }
-  variables.push({
-    name: varName,
-    value: '',
-    description: 'Edge Optimize cache key (managed by Adobe LLM Optimizer)',
-    hidden: false,
-    sensitive: false,
-  });
+  variables.push(managedCacheKeyVariable(varName));
   return variables;
 }
 
@@ -431,6 +437,84 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
  */
 export function managedRuleNames(cfg) {
   return [cfg.ruleNames.parent, cfg.ruleNames.routing, cfg.ruleNames.failoverTest];
+}
+
+/**
+ * Builds a JSON Patch (RFC 6902) that inserts the managed "Optimize at Edge" wrapper rule (and its
+ * PMUSER cache-key variable) into an existing rule tree WITHOUT re-serialising any existing rule or
+ * behaviour.
+ *
+ * Why a patch instead of mergeIntoTree + full-tree PUT: a GET→merge→PUT round-trip re-stores PAPI's
+ * GET-expanded projection of behaviours we never touch (e.g. an origin on "Use Platform Settings"
+ * comes back with expanded SSL/TLS fields), which validateRules then rejects as incompatible. A
+ * server-side PATCH applies only these deltas to the STORED tree, so untouched behaviours are never
+ * re-serialised by us and that whole class of false rejection disappears.
+ *
+ * Idempotent: any existing managed rule is removed first — matched by TRIMMED name, so a legacy
+ * `"Optimize at Edge "` (trailing space) is cleaned up too — then re-added, never duplicated.
+ *
+ * `insertIndex` positions the wrapper among the *non-managed* children (0 = before everything =
+ * default, length = after everything), matching mergeIntoTree.
+ *
+ * @param {object} ruleTree - the property's current rule-tree document ({ rules: {...}, ... })
+ * @param {object} cfg
+ * @param {number} [insertIndex]
+ * @returns {Array<object>} JSON Patch operations (empty-safe; always adds the wrapper)
+ */
+export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
+  const root = ruleTree?.rules;
+  if (root === null || typeof root !== 'object') {
+    throw new Error("Rule tree is missing a top-level 'rules' object.");
+  }
+
+  const ops = [];
+
+  // 1. Insert the managed wrapper as a child of the default rule, first removing any existing
+  //    managed rules so a re-run replaces rather than duplicates.
+  if (!Array.isArray(root.children)) {
+    // No children array at all — create it containing just the managed wrapper.
+    ops.push({ op: 'add', path: '/rules/children', value: [buildParentRule(cfg)] });
+  } else {
+    const { children } = root;
+    const managed = new Set(managedRuleNames(cfg).map((name) => name.trim()));
+    // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is cleaned up too.
+    const isManaged = (child) => managed.has((child?.name ?? '').trim());
+
+    // Remove existing managed rules highest index first, so the earlier indices we still need stay
+    // valid as the array shrinks (a JSON Patch remove shifts later elements down).
+    const managedIndexes = [];
+    children.forEach((child, i) => {
+      if (isManaged(child)) {
+        managedIndexes.push(i);
+      }
+    });
+    managedIndexes
+      .sort((a, b) => b - a)
+      .forEach((i) => ops.push({ op: 'remove', path: `/rules/children/${i}` }));
+
+    // After those removals run, the array is exactly the non-managed children in their original
+    // order, so clamp insertIndex against that length (mirrors mergeIntoTree). NaN/garbage -> 0.
+    const nonManagedCount = children.length - managedIndexes.length;
+    const n = Math.trunc(Number(insertIndex));
+    const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, nonManagedCount)) : 0;
+    ops.push({
+      op: 'add',
+      // `-` appends; a numeric index inserts before it. Append when idx lands at/after the end.
+      path: idx >= nonManagedCount ? '/rules/children/-' : `/rules/children/${idx}`,
+      value: buildParentRule(cfg),
+    });
+  }
+
+  // 2. Declare the PMUSER cache-key variable if the tree doesn't already have it. `add` to a
+  //    missing `/rules/variables` would fail, so create the array when absent.
+  const varName = cfg.cacheKeyVariable.name;
+  if (!Array.isArray(root.variables)) {
+    ops.push({ op: 'add', path: '/rules/variables', value: [managedCacheKeyVariable(varName)] });
+  } else if (!root.variables.some((v) => v?.name === varName)) {
+    ops.push({ op: 'add', path: '/rules/variables/-', value: managedCacheKeyVariable(varName) });
+  }
+
+  return ops;
 }
 
 // The request header carrying the site's LLMO API key — a confidential value that must never be
