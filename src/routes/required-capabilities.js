@@ -65,10 +65,6 @@ export const INTERNAL_ROUTES = [
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 
-  // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
-  'GET /org/:spaceCatId/brands/all/brand-presence/stats',
-  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
-
   // Agentic traffic PG dashboard endpoints (site-scoped) - non-mutating POST queries
   // (complex payloads / export trigger); UI only, not yet required by S2S
   'POST /sites/:siteId/agentic-traffic/hits-by-urls',
@@ -173,9 +169,6 @@ export const INTERNAL_ROUTES = [
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
 
-  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
-  'GET /v2/regions',
-
   // Monitoring - DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
   // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
   // registration). Kept internal because reusing `audit:read` would silently broaden that
@@ -253,7 +246,13 @@ const routeRequiredCapabilities = {
   'PUT /configurations/latest/queues': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/jobs/:jobType': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/latest/handlers/:handlerType': CAP_CONFIGURATION_WRITE,
+  /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
+  'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': CAP_CONFIGURATION_WRITE,
   'PATCH /configurations/sites/audits': CAP_CONFIGURATION_WRITE,
+
+  // Regions lookup - global table, no org scope; readable by any consumer
+  // (session-token or S2S) holding organization:read
+  'GET /v2/regions': 'organization:read',
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
@@ -318,6 +317,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/fanout-report': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/stats': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': 'brand:read',

@@ -748,13 +748,15 @@ v2-serenity-activate:
       the workspace; per-market it is 409-safe (an already-live slice is reported,
       not duplicated).
 
-      Project creation is gated on a primary URL/domain, NOT on prompt
-      generation: with no domain the brand is activated sub-workspace-only (no
-      project, HTTP 200, empty `markets`), anchored solely by its sub-workspace —
-      the bare "save & continue later" draft. With a domain but no market, a
-      single US/EN fallback project is provisioned. `generatePrompts` (body, else
-      stash, else false) decides whether topics/prompts are generated for the
-      provisioned project(s); it requires a domain, so true with no domain is a 400.
+      A primary URL/domain is REQUIRED to activate. Activation resolves the primary
+      domain's Site and sets it as the brand's base site (`brands.site_id`) in the
+      same write that flips status — so an active brand is always site-anchored, the
+      same contract as a non-Serenity brand. A pending brand with no primary URL
+      therefore cannot be activated: it stays pending and the response is a 400. (An
+      already-active brand re-supplying no URL is a no-op reactivation.) With a domain
+      but no market, a single US/EN fallback project is provisioned. `generatePrompts`
+      (body, else stash, else false) decides whether topics/prompts are generated for
+      the provisioned project(s); it requires a domain, so true with no domain is a 400.
 
       ALL-OR-NOTHING: the brand flips to `active` (HTTP 200) only when the FULL
       chain succeeds — sub-workspace ensured, EVERY market's project live, the
@@ -789,11 +791,18 @@ v2-serenity-activate:
         description: Organization, brand, or parent workspace not found, or serenity is not active for the organization.
       '409':
         description: >-
-          Misconfiguration: the brand's sub-workspace equals the organization
-          parent workspace. Refused to avoid acting on the shared parent pool.
+          Either (a) the primary domain is already another active brand's primary
+          site (`brands_base_site_unique`): the brand STAYS `pending` and the body
+          carries `error: serenityActivationSiteConflict` plus the per-market
+          outcomes — the operator must choose a different primary URL; or (b)
+          misconfiguration: the brand's sub-workspace equals the organization parent
+          workspace (refused to avoid acting on the shared parent pool).
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+            schema:
+              oneOf:
+                - { $ref: './schemas.yaml#/SerenityActivateResponse' }
+                - { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: >-
           Incomplete activation — a pending (draft) brand's provisioning chain did
@@ -1055,11 +1064,12 @@ v2-serenity-url-inspector-filter-dimensions:
       those dropdowns can show.
 
       `topics`/`categories`/`page_intents`/`origins` are derived from the same
-      underlying Topics element response, split apart by their `topic:`/
-      `category:`/`intent:`/`source:` tag prefix. Any other tag prefix Semrush
-      introduces later (e.g. `type:branded`) surfaces automatically as an extra
-      array property keyed by that prefix, and prefix-less tags collect into
-      `tags` — see `SerenityUrlInspectorFilterDimensions`.
+      underlying Topics element response, split apart by their `topic__`/
+      `category__`/`intent__`/`source__` tag prefix. Any other tag prefix Semrush
+      introduces later (e.g. `type__branded`) surfaces automatically as an extra
+      array property keyed by that prefix. Bare prefix declarations with no
+      value (e.g. a lone `category` row) are ignored — see
+      `SerenityUrlInspectorFilterDimensions`.
     operationId: listSerenityUrlInspectorFilterDimensions
     security:
       - ims_key: []

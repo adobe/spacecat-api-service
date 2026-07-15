@@ -66,6 +66,24 @@ export const BP_PROMPT_1_INTENT = 'informational';
 export const SERENITY_MOCK_WORKSPACE_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
 export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
 
+// Org-level parent workspace for ORG_1, so a subworkspace brand resolves a non-null
+// `parentWorkspaceId` — the condition the dynamic-allocation JIT guard needs to engage, and the
+// workspace whose `/resources` the allocator reads as the advisory pool gauge when a top-up fires.
+//
+// DELIBERATELY ALIASES SERENITY_MOCK_PROJECT_ID (not a coincidence, not a new id) — the UM mock's
+// `GET .../resources` / `createSubworkspace` handlers both 403 on any id that isn't a
+// pre-registered `workspace` entity, and the loaded boot seed (`parent-with-child`) has exactly
+// TWO: the one already claimed by SERENITY_MOCK_WORKSPACE_ID (BRAND_1's own sub-workspace — can't
+// double as its own org parent) and this one. A genuinely third, distinct workspace would need
+// either reseeding the mock's whole store (`__seed` replaces the RESET BASELINE store-wide — too
+// broad a blast radius to risk for this) or the mock's internal seed-construction factories, which
+// aren't available here: the `mock/*` subpath is an in-monorepo-only export (`files: ["src"]` in
+// the package's `package.json`), so api-service, an external npm consumer, can't reach it.
+// Referencing the SAME export (not a copy-pasted literal) keeps this a single source of truth
+// instead of a silent, unexplained coincidence — its role as a PE-mock project id elsewhere is
+// irrelevant to its use here as a UM workspace id metered via `__quota`.
+export const SERENITY_ORG_PARENT_WS_ID = SERENITY_MOCK_PROJECT_ID;
+
 // ── FACS state-layer managers (hybrid-model §8.3) ──
 // The brandManager persona holds state-layer `llmo/can_manage_users` on
 // MANAGED_BRAND_ID only (seeded in facs-access-mappings.js). It has an EMPTY

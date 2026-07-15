@@ -20,7 +20,7 @@ import { dateToIsoWeek } from '../week-utils.js';
  * `table`). One row per cited URL in the (project, date, model) scope.
  *
  * Same filter shape as cited-domains (date in BOTH simple + advanced, CBF_model
- * in an `or` block, category as a `category:<label>` tag, region via top-level
+ * in an `or` block, category as a `category__<label>` tag, region via top-level
  * `project_id`). `startDate`/`endDate` are required (validated in the controller).
  * The element does NOT honor a server-side content-type filter, so the
  * `domain_type='Owned'` selection is applied client-side in the transform.
@@ -30,7 +30,7 @@ import { dateToIsoWeek } from '../week-utils.js';
  * @param {string} [params.platform] - Legacy alias for `model`; `model` wins.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
- * @param {string} [params.category] - Category label → tag `category:<label>`.
+ * @param {string} [params.category] - Category label → tag `category__<label>`.
  * @param {string} [params.projectId] - Semrush project id (region scope, top-level).
  */
 export function buildOwnedUrlsStatsPayload({
@@ -43,7 +43,7 @@ export function buildOwnedUrlsStatsPayload({
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
   if (category) {
-    advancedFilters.push({ op: 'eq', val: `category:${category}`, col: 'CBF_tags' });
+    advancedFilters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
   }
   return {
     ...(projectId && { project_id: projectId }),
@@ -75,7 +75,7 @@ export function buildOwnedUrlsTrendPayload({
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
   if (category) {
-    advancedFilters.push({ op: 'eq', val: `category:${category}`, col: 'CBF_tags' });
+    advancedFilters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
   }
   return {
     ...(projectId && { project_id: projectId }),

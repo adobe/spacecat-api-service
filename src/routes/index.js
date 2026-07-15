@@ -195,6 +195,8 @@ export default function getRouteHandlers(
     'PUT /configurations/latest/queues': configurationController.updateQueues,
     'PATCH /configurations/latest/jobs/:jobType': configurationController.updateJob,
     'PATCH /configurations/latest/handlers/:handlerType': configurationController.updateHandler,
+    /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
+    'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': configurationController.replaceHandlerEnabledDisabled,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,

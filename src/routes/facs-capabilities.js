@@ -241,6 +241,7 @@ const routeFacsCapabilities = {
     'GET /configurations/latest', // admin
     'PATCH /configurations/latest', // admin
     'PATCH /configurations/latest/handlers/:handlerType', // admin
+    'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled', // admin (TEMPORARY, see SITES-40312)
     'PATCH /configurations/latest/jobs/:jobType', // admin
     'PATCH /configurations/sites/audits', // admin
     'POST /configurations/:version/restore', // admin

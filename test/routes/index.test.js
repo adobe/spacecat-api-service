@@ -32,6 +32,9 @@ describe('getRouteHandlers', () => {
     updateQueues: sinon.stub(),
     updateJob: sinon.stub(),
     updateHandler: sinon.stub(),
+    // TEMPORARY: Mock for temporary cleanup API - will be removed once cleanup is done
+    // This is added here to prevent route tests from failing, not for unit testing the endpoint
+    replaceHandlerEnabledDisabled: sinon.stub(),
     restoreVersion: sinon.stub(),
   };
 
@@ -860,6 +863,7 @@ describe('getRouteHandlers', () => {
       'DELETE /configurations/audits/:auditType',
       'PATCH /configurations/latest/jobs/:jobType',
       'PATCH /configurations/latest/handlers/:handlerType',
+      'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled',
       'POST /event/fulfillment/:eventType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
