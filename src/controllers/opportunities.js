@@ -30,7 +30,6 @@ import { isValidLocale } from '../utils/validations.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
-import { getHeaderCaseInsensitive } from '../support/http-headers.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
@@ -479,24 +478,21 @@ function OpportunitiesController(ctx) {
       return notFound('Opportunity not found');
     }
 
-    const headers = context.pathInfo?.headers || {};
-    const authHeader = getHeaderCaseInsensitive(headers, 'authorization');
-    if (!hasText(authHeader)) {
-      return badRequest('Authorization header is required to trigger a run');
-    }
-
     const {
       maxPages, customUrls, checkAuditAge, enableAiAnalysis,
     } = context.data || {};
     const baseUrl = context.env?.PRERENDER_VALIDATION_RUN_BASE_URL
       || DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL;
 
+    // No credentials are forwarded here — the upstream service authorizes this call by
+    // source IP (spacecat-api-service's own outbound egress IPs are allowlisted there),
+    // not by a caller-supplied token. See docs/specs/2026-07-13-prerender-validation-
+    // native-comparison.md for why this replaced token-forwarding.
     let upstream;
     try {
       upstream = await fetch(`${baseUrl}/api/compare/run`, {
         method: 'POST',
         headers: {
-          Authorization: authHeader,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

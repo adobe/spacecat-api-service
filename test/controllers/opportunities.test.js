@@ -1121,17 +1121,7 @@ describe('Opportunities Controller', () => {
       expect(error).to.have.property('message', 'Only users belonging to the organization of the site can trigger its opportunities');
     });
 
-    it('returns bad request if no authorization header is present', async () => {
-      const response = await opportunitiesController.runPrerenderValidation({
-        ...defaultAuthAttributes,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        pathInfo: { headers: {} },
-      });
-      expect(response.status).to.equal(400);
-      expect((await response.json())).to.have.property('message', 'Authorization header is required to trigger a run');
-    });
-
-    it('forwards the request to the internal prerender-validation service and passes through a 202', async () => {
+    it('forwards the request to the internal prerender-validation service without credentials and passes through a 202', async () => {
       const fetchStub = sandbox.stub(global, 'fetch').resolves({
         status: 202,
         json: async () => ({ requestId: 'req-123' }),
@@ -1139,7 +1129,6 @@ describe('Opportunities Controller', () => {
       const response = await opportunitiesController.runPrerenderValidation({
         ...defaultAuthAttributes,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        pathInfo: { headers: { authorization: 'Bearer test-token' } },
         data: {
           maxPages: 50, checkAuditAge: true, customUrls: ['https://example.com/a'], enableAiAnalysis: true,
         },
@@ -1151,7 +1140,7 @@ describe('Opportunities Controller', () => {
       const [url, options] = fetchStub.getCall(0).args;
       expect(url).to.equal('https://sj1010010249075.corp.adobe.com/api/compare/run');
       expect(options.method).to.equal('POST');
-      expect(options.headers.Authorization).to.equal('Bearer test-token');
+      expect(options.headers).to.not.have.property('Authorization');
       expect(JSON.parse(options.body)).to.deep.equal({
         siteId: SITE_ID,
         maxPages: 50,
@@ -1159,15 +1148,6 @@ describe('Opportunities Controller', () => {
         customUrls: ['https://example.com/a'],
         enableAiAnalysis: true,
       });
-    });
-
-    it('returns bad request if pathInfo is entirely absent (no headers at all)', async () => {
-      const response = await opportunitiesController.runPrerenderValidation({
-        ...defaultAuthAttributes,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-      });
-      expect(response.status).to.equal(400);
-      expect((await response.json())).to.have.property('message', 'Authorization header is required to trigger a run');
     });
 
     it('uses PRERENDER_VALIDATION_RUN_BASE_URL from env when configured', async () => {
@@ -1178,7 +1158,6 @@ describe('Opportunities Controller', () => {
       const response = await opportunitiesController.runPrerenderValidation({
         ...defaultAuthAttributes,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        pathInfo: { headers: { authorization: 'Bearer test-token' } },
         env: { PRERENDER_VALIDATION_RUN_BASE_URL: 'https://custom-host.example.com' },
       });
 
@@ -1195,7 +1174,6 @@ describe('Opportunities Controller', () => {
       const response = await opportunitiesController.runPrerenderValidation({
         ...defaultAuthAttributes,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        pathInfo: { headers: { authorization: 'Bearer test-token' } },
       });
 
       expect(response.status).to.equal(409);
@@ -1207,7 +1185,6 @@ describe('Opportunities Controller', () => {
       const response = await opportunitiesController.runPrerenderValidation({
         ...defaultAuthAttributes,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        pathInfo: { headers: { authorization: 'Bearer test-token' } },
       });
 
       expect(response.status).to.equal(502);
@@ -1224,7 +1201,6 @@ describe('Opportunities Controller', () => {
       const response = await opportunitiesController.runPrerenderValidation({
         ...defaultAuthAttributes,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        pathInfo: { headers: { authorization: 'Bearer test-token' } },
       });
 
       expect(response.status).to.equal(202);
