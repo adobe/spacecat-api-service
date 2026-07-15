@@ -39,9 +39,6 @@ const PRERENDER_VALIDATION_STATUSES = [
   'completed_fail',
   'error',
 ];
-// Internal llmo-prerender-api host — the service that actually runs the S3-vs-Lambda
-// comparison. Overridable via PRERENDER_VALIDATION_RUN_BASE_URL for other environments.
-const DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL = 'https://sj1010010249075.corp.adobe.com';
 
 /**
  * Opportunities controller.
@@ -403,7 +400,7 @@ function OpportunitiesController(ctx) {
     }
 
     const {
-      status, startedAt, completedAt, reason,
+      status, startedAt, completedAt, reason, requestId,
     } = context.data;
     if (!hasText(status) || !PRERENDER_VALIDATION_STATUSES.includes(status)) {
       return badRequest(`status must be one of: ${PRERENDER_VALIDATION_STATUSES.join(', ')}`);
@@ -422,6 +419,9 @@ function OpportunitiesController(ctx) {
     if (reason !== undefined && reason !== null && typeof reason !== 'string') {
       return badRequest('reason must be a string or null');
     }
+    if (requestId !== undefined && requestId !== null && typeof requestId !== 'string') {
+      return badRequest('requestId must be a string or null');
+    }
 
     try {
       const currentData = opportunity.getData() || {};
@@ -431,6 +431,11 @@ function OpportunitiesController(ctx) {
       }
       if (completedAt !== undefined) {
         prerenderValidation.completedAt = completedAt;
+      }
+      // requestId carries over from the spread above once set (e.g. at in_progress
+      // time) — only overwritten when the caller explicitly provides a new value.
+      if (requestId !== undefined) {
+        prerenderValidation.requestId = requestId;
       }
       // Unlike startedAt/completedAt, reason is tied to the CURRENT status, not
       // something to carry over — always set it (to null when absent) so a stale
@@ -455,6 +460,10 @@ function OpportunitiesController(ctx) {
    * @returns {Promise<Response>} The upstream service's response, passed through.
    */
   const runPrerenderValidation = async (context) => {
+    // Internal llmo-prerender-api host — the service that actually runs the S3-vs-Lambda
+    // comparison. Overridable via PRERENDER_VALIDATION_RUN_BASE_URL for other environments.
+    const DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL = 'https://sj1010010249075.corp.adobe.com';
+
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
@@ -478,9 +487,29 @@ function OpportunitiesController(ctx) {
       return notFound('Opportunity not found');
     }
 
-    const {
-      maxPages, customUrls, checkAuditAge, enableAiAnalysis,
-    } = context.data || {};
+    // Mirrors the same gate tokowaka's own /api/compare/run enforces, checked here first
+    // against data we already have, so an already-validated or already-running site gets
+    // a fast 409 without a wasted network call to the internal service.
+    const IN_PROGRESS_STALE_MS = 3 * 60 * 60 * 1000;
+    const currentValidation = opportunity.getData()?.prerenderValidation;
+    if (currentValidation?.status === 'completed_success') {
+      return createResponse(
+        { error: 'Site already validated (completed_success)', reason: 'already_validated' },
+        409,
+      );
+    }
+    if (
+      currentValidation?.status === 'in_progress'
+      && currentValidation.startedAt
+      && (Date.now() - new Date(currentValidation.startedAt).getTime()) < IN_PROGRESS_STALE_MS
+    ) {
+      return createResponse(
+        { error: 'Validation already in progress for this site', reason: 'in_progress' },
+        409,
+      );
+    }
+
+    const { customUrls } = context.data || {};
     const baseUrl = context.env?.PRERENDER_VALIDATION_RUN_BASE_URL
       || DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL;
 
@@ -488,6 +517,13 @@ function OpportunitiesController(ctx) {
     // source IP (spacecat-api-service's own outbound egress IPs are allowlisted there),
     // not by a caller-supplied token. See docs/specs/2026-07-13-prerender-validation-
     // native-comparison.md for why this replaced token-forwarding.
+    //
+    // maxPages/enableAiAnalysis/checkAuditAge are fixed here, not caller-configurable:
+    // always the full 100-page cap, AI analysis off, and the strict last-24h audit
+    // freshness check enforced (same rigor as the daily cron), regardless of what the
+    // caller requests.
+    context.log.info(`[runPrerenderValidation] siteId=${siteId} opportunityId=${opportunityId} calling ${baseUrl}/api/compare/run`);
+
     let upstream;
     try {
       upstream = await fetch(`${baseUrl}/api/compare/run`, {
@@ -497,14 +533,15 @@ function OpportunitiesController(ctx) {
         },
         body: JSON.stringify({
           siteId,
-          ...(maxPages !== undefined ? { maxPages } : {}),
+          maxPages: 100,
+          enableAiAnalysis: false,
+          checkAuditAge: true,
           ...(customUrls !== undefined ? { customUrls } : {}),
-          ...(checkAuditAge !== undefined ? { checkAuditAge } : {}),
-          ...(enableAiAnalysis !== undefined ? { enableAiAnalysis } : {}),
         }),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(5000),
       });
     } catch (e) {
+      context.log.error(`[runPrerenderValidation] siteId=${siteId} unreachable at ${baseUrl}: ${e.message}`);
       return createResponse(
         { error: 'prerenderValidationServiceUnreachable', message: e.message },
         502,
@@ -512,6 +549,7 @@ function OpportunitiesController(ctx) {
     }
 
     const body = await upstream.json().catch(() => ({}));
+    context.log.info(`[runPrerenderValidation] siteId=${siteId} upstream responded status=${upstream.status}`);
     return createResponse(body, upstream.status);
   };
 
