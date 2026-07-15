@@ -254,10 +254,15 @@ function LlmoCloudFrontController(ctx) {
   const CATEGORIZED_AWS_ERRORS = new Set([
     'AccessDenied', 'AccessDeniedException', 'PreconditionFailed',
     'ThrottlingException', 'TooManyRequestsException', 'InvalidArgument', 'NoSuchDistribution',
+    // CloudWatch Logs delivery errors (cdn-log-delivery endpoints):
+    'ServiceQuotaExceededException', 'ValidationException', 'ConflictException',
+    'ExpiredTokenException', 'DeliverySourceConflict',
   ]);
+  // Return only the error name for categorized AWS errors — not the full message, which can
+  // contain cross-account ARNs, assumed-role paths, or other sensitive infra details.
   const mutationErrorResponse = (error, fallbackMessage) => (
     CATEGORIZED_AWS_ERRORS.has(error?.name)
-      ? badRequest(cleanupHeaderValue(`${error.name}: ${error.message}`))
+      ? badRequest(cleanupHeaderValue(error.name))
       : internalServerError(fallbackMessage)
   );
 
@@ -1193,7 +1198,24 @@ function LlmoCloudFrontController(ctx) {
       }
       const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
 
-      const { credentials } = await assumeConnectorRole({ accountId, externalId, roleName });
+      const { cloudFrontClient, credentials } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+
+      // Guard: only proceed if the distribution actually serves this site (prevents cross-org
+      // log capture in shared accounts; also surfaces a proper 404 for nonexistent distributions
+      // rather than a misleading "Adobe destination not provisioned" message).
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
+
       let result;
       try {
         result = await createCdnLogDelivery(credentials, {
@@ -1260,6 +1282,7 @@ function LlmoCloudFrontController(ctx) {
       const { cloudFrontClient, credentials } = await assumeCloudFrontClient({
         accountId, externalId, roleName,
       });
+
       const distributions = await cloudFrontClient.listDistributions();
 
       // Run in bounded batches (CDN_LOG_RESCAN_CONCURRENCY) so a large account doesn't trip
@@ -1279,6 +1302,14 @@ function LlmoCloudFrontController(ctx) {
           })),
         );
         results.push(...batchResults);
+      }
+
+      // If every distribution failed with ResourceNotFoundException the Adobe destination is not
+      // provisioned — surface a clear top-level error instead of an all-failed distribution list.
+      if (results.length > 0 && results.every(
+        (r) => r.status === 'rejected' && r.reason?.name === 'ResourceNotFoundException',
+      )) {
+        return badRequest('Adobe log destination is not provisioned for this organization yet — run cdn-logs provisioning first');
       }
 
       const summary = distributions.map((dist, i) => {

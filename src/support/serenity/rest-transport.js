@@ -581,7 +581,7 @@ export function createSerenityTransport({ env, imsToken }) {
           + 'Pass the tag\'s current parent id to rename in place, or null to promote deliberately.',
         );
       }
-      const body = { name, parent_id: parentId };
+      const body = { name, parent_id: parentId ?? undefined };
       return unwrap('PATCH', await projects.PATCH(
         '/v2/workspaces/{id}/projects/{project_id}/aio/tags/{tag_id}',
         {

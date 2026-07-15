@@ -2261,6 +2261,11 @@ describe('LlmoCloudFrontController', () => {
         accountId: '120569600543',
         credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
       });
+      // assertDistributionServesSite calls listDistributions; return a distribution whose aliases
+      // match the mock site's base URL (https://www.example.com → www.example.com).
+      listDistributionsStub.resolves([
+        { id: 'E2EXAMPLE123', aliases: ['www.example.com'] },
+      ]);
       createCdnLogDeliveryStub.resolves({
         created: true,
         alreadyExisted: false,
@@ -2364,8 +2369,20 @@ describe('LlmoCloudFrontController', () => {
       expect((await result.json()).message).to.include('not provisioned');
     });
 
-    it('returns 500 when createCdnLogDelivery throws a non-ResourceNotFound error', async () => {
-      createCdnLogDeliveryStub.rejects(new Error('AccessDeniedException: not authorized'));
+    it('returns 400 when createCdnLogDelivery throws a categorized AWS error', async () => {
+      const err = new Error('not authorized');
+      err.name = 'AccessDeniedException';
+      createCdnLogDeliveryStub.rejects(err);
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(400);
+      // Only the error name should appear — not the raw message, which may contain ARNs.
+      expect((await result.json()).message).to.equal('AccessDeniedException');
+    });
+
+    it('returns 500 when createCdnLogDelivery throws an uncategorized error', async () => {
+      createCdnLogDeliveryStub.rejects(new Error('Something went wrong internally'));
 
       const result = await controller.enableCdnLogDelivery(logDeliveryContext);
 

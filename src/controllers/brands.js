@@ -2254,6 +2254,7 @@ function BrandsController(ctx, log, env) {
         // until it lands, dedup widens to all base-url prompt-gen jobs for the site.
         if (generatePrompts) {
           if (drsConfigured) {
+            // @ts-ignore listJobs not yet in DrsClient type definitions
             const inFlight = await drsClient.listJobs({
               siteId: baseSiteId,
               providerId: 'prompt_generation_base_url',
@@ -2302,6 +2303,7 @@ function BrandsController(ctx, log, env) {
           hasExistingPrompts = (stats.branded + stats.unbranded) > 0;
         }
         if ((generatePrompts || hasExistingPrompts) && drsConfigured) {
+          // @ts-ignore createBrandPresenceSchedule not yet in DrsClient type definitions
           const schedule = await drsClient.createBrandPresenceSchedule({
             siteId: baseSiteId,
             brandId: brandUuid,

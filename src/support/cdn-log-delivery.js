@@ -145,17 +145,20 @@ export async function createCdnLogDelivery(credentials, {
   const deliverySourceName = buildDeliverySourceName({ provider, imsOrgId, resourceId });
   const resourceArn = config.buildResourceArn({ accountId, resourceId });
 
-  // Find the existing delivery for this source, if any (paginated). Returns it or undefined.
+  // Find the existing delivery for this source pointing at the expected destination (paginated).
+  // The DescribeDeliveries API does not accept a server-side filter; pagination is client-side.
   const findExistingDelivery = async () => {
     let nextToken;
     do {
       // eslint-disable-next-line no-await-in-loop
       const page = await client.send(new DescribeDeliveriesCommand({
-        deliverySourceName,
         ...(nextToken && { nextToken }),
       }));
+      // Match on both source name AND destination ARN: a delivery to an old/different destination
+      // is not valid — if the destination ARN ever changes, re-enable is needed.
       const match = (page.deliveries || []).find(
-        (d) => d.deliverySourceName === deliverySourceName,
+        (d) => d.deliverySourceName === deliverySourceName
+          && d.deliveryDestinationArn === deliveryDestinationArn,
       );
       if (match) {
         return match;
@@ -188,11 +191,22 @@ export async function createCdnLogDelivery(credentials, {
     }
   }
 
-  await client.send(new PutDeliverySourceCommand({
-    name: deliverySourceName,
-    resourceArn,
-    logType: config.logType,
-  }));
+  try {
+    await client.send(new PutDeliverySourceCommand({
+      name: deliverySourceName,
+      resourceArn,
+      logType: config.logType,
+    }));
+  } catch (err) {
+    // Distribution already bound to a different delivery source (e.g. the customer set one up
+    // manually). AWS rejects the re-registration; surface a clear 4xx rather than a generic 500.
+    if (err?.name === 'ConflictException') {
+      const conflict = new Error(`Distribution ${resourceId} is already registered to a different delivery source and cannot be re-registered without removing the existing source first`);
+      conflict.name = 'DeliverySourceConflict';
+      throw conflict;
+    }
+    throw err;
+  }
 
   let response;
   try {

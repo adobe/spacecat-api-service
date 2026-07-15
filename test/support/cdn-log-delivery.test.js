@@ -134,12 +134,17 @@ describe('cdn-log-delivery support', () => {
     it('is idempotent when a delivery already exists (paginated)', async () => {
       sendStub.callsFake((cmd) => {
         if (cmd.type === 'describe') {
-          // First page: no match + nextToken; second page: the match.
+          // First page: no match + nextToken; second page: the match. Match requires both
+          // deliverySourceName AND deliveryDestinationArn to guard against stale destinations.
           if (!cmd.input.nextToken) {
             return Promise.resolve({ deliveries: [{ deliverySourceName: 'other' }], nextToken: 'p2' });
           }
           return Promise.resolve({
-            deliveries: [{ deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE123', id: 'del-existing' }],
+            deliveries: [{
+              deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE123',
+              deliveryDestinationArn: baseParams.deliveryDestinationArn,
+              id: 'del-existing',
+            }],
           });
         }
         // GetDeliverySource resolves (source exists) → triggers the paginated describe lookup.
@@ -166,7 +171,11 @@ describe('cdn-log-delivery support', () => {
         if (cmd.type === 'describe') {
           describeCalls += 1;
           return Promise.resolve({
-            deliveries: [{ deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE123', id: 'del-raced' }],
+            deliveries: [{
+              deliverySourceName: 'llmo-cf-abc123-E2EXAMPLE123',
+              deliveryDestinationArn: baseParams.deliveryDestinationArn,
+              id: 'del-raced',
+            }],
           });
         }
         return Promise.resolve({});
@@ -204,6 +213,23 @@ describe('cdn-log-delivery support', () => {
       expect(result.created).to.equal(false);
       expect(result.alreadyExisted).to.equal(true);
       expect(result.deliveryId).to.equal(undefined);
+    });
+
+    it('throws DeliverySourceConflict when PutDeliverySource rejects with ConflictException', async () => {
+      sendStub.callsFake((cmd) => {
+        if (cmd.type === 'get') {
+          return Promise.reject(rnf()); // source absent → reach PutDeliverySource
+        }
+        if (cmd.type === 'put') {
+          // Distribution already registered to a different delivery source.
+          return Promise.reject(Object.assign(new Error('conflict'), { name: 'ConflictException' }));
+        }
+        return Promise.resolve({});
+      });
+
+      const err = await mod.createCdnLogDelivery(creds, baseParams).catch((e) => e);
+      expect(err.name).to.equal('DeliverySourceConflict');
+      expect(err.message).to.include('different delivery source');
     });
 
     it('rethrows a non-conflict error from CreateDelivery', async () => {
