@@ -1,3 +1,10 @@
+# [1.654.0](https://github.com/adobe/spacecat-api-service/compare/v1.653.0...v1.654.0) (2026-07-15)
+
+
+### Features
+
+* capture guidance_markdown + feedback_subject_id on backoffice reviews ([#2798](https://github.com/adobe/spacecat-api-service/issues/2798)) ([1435d52](https://github.com/adobe/spacecat-api-service/commit/1435d52111e8ee2748488dcc8c918717f64e7cdd)), closes [#790](https://github.com/adobe/spacecat-api-service/issues/790)
+
 # [1.653.0](https://github.com/adobe/spacecat-api-service/compare/v1.652.1...v1.653.0) (2026-07-15)
 
 
