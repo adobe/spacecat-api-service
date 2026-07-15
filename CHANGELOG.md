@@ -1,3 +1,10 @@
+# [1.652.0](https://github.com/adobe/spacecat-api-service/compare/v1.651.0...v1.652.0) (2026-07-15)
+
+
+### Features
+
+* **referral-traffic:** has-data probes all referral sources by priority ([#2776](https://github.com/adobe/spacecat-api-service/issues/2776)) ([7c94bff](https://github.com/adobe/spacecat-api-service/commit/7c94bff7618aca3d8b1cf912c3fe1abb358e26bc))
+
 # [1.651.0](https://github.com/adobe/spacecat-api-service/compare/v1.650.0...v1.651.0) (2026-07-14)
 
 
