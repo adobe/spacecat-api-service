@@ -139,6 +139,10 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
+    // Semrush onboarding notification — org-membership gated only (hasAccess(org),
+    // no product capability check), fires a Slack webhook; not a product-scoped
+    // FACS surface today.
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding',
     // LLMO CloudFront "Optimize at Edge" onboarding wizard — admin-only
     // (gateEdgeOptimizeWizard requires LLMO admin); cross-account control-plane, not a
     // customer FACS surface.

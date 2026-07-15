@@ -110,6 +110,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
+ * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -178,6 +179,7 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   taskManagementController,
+  onboardingController,
   redirectsController,
 ) {
   const staticRoutes = {};
@@ -258,6 +260,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding': onboardingController.triggerOnboarding,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
