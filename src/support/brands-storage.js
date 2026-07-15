@@ -321,7 +321,7 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
  * Fully replaces brand_sites for a brand. Groups submitted URLs by normalized base URL
  * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
  */
-async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
+async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy, log = console) {
   // Serenity market-site rows (type='serenity') are owned by the serenity market
   // lifecycle, NOT by the brand's URL list. A market's domain is generally not in
   // brand.urls, so the delete-all-then-reinsert below would wipe these links on
@@ -403,6 +403,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   }
 
   if (!sites || sites.length === 0) {
+    log.warn(`syncBrandSites: no sites found for org ${organizationId} matching URLs [${[...pathsByBase.keys()].join(', ')}]`);
     return;
   }
 
@@ -1030,7 +1031,7 @@ export async function upsertBrand({
 
   if (brand.urls !== undefined) {
     await Promise.all([
-      syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
+      syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy, log),
       syncBrandUrls(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
     ]);
   }
@@ -1055,6 +1056,7 @@ export async function updateBrand({
   updates,
   postgrestClient,
   updatedBy = 'system',
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -1233,7 +1235,7 @@ export async function updateBrand({
 
   if (updates.urls !== undefined) {
     await Promise.all([
-      syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
+      syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy, log),
       syncBrandUrls(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
     ]);
   }
