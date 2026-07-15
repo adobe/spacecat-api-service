@@ -5759,7 +5759,7 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
-  describe('prompt-suggestion schedule triggers (Phase 3)', () => {
+  describe('prompt-suggestion schedule registration (Phase 3)', () => {
     let onboardingModule;
     let sandbox;
 
@@ -5784,25 +5784,31 @@ describe('LLMO Onboarding Functions', () => {
         || sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
     });
 
-    const buildParams = (drsClient) => ({
-      drsClient,
-      siteId: 'site-123',
-      log: {
-        info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
-      },
-      say: sandbox.stub(),
+    const buildLog = () => ({
+      info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
     });
 
-    const HELPERS = [
-      ['triggerSemrushPromptJob', 'prompt_generation_semrush', 'twice_monthly'],
-      ['triggerCitationAttemptJob', 'prompt_generation_agentic_traffic', 'twice_monthly'],
-      ['triggerSyntheticPersonasJob', 'prompt_generation_synthetic_personas', 'quarterly'],
+    // providerId+cadence live in ONE place (PROMPT_SUGGESTION_PIPELINES). This
+    // literal mirrors it; the first test asserts the module table matches, so a
+    // drift is caught here rather than silently changing behavior.
+    const PIPELINES = [
+      ['prompt_generation_semrush', 'twice_monthly'],
+      ['prompt_generation_agentic_traffic', 'twice_monthly'],
+      ['prompt_generation_synthetic_personas', 'quarterly'],
     ];
 
-    HELPERS.forEach(([fnName, providerId, cadence]) => {
-      it(`${fnName} registers a ${cadence} schedule for ${providerId} with an immediate first run`, async () => {
+    it('declares each provider+cadence exactly once in PROMPT_SUGGESTION_PIPELINES', () => {
+      expect(onboardingModule.PROMPT_SUGGESTION_PIPELINES.map(
+        ({ providerId, cadence }) => [providerId, cadence],
+      )).to.deep.equal(PIPELINES);
+    });
+
+    PIPELINES.forEach(([providerId, cadence]) => {
+      it(`registerPromptSuggestionSchedule registers a ${cadence} schedule for ${providerId} with an immediate first run`, async () => {
         const drsClient = buildDrsClient();
-        const result = await onboardingModule[fnName](buildParams(drsClient));
+        const result = await onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', log: buildLog(), say: sandbox.stub(),
+        });
 
         expect(drsClient.createSchedule).to.have.been.calledOnce;
         const arg = drsClient.createSchedule.firstCall.args[0];
@@ -5819,25 +5825,46 @@ describe('LLMO Onboarding Functions', () => {
         expect(result).to.deep.equal({ scheduleId: 'sched-1', alreadyExisted: false });
       });
 
-      it(`${fnName} skips (no createSchedule) when the DRS client is not configured`, async () => {
+      it(`registerPromptSuggestionSchedule skips (no createSchedule) for ${providerId} when the DRS client is not configured`, async () => {
         const drsClient = buildDrsClient();
         drsClient.isConfigured.returns(false);
-        const params = buildParams(drsClient);
+        const log = buildLog();
 
-        const result = await onboardingModule[fnName](params);
+        const result = await onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', log, say: sandbox.stub(),
+        });
 
         expect(drsClient.createSchedule).to.not.have.been.called;
         expect(result).to.equal(null);
-        expect(params.log.debug).to.have.been.calledWithMatch(providerId);
+        expect(log.debug).to.have.been.calledWithMatch(providerId);
       });
 
-      it(`${fnName} propagates a schedule-registration failure to the caller (not swallowed)`, async () => {
+      it(`registerPromptSuggestionSchedule propagates a schedule-registration failure for ${providerId} (not swallowed)`, async () => {
         const err = new Error('DRS POST /schedules failed: 500');
         const drsClient = buildDrsClient(sandbox.stub().rejects(err));
 
-        await expect(onboardingModule[fnName](buildParams(drsClient)))
-          .to.be.rejectedWith('DRS POST /schedules failed: 500');
+        await expect(onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', log: buildLog(), say: sandbox.stub(),
+        })).to.be.rejectedWith('DRS POST /schedules failed: 500');
       });
+    });
+
+    it('registerPromptSuggestionSchedule logs the alreadyExisted branch', async () => {
+      const drsClient = buildDrsClient(
+        sandbox.stub().resolves({ scheduleId: 'sched-9', alreadyExisted: true }),
+      );
+      const log = buildLog();
+
+      await onboardingModule.registerPromptSuggestionSchedule({
+        drsClient,
+        providerId: 'prompt_generation_semrush',
+        cadence: 'twice_monthly',
+        siteId: 'site-123',
+        log,
+        say: sandbox.stub(),
+      });
+
+      expect(log.info).to.have.been.calledWithMatch('already existed');
     });
   });
 
@@ -5895,6 +5922,8 @@ describe('LLMO Onboarding Functions', () => {
       const instance = mockDrsClient.createFrom();
       expect(instance.submitJob).to.have.been.calledOnce; // Brandalf fired first
       expect(instance.createSchedule).to.have.been.calledThrice;
+      // Schedules register AFTER the Brandalf submit (not in parallel before it).
+      expect(instance.createSchedule).to.have.been.calledAfter(instance.submitJob);
       const providerIds = instance.createSchedule.getCalls().map((c) => c.args[0].providerIds[0]);
       expect(providerIds).to.have.members([
         'prompt_generation_semrush',
@@ -5918,8 +5947,9 @@ describe('LLMO Onboarding Functions', () => {
       );
 
       const context = buildV2Context();
+      const params = buildV2Params(context);
       // Must resolve (onboarding succeeds) despite every schedule registration failing.
-      await activateBrandAndGeneratePrompts(buildV2Params(context));
+      await activateBrandAndGeneratePrompts(params);
 
       const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
       const semrushLog = errorLogs.find((m) => m.includes('prompt_generation_semrush'));
@@ -5928,8 +5958,30 @@ describe('LLMO Onboarding Functions', () => {
       expect(semrushLog).to.include('status=500');
       // All three providers are surfaced, none swallowed.
       expect(context.log.error).to.have.been.calledThrice;
+      // Operator gets a Slack warning per failed schedule (manual-trigger signal).
+      expect(params.say).to.have.been.calledWithMatch(/Failed to register DRS .*schedule/);
       // Brandalf still fired — the schedule failures did not abort onboarding.
       expect(mockDrsClient.createFrom().submitJob).to.have.been.calledOnce;
+    });
+
+    it('logs status=unknown when a schedule-registration failure carries no HTTP status', async () => {
+      const err = new Error('network down'); // no .status attached
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        createSchedule: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('status=unknown'))).to.be.true;
     });
   });
 });
