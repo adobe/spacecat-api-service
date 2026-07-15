@@ -19,7 +19,6 @@ const ORG_ID = '11111111-1111-4111-b111-111111111111';
 describe('OnboardingController', () => {
   let sandbox;
   let notifyStub;
-  let resolveWorkspaceStub;
   let hasAccessStub;
   let OnboardingController;
   let mockOrg;
@@ -39,14 +38,14 @@ describe('OnboardingController', () => {
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
-    mockOrg = { getId: () => ORG_ID };
+    mockOrg = { getId: () => ORG_ID, getSemrushWorkspaceId: () => 'ws-123' };
     notifyStub = sandbox.stub().resolves();
-    resolveWorkspaceStub = sandbox.stub().resolves('ws-123');
     hasAccessStub = sandbox.stub().resolves(true);
 
+    // esmock returns a fresh module instance per call, so the controller's
+    // module-scoped per-org cooldown Map starts empty for every test.
     OnboardingController = await esmock('../../src/controllers/onboarding.js', {
       '../../src/support/onboarding/slack-notifier.js': { notifyOnboarding: notifyStub },
-      '../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId: resolveWorkspaceStub },
       '../../src/support/access-control-util.js': {
         default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
       },
@@ -72,7 +71,7 @@ describe('OnboardingController', () => {
   });
 
   it('returns 200 with workspaceId null when the org has no workspace', async () => {
-    resolveWorkspaceStub.resolves(null);
+    mockOrg.getSemrushWorkspaceId = () => null;
     const ctx = buildContext();
     const controller = OnboardingController(ctx, ctx.log, ctx.env);
     const res = await controller.triggerOnboarding(ctx);
@@ -173,5 +172,57 @@ describe('OnboardingController', () => {
     const logged = ctx.log.error.firstCall.args[0];
     expect(logged).to.not.contain(webhookUrl);
     expect(logged).to.contain('[redacted]');
+  });
+
+  it('reads the workspace id off the fetched org without a second findById', async () => {
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    await controller.triggerOnboarding(ctx);
+
+    expect(ctx.dataAccess.Organization.findById.calledOnce).to.equal(true);
+  });
+
+  it('returns workspaceId null when the org has no getSemrushWorkspaceId getter', async () => {
+    mockOrg = { getId: () => ORG_ID };
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    const res = await controller.triggerOnboarding(ctx);
+
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body).to.deep.equal({ notified: true, workspaceId: null });
+  });
+
+  it('skips a duplicate notification for the same org within the cooldown window', async () => {
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+
+    const first = await controller.triggerOnboarding(ctx);
+    expect(first.status).to.equal(200);
+    expect((await first.json()).notified).to.equal(true);
+
+    const second = await controller.triggerOnboarding(ctx);
+    expect(second.status).to.equal(200);
+    expect(await second.json()).to.deep.equal({
+      notified: false, workspaceId: 'ws-123', reason: 'recently notified',
+    });
+    expect(notifyStub.calledOnce).to.equal(true);
+  });
+
+  it('does not arm the cooldown when the send fails, keeping retries open', async () => {
+    const err = new Error('onboarding notification rejected with status 500');
+    err.status = 502;
+    notifyStub.onFirstCall().rejects(err);
+    notifyStub.onSecondCall().resolves();
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+
+    const first = await controller.triggerOnboarding(ctx);
+    expect(first.status).to.equal(502);
+
+    const second = await controller.triggerOnboarding(ctx);
+    expect(second.status).to.equal(200);
+    expect((await second.json()).notified).to.equal(true);
+    expect(notifyStub.calledTwice).to.equal(true);
   });
 });
