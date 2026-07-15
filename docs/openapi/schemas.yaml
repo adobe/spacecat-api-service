@@ -3194,6 +3194,54 @@ OpportunityUpdate:
       description: Optional list of tags
       example:
         - 'Traffic acquisition'
+PrerenderValidationUpdate:
+  type: object
+  required:
+    - status
+  properties:
+    status:
+      description: Lifecycle status of the prerender validation run
+      type: string
+      enum:
+        - 'in_progress'
+        - 'completed_success'
+        - 'completed_fail'
+        - 'error'
+      example: 'completed_success'
+    startedAt:
+      description: ISO 8601 timestamp when the validation run started, or null
+      type: [string, 'null']
+      format: date-time
+      example: '2026-07-12T11:31:12.729Z'
+    completedAt:
+      description: ISO 8601 timestamp when the validation run completed, or null
+      type: [string, 'null']
+      format: date-time
+      example: '2026-07-12T11:33:19.100Z'
+    reason:
+      description: |
+        Reason for the current status (e.g. a WAF-block code on failure). Always
+        reset on every update — omit or send null to clear a stale reason from a
+        previous run.
+      type: [string, 'null']
+      example: 'waf_block:403'
+    requestId:
+      description: |
+        Identifier of the tokowaka comparison job for this run, set when the run
+        starts (in_progress) and carried over on subsequent updates unless
+        explicitly overwritten.
+      type: [string, 'null']
+      example: 'req-a1b2c3'
+PrerenderValidationRun:
+  type: object
+  properties:
+    customUrls:
+      description: Specific URLs to check instead of the default top-pages set
+      type: array
+      items:
+        type: string
+        format: uri
+      example: ['https://example.com/page-1']
 SuggestionStatus:
   description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
   type: string

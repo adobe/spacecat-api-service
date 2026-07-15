@@ -344,6 +344,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/page-relationships/search': pageRelationshipsController.search,
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/prerender-validation': opportunitiesController.patchPrerenderValidation,
+    'POST /sites/:siteId/opportunities/:opportunityId/prerender-validation/run': opportunitiesController.runPrerenderValidation,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': suggestionsController.getAllForOpportunityPaged,

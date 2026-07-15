@@ -256,6 +256,10 @@ const routeFacsCapabilities = {
     'PATCH /consumers/:consumerId', // admin
     'POST /consumers/:consumerId/revoke', // admin
     'POST /consumers/register', // admin
+
+    // Prerender Validation — internal tokowaka-only, admin/S2S token bypasses FACS
+    'PATCH /sites/:siteId/opportunities/:opportunityId/prerender-validation',
+    'POST /sites/:siteId/opportunities/:opportunityId/prerender-validation/run',
   ],
 
   PRODUCTS_ROUTES: {

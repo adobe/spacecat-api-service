@@ -33,6 +33,12 @@ import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
+const PRERENDER_VALIDATION_STATUSES = [
+  'in_progress',
+  'completed_success',
+  'completed_fail',
+  'error',
+];
 
 /**
  * Opportunities controller.
@@ -356,12 +362,205 @@ function OpportunitiesController(ctx) {
     }
   };
 
+  /**
+   * Merges prerender-validation lifecycle state into an opportunity's data.
+   * Only `data.prerenderValidation` is updated — all other `data` fields are
+   * preserved (server-side merge), so external callers cannot clobber the data
+   * written by the prerender audit.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Updated opportunity response.
+   */
+  const patchPrerenderValidation = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can edit its opportunities');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No updates provided');
+    }
+
+    const {
+      status, startedAt, completedAt, reason, requestId,
+    } = context.data;
+    if (!hasText(status) || !PRERENDER_VALIDATION_STATUSES.includes(status)) {
+      return badRequest(`status must be one of: ${PRERENDER_VALIDATION_STATUSES.join(', ')}`);
+    }
+    // Matches full ISO 8601 date-time with a timezone designator (Z or ±HH:mm) — Date.parse
+    // alone is too permissive (accepts "Tuesday", "1", etc.), so the regex gates it first.
+    const ISO_8601_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+    const isValidTimestamp = (v) => v === null
+      || (typeof v === 'string' && ISO_8601_REGEX.test(v) && !Number.isNaN(Date.parse(v)));
+    if (startedAt !== undefined && !isValidTimestamp(startedAt)) {
+      return badRequest('startedAt must be a valid ISO 8601 date string or null');
+    }
+    if (completedAt !== undefined && !isValidTimestamp(completedAt)) {
+      return badRequest('completedAt must be a valid ISO 8601 date string or null');
+    }
+    if (reason !== undefined && reason !== null && typeof reason !== 'string') {
+      return badRequest('reason must be a string or null');
+    }
+    if (requestId !== undefined && requestId !== null && typeof requestId !== 'string') {
+      return badRequest('requestId must be a string or null');
+    }
+
+    try {
+      const currentData = opportunity.getData() || {};
+      const prerenderValidation = { ...currentData.prerenderValidation, status };
+      if (startedAt !== undefined) {
+        prerenderValidation.startedAt = startedAt;
+      }
+      if (completedAt !== undefined) {
+        prerenderValidation.completedAt = completedAt;
+      }
+      // requestId carries over from the spread above once set (e.g. at in_progress
+      // time) — only overwritten when the caller explicitly provides a new value.
+      if (requestId !== undefined) {
+        prerenderValidation.requestId = requestId;
+      }
+      // Unlike startedAt/completedAt, reason is tied to the CURRENT status, not
+      // something to carry over — always set it (to null when absent) so a stale
+      // failure reason from a previous run can't leak into a later success.
+      prerenderValidation.reason = reason !== undefined ? reason : null;
+
+      opportunity.setData({ ...currentData, prerenderValidation });
+      opportunity.setUpdatedBy(profile.email || 'system');
+      const updatedOppty = await opportunity.save(opportunity);
+      return ok(OpportunityDto.toJSON(updatedOppty));
+    } catch (e) {
+      return handleDataAccessError(e, 'Error updating prerender validation');
+    }
+  };
+
+  /**
+   * Triggers a new prerender-validation comparison run for the site by forwarding
+   * to the internal llmo-prerender-api service's POST /api/compare/run. The
+   * caller's own Authorization header is forwarded as-is — this endpoint does not
+   * hold its own credential for the internal service.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} The upstream service's response, passed through.
+   */
+  const runPrerenderValidation = async (context) => {
+    // Internal llmo-prerender-api host — the service that actually runs the S3-vs-Lambda
+    // comparison. Overridable via PRERENDER_VALIDATION_RUN_BASE_URL for other environments.
+    const DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL = 'https://sj1010010249075.corp.adobe.com';
+
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can trigger its opportunities');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    // Mirrors the same gate tokowaka's own /api/compare/run enforces, checked here first
+    // against data we already have, so an already-validated or already-running site gets
+    // a fast 409 without a wasted network call to the internal service.
+    const IN_PROGRESS_STALE_MS = 3 * 60 * 60 * 1000;
+    const currentValidation = opportunity.getData()?.prerenderValidation;
+    if (currentValidation?.status === 'completed_success') {
+      return createResponse(
+        { error: 'Site already validated (completed_success)', reason: 'already_validated' },
+        409,
+      );
+    }
+    if (
+      currentValidation?.status === 'in_progress'
+      && currentValidation.startedAt
+      && (Date.now() - new Date(currentValidation.startedAt).getTime()) < IN_PROGRESS_STALE_MS
+    ) {
+      return createResponse(
+        { error: 'Validation already in progress for this site', reason: 'in_progress' },
+        409,
+      );
+    }
+
+    const { customUrls } = context.data || {};
+    const baseUrl = context.env?.PRERENDER_VALIDATION_RUN_BASE_URL
+      || DEFAULT_PRERENDER_VALIDATION_RUN_BASE_URL;
+
+    // No credentials are forwarded here — the upstream service authorizes this call by
+    // source IP (spacecat-api-service's own outbound egress IPs are allowlisted there),
+    // not by a caller-supplied token. See docs/specs/2026-07-13-prerender-validation-
+    // native-comparison.md for why this replaced token-forwarding.
+    //
+    // maxPages/enableAiAnalysis/checkAuditAge are fixed here, not caller-configurable:
+    // always the full 100-page cap, AI analysis off, and the strict last-24h audit
+    // freshness check enforced (same rigor as the daily cron), regardless of what the
+    // caller requests.
+    context.log.info(`[runPrerenderValidation] siteId=${siteId} opportunityId=${opportunityId} calling ${baseUrl}/api/compare/run`);
+
+    let upstream;
+    try {
+      upstream = await fetch(`${baseUrl}/api/compare/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          siteId,
+          maxPages: 100,
+          enableAiAnalysis: false,
+          checkAuditAge: true,
+          ...(customUrls !== undefined ? { customUrls } : {}),
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch (e) {
+      context.log.error(`[runPrerenderValidation] siteId=${siteId} unreachable at ${baseUrl}: ${e.message}`);
+      return createResponse(
+        { error: 'prerenderValidationServiceUnreachable', message: e.message },
+        502,
+      );
+    }
+
+    const body = await upstream.json().catch(() => ({}));
+    context.log.info(`[runPrerenderValidation] siteId=${siteId} upstream responded status=${upstream.status}`);
+    return createResponse(body, upstream.status);
+  };
+
   return {
     createOpportunity,
     getAllForSite,
     getByID,
     getByStatus,
     patchOpportunity,
+    patchPrerenderValidation,
+    runPrerenderValidation,
     removeOpportunity,
   };
 }

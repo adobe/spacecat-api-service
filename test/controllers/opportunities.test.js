@@ -180,6 +180,8 @@ describe('Opportunities Controller', () => {
     'getByID',
     'createOpportunity',
     'patchOpportunity',
+    'patchPrerenderValidation',
+    'runPrerenderValidation',
     'removeOpportunity',
   ];
 
@@ -247,6 +249,10 @@ describe('Opportunities Controller', () => {
           .withAuthenticated(true),
       },
     };
+
+    // Reset the shared entity's save() each test — some tests reassign it to throw
+    // and do not restore it, which would otherwise leak into subsequent tests.
+    mockOpptyEntity.save = () => mockOpptyEntity;
 
     opportunitiesController = OpportunitiesController(mockContext);
   });
@@ -744,6 +750,632 @@ describe('Opportunities Controller', () => {
     expect(error).to.have.property('message', 'No updates provided');
   });
 
+  it('merges prerender-validation status without clobbering other data fields', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress' },
+    });
+
+    expect(response.status).to.equal(200);
+    // other data fields preserved
+    expect(mockOpptyEntity.getData().additionalInfo).to.equal('info');
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({ status: 'in_progress', reason: null });
+    const updated = await response.json();
+    expect(updated).to.have.property('id', OPPORTUNITY_ID);
+    expect(updated).to.have.property('updatedBy', 'test@test.com');
+  });
+
+  it('sets prerender-validation when the opportunity has no existing data', async () => {
+    opptys[0].data = undefined;
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData()).to.deep.equal({ prerenderValidation: { status: 'in_progress', reason: null } });
+  });
+
+  it('sets startedAt and completedAt when provided and merges with existing prerenderValidation', async () => {
+    opptys[0].data = {
+      additionalInfo: 'info',
+      prerenderValidation: { status: 'in_progress', startedAt: '2026-07-03T10:00:00.000Z', completedAt: null },
+    };
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success', completedAt: '2026-07-03T11:40:00.000Z' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'completed_success',
+      startedAt: '2026-07-03T10:00:00.000Z',
+      completedAt: '2026-07-03T11:40:00.000Z',
+      reason: null,
+    });
+  });
+
+  it('sets startedAt when provided', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', startedAt: '2026-07-03T10:00:00.000Z', completedAt: null },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'in_progress',
+      startedAt: '2026-07-03T10:00:00.000Z',
+      completedAt: null,
+      reason: null,
+    });
+  });
+
+  it('sets reason when provided (e.g. bot-block)', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_fail', completedAt: '2026-07-03T11:40:00.000Z', reason: 'waf_block_homepage:cloudflare' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'completed_fail',
+      completedAt: '2026-07-03T11:40:00.000Z',
+      reason: 'waf_block_homepage:cloudflare',
+    });
+  });
+
+  it('clears a stale reason from a previous failed run when the new run succeeds without one', async () => {
+    opptys[0].data = {
+      additionalInfo: 'info',
+      prerenderValidation: {
+        status: 'completed_fail', completedAt: '2026-07-03T09:00:00.000Z', reason: 'waf_block_homepage:cloudflare',
+      },
+    };
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success', completedAt: '2026-07-03T11:40:00.000Z' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'completed_success',
+      completedAt: '2026-07-03T11:40:00.000Z',
+      reason: null,
+    });
+  });
+
+  it('defaults updatedBy to system when the profile has no email (api key)', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...apikeyAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'error' },
+    });
+
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('updatedBy', 'system');
+  });
+
+  it('returns bad request for prerender-validation if site id is missing', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: {},
+      data: { status: 'in_progress' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'Site ID required');
+  });
+
+  it('returns bad request for prerender-validation if opportunity id is missing', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID },
+      data: { status: 'in_progress' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'Opportunity ID required');
+  });
+
+  it('returns not found for prerender-validation if site does not exist', async () => {
+    mockSite.findById.resolves(null);
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress' },
+    });
+    expect(response.status).to.equal(404);
+    expect((await response.json())).to.have.property('message', 'Site not found');
+  });
+
+  it('returns not found for prerender-validation if opportunity does not exist', async () => {
+    mockOpportunity.findById.resolves(null);
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress' },
+    });
+    expect(response.status).to.equal(404);
+    expect((await response.json())).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('returns not found for prerender-validation if opportunity belongs to another site', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      // opportunity entity reports SITE_ID, but a different (valid) site id is requested
+      params: { siteId: OPPORTUNITY_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress' },
+    });
+    expect(response.status).to.equal(404);
+    expect((await response.json())).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('returns bad request for prerender-validation if no body is provided', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'No updates provided');
+  });
+
+  it('returns bad request for prerender-validation if status is invalid', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'bogus' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json()).message).to.match(/status must be one of/);
+  });
+
+  it('returns bad request for prerender-validation if startedAt is not a valid ISO date string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', startedAt: 'not-a-date' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'startedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if startedAt is not a string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', startedAt: 12345 },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'startedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if completedAt is not a valid ISO date string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success', completedAt: 'not-a-date' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'completedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if completedAt is not a string', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success', completedAt: 12345 },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'completedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if startedAt is a non-ISO date-like string (e.g. a weekday name)', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', startedAt: 'Tuesday' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'startedAt must be a valid ISO 8601 date string or null');
+  });
+
+  it('returns bad request for prerender-validation if reason is not a string or null', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_fail', reason: 12345 },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'reason must be a string or null');
+  });
+
+  it('returns bad request for prerender-validation if requestId is not a string or null', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', requestId: 12345 },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'requestId must be a string or null');
+  });
+
+  it('sets requestId when provided at in_progress', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', requestId: 'req-abc123' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'in_progress',
+      requestId: 'req-abc123',
+      reason: null,
+    });
+  });
+
+  it('carries requestId over to a later update when not explicitly provided', async () => {
+    opptys[0].data = {
+      prerenderValidation: { status: 'in_progress', requestId: 'req-abc123' },
+    };
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'completed_success' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation).to.deep.equal({
+      status: 'completed_success',
+      requestId: 'req-abc123',
+      reason: null,
+    });
+  });
+
+  it('overwrites requestId when a new value is explicitly provided', async () => {
+    opptys[0].data = {
+      prerenderValidation: { status: 'completed_fail', requestId: 'req-old' },
+    };
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress', requestId: 'req-new' },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(mockOpptyEntity.getData().prerenderValidation.requestId).to.equal('req-new');
+  });
+
+  it('accepts null for startedAt and completedAt', async () => {
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {
+        status: 'in_progress', startedAt: null, completedAt: null,
+      },
+    });
+    expect(response.status).to.equal(200);
+  });
+
+  it('returns bad request for prerender-validation on a validation error', async () => {
+    mockOpptyEntity.save = async () => {
+      throw new ValidationError('Validation error');
+    };
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress' },
+    });
+    expect(response.status).to.equal(400);
+    expect((await response.json())).to.have.property('message', 'Validation error');
+  });
+
+  it('returns 500 for prerender-validation on a data access error', async () => {
+    mockOpptyEntity.save = async () => {
+      throw new Error('boom');
+    };
+    const response = await opportunitiesController.patchPrerenderValidation({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'in_progress' },
+    });
+    expect(response.status).to.equal(500);
+    expect((await response.json())).to.have.property('message', 'Error updating prerender validation');
+  });
+
+  describe('runPrerenderValidation', () => {
+    it('returns bad request if site id is missing', async () => {
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        params: {},
+        pathInfo: { headers: { authorization: 'Bearer test-token' } },
+      });
+      expect(response.status).to.equal(400);
+      expect((await response.json())).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request if opportunity id is missing', async () => {
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        params: { siteId: SITE_ID },
+        pathInfo: { headers: { authorization: 'Bearer test-token' } },
+      });
+      expect(response.status).to.equal(400);
+      expect((await response.json())).to.have.property('message', 'Opportunity ID required');
+    });
+
+    it('returns not found if site does not exist', async () => {
+      mockSite.findById.resolves(null);
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        pathInfo: { headers: { authorization: 'Bearer test-token' } },
+      });
+      expect(response.status).to.equal(404);
+      expect((await response.json())).to.have.property('message', 'Site not found');
+    });
+
+    it('returns not found if opportunity does not exist', async () => {
+      mockOpportunity.findById.resolves(null);
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        pathInfo: { headers: { authorization: 'Bearer test-token' } },
+      });
+      expect(response.status).to.equal(404);
+      expect((await response.json())).to.have.property('message', 'Opportunity not found');
+    });
+
+    it('returns not found if opportunity belongs to another site', async () => {
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        // opportunity entity reports SITE_ID, but a different (valid) site id is requested
+        params: { siteId: OPPORTUNITY_ID, opportunityId: OPPORTUNITY_ID },
+        pathInfo: { headers: { authorization: 'Bearer test-token' } },
+      });
+      expect(response.status).to.equal(404);
+      expect((await response.json())).to.have.property('message', 'Opportunity not found');
+    });
+
+    it('returns 409 already_validated without calling tokowaka when status is completed_success', async () => {
+      mockOpportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getData: () => ({ prerenderValidation: { status: 'completed_success' } }),
+      });
+      const fetchStub = sandbox.stub(global, 'fetch');
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(409);
+      expect((await response.json())).to.deep.equal({
+        error: 'Site already validated (completed_success)',
+        reason: 'already_validated',
+      });
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('returns 409 in_progress without calling tokowaka when a run started less than 3 hours ago', async () => {
+      mockOpportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getData: () => ({
+          prerenderValidation: { status: 'in_progress', startedAt: new Date().toISOString() },
+        }),
+      });
+      const fetchStub = sandbox.stub(global, 'fetch');
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(409);
+      expect((await response.json())).to.deep.equal({
+        error: 'Validation already in progress for this site',
+        reason: 'in_progress',
+      });
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('proceeds to call tokowaka when an in_progress run started more than 3 hours ago (stale)', async () => {
+      const fourHoursAgo = new Date(Date.now() - (4 * 60 * 60 * 1000)).toISOString();
+      mockOpportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getData: () => ({
+          prerenderValidation: { status: 'in_progress', startedAt: fourHoursAgo },
+        }),
+      });
+      const fetchStub = sandbox.stub(global, 'fetch').resolves({
+        status: 202,
+        json: async () => ({ requestId: 'req-123' }),
+      });
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(202);
+      expect(fetchStub).to.have.been.calledOnce;
+    });
+
+    it('proceeds to call tokowaka when there is no prior prerenderValidation status', async () => {
+      mockOpportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getData: () => ({}),
+      });
+      const fetchStub = sandbox.stub(global, 'fetch').resolves({
+        status: 202,
+        json: async () => ({ requestId: 'req-123' }),
+      });
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(202);
+      expect(fetchStub).to.have.been.calledOnce;
+    });
+
+    it('returns forbidden when user does not have access to the organization', async () => {
+      const mockOrg = { getImsOrgId: () => 'test-org-id' };
+      const mockSiteWithOrg = {
+        id: SITE_ID,
+        getOrganization: async () => mockOrg,
+      };
+      mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
+      mockSite.findById.resolves(mockSiteWithOrg);
+
+      const restrictedAuthInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true);
+      restrictedAuthInfo.claims = { organizations: [] };
+
+      const restrictedContext = {
+        dataAccess: mockOpportunityDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        attributes: { authInfo: restrictedAuthInfo },
+        log: defaultAuthAttributes.log,
+      };
+
+      const restrictedController = OpportunitiesController(restrictedContext);
+      const response = await restrictedController.runPrerenderValidation({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        pathInfo: { headers: { authorization: 'Bearer test-token' } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only users belonging to the organization of the site can trigger its opportunities');
+    });
+
+    it('forwards the request to the internal prerender-validation service without credentials, with fixed maxPages/enableAiAnalysis/checkAuditAge, and passes through a 202', async () => {
+      const fetchStub = sandbox.stub(global, 'fetch').resolves({
+        status: 202,
+        json: async () => ({ requestId: 'req-123' }),
+      });
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { customUrls: ['https://example.com/a'] },
+      });
+
+      expect(response.status).to.equal(202);
+      expect((await response.json())).to.deep.equal({ requestId: 'req-123' });
+      expect(fetchStub).to.have.been.calledOnce;
+      const [url, options] = fetchStub.getCall(0).args;
+      expect(url).to.equal('https://sj1010010249075.corp.adobe.com/api/compare/run');
+      expect(options.method).to.equal('POST');
+      expect(options.headers).to.not.have.property('Authorization');
+      expect(options.signal).to.be.an.instanceOf(AbortSignal);
+      expect(JSON.parse(options.body)).to.deep.equal({
+        siteId: SITE_ID,
+        maxPages: 100,
+        enableAiAnalysis: false,
+        checkAuditAge: true,
+        customUrls: ['https://example.com/a'],
+      });
+      expect(mockContext.log.info).to.have.been.called;
+    });
+
+    it('ignores caller-supplied maxPages/enableAiAnalysis/checkAuditAge and always sends the fixed values', async () => {
+      const fetchStub = sandbox.stub(global, 'fetch').resolves({
+        status: 202,
+        json: async () => ({ requestId: 'req-123' }),
+      });
+      await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          maxPages: 5, checkAuditAge: false, enableAiAnalysis: true,
+        },
+      });
+
+      expect(JSON.parse(fetchStub.getCall(0).args[1].body)).to.deep.equal({
+        siteId: SITE_ID,
+        maxPages: 100,
+        enableAiAnalysis: false,
+        checkAuditAge: true,
+      });
+    });
+
+    it('uses PRERENDER_VALIDATION_RUN_BASE_URL from env when configured', async () => {
+      const fetchStub = sandbox.stub(global, 'fetch').resolves({
+        status: 202,
+        json: async () => ({ requestId: 'req-123' }),
+      });
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        env: { PRERENDER_VALIDATION_RUN_BASE_URL: 'https://custom-host.example.com' },
+      });
+
+      expect(response.status).to.equal(202);
+      const [url] = fetchStub.getCall(0).args;
+      expect(url).to.equal('https://custom-host.example.com/api/compare/run');
+    });
+
+    it('passes through a non-2xx response from the upstream service (e.g. already validated)', async () => {
+      sandbox.stub(global, 'fetch').resolves({
+        status: 409,
+        json: async () => ({ error: 'Site already validated', reason: 'already_validated' }),
+      });
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(409);
+      expect((await response.json())).to.deep.equal({ error: 'Site already validated', reason: 'already_validated' });
+    });
+
+    it('returns 502 and logs an error when the upstream service is unreachable', async () => {
+      sandbox.stub(global, 'fetch').rejects(new Error('network error'));
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(502);
+      const error = await response.json();
+      expect(error).to.have.property('error', 'prerenderValidationServiceUnreachable');
+      expect(error).to.have.property('message', 'network error');
+      expect(mockContext.log.error).to.have.been.calledWithMatch('unreachable');
+    });
+
+    it('defaults to an empty body when the upstream response is not valid JSON', async () => {
+      sandbox.stub(global, 'fetch').resolves({
+        status: 202,
+        json: async () => { throw new Error('not json'); },
+      });
+      const response = await opportunitiesController.runPrerenderValidation({
+        ...defaultAuthAttributes,
+        log: mockContext.log,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(202);
+      expect((await response.json())).to.deep.equal({});
+    });
+  });
+
   it('removes an opportunity', async () => {
     const response = await opportunitiesController.removeOpportunity({
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -1137,6 +1769,42 @@ describe('Opportunities Controller', () => {
             title: 'Updated Test Opportunity',
             description: 'Updated Test Description',
           },
+          ...defaultAuthAttributes,
+        });
+
+        expect(response.status).to.equal(403);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Only users belonging to the organization of the site can edit its opportunities');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+
+      it('returns forbidden when user does not have access to the organization for patchPrerenderValidation', async () => {
+        const mockOrg = { getImsOrgId: () => 'test-org-id' };
+        const mockSiteWithOrg = {
+          id: SITE_ID,
+          getOrganization: async () => mockOrg,
+        };
+        mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
+        mockSite.findById.resolves(mockSiteWithOrg);
+
+        const restrictedAuthInfo = new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'user' }])
+          .withProfile({ is_admin: false })
+          .withAuthenticated(true);
+        restrictedAuthInfo.claims = { organizations: [] };
+
+        const restrictedContext = {
+          dataAccess: mockOpportunityDataAccess,
+          pathInfo: { headers: { 'x-product': 'abcd' } },
+          attributes: { authInfo: restrictedAuthInfo },
+          log: defaultAuthAttributes.log,
+        };
+
+        const restrictedController = OpportunitiesController(restrictedContext);
+        const response = await restrictedController.patchPrerenderValidation({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { status: 'in_progress' },
           ...defaultAuthAttributes,
         });
 

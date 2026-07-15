@@ -299,6 +299,95 @@ export default function opportunityTests(getHttpClient, resetData) {
       });
     });
 
+    describe('PATCH /sites/:siteId/opportunities/:opportunityId/prerender-validation', () => {
+      let testOpptyId;
+
+      before(async () => {
+        await resetData();
+        // Create a test-scoped opportunity to mutate
+        const http = getHttpClient();
+        const res = await http.user.post(`/sites/${SITE_1_ID}/opportunities`, {
+          type: 'content-update',
+          origin: 'AI',
+          title: 'Prerender validation test opportunity',
+        });
+        expect(res.status).to.equal(201);
+        testOpptyId = res.body.id;
+      });
+
+      it('user: sets status and merges with existing data', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(
+          `/sites/${SITE_1_ID}/opportunities/${testOpptyId}/prerender-validation`,
+          { status: 'in_progress', startedAt: '2026-07-12T11:31:12.729Z', completedAt: null },
+        );
+        expect(res.status).to.equal(200);
+        expectOpportunityDto(res.body);
+        expect(res.body.data.prerenderValidation).to.deep.equal({
+          status: 'in_progress',
+          startedAt: '2026-07-12T11:31:12.729Z',
+          completedAt: null,
+          reason: null,
+        });
+      });
+
+      it('user: sets reason on failure and clears it on a later success', async () => {
+        const http = getHttpClient();
+        const failRes = await http.user.patch(
+          `/sites/${SITE_1_ID}/opportunities/${testOpptyId}/prerender-validation`,
+          {
+            status: 'completed_fail', completedAt: '2026-07-12T11:33:19.100Z', reason: 'waf_block:403',
+          },
+        );
+        expect(failRes.status).to.equal(200);
+        expect(failRes.body.data.prerenderValidation.reason).to.equal('waf_block:403');
+
+        const successRes = await http.user.patch(
+          `/sites/${SITE_1_ID}/opportunities/${testOpptyId}/prerender-validation`,
+          { status: 'completed_success', completedAt: '2026-07-12T11:40:00.000Z' },
+        );
+        expect(successRes.status).to.equal(200);
+        expect(successRes.body.data.prerenderValidation.reason).to.equal(null);
+        expect(successRes.body.data.prerenderValidation.status).to.equal('completed_success');
+      });
+
+      it('user: returns 400 for invalid status', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(
+          `/sites/${SITE_1_ID}/opportunities/${testOpptyId}/prerender-validation`,
+          { status: 'bogus' },
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 400 for invalid startedAt', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(
+          `/sites/${SITE_1_ID}/opportunities/${testOpptyId}/prerender-validation`,
+          { status: 'in_progress', startedAt: 'not-a-date' },
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 403 for denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(
+          `/sites/${SITE_3_ID}/opportunities/${testOpptyId}/prerender-validation`,
+          { status: 'in_progress' },
+        );
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for non-existent opportunity', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(
+          `/sites/${SITE_1_ID}/opportunities/${NON_EXISTENT_OPPTY_ID}/prerender-validation`,
+          { status: 'in_progress' },
+        );
+        expect(res.status).to.equal(404);
+      });
+    });
+
     describe('DELETE /sites/:siteId/opportunities/:opportunityId', () => {
       let testOpptyId;
 

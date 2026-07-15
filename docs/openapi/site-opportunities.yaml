@@ -194,6 +194,120 @@ site-opportunity:
     security:
       - ims_key: [ ]
 
+site-opportunity-prerender-validation:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  patch:
+    operationId: updateSiteOpportunityPrerenderValidation
+    summary: |
+      Update the prerender-validation lifecycle state on a prerender opportunity
+    description: |
+      Server-side merge into the opportunity's `data.prerenderValidation` field only —
+      other `data` keys are left untouched. Intended for internal/S2S callers (e.g. the
+      tokowaka prerender-validation cron/on-demand runner), not general opportunity edits.
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/PrerenderValidationUpdate'
+    responses:
+      '200':
+        description: Opportunity updated with the new prerender-validation state
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Opportunity'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-prerender-validation-run:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  post:
+    operationId: runSiteOpportunityPrerenderValidation
+    summary: |
+      Trigger a new prerender-validation comparison run for the site
+    description: |
+      Forwards the request to the internal llmo-prerender-api service's
+      `POST /api/compare/run`, using the caller's own Authorization header — this
+      endpoint does not hold its own credential for the internal service. The
+      upstream response (status and body) is passed through as-is, including its
+      `202 { requestId }` on success and `409` rejections (e.g. already validated,
+      already in progress, last audit failed).
+    tags:
+      - opportunities
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/PrerenderValidationRun'
+    responses:
+      '202':
+        description: Comparison run started
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestId:
+                  type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: |
+          Run rejected — the opportunity is already completed_success, already
+          in_progress, or the last prerender audit did not succeed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                reason:
+                  type: string
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '502':
+        description: The internal prerender-validation service is unreachable
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                message:
+                  type: string
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-suggestions:
   parameters:
     - $ref: './parameters.yaml#/siteId'

@@ -489,6 +489,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId': 'opportunity:read',
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
+  'PATCH /sites/:siteId/opportunities/:opportunityId/prerender-validation': 'opportunity:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/prerender-validation/run': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
 
   // Suggestions
