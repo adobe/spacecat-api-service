@@ -75,6 +75,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} llmoController - The LLMO controller.
  * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
  * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
+ * @param {Object} llmoAkamaiController - The LLMO Akamai onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -108,6 +109,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -140,6 +142,7 @@ export default function getRouteHandlers(
   llmoController,
   llmoCloudflareController,
   llmoCloudFrontController,
+  llmoAkamaiController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -174,6 +177,7 @@ export default function getRouteHandlers(
   serenityController,
   elementsController,
   proxyController,
+  taskManagementController,
   redirectsController,
 ) {
   const staticRoutes = {};
@@ -191,6 +195,8 @@ export default function getRouteHandlers(
     'PUT /configurations/latest/queues': configurationController.updateQueues,
     'PATCH /configurations/latest/jobs/:jobType': configurationController.updateJob,
     'PATCH /configurations/latest/handlers/:handlerType': configurationController.updateHandler,
+    /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
+    'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': configurationController.replaceHandlerEnabledDisabled,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
@@ -246,6 +252,8 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
@@ -262,6 +270,14 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
+    'GET /organizations/:organizationId/task-management/connections': taskManagementController.listConnections,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId': taskManagementController.getConnection,
+    'GET /organizations/:organizationId/task-management/tickets': taskManagementController.listTickets,
+    'GET /organizations/:organizationId/suggestions/:suggestionId/ticket': taskManagementController.getTicketBySuggestion,
+    'GET /organizations/:organizationId/opportunities/:opportunityId/tickets': taskManagementController.listTicketsByOpportunity,
+    'POST /organizations/:organizationId/task-management/:provider/tickets': taskManagementController.createTicket,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/projects': taskManagementController.listProjects,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types': taskManagementController.listIssueTypes,
     'GET /projects': projectsController.getAll,
     'POST /projects': projectsController.createProject,
     'GET /projects/:projectId': projectsController.getByID,
@@ -476,6 +492,7 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-url/:url': scrapeJobController.getScrapeUrlByProcessingType,
 
     // Fixes
+    'GET /sites/:siteId/fixes': (c) => fixesController.getAllForSite(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
@@ -552,6 +569,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': llmoCloudflareController.addRoute,
+
+    // LLMO Akamai Onboarding Routes
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': llmoAkamaiController.getConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': llmoAkamaiController.listProperties,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': llmoAkamaiController.plan,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': llmoAkamaiController.deploy,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': llmoAkamaiController.activate,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': llmoAkamaiController.activationStatus,
 
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,

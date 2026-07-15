@@ -29,6 +29,7 @@ import {
   getIsSummitPlgEnabled,
   getCookieValue,
   filterSitesForProductCode,
+  getEntitledProductCodes,
   queueDetectCdnAudit,
   queueDeliveryConfigWriter,
   validateSiteForRedirects,
@@ -958,6 +959,53 @@ describe('utils', () => {
       const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', adminUtil);
 
       expect(result).to.have.lengthOf(2);
+    });
+  });
+
+  describe('getEntitledProductCodes (SITES-46454)', () => {
+    let sandbox3;
+    let perProductTiers;
+    let mockContext;
+    let mockOrg;
+
+    beforeEach(() => {
+      sandbox3 = sinon.createSandbox();
+      perProductTiers = {};
+      sandbox3.stub(TierClient, 'createForOrg').callsFake((_ctx, _org, code) => (
+        perProductTiers[code] ?? {
+          checkValidEntitlement: () => Promise.resolve({ entitlement: null }),
+        }
+      ));
+      mockContext = { log: { error: sinon.stub() } };
+      mockOrg = { getId: () => 'org-1' };
+    });
+
+    afterEach(() => {
+      sandbox3.restore();
+    });
+
+    function mockEntitled(code) {
+      perProductTiers[code] = {
+        checkValidEntitlement: () => Promise.resolve({ entitlement: { getId: () => `ent-${code}` } }),
+      };
+    }
+
+    it('returns only product codes the org has an entitlement for', async () => {
+      mockEntitled('ASO');
+      const result = await getEntitledProductCodes(mockContext, mockOrg);
+      expect(result).to.eql(['ASO']);
+    });
+
+    it('returns multiple codes when org is entitled to several products', async () => {
+      mockEntitled('ASO');
+      mockEntitled('LLMO');
+      const result = await getEntitledProductCodes(mockContext, mockOrg);
+      expect(result.sort()).to.eql(['ASO', 'LLMO'].sort());
+    });
+
+    it('returns empty array when the org has no entitlements at all', async () => {
+      const result = await getEntitledProductCodes(mockContext, mockOrg);
+      expect(result).to.eql([]);
     });
   });
 

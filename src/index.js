@@ -45,6 +45,7 @@ import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
+import TaskManagementController from './controllers/task-management.js';
 import OrganizationsController from './controllers/organizations.js';
 import ProjectsController from './controllers/project.js';
 import SitesController from './controllers/sites.js';
@@ -80,6 +81,7 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoCloudflareController from './controllers/llmo/llmo-cloudflare.js';
 import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
+import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
@@ -260,6 +262,7 @@ async function run(request, context) {
     const llmoController = LlmoController(context);
     const llmoCloudflareController = LlmoCloudflareController(context);
     const llmoCloudFrontController = LlmoCloudFrontController(context);
+    const llmoAkamaiController = LlmoAkamaiController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fanoutReportController = FanoutReportController(context);
@@ -293,6 +296,7 @@ async function run(request, context) {
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
+    const taskManagementController = TaskManagementController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -323,6 +327,7 @@ async function run(request, context) {
       llmoController,
       llmoCloudflareController,
       llmoCloudFrontController,
+      llmoAkamaiController,
       llmoMysticatController,
       llmoOpportunitiesController,
       userActivitiesController,
@@ -357,6 +362,7 @@ async function run(request, context) {
       serenityController,
       elementsController,
       proxyController,
+      taskManagementController,
       redirectsController,
     );
 
@@ -392,6 +398,9 @@ async function run(request, context) {
       }
       if (params.preflightId && !isValidUUID(params.preflightId)) {
         return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.connectionId && !isValidUUIDAnyVersion(params.connectionId)) {
+        return badRequest('Connection Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;

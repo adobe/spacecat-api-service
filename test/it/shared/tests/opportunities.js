@@ -18,6 +18,7 @@ import {
   NON_EXISTENT_SITE_ID,
   OPPTY_1_ID,
   OPPTY_2_ID,
+  OPPTY_4_ID,
   NON_EXISTENT_OPPTY_ID,
 } from '../seed-ids.js';
 
@@ -54,12 +55,13 @@ export default function opportunityTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities`);
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((oppty) => expectOpportunityDto(oppty));
 
         const ids = sortById(res.body).map((o) => o.id);
         expect(ids).to.include(OPPTY_1_ID);
         expect(ids).to.include(OPPTY_2_ID);
+        expect(ids).to.include(OPPTY_4_ID);
       });
 
       it('user: returns 403 for denied site', async () => {

@@ -47,7 +47,7 @@ function defaultDateRange() {
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} [params.startDate] - ISO date (YYYY-MM-DD). Defaults to 28 days ago.
  * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Defaults to today.
- * @param {string} [params.category] - Category label, pushed as the tag `category:<label>`.
+ * @param {string} [params.category] - Category label, pushed as the tag `category__<label>`.
  * @param {string} [params.projectId] - Semrush project id for region scoping (top-level).
  */
 export function buildCitedDomainsPayload({
@@ -63,11 +63,11 @@ export function buildCitedDomainsPayload({
     { op: 'gte', val: start, col: 'CBF_date__start' },
     { op: 'lte', val: end, col: 'CBF_date__end' },
   ];
-  // Category is a namespaced Semrush tag (`category:<label>`). Verified honored by this
+  // Category is a namespaced Semrush tag (`category__<label>`). Verified honored by this
   // element (unlike region/brand/content-type filters, which it ignores). The label is
-  // sent straight through, e.g. category=Firefly → tag `category:Firefly`.
+  // sent straight through, e.g. category=Firefly → tag `category__Firefly`.
   if (category) {
-    advancedFilters.push({ op: 'eq', val: `category:${category}`, col: 'CBF_tags' });
+    advancedFilters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
   }
 
   return {
