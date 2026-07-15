@@ -2890,8 +2890,8 @@ function SuggestionsController(ctx, sqs, env) {
 
     const body = isNonEmptyObject(context.data) ? context.data : {};
     const {
-      eventId, verdict, detailMarkdown, rejectionCategory,
-      stateTransition, previousFix, editedFix,
+      eventId, verdict, detailMarkdown, guidanceMarkdown, rejectionCategory,
+      stateTransition, previousFix, editedFix, feedbackSubjectId,
     } = body;
 
     // FR-09: event_id is MANDATORY and client-supplied (no server fallback).
@@ -2918,6 +2918,24 @@ function SuggestionsController(ctx, sqs, env) {
       }
       if (Buffer.byteLength(detailMarkdown, 'utf8') > 8192) {
         return createResponse({ message: 'detail_markdown exceeds the 8 KB limit' }, 413);
+      }
+    }
+    // guidance_markdown is the AI-generated issue context (title + description).
+    // Larger cap than detail_markdown (64 KB) because issue descriptions +
+    // implementation guidance run long.
+    if (guidanceMarkdown != null) {
+      if (typeof guidanceMarkdown !== 'string') {
+        return badRequest('guidance_markdown must be a string');
+      }
+      if (Buffer.byteLength(guidanceMarkdown, 'utf8') > 65536) {
+        return createResponse({ message: 'guidance_markdown exceeds the 64 KB limit' }, 413);
+      }
+    }
+    // feedback_subject_id is an opaque grouping id (e.g. a CWV issue id) — a short
+    // string, not free text. Bounded to guard against abuse.
+    if (feedbackSubjectId != null) {
+      if (typeof feedbackSubjectId !== 'string' || feedbackSubjectId.length > 200) {
+        return badRequest('feedback_subject_id must be a string of at most 200 characters');
       }
     }
 
@@ -2957,10 +2975,13 @@ function SuggestionsController(ctx, sqs, env) {
 
     const {
       detailMarkdown: cleanMarkdown,
+      guidanceMarkdown: cleanGuidance,
       previousFix: cleanPreviousFix,
       editedFix: cleanEditedFix,
       scrubHits,
-    } = redactFeedbackContent({ detailMarkdown, previousFix, editedFix });
+    } = redactFeedbackContent({
+      detailMarkdown, guidanceMarkdown, previousFix, editedFix,
+    });
 
     const scrubbed = Object.entries(scrubHits);
     if (scrubbed.length > 0) {
@@ -2977,6 +2998,8 @@ function SuggestionsController(ctx, sqs, env) {
       signal,
       reviewer_id: reviewerId,
       detail_markdown: cleanMarkdown ?? null,
+      guidance_markdown: cleanGuidance ?? null,
+      feedback_subject_id: feedbackSubjectId ?? null,
       previous_fix: cleanPreviousFix ?? null,
       edited_fix: cleanEditedFix ?? null,
       state_transition: hasText(stateTransition) ? stateTransition : null,

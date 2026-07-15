@@ -129,12 +129,16 @@ describe('feedback-redaction', () => {
     it('sanitises + scrubs markdown and scrubs both patches, aggregating hits', () => {
       const result = redactFeedbackContent({
         detailMarkdown: '<script>x</script> key AKIAABCDEFGHIJKLMNOP me@adobe.com',
+        guidanceMarkdown: '<style>y</style> issue at foo.corp.adobe.com',
         previousFix: { code: 'Bearer abcdefghijklmnop' },
         editedFix: { code: `ghp_${'z'.repeat(25)}` },
       });
       expect(result.detailMarkdown).to.not.contain('<script>');
       expect(result.detailMarkdown).to.contain('[[REDACTED:aws_access_key]]');
       expect(result.detailMarkdown).to.contain('[[REDACTED:adobe_email]]');
+      // guidance_markdown is sanitised + scrubbed the same way (defence in depth)
+      expect(result.guidanceMarkdown).to.not.contain('<style>');
+      expect(result.guidanceMarkdown).to.contain('[[REDACTED:adobe_internal_host]]');
       expect(result.previousFix.code).to.contain('[[REDACTED:bearer_token]]');
       expect(result.editedFix.code).to.contain('[[REDACTED:github_pat]]');
       expect(result.scrubHits.aws_access_key).to.be.greaterThan(0);
