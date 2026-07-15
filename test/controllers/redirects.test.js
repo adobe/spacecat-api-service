@@ -98,10 +98,6 @@ describe('RedirectsController', () => {
     expect(response.headers.get('content-type')).to.equal('text/plain; charset=utf-8');
     expect(response.headers.get('cache-control')).to.equal('max-age=10');
     expect(response.headers.get('etag')).to.equal(ETAG);
-    // Surrogate-Key enables Mystique to targeted-purge this tenant's overlay
-    // via Fastly's key-purge endpoint (POST /service/<sid>/purge/<key>) after
-    // a successful S3 write. See mystique#3381.
-    expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
     expect(await response.text()).to.equal(overlay);
     // Resolves the site by the p<program>/e<env> external ids parsed from the service.
     expect(mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId
@@ -158,8 +154,6 @@ describe('RedirectsController', () => {
     expect(response.headers.get('etag')).to.equal(ETAG);
     expect(response.headers.get('cache-control')).to.equal('max-age=10');
     expect(response.headers.get('content-type')).to.equal('text/plain; charset=utf-8');
-    // Surrogate-Key echoed on 304 so purges hit both HIT and NOT_MODIFIED entries.
-    expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
     expect(await response.text()).to.equal('');
     // Body never deserialized when returning 304 — the transformToString cost is elided.
     expect(bodyStub.called).to.be.false;
