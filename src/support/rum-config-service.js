@@ -10,13 +10,14 @@
  * governing permissions and limitations under the License.
  */
 
-import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import { resolveRumDomainKey } from '@adobe/spacecat-shared-rum-api-client';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-
-const RUM_CHECK_TIMEOUT_MS = 3000;
 
 /**
  * Checks whether the site has a RUM domain key and optionally persists the result.
+ *
+ * Candidate resolution and timeout logic live in the shared
+ * {@link resolveRumDomainKey} helper; this function owns only the save semantics.
  *
  * When called with the default { save: true }, this function applies the rumConfig
  * update and saves the site internally.
@@ -37,25 +38,11 @@ const RUM_CHECK_TIMEOUT_MS = 3000;
  * @returns {Promise<boolean>} true if a RUM domain key was found.
  */
 export async function updateRumConfig(site, context, { save = true } = {}) {
-  const { log } = context;
-  const domain = new URL(site.getBaseURL()).hostname;
-
   let hasDomainKey = false;
-  let timeoutId;
-
   try {
-    const rumApiClient = RUMAPIClient.createFrom(context);
-    await Promise.race([
-      rumApiClient.retrieveDomainkey(domain),
-      new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('RUM check timed out')), RUM_CHECK_TIMEOUT_MS);
-      }),
-    ]);
-    hasDomainKey = true;
+    ({ hasDomainKey } = await resolveRumDomainKey(site, context));
   } catch (e) {
-    log.warn(`[rum-config-service] RUM check failed for ${domain}: ${e.message}`);
-  } finally {
-    clearTimeout(timeoutId);
+    context.log.warn(`[rum-config-service] resolveRumDomainKey failed: ${e.message}`);
   }
 
   if (save) {

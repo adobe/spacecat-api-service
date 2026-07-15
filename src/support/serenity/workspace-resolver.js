@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -36,6 +38,16 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  */
 export const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — positive
 export const NEG_TTL_MS = 30 * 1000; // 30 seconds — negative
+// Brand-subworkspace positive TTL is deliberately short. A brand's mode can
+// flip at runtime (activate binds a sub-workspace; deactivate clears it), and
+// this cache is process-local: clearBrandWorkspaceCache() only evicts the
+// calling Lambda container, so every OTHER warm container keeps routing the
+// brand in its stale mode until its own entry expires. Bounding the positive
+// TTL to a few seconds caps that cross-instance staleness window — after a
+// flip, a sibling instance re-reads the pointer within ~BRAND_CACHE_TTL_MS
+// instead of up to CACHE_TTL_MS. The flips are rare and low-QPS, so the extra
+// Brand.findById reads are negligible.
+export const BRAND_CACHE_TTL_MS = 10 * 1000; // 10 seconds — positive (brand subworkspace)
 export const MAX_ENTRIES = 1024;
 
 const cache = new Map();
@@ -93,4 +105,97 @@ export async function resolveWorkspaceId(ctx, spaceCatId) {
   const ttl = workspaceId === null ? NEG_TTL_MS : CACHE_TTL_MS;
   cache.set(spaceCatId, { value: workspaceId, expiresAt: now + ttl });
   return workspaceId;
+}
+
+/**
+ * Brand-level cache, mirroring the org cache above. Keyed by brandId, it holds
+ * the brand's OWN subworkspace id (or null when no subworkspace is bound).
+ * The flat-mode parent is NOT cached here — it is resolved fresh via
+ * resolveWorkspaceId (itself cached), so a parent change can never go stale
+ * behind a brand entry.
+ *
+ * Positive entries use the short BRAND_CACHE_TTL_MS (not CACHE_TTL_MS) because
+ * a brand's mode can flip at runtime and this Map is process-local: an
+ * activate/deactivate on one container clears only that container's entry, so
+ * a sibling container can keep routing the brand in its stale mode until its
+ * own entry expires. The short TTL bounds that cross-instance staleness window.
+ *
+ * Exported for unit tests; production code should not call clearBrandWorkspaceCache.
+ */
+const brandCache = new Map();
+
+export function clearBrandWorkspaceCache() {
+  brandCache.clear();
+}
+
+function evictBrandIfNeeded() {
+  while (brandCache.size >= MAX_ENTRIES) {
+    const oldest = brandCache.keys().next().value;
+    /* c8 ignore start -- defensive: size>=MAX_ENTRIES implies a key exists */
+    if (oldest === undefined) {
+      break;
+    }
+    /* c8 ignore stop */
+    brandCache.delete(oldest);
+  }
+}
+
+async function resolveBrandSubworkspaceId(ctx, brandId) {
+  if (!hasText(brandId)) {
+    return null;
+  }
+  const now = Date.now();
+  const cached = brandCache.get(brandId);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  const Brand = ctx?.dataAccess?.Brand;
+  if (!Brand || typeof Brand.findById !== 'function') {
+    throw new Error('Brand data-access not available on context');
+  }
+
+  const brand = await Brand.findById(brandId);
+  const subworkspaceId = (brand && typeof brand.getSemrushSubWorkspaceId === 'function')
+    ? (brand.getSemrushSubWorkspaceId() ?? null)
+    : null;
+
+  brandCache.delete(brandId);
+  evictBrandIfNeeded();
+  const ttl = subworkspaceId === null ? NEG_TTL_MS : BRAND_CACHE_TTL_MS;
+  brandCache.set(brandId, { value: subworkspaceId, expiresAt: now + ttl });
+  return subworkspaceId;
+}
+
+/**
+ * Dual-mode resolution predicate (serenity design §3). Computes, in one place,
+ * which workspace a brand's serenity operations run against and which mode the
+ * handlers branch on:
+ *
+ *   { mode: 'subworkspace', workspaceId: <sub ws>,  parentWorkspaceId: <parent ws> }
+ *   { mode: 'flat',         workspaceId: <parent ws>, parentWorkspaceId: <parent ws> }
+ *
+ * `parentWorkspaceId` (the org's shared workspace) is always resolved and
+ * returned so callers that mint a sub-workspace on activate do not have to
+ * re-resolve it. In flat mode `workspaceId` IS the parent and may be null (org
+ * has no parent workspace yet); the controller maps that to 404, exactly as
+ * today.
+ *
+ * @param {object} ctx - Request context (uses ctx.dataAccess.Brand + .Organization).
+ * @param {string} spaceCatId - SpaceCat organization UUID (for the flat-mode parent).
+ * @param {string} brandId - Brand UUID.
+ * @returns {Promise<{mode: 'subworkspace'|'flat', workspaceId: string|null,
+ *   parentWorkspaceId: string|null}>}
+ */
+export async function resolveBrandWorkspace(ctx, spaceCatId, brandId) {
+  // Independent reads (brand subworkspace + org parent) — resolve concurrently
+  // so a cold cache costs one round-trip, not two, on this hot-path predicate.
+  const [subworkspaceId, parentWorkspaceId] = await Promise.all([
+    resolveBrandSubworkspaceId(ctx, brandId),
+    resolveWorkspaceId(ctx, spaceCatId),
+  ]);
+  if (hasText(subworkspaceId)) {
+    return { mode: 'subworkspace', workspaceId: subworkspaceId, parentWorkspaceId };
+  }
+  return { mode: 'flat', workspaceId: parentWorkspaceId, parentWorkspaceId };
 }

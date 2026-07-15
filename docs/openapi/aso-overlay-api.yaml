@@ -1,0 +1,155 @@
+get-aso-redirects:
+  get:
+    tags:
+      - aso-overlay
+    summary: Get the ASO dispatcher redirect overlay for a Cloud Manager service
+    description: |
+      Returns the plain-text redirect overlay (`config/<service>/redirects.txt`)
+      for the given Cloud Manager service, served from the per-environment ASO
+      overlay S3 bucket via the api-service execution role.
+
+      Authenticated with the `X-ASO-API-Key` header (the inbound key the AEM
+      dispatcher presents). Fronted by Fastly for edge caching; the dispatcher
+      polls this URL on its normal cycle. Each deployment serves its own env's
+      bucket (`spacecat-<env>-aso-overlays`), so no env path segment is needed.
+
+      Authorization is per request: the `service` is resolved to a provisioned,
+      ASO-entitled site (org entitlement + site enrollment) before the overlay
+      is served; any miss returns `404` so the endpoint cannot enumerate programs.
+
+      See ADR `aso-dispatcher-overlay` (Lite-E) in mysticat-architecture.
+    operationId: getAsoRedirects
+    parameters:
+      - name: service
+        in: path
+        required: true
+        description: Cloud Manager service identifier.
+        schema:
+          type: string
+          pattern: '^cm-p\d{1,10}-e\d{1,10}$'
+          example: cm-p154709-e1629980
+      - name: If-None-Match
+        in: header
+        required: false
+        description: |
+          RFC 7232 conditional GET. Send the `ETag` from a previous response
+          to receive `304 Not Modified` when the overlay has not changed.
+
+          Accepted forms:
+          - A single strong validator: `"d41d8cd98f00b204e9800998ecf8427e"`
+          - A comma-separated list of validators: `"a", "b", "c"`
+          - The wildcard `*` (matches any existing representation)
+          - The weak-prefix form under weak comparison: `W/"tag"` and
+            `"tag"` are treated as equal (§2.3.2)
+
+          The validator MUST be a properly quoted opaque-tag per §2.3;
+          shell-stripped or unquoted values are rejected and the response
+          falls back to `200`.
+        schema:
+          type: string
+          example: '"d41d8cd98f00b204e9800998ecf8427e"'
+    responses:
+      '200':
+        description: The redirect overlay file.
+        headers:
+          ETag:
+            description: |
+              Strong validator (S3-passthrough) for the overlay object.
+              Persist and echo back on subsequent polls via `If-None-Match`
+              to skip re-downloading unchanged content. Treat the value as
+              opaque — do not depend on it being an MD5, since multipart
+              uploads produce a different (still-strong) validator format.
+            schema:
+              type: string
+              example: '"d41d8cd98f00b204e9800998ecf8427e"'
+          Cache-Control:
+            description: Edge-cache directive aligned with the Fastly VCL TTL.
+            schema:
+              type: string
+              example: max-age=10
+        content:
+          text/plain:
+            schema:
+              type: string
+            example: |
+              example.com/old-widget https://www.example.com/products/widget-v2
+              blog.example.com/old-post https://blog.example.com/articles/new
+      '304':
+        description: |
+          The overlay has not changed since the client-supplied `If-None-Match`
+          validator. Response has no body (Content-Length: 0); the `ETag` and
+          `Cache-Control` headers are still emitted so the client can refresh
+          its cached copy metadata.
+
+          Contract with polling clients: on 304 the previously cached body MAY
+          be treated as fresh for the `Cache-Control: max-age` window without
+          re-validating. On any non-304 response the client MUST rebuild any
+          derived state (e.g. dispatcher SDBM maps) from the fresh body.
+
+          Authorization is still evaluated before this status is returned —
+          an unauthorized caller who happens to know a valid ETag for some
+          other tenant's overlay still receives `404`.
+        headers:
+          ETag:
+            description: |
+              The current validator (may be absent if the storage backend
+              did not surface one, but the 304 semantics still hold under
+              `If-None-Match: *`).
+            schema:
+              type: string
+              example: '"d41d8cd98f00b204e9800998ecf8427e"'
+          Cache-Control:
+            schema:
+              type: string
+              example: max-age=10
+          Content-Length:
+            description: Always `0` — RFC 7230 §3.3.3 forbids a body on 304.
+            schema:
+              type: integer
+              example: 0
+      '400':
+        description: Bad request. The service identifier does not match the Cloud Manager `cm-pXXX-eYYY` pattern.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+          Cache-Control:
+            description: |
+              Always `no-store` on negative responses so Fastly and any other
+              intermediary cannot pin a stale error. Without this, the Fastly
+              VCL default (`fetch/100-aso-overlay-ttl.vcl`) would apply
+              `ttl=10s` + `stale_while_revalidate=30s` + `stale_if_error=86400s`
+              uniformly, causing a customer-provisioning race where a
+              dispatcher poll made before the tenant lands keeps serving stale
+              errors for up to 24 h.
+            schema:
+              type: string
+              example: no-store
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: |
+          No redirect overlay found. Returned when the service identifier does
+          not resolve to a provisioned + ASO-entitled + enrolled site, or when
+          the overlay object is absent in S3. Deliberately indistinguishable
+          from an authorization failure to prevent tenant enumeration (Lite-E
+          property, see ADR `aso-dispatcher-overlay`).
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+          Cache-Control:
+            description: Always `no-store` — see note under 400.
+            schema:
+              type: string
+              example: no-store
+      '500':
+        description: Internal server error.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+          Cache-Control:
+            description: Always `no-store` — see note under 400.
+            schema:
+              type: string
+              example: no-store
+    security:
+      - aso_overlay_api_key: []

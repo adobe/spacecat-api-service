@@ -61,6 +61,17 @@ site:
       This endpoint is useful for updating a site.
       Only the fields as per the request body schema will be updated.
       At least one field to update must be provided in the request body.
+
+      Re-parenting a site is not allowed through this endpoint: changing
+      `organizationId` or `projectId` returns 403. Both reference org-scoped
+      records, so re-parenting must go through controlled flows (e.g.
+      `PATCH /projects/{projectId}`) to keep a site and its project in the same
+      organization.
+
+      Changing a site's `baseURL` is also rejected with 403 when the site backs a
+      Semrush-managed brand: that brand's tracked domain lives on its Semrush
+      projects/markets, which have no domain-update path, so the site URL is held
+      immutable to keep the two in sync.
     operationId: patchSite
     security:
       - admin_key: [ ]
@@ -77,6 +88,19 @@ site:
           application/json:
             schema:
               $ref: './schemas.yaml#/Site'
+      '403':
+        description: >-
+          Attempted to change a field that is not allowed via this endpoint
+          (organizationId or projectId), or to change the baseURL of a site
+          attached to a Semrush-managed brand.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Updating the URL of a site attached to a Semrush-managed brand is not allowed"
       '400':
         $ref: './responses.yaml#/400-no-site-id-request-body-no-updates'
       '401':
@@ -1175,3 +1199,44 @@ site-graph:
     security:
       - ims_key: [ ]
       - scoped_api_key: [ ]
+site-identity:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+    summary: Retrieve the minimal routing identity for a single site
+    description: |
+      Returns only the routing identity for a site - its id, owning organization ids
+      (internal `organizationId` and Adobe `imsOrgId`), `baseURL`, and `deliveryType`.
+      No site config, LLMO data, or audits.
+
+      This is a readAll-class route gated on the `site:readAll` capability (the same as
+      the bulk `GET /sites`), not `site:read`. It lets a platform S2S consumer that holds
+      only a site UUID resolve the site's `imsOrgId` and mint a customer-scoped token -
+      the `site -> organization` join it cannot perform without already being scoped.
+
+      `imsOrgId` (and `organizationId`) may be `null` when the site has no resolvable
+      owning organization; the response is still `200`.
+
+      Required capabilities: admin access (legacy admin path) or S2S `site:readAll`.
+    operationId: getSiteIdentity
+    responses:
+      '200':
+        description: Successful operation with the site identity returned
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteIdentity'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

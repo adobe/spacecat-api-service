@@ -50,6 +50,7 @@ export function resolveVisibilityMarketFromSearchParams(sp) {
 
 const ENGINE_QUERY_MAP = {
   chatgpt: 'chatgpt',
+  chat_gpt: 'chatgpt',
   gemini: 'gemini',
   aimode: 'googleAiMode',
   overview: 'googleAiOverview',
@@ -60,9 +61,12 @@ const ENGINE_QUERY_MAP = {
 };
 
 export function normalizeEngineFromQuery(engine) {
-  if (engine == null || engine === '' || engine === 'all') { return null; }
+  if (engine == null || engine === '') { return null; }
   const t = engine.trim();
   const e = t.toLowerCase();
+  // Drop aggregate / non-engine tokens: `all` (query) and `unspecified` (the
+  // SR `stats-by-llm` cross-engine total row's `llm` enum) are not selectable models.
+  if (e === 'all' || e === 'unspecified') { return null; }
   return ENGINE_QUERY_MAP[e] ?? t;
 }
 

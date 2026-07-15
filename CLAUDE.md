@@ -17,6 +17,7 @@ npm run test-postdeploy    # Run post-deployment tests
 npm run test-e2e           # Run end-to-end tests (30s timeout)
 npm run lint               # Run ESLint
 npm run lint:fix           # Auto-fix linting issues
+npm run type-check         # Opt-in tsc --checkJs over // @ts-check files (serenity); blocking gate
 ```
 
 ### Single Test Execution
@@ -32,6 +33,11 @@ npx mocha --require test/it/postgres/harness.js --timeout 30000 'test/it/postgre
 
 # Single IT test file
 npx mocha --require test/it/postgres/harness.js --timeout 30000 test/it/postgres/sites.test.js
+
+# Mock-backed suites (e.g. serenity, which drives the Semrush vendor mock
+# containers over real HTTPS — not in-process stubs, no live Semrush) are slower
+# than the pure-DB suites — run them with --timeout 60000:
+npx mocha --require test/it/postgres/harness.js --timeout 60000 test/it/postgres/serenity.test.js
 ```
 
 ### Documentation
@@ -197,6 +203,46 @@ const hasAccess = await accessControlUtil.hasAccess(
   'llmo_optimizer' // productCode
 );
 ```
+
+**S2S consumer capability pattern** — use this instead of a bare `hasAdminAccess()` when a route is already mapped in `required-capabilities.js` and should be reachable by S2S consumers:
+
+```javascript
+import { CAP_CONFIGURATION_WRITE } from '../routes/capability-constants.js';
+
+// Dual-layer check: admin bypass first, then fresh DB fetch for S2S consumers.
+// Returns a forbidden Response when denied, null when access is granted.
+const authorizeWrite = async (context, route) => {
+  const requestId = context?.invocation?.id || 'unknown';
+  const isAdmin = accessControlUtil.hasAdminAccess();
+  const s2sResult = isAdmin
+    ? { allowed: false, reason: 'admin-bypass' }
+    : await accessControlUtil.hasS2SCapability(CAP_CONFIGURATION_WRITE);
+  if (!isAdmin && !s2sResult.allowed) {
+    log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+    return forbidden('Forbidden');
+  }
+  if (s2sResult.allowed) {
+    log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_CONFIGURATION_WRITE} requestId=${requestId}`);
+  }
+  return null;
+};
+
+// In the handler:
+const denied = await authorizeWrite(context, 'PATCH /configurations/latest');
+if (denied) {
+  return denied;
+}
+```
+
+Capability constants live in `src/routes/capability-constants.js`. Both the route map (`required-capabilities.js`) and the controller must reference the **same constant** — the `capability-constants drift coverage` test enforces this. See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the full two-layer design.
+
+**FACS-native authorization (state-layer endpoints — exception to the above):** The `/state/access-mappings`, `/product/capabilities`, `/user/capabilities`, and `/organizations/:id/permission/audit-logs` endpoints (`src/controllers/state-access-mappings.js`) do **not** use `AccessControlUtil`. They implement the hybrid MAC/FACS permission model directly: authorization is evaluated from the JWT's `facs_permissions` (read via `authInfo.getFacsPermissions()`) **unioned** with state-layer `granted_capabilities` rows in `facs_access_mappings`. A caller is an org-wide FACS manager if the JWT carries `<product>/can_manage_users`; otherwise they are a resource-scoped state-layer manager whose authority is the set of resources where they hold a state `can_manage_users` binding (`resolveManageAuthority`). This is deliberate — these endpoints govern the ReBAC bindings themselves, so they predate/sit beneath the entitlement model `AccessControlUtil` checks. `facsWrapper` (from `@adobe/spacecat-shared-http-utils`) is attached as the innermost wrapper in `src/index.js` and fronts these routes using the `routeFacsCapabilities` map in `src/routes/facs-capabilities.js` (per-product LaunchDarkly flag-gated, default-off in prod, so non-enrolled orgs bypass). The state-layer management endpoints additionally remain restricted to `AWS_ENV === 'dev'` (a `devOnly` blocker in the controller; handlers 404 elsewhere) until they graduate to production — the controller's own `can_manage_users` / `can_view` gating is the permanent authorization layer beneath the wrapper.
+
+**Classifying route params when adding ANY endpoint (required):** Every dynamic `:param` in `src/routes/index.js` must be classified in `src/routes/facs-capabilities.js` so `facsWrapper` can resolve (or correctly ignore) the ReBAC resource for a route. The `routeFacsCapabilities` test suite (`test/routes/facs-capabilities.test.js`) **fails the build** if a param is unclassified, claimed by two buckets, or stale. When you add a route:
+
+- **Param identifies an existing ReBAC entity** (a brand or a site) → reuse the existing alias in `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` (`LLMO.brand → ['brandId']`, `ASO.site → ['siteId']`). Do **not** invent a new alias key for the same entity — add the param name to the existing entity's array.
+- **Param is anything else** (a new entity not yet under ReBAC, a sub-resource id, a filter/format/pagination value, an org/project id) → add the identifier to `FACS_NON_RESOURCE_PARAMS`. **New entities default here:** a brand-new entity's identifier goes into `FACS_NON_RESOURCE_PARAMS` until ReBAC is actually implemented for it — only then does it graduate to a product's `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` entry.
+- A param must never appear in both maps (the disjointness test enforces this).
 
 **Authentication precedence** (checked in order):
 1. JWT with scopes
@@ -510,6 +556,7 @@ return internalServerError('Internal error occurred');
 2. Add/update schemas in `docs/openapi/schemas.yaml`
 3. Run `npm run docs:lint` to validate
 4. Add route to `src/routes/index.js`
+   - If the route has a dynamic `:param`, classify it in `src/routes/facs-capabilities.js`: reuse an existing entry in `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` for an existing ReBAC entity (brand/site), or add the identifier to `FACS_NON_RESOURCE_PARAMS` otherwise (new entities default here until ReBAC exists for them). The `routeFacsCapabilities` test fails the build if a param is left unclassified — see the FACS-native authorization note under Access Control.
 5. Add route handler invocation in `src/index.js` (if new pattern)
 6. Implement controller method
 7. Add DTO if needed

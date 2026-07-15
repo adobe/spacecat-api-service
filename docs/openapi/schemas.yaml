@@ -159,6 +159,7 @@ AuditType:
     - 'related-urls'
     - 'summarization'
     - 'faqs'
+    - 'money-pages'
   example: 'cwv'
 URL:
   type: string
@@ -704,6 +705,38 @@ Site:
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
+SiteIdentity:
+  type: object
+  description: |
+    The minimal routing identity for a single site, returned by
+    `GET /sites/{siteId}/identity`. Exposes only what a platform `site:readAll` consumer
+    needs to resolve a site's owning organization and mint a customer-scoped token.
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    organizationId:
+      description: The ID of the organization this site belongs to, or null if unresolved
+      oneOf:
+        - $ref: '#/Id'
+        - type: 'null'
+    imsOrgId:
+      description: The Adobe IMS organization ID of the owning organization, or null if unresolved
+      oneOf:
+        - $ref: '#/ImsOrganizationId'
+        - type: 'null'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
+  example:
+    siteId: '7511d4b9-1234-4abc-8def-0123456789ab'
+    organizationId: '160da889-5678-4cde-9f01-23456789abcd'
+    imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg'
+    baseURL: 'https://example.com'
+    deliveryType: 'aem_edge'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
@@ -797,6 +830,49 @@ SitePagedResponse:
         $ref: './schemas.yaml#/SiteListItem'
     pagination:
       $ref: './schemas.yaml#/PaginationMetadata'
+  required:
+    - sites
+    - pagination
+SiteSearchResponse:
+  type: object
+  description: |
+    Response for the `baseUrlContains` substring search on `GET /sites`. Unlike
+    `SitePagedResponse`, this path is not cursor-iterable: `pagination` carries no
+    `cursor`, paginates by `offset`, and echoes the trimmed `baseUrlContains` query so a
+    client can confirm the search was actually applied (an older deployment that ignores
+    `baseUrlContains` but honors `limit` would return `SitePagedResponse` with no echo).
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/SiteListItem'
+    pagination:
+      type: object
+      properties:
+        limit:
+          description: The maximum number of items returned (default 50, clamped to 500)
+          type: integer
+          example: 50
+        offset:
+          description: The zero-based offset into the search results for this page (default 0)
+          type: integer
+          example: 0
+        hasMore:
+          description: Indicates whether more matching sites exist beyond this result
+          type: boolean
+          example: false
+        baseUrlContains:
+          description: |
+            The trimmed `baseUrlContains` query that was applied (3-256 chars). Echoed so
+            clients can confirm the search ran; absent on deployments that ignore the
+            param.
+          type: string
+          example: "adobe"
+      required:
+        - limit
+        - offset
+        - hasMore
+        - baseUrlContains
   required:
     - sites
     - pagination
@@ -1078,6 +1154,17 @@ AuditResult:
           type: string
         finalUrl:
           description: The final URL for the audited page.
+          type: string
+    - type: object
+      description: |
+        The result of money-pages audit.
+      properties:
+        siteUrl:
+          description: The resolved site URL the money-pages audit was run against.
+          type: string
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
     - type: array
       description: Information about the provided URLs in the Google index.
@@ -3765,13 +3852,66 @@ Brand:
       description: The name of the brand
       type: string
     baseSiteId:
-      description: UUID of the brand's primary site. Immutable once set. Unique per organization.
-      type: string
+      description: >-
+        UUID of the brand's primary site. Unique per organization. Immutable once
+        set on an active brand. On a pending brand it may be re-pointed to a
+        different site or cleared (send null) to free the site for reuse by
+        another brand.
+      type: [string, 'null']
       format: uuid
     baseUrl:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
       type: string
       readOnly: true
+    semrushWorkspaceId:
+      description: >-
+        Read-only. DEPRECATED — kept for backward compatibility only, mirrored
+        from semrushSubWorkspaceId (below). Prefer semrushSubWorkspaceId; this
+        field will be removed once every direct consumer has migrated.
+      type: [string, 'null']
+      readOnly: true
+      deprecated: true
+    semrushSubWorkspaceId:
+      description: >-
+        Read-only. The brand's own Semrush sub-workspace id (dual-mode) — the
+        canonical, correctly-named field. Null for brands still in flat mode
+        (no sub-workspace minted yet). Used to scope per-brand Semrush views
+        to the sub-workspace.
+      type: [string, 'null']
+      readOnly: true
+    pendingSemrushProvisioning:
+      description: >-
+        Read-only. Deferred Semrush provisioning data for a pending (draft)
+        brand: the primary URL + initial market chosen at "Save as pending"
+        before the brand's sub-workspace + project exist. Fed into activation;
+        each market that provisions is removed and the field is nulled once none
+        remain (failed markets stay for retry). Null for a non-pending brand (or
+        a draft with no provisioning data yet). primaryUrl may be null (saved as
+        pending before a URL was entered).
+      type: [object, 'null']
+      readOnly: true
+      properties:
+        primaryUrl:
+          type: [string, 'null']
+        markets:
+          type: array
+          items:
+            type: object
+            required:
+              - market
+              - languageCode
+            properties:
+              market:
+                type: string
+              languageCode:
+                type: string
+              modelIds:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  AI model (LLM) ids to attach to this market's project at
+                  activation. Optional; omitted when none were chosen.
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
@@ -4011,6 +4151,20 @@ Fix:
       format: date-time
     executedBy:
       type: string
+      description: IMS user ID of the caller who executed the fix. Server-derived; not client-settable.
+      readOnly: true
+    executedByUser:
+      type: object
+      description: Resolved IMS profile for the user who executed the fix. Present on getAllForOpportunity and getByID when the executor identity was successfully resolved. Omitted from getByStatus.
+      readOnly: true
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
     executedAt:
       type: string
       format: date-time
@@ -4154,9 +4308,6 @@ FixUpdate:
       description: Optional array of suggestion IDs to associate with this fix. Replaces existing associations.
       items:
         $ref: '#/Id'
-    executedBy:
-      type: string
-      description: Email or identifier of who executed the fix
     executedAt:
       $ref: '#/DateTime'
       description: ISO timestamp when the fix was executed
@@ -4453,6 +4604,62 @@ PredominantTrafficResult:
           minimum: 0
           maximum: 100
           example: 4.2
+
+LlmoOnboardSiteRequest:
+  type: object
+  required:
+    - domain
+    - brandName
+  properties:
+    domain:
+      type: string
+      format: hostname
+      description: The domain name to onboard (without protocol).
+      example: "example.com"
+    brandName:
+      type: string
+      description: |
+        The brand label for the site's LLMO config (set via
+        `siteConfig.updateLlmoBrand`). This is NOT a brand entity.
+      example: "Example Brand"
+    deliveryType:
+      type: string
+      description: Optional delivery type forwarded to site creation.
+      example: "aem_edge"
+
+LlmoOnboardSiteResponse:
+  type: object
+  required:
+    - siteId
+    - organizationId
+    - baseURL
+    - dataFolder
+    - status
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: The created or existing site ID.
+      example: "987fcdeb-51a2-43d1-9f12-345678901234"
+    organizationId:
+      type: string
+      format: uuid
+      description: The organization ID.
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    baseURL:
+      type: string
+      format: uri
+      description: The normalized base URL of the onboarded site.
+      example: "https://example.com"
+    dataFolder:
+      type: string
+      description: The LLMO data folder for the site.
+      example: "example-com"
+    status:
+      type: string
+      enum: ["processing"]
+      description: Always `processing` — triggered audits run asynchronously.
+      example: "processing"
 
 LlmoQuestion:
   type: object
@@ -5063,7 +5270,29 @@ LlmoConfig:
           description: A record of ignored prompts keyed by UUID
           additionalProperties:
             $ref: '#/LlmoIgnoredPrompt'
+    claims:
+      $ref: '#/LlmoClaimsGuidance'
   additionalProperties: true
+
+LlmoClaimsGuidance:
+  type: object
+  description: |
+    Optional customer guidance for brand claims extraction and sentiment classification.
+    Each field is limited to 4000 characters to keep downstream LLM prompts bounded.
+    Guidance text is stored for processing but is never written to application logs.
+  properties:
+    brandContext:
+      type: string
+      maxLength: 4000
+      description: Customer-provided brand context used as background guidance for claims extraction.
+      example: "Treat Firefly as part of the Adobe product family."
+    sentimentGuidance:
+      type: string
+      maxLength: 4000
+      description: Customer-provided guidance for interpreting claim sentiment.
+      example: "Claims about setup friction should be classified as unfavorable."
+  # Keep claims guidance closed because these free-text fields are passed to downstream LLM prompts.
+  additionalProperties: false
 
 LlmoDeletedPrompt:
   type: object
@@ -5562,6 +5791,63 @@ SiteEnrollment:
     createdAt: "2024-01-15T10:30:00Z"
     updatedAt: "2024-01-15T10:30:00Z"
     updatedBy: "system"
+
+EnsureSiteEntitlementRequest:
+  type: object
+  description: |
+    Request body for ensuring entitlement and site enrollment for a site.
+    `productCode` is required; `tier` defaults to FREE_TRIAL when omitted.
+  properties:
+    productCode:
+      description: The product code to ensure entitlement for
+      type: string
+      enum: [LLMO, ASO, ACO]
+    tier:
+      description: |
+        The entitlement tier. When the organization already has an entitlement
+        for the product at a non-PAID tier, the tier is upgraded to this value.
+        Defaults to FREE_TRIAL when omitted.
+      type: string
+      enum: [FREE_TRIAL, PAID]
+      default: FREE_TRIAL
+  required:
+    - productCode
+  example:
+    productCode: "ASO"
+    tier: "FREE_TRIAL"
+
+EnsureSiteEntitlementResponse:
+  type: object
+  description: |
+    Result of an ensure-entitlement-for-site call. Contains the organization-
+    level entitlement (created or pre-existing) and the site enrollment that
+    links the site to it.
+  properties:
+    entitlement:
+      $ref: '#/Entitlement'
+    siteEnrollment:
+      $ref: '#/SiteEnrollment'
+  required:
+    - entitlement
+    - siteEnrollment
+  example:
+    entitlement:
+      id: "123e4567-e89b-12d3-a456-426614174000"
+      organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+      productCode: "ASO"
+      tier: "FREE_TRIAL"
+      quotas:
+        llmo_trial_prompts: 200
+      createdAt: "2024-01-15T10:30:00Z"
+      updatedAt: "2024-01-15T10:30:00Z"
+      updatedBy: "system"
+    siteEnrollment:
+      id: "abc12345-e89b-12d3-a456-426614174000"
+      siteId: "def67890-cca4-48d6-a086-aa1e0d86ec10"
+      entitlementId: "123e4567-e89b-12d3-a456-426614174000"
+      createdAt: "2024-01-15T10:30:00Z"
+      updatedAt: "2024-01-15T10:30:00Z"
+      updatedBy: "system"
 
 TrialUser:
   type: object
@@ -6246,7 +6532,8 @@ V2Prompt:
       description: Regions where this prompt is applicable
     categoryId:
       type: string
-      description: Category business key
+      format: uuid
+      description: Category UUID (categories.id)
     topicId:
       type: string
       description: Topic business key
@@ -6263,6 +6550,21 @@ V2Prompt:
       description: The source system or process that created the prompt
       example: "config"
       default: "config"
+    intent:
+      type: [string, 'null']
+      description: >-
+        Canonical search-intent bucket persisted for the prompt, or null when
+        unknown/unclassified. One of the canonical buckets (mirrors DRS prompt
+        generation).
+      enum:
+        - informational
+        - instructional
+        - comparative
+        - transactional
+        - planning
+        - delegation
+        - null
+      example: informational
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
@@ -6278,14 +6580,17 @@ V2Prompt:
       properties:
         id:
           type: string
+          format: uuid
           description: |
-            Currently the UUID PK (categories.id) for backward compat —
-            aligning this to the category_id business key is a deferred
-            breaking change. Use `uuid` for FK linkage today.
+            UUID primary key (categories.id). The sole category identifier
+            (the legacy category_id business key was retired — LLMO-5515).
+            `id` and `uuid` carry the same value; either works for FK linkage.
         uuid:
           type: string
           format: uuid
-          description: UUID primary key (categories.id)
+          description: |
+            UUID primary key (categories.id). Alias of `id`, kept for
+            backward compatibility.
         name:
           type: string
         origin:
@@ -6342,6 +6647,21 @@ V2PromptInput:
       type: string
       description: The source system or process that created the prompt
       default: "config"
+    intent:
+      type: string
+      description: >-
+        Optional search-intent bucket for the prompt. Normalized on write:
+        the value is lowercased, legacy aliases are remapped
+        (`statistical`/`navigational` -> `informational`,
+        `commercial` -> `transactional`), and the result is validated against
+        the canonical buckets. An absent, empty, or (post-remap) invalid
+        value is stored as null (NULL) — it is NOT coerced to a default
+        bucket. Canonical buckets (mirror DRS prompt generation):
+        `informational`, `instructional`, `comparative`, `transactional`,
+        `planning`, `delegation`. No `enum` constraint is applied to the
+        input: legacy aliases (`statistical`, `navigational`, `commercial`)
+        are accepted and normalized on write.
+      example: informational
 
 V2PromptBulkDeleteRequest:
   type: object
@@ -6621,6 +6941,20 @@ CustomerConfigBrand:
       type: string
       description: Detailed description of the brand
       example: "Adobe's flagship image editing software"
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Blank values clear the stored value.
+      example: "Adobe Photoshop is Adobe's image editing product for creative professionals."
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Blank values clear the stored value.
+      example: "Treat comparisons about subscription cost as neutral unless the answer explicitly recommends against the brand."
     updatedAt:
       $ref: '#/DateTime'
       description: When the brand was last updated
@@ -7234,12 +7568,85 @@ V2BrandCompetitor:
         - 'null'
       description: Competitor URL
       example: 'https://www.acme.com'
+    aliases:
+      type: array
+      items:
+        type: string
+      description: >-
+        Alternate names the competitor is known by. Propagated to the competitor's
+        Semrush benchmark `brand_aliases` for sub-workspace brands.
+      example: ['Acme', 'Acme Corporation']
     regions:
       type: array
       items:
         type: string
       description: ISO-3166 country codes
       example: ['US']
+
+V2SemrushRejectedAlias:
+  type: object
+  description: >-
+    A set of aliases Semrush refused on one market/project's benchmark during a
+    brand-edit re-sync (the aliases were written but are not being tracked).
+  properties:
+    projectId:
+      type: string
+      description: Semrush project (market) id the rejection occurred on.
+    market:
+      type: string
+      description: ISO-3166 country code of that market.
+      example: 'us'
+    domain:
+      type: [string, 'null']
+      description: Benchmark domain the aliases were attached to (null when absent).
+      example: 'www.example.com'
+    aliases:
+      type: array
+      items:
+        type: string
+      description: The alias names Semrush rejected.
+      example: ['Bogus Name']
+
+V2PendingSemrushProvisioning:
+  type: [object, 'null']
+  description: >-
+    Deferred Semrush provisioning data for a pending (draft) brand: the primary
+    URL + initial markets (each with its chosen AI models/LLMs) collected at
+    "Save as pending" before the brand's sub-workspace + project exist, plus
+    whether activation should generate topics/prompts. Activation provisions each
+    market and removes it from the blob, nulling the field once none remain
+    (failed markets stay for retry). markets may be empty: with a primaryUrl a
+    single US/EN fallback project is provisioned; with neither a primaryUrl nor a
+    market a sub-workspace-only brand is provisioned. On a brand response this is
+    read-only and null for a non-pending brand. On a PATCH it is honored only
+    while the brand is (and stays) pending — the draft Markets tab appends a
+    market / edits a market's LLMs — and ignored otherwise.
+  properties:
+    primaryUrl:
+      type: [string, 'null']
+    generatePrompts:
+      type: boolean
+      description: >-
+        Whether activation generates topics/prompts for the provisioned
+        project(s). Defaults to false (project created empty). Requires a
+        primaryUrl (and thus a project) when true.
+    markets:
+      type: array
+      items:
+        type: object
+        required:
+          - market
+          - languageCode
+        properties:
+          market:
+            type: string
+          languageCode:
+            type: string
+          modelIds:
+            type: array
+            items:
+              type: string
+            description: AI model (LLM) ids to attach to this market at activation.
 
 V2Brand:
   type: object
@@ -7267,6 +7674,18 @@ V2Brand:
         - string
         - 'null'
       description: Brand description
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Blank values clear the stored value.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Blank values clear the stored value.
     vertical:
       type:
         - string
@@ -7304,6 +7723,13 @@ V2Brand:
         type: string
         format: uuid
       description: IDs of sites linked to this brand (read-only, derived from brand_sites)
+    pendingSemrushProvisioning:
+      allOf:
+        - $ref: '#/V2PendingSemrushProvisioning'
+      readOnly: true
+      description: >-
+        Read-only deferred Semrush provisioning data for a pending (draft)
+        brand. Null for a non-pending brand. See V2PendingSemrushProvisioning.
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
@@ -7330,6 +7756,8 @@ V2Brand:
     status: 'active'
     origin: 'human'
     description: 'An example brand'
+    brandContext: "Example Brand is a B2B analytics platform."
+    mentionSentimentGuidance: "Treat factual pricing mentions as neutral unless the response recommends against the brand."
     vertical: 'technology'
     region: ['US', 'DE']
     urls:
@@ -7353,6 +7781,25 @@ V2Brand:
     updatedAt: '2026-03-15T10:30:00Z'
     updatedBy: 'user@adobe.com'
 
+V2BrandUpdateResponse:
+  description: >-
+    A brand (as returned by GET) plus, when the edit re-synced aliases/competitors
+    to a sub-workspace brand's Semrush markets and Semrush refused some aliases,
+    the `semrushRejectedAliases` set. The field is omitted when nothing was
+    rejected (or the brand is flat-mode).
+  allOf:
+    - $ref: '#/V2Brand'
+    - type: object
+      properties:
+        semrushRejectedAliases:
+          type: array
+          description: >-
+            Per-market alias rejections from the Semrush re-sync (own-brand and
+            competitor benchmarks). Present only when at least one alias was
+            rejected.
+          items:
+            $ref: '#/V2SemrushRejectedAlias'
+
 V2BrandInput:
   type: object
   description: Request body for creating a brand. Upserts on conflict (organization_id, name).
@@ -7372,6 +7819,18 @@ V2BrandInput:
       default: human
     description:
       type: string
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Omit to preserve, blank or null to clear.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Omit to preserve, blank or null to clear.
     vertical:
       type: string
     region:
@@ -7413,6 +7872,18 @@ V2BrandUpdateInput:
       enum: [human, ai]
     description:
       type: string
+    brandContext:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional claims extraction context for this brand. Omit to preserve, blank or null to clear.
+    mentionSentimentGuidance:
+      type:
+        - string
+        - 'null'
+      maxLength: 4000
+      description: Optional guidance for classifying brand mention sentiment. Omit to preserve, blank or null to clear.
     vertical:
       type: string
     region:
@@ -7439,6 +7910,13 @@ V2BrandUpdateInput:
       type: array
       items:
         $ref: '#/V2BrandCompetitor'
+    pendingSemrushProvisioning:
+      allOf:
+        - $ref: '#/V2PendingSemrushProvisioning'
+      description: >-
+        Deferred Semrush provisioning data. Honored only while the brand is (and
+        stays) pending — the draft Markets tab appends a market / edits a
+        market's LLMs; silently ignored on a non-pending brand.
 
 V2BrandListResponse:
   type: object
@@ -7450,6 +7928,64 @@ V2BrandListResponse:
       type: array
       items:
         $ref: '#/V2Brand'
+
+V2BrandActivateInput:
+  type: object
+  description: |
+    Request body for activating a brand. Promotes an existing pending brand to
+    active (sets baseSiteId from the brand's onboarded primary site and flips
+    status to active), optionally generates AI prompts, and ensures a
+    brand-presence schedule.
+  required:
+    - generatePrompts
+  properties:
+    generatePrompts:
+      type: boolean
+      description: |
+        When `true`, asynchronous AI prompt generation is triggered for the
+        brand and the response includes a `promptGenerationJobId`.
+  example:
+    generatePrompts: true
+
+V2BrandActivateResponse:
+  type: object
+  description: |
+    Result of activating a brand: the brand is now active with its base site
+    resolved. Includes a `promptGenerationJobId` when prompt generation was
+    triggered and a `scheduleId` when a brand-presence schedule was ensured.
+  required:
+    - brandId
+    - status
+    - baseSiteId
+  properties:
+    brandId:
+      type: string
+      format: uuid
+      description: Brand UUID
+    status:
+      type: string
+      enum: [active]
+      description: Brand status after activation (always `active`)
+    baseSiteId:
+      type: string
+      format: uuid
+      description: ID of the brand's onboarded primary site, now set as its base site
+    promptGenerationJobId:
+      type: string
+      description: |
+        Identifier of the asynchronous AI prompt-generation job. Present only
+        when `generatePrompts` was `true`.
+    scheduleId:
+      type: string
+      description: |
+        Identifier of the brand-presence schedule that was created or ensured.
+        Present only when a schedule was created or already existed.
+  example:
+    brandId: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    status: 'active'
+    baseSiteId: 'b2c3d4e5-6789-01ab-cdef-2345678901ab'
+    promptGenerationJobId: 'c3d4e5f6-7890-12ab-cdef-3456789012ab'
+    scheduleId: 'd4e5f6a7-8901-23ab-cdef-4567890123ab'
 
 V2Category:
   type: object
@@ -7463,12 +7999,16 @@ V2Category:
   properties:
     id:
       type: string
-      description: Category business key (category_id slug). Stable once assigned.
-      example: 'baseurl-discovery-research'
+      format: uuid
+      description: |
+        UUID primary key (categories.id) — the sole category identifier.
+        Use this value on the CRUD path params and the `?categoryId=` prompt
+        filter. The legacy category_id business key was retired (LLMO-5515).
+      example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
     uuid:
       type: string
       format: uuid
-      description: UUID primary key (categories.id)
+      description: UUID primary key (categories.id). Alias of `id`.
     name:
       type: string
       description: |
@@ -7511,12 +8051,6 @@ V2CategoryInput:
   required:
     - name
   properties:
-    id:
-      type: string
-      description: |
-        Client-supplied slug. Used only when inserting a brand-new row; for
-        existing rows the stored `id` is preserved (FK stability).
-      example: 'discovery-research'
     name:
       type: string
       description: Human-readable category name. Canonicalized on write.
@@ -8587,6 +9121,14 @@ UrlInspectorStats:
 UrlInspectorOwnedUrlRow:
   type: object
   properties:
+    urlId:
+      type: string
+      description: >-
+        Real source_urls.id for this URL, used by the URL Details "Prompt
+        Analysis" drilldown to key rpc_url_inspector_url_prompts on a genuine
+        uuid (LLMO-5992). Empty string when an older RPC build has not yet
+        shipped the column.
+      example: '44444444-4444-4444-4444-444444444444'
     url:
       type: string
       format: uri
@@ -9399,6 +9941,19 @@ AiVisibilitySemrushCountry:
     - VN
     - WORLDWIDE
 
+AiVisibilitySemrushDate:
+  type: object
+  description: Date message from ai-seo-ts common/types_pb
+  properties:
+    day:
+      type: integer
+    month:
+      type: integer
+    year:
+      type: integer
+  required: [day, month, year]
+  additionalProperties: true
+
 AiVisibilitySemrushTopicIntent:
   type: string
   description: TOPIC_INTENT from ai-seo-ts common/types_pb
@@ -9459,6 +10014,102 @@ AiVisibilitySemrushTopicIntentEntry:
     weight:
       type: integer
       description: Intent weight within the distribution (0–100 scale per Semrush)
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByLLMEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByLLMResponse.LLMEntry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    citations:
+      description: Citations for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+    aiVisibility:
+      type: integer
+      description: AI Visibility score for the brand
+    isoDate:
+      type: string
+      description: Normalized ISO date (`YYYY-MM` or `YYYY-MM-DD`)
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByLLMResponse:
+  type: object
+  description: |
+    Brand statistics by LLM from `GET /llmo/ai-visibility/v1/brand/stats-by-llm`.
+    Native Semrush v2 `StatsByLLMResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    target:
+      $ref: '#/AiVisibilitySemrushBrand'
+    llm:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByLLMEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByCountryEntry:
+  type: object
+  description: |
+    One row from Semrush `StatsByCountryResponse.ByCountry` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    country:
+      description: Market for the grouped statistics
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+    mentions:
+      description: Prompt responses mentioning the target brand
+      oneOf:
+        - type: string
+        - type: integer
+    audience:
+      description: Estimated audience for the brand
+      oneOf:
+        - type: string
+        - type: integer
+    ownedSources:
+      description: Citations from the brand domain
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1BrandStatsByCountryResponse:
+  type: object
+  description: |
+    Brand statistics by country from `GET /llmo/ai-visibility/v1/brand/stats-by-country`.
+    Native Semrush v2 `StatsByCountryResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    byCountry:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandStatsByCountryEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
 AiVisibilityV1TopicBrandTopicRow:
@@ -9788,6 +10439,40 @@ AiVisibilityV1PromptPromptResponse:
         $ref: '#/AiVisibilitySemrushSource'
   additionalProperties: true
 
+AiVisibilityV1MetaCountry:
+  type: object
+  description: Country entry from Semrush `cr.v1 Meta/Meta` protobuf JSON.
+  properties:
+    country:
+      $ref: '#/AiVisibilitySemrushCountry'
+    daily:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushDate'
+    monthly:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushDate'
+    is_coming_soon:
+      type: boolean
+  required: [country, daily, monthly, is_coming_soon]
+  additionalProperties: true
+
+AiVisibilityV1Meta:
+  type: object
+  description: |
+    Metadata from Semrush `cr.v1 Meta/Meta` with an appended computed `WORLDWIDE`
+    country entry when Semrush does not already return one.
+  properties:
+    countries:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1MetaCountry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [countries]
+  additionalProperties: true
+
 AiVisibilityV1PromptBrandPromptsResponse:
   type: object
   description: |
@@ -9935,6 +10620,168 @@ AiVisibilityV1PromptGapPromptsExportResponse:
       type: string
       description: Suggested CSV file name from `ExportResponse.file_name`.
       example: gap-prompts.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1PromptGapPromptsTotalsResponse:
+  type: object
+  description: |
+    Per-kind gap prompts counts from `GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals`.
+    Returns only the totals array without paginated data.
+  properties:
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptGapPromptsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainRow:
+  type: object
+  description: |
+    One domain from Semrush v2 `GapSourceDomainsResponse.Domain` as protobuf JSON (camelCase).
+    UInt64 fields may be serialized as JSON strings.
+  properties:
+    domain:
+      type: string
+    gapMentions:
+      type: array
+      description: Per-brand mention counts included in the gap for this source domain
+      items:
+        $ref: '#/AiVisibilityV1TopicGapTopicMentionsByBrand'
+    targetMentions:
+      description: Mentions of the target brand sourced from this domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    sourcesCount:
+      description: Number of URLs from the domain used as a source (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    promptsCount:
+      description: Number of prompt responses using sources from the domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    organicTraffic:
+      description: Estimated organic traffic to the domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    totalBrandMentions:
+      description: All brand mentions sourced from this domain (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsResponse:
+  type: object
+  description: |
+    Gap source domains list from `GET /llmo/ai-visibility/v1/source/gap-source-domains`.
+    Wraps Semrush v2 source `GapSourceDomains` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceGapSourceDomainRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsTotalRow:
+  type: object
+  description: |
+    One row from Semrush `GapSourceDomainsTotalsResponse.TotalByKind` as protobuf JSON (camelCase).
+    Structurally identical to `AiVisibilityV1TopicGapTopicsTotalRow`.
+  properties:
+    kind:
+      description: Gap kind (`GAP_KIND` enum name or integer)
+      oneOf:
+        - type: string
+          enum:
+            - UNSPECIFIED
+            - ALL
+            - MISSING
+            - WEAK
+            - SHARED
+            - STRONG
+            - UNIQUE
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6]
+    count:
+      description: Total source domains for this gap kind (`uint64`)
+      oneOf:
+        - type: string
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsTotalsResponse:
+  type: object
+  description: |
+    Per-kind gap source domains counts from
+    `GET /llmo/ai-visibility/v1/source/gap-source-domains-totals`.
+    Returns only the totals array without paginated data.
+  properties:
+    totals:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceGapSourceDomainsTotalRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceGapSourceDomainsExportResponse:
+  type: object
+  description: |
+    Gap source domains CSV export from
+    `GET /llmo/ai-visibility/v1/source/gap-source-domains-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: gap-source-domains.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityPromptResearchExportResponse:
+  type: object
+  description: |
+    Prompt Research CSV export from the `GET /llmo/ai-visibility/v1/prompt-research/*-export`
+    endpoints (prompts, brands, source-domains, topics). Native Semrush v2 `ExportResponse`
+    protobuf JSON plus `srFilters` from the API layer. The CSV columns are produced by Semrush
+    and passed through unchanged. Omitting `engine` exports all engines in a single call.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: prompts_by_topic_fts_coffee_us.csv
     contentType:
       type: string
       description: MIME type from `ExportResponse.content_type`.
@@ -10140,17 +10987,78 @@ SerenityPrompt:
       description: BCP-47 primary subtag (lowercase) for the slice.
     text:
       type: string
+    tags:
+      type: array
+      items: { $ref: '#/SerenityPromptTag' }
+      description: |
+        The tags carried by this prompt, one entry per tag, keyed by upstream
+        id. Present on `GET /serenity/prompts` list items.
+
+        Tag names are NOT unique: uniqueness is scoped per (project, parent)
+        upstream, so a prompt can carry two tags with the same bare name from
+        different dimensions (a sub-category `human` and the `source` value
+        `human`). Read a tag's dimension from `path[0].name`, never from its
+        own name.
     tagMap:
       type: object
       additionalProperties: { type: string }
+      deprecated: true
       description: |
-        Map of tag name → upstream tag id. Keys are the tag names (e.g.
-        "category:Firefly"); values are the Semrush tag UUIDs to pass back as
-        `tagIds` query params when filtering. Tags without an upstream id carry
-        an empty string value and are excluded from tag_ids filter calls.
-        Tag names are assumed unique per Semrush project; if duplicates exist,
-        only the last entry is retained.
-      example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
+        DEPRECATED — use `tags`. Map of tag name → upstream tag id. Being keyed
+        by name, it cannot represent a prompt carrying two same-named tags from
+        different dimensions: only one survives, and which one depends on
+        upstream ordering. Removed once every consumer reads `tags`.
+      example: { "Firefly": "uuid-1", "Commercial": "uuid-2" }
+    tagIds:
+      type: array
+      items: { type: string }
+      description: |
+        Echo of the upstream tag ids this prompt was created/updated with.
+        Present on a create/update response
+        (`SerenityCreatePromptsResponse.created`, the `updateSerenityPrompt`
+        200); absent on `GET /serenity/prompts` list items, which carry `tags`.
+
+SerenityPromptTag:
+  type: object
+  description: |
+    One tag carried by a prompt, with its own parentage.
+
+    Upstream serializes a tag identically wherever it appears — embedded on a
+    prompt, or listed by the tag tree read — so a prompt's tags carry their own
+    parentage. What varies is DEPTH, not endpoint: upstream omits `parent_id` and
+    `path` on a dimension root and carries both on a descendant. This API
+    normalizes that absence to `null`, so a tag whose `path` is `null` is a
+    dimension root and its own `name` is its dimension.
+  required: [id, name]
+  properties:
+    id:
+      type: string
+      description: Upstream tag id. Pass back as a `tagIds` query param to filter.
+    name:
+      type: string
+      description: The tag's bare name. Never contains a ':' and is not unique on its own.
+    parentId:
+      type: [string, 'null']
+      description: Upstream id of this tag's parent, or null when it is a dimension root.
+    path:
+      type: [array, 'null']
+      description: |
+        Root-first ancestry, EXCLUDING the tag itself. `path[0]` is the tag's
+        dimension root (`category`, `intent`, `source` or `type`), which is how
+        a tag's dimension is determined at any depth. Null for a dimension root.
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string }
+          name: { type: string }
+  example:
+    id: "uuid-1"
+    name: "Trail"
+    parentId: "uuid-cat"
+    path:
+      - { id: "uuid-root", name: "category" }
+      - { id: "uuid-cat", name: "Running Shoes" }
 
 SerenityPromptListResponse:
   type: object
@@ -10165,14 +11073,19 @@ SerenityPromptListResponse:
 
 SerenityPromptInput:
   type: object
-  description: One row in a bulk-create prompts request.
-  required: [text, geoTargetId, languageCode]
+  description: |
+    One row in a bulk-create prompts request. Tags are addressed by upstream id
+    (`tagIds`, from a prior tags list/create) and never by name: a name cannot
+    identify a nested tag, because upstream scopes tag-name uniqueness to
+    (project, parent). A `tags` key is rejected with 400.
+  required: [text, geoTargetId, languageCode, tagIds]
   properties:
     text: { type: string }
-    tags:
+    tagIds:
       type: array
       items: { type: string }
-      default: []
+      minItems: 1
+      description: Upstream tag ids to attach to this prompt.
     geoTargetId:
       type: integer
       minimum: 1
@@ -10222,11 +11135,12 @@ SerenityUpdatePromptRequest:
   description: |
     Replace the prompt's text and tags. Carries the owning slice in
     `geoTargetId` + `languageCode` so the server can resolve the upstream
-    project without scanning. All four fields are required — the upstream
-    provider's API has no in-place update or GET-by-id, so the server runs
-    DELETE-old + POST-new and treats the body as the full next state.
-    Pass `tags: []` to clear tags.
-  required: [geoTargetId, languageCode, text, tags]
+    project without scanning. `geoTargetId`, `languageCode`, and `text` are
+    always required — the upstream provider's API has no in-place update or
+    GET-by-id, so the server runs DELETE-old + POST-new and treats the body
+    as the full next state. `tagIds` (non-empty) is required; tags are addressed
+    by upstream id and never by name, so a `tags` key is rejected with 400.
+  required: [geoTargetId, languageCode, text, tagIds]
   properties:
     geoTargetId:
       type: integer
@@ -10235,9 +11149,11 @@ SerenityUpdatePromptRequest:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     text: { type: string }
-    tags:
+    tagIds:
       type: array
       items: { type: string }
+      minItems: 1
+      description: Upstream tag ids to attach to the replacement prompt.
 
 SerenityBulkDeletePromptsRequest:
   type: object
@@ -10273,6 +11189,16 @@ SerenityBulkDeletePromptsResponse:
           status: { type: integer }
           message: { type: string }
 
+SerenityMarketStatus:
+  type: string
+  description: |
+    Publish state of the market's upstream project, surfaced only in
+    sub-workspace mode where markets are read live from the brand's own
+    workspace. Maps 1:1 from the upstream `publish_status`
+    (`initial_publish_failed` → `publish_failed`). Absent in flat mode,
+    where market existence is a pure DB-row contract.
+  enum: [draft, publishing, publish_failed, live, live_with_unpublished_updates]
+
 SerenityMarket:
   type: object
   description: |
@@ -10296,6 +11222,24 @@ SerenityMarket:
     updatedAt:
       oneOf:
         - $ref: '#/DateTime'
+        - type: 'null'
+    # Additive, sub-workspace mode only. In flat mode the list
+    # is a pure DB read and omits both. status reflects the live publish state;
+    # semrushProjectId is the upstream project id for the slice (same value the
+    # market-detail endpoint exposes). Optional so flat-mode responses still validate.
+    status:
+      $ref: '#/SerenityMarketStatus'
+    semrushProjectId:
+      type: string
+      description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
+    domain:
+      description: |
+        The market's own domain (its primary URL host, e.g. "example.com").
+        Each market has its own primary URL/domain — the brand itself has none.
+        Additive, sub-workspace mode only. Surfaced so the market overview can
+        display it. Null when the upstream project carries no domain.
+      oneOf:
+        - type: string
         - type: 'null'
 
 SerenityMarketListResponse:
@@ -10323,6 +11267,152 @@ SerenityMarketDetail:
         semrushProjectId:
           type: string
           description: Upstream Semrush AIO project id for this slice (provider-specific by design).
+        initialized:
+          description: |
+            AIO readiness for this slice's project (sub-workspace mode only). `true`/`false`
+            from the upstream init-status probe, or `null` when the probe is
+            unavailable or the read failed (best-effort enrichment — never fails
+            the detail read). Absent in flat mode.
+          oneOf:
+            - type: boolean
+            - type: 'null'
+
+SerenityActivateRequest:
+  type: object
+  description: |
+    Activates a brand into sub-workspace mode: ensures the brand's own
+    Semrush sub-workspace exists (creating + resourcing it on first call),
+    then per supplied market creates-or-resumes a draft and publishes it once.
+
+    All fields are optional. A pending (draft) brand activated from the wizard
+    sends an EMPTY body `{}` and every value is read from its stashed
+    `pending_semrush_provisioning` (primary URL, markets, generatePrompts). A
+    reactivation of an already-live brand re-supplies them in the body (the body
+    wins when present; there is no stored market memory otherwise). When no
+    primary URL/domain is available at all, a sub-workspace-only brand is
+    activated (no project). With a domain but no market, a single US/EN fallback
+    project is provisioned.
+  properties:
+    generatePrompts:
+      type: boolean
+      description: >-
+        Whether to generate topics/prompts for the provisioned project(s).
+        Overrides the stashed value; defaults to the stash (else false). Requires
+        a primary URL/domain (a project) — true with no domain is rejected (400).
+    brandDomain:
+      type: string
+      description: Primary domain for the brand's upstream projects.
+    brandNames:
+      type: array
+      minItems: 1
+      items: { type: string }
+      description: Brand name variants tracked upstream; the first is the display name.
+    brandDisplayName:
+      type: string
+      description: Prefix for each market's default project name when `name` is omitted.
+    markets:
+      type: array
+      minItems: 1
+      maxItems: 50
+      description: |
+        Markets to bring live for this brand. Capped at 50 per request: each
+        market drives sequential upstream create+publish calls, so a larger
+        array is rejected with 400 (rather than risking a Lambda timeout).
+      items:
+        type: object
+        required: [market, languageCode]
+        properties:
+          market:
+            type: string
+            pattern: '^[A-Za-z]{2}$'
+            description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
+          languageCode:
+            type: string
+            pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+          name:
+            type: string
+            description: Optional display name for this market's upstream project.
+          modelIds:
+            type: array
+            items:
+              type: string
+            description: >-
+              Optional AI model (LLM) ids to attach to this market's project.
+              When omitted here, the markets stashed on the pending brand supply
+              them (a draft activated from the wizard carries per-market LLMs in
+              pending_semrush_provisioning).
+
+SerenityActivateResponse:
+  type: object
+  required: [brandId, status, markets]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [active, pending]
+      description: |
+        All-or-nothing. `active` (HTTP 200) only when the FULL provisioning chain
+        succeeded — sub-workspace ensured, every market's project live, the brand
+        linked to its sub-workspace, AND every project mirrored as a Site
+        (`brand_sites` type=`serenity`). Otherwise a pending (draft) brand stays
+        `pending` and the response is HTTP 502 (incomplete activation; body carries
+        `error`/`message` and the per-market outcomes — retry to converge). Mirrors
+        the persisted brand status.
+    baseSiteId:
+      type: string
+      format: uuid
+      description: |
+        The brand's primary Site (`brands.site_id`), present on a successful
+        activation (HTTP 200) — set to the primary domain's mirror Site so an
+        active Serenity brand is always anchored by a base site (same contract as
+        a non-Serenity brand). Absent on incomplete activations.
+    error:
+      type: string
+      description: |
+        Present only on an incomplete activation (HTTP 502, `status: pending`): a
+        stable token identifying the failure class (e.g. `serenityActivationIncomplete`).
+    message:
+      type: string
+      description: |
+        Present only on an incomplete activation (HTTP 502): a human-readable
+        reason naming the failed step (markets vs. site link). Never leaks the
+        upstream gateway URL.
+    markets:
+      type: array
+      description: Per-market outcome, in request order.
+      items:
+        type: object
+        required: [market, languageCode, status]
+        properties:
+          market:
+            type: string
+          languageCode:
+            type: string
+          status:
+            type: integer
+            description: Per-market HTTP-style status (201 live, 409 already-live, 4xx/5xx failure).
+          body:
+            type: object
+            additionalProperties: true
+            description: The per-market handler result body.
+
+SerenityDeactivateResponse:
+  type: object
+  description: |
+    Result of decommissioning a brand's sub-workspace: every project is
+    deleted and the allocation released back to the parent pool, but the
+    workspace and its `semrush_workspace_id` pointer are KEPT for reuse
+    (never-delete). The brand status is set to `pending`.
+  required: [brandId, status]
+  properties:
+    brandId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [pending]
 
 SerenityCreateMarketRequest:
   type: object
@@ -10360,6 +11450,27 @@ SerenityTag:
   properties:
     id: { type: string }
     name: { type: string }
+    parentId:
+      type: [string, 'null']
+      description: |
+        Parent tag id when this tag is a nested child, else null. Only populated
+        by the nested TREE read (GET /serenity/tags?parentId=...); absent on the
+        flat, prompt-derived listing.
+    childrenCount:
+      type: integer
+      description: |
+        Number of direct children under this tag. Populated by the TREE read
+        (typically non-zero only on root categories).
+    path:
+      type: [array, 'null']
+      description: |
+        Ancestor breadcrumb (root → ... ) for a nested child, populated by the
+        TREE read when listing a parent's children; null for a root/flat tag.
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
 
 SerenityTagListResponse:
   type: object
@@ -10390,6 +11501,46 @@ SerenityModelListResponse:
       type: array
       items: { $ref: '#/SerenityModel' }
 
+SerenityLanguage:
+  type: object
+  required: [name]
+  properties:
+    id:
+      type: [string, 'null']
+      description: Semrush language catalog id (null when the catalog omits it).
+    name:
+      type: string
+      description: English language name as Semrush spells it (the match key).
+
+SerenityLanguageListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityLanguage' }
+
+SerenityUpdateModelsRequest:
+  type: object
+  description: |
+    Desired AI-model set for one (geoTargetId, languageCode) slice. The server
+    diffs this against the currently-assigned models and applies the minimal
+    add/remove, then publishes. `modelIds` are catalog model ids (the `id` from
+    `GET /serenity/models`), not assignment-row ids.
+  required: [geoTargetId, languageCode, modelIds]
+  properties:
+    geoTargetId:
+      type: integer
+      minimum: 1
+    languageCode:
+      type: string
+      pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    modelIds:
+      type: array
+      maxItems: 50
+      items: { type: string }
+      description: Catalog model ids to track for this slice. Empty array clears all.
+
 SerenityErrorResponse:
   type: object
   description: |
@@ -10402,3 +11553,1038 @@ SerenityErrorResponse:
   properties:
     error: { type: string }
     message: { type: string }
+
+SerenityFilterDimensionItem:
+  type: object
+  description: |
+    A single id/label option for a Serenity Elements filter dropdown. `id` is
+    the original, unmodified tag value returned by Semrush (including its
+    `prefix__` and any further `parent__child` encoding, e.g.
+    `topic__Furniture__Sofas`). `parent_id`/`parent_label` are present only
+    when the source tag encoded a "parent__child" hierarchy; `parent_id` is
+    the same `prefix__` reconstructed over just the parent segment (e.g. for
+    `category__Living Room Furniture Retail__Living Room Furniture and Sofas`,
+    `parent_id` is `category__Living Room Furniture Retail`).
+  required: [id, label]
+  properties:
+    id: { type: string }
+    label: { type: string }
+    parent_id: { type: string }
+    parent_label: { type: string }
+
+SerenityUrlInspectorFilterDimensions:
+  type: object
+  description: |
+    Filter dimensions for the Serenity (Semrush Elements-backed) URL Inspector
+    dashboard, sourced from the Semrush Brands, Markets, and Topics elements.
+
+    `brands`, `regions`, `topics`, `categories`, `page_intents`, `origins`, and
+    `tags` are always present (empty array when Semrush has no data). Any
+    additional Semrush tag prefix not already covered by the fixed dimensions
+    (e.g. a future `type__branded` tag) surfaces as an extra dynamic array
+    property keyed by that prefix — this is why the schema allows
+    `additionalProperties`. Prefixes that would collide with one of the fixed
+    keys above are routed into `tags` instead of clobbering that key. Bare
+    prefix declarations with no value (e.g. a lone `category` row) are ignored
+    entirely and never appear in any dimension.
+  required: [brands, regions, topics, categories, page_intents, origins, tags]
+  properties:
+    brands:
+      type: array
+      description: |
+        Available brands in the workspace. `id` mirrors `label` (Semrush has no
+        stable brand id); `spacecat_brand_id` resolves by case-insensitive name
+        match against the org's SpaceCat brands.
+      items:
+        type: object
+        required: [id, label]
+        properties:
+          id: { type: string }
+          label: { type: string }
+          spacecat_brand_id: { type: [string, 'null'] }
+    regions:
+      type: array
+      description: Available markets (Semrush projects), one per location + language combination.
+      items:
+        type: object
+        required: [id, semrush_project_id, label]
+        properties:
+          id:
+            type: [string, 'null']
+            description: Region code parsed from the label's leading segment (e.g. `US` from `US-en`); null when the label has no `-`.
+          semrush_project_id: { type: [string, 'null'] }
+          label: { type: string }
+          spacecat_brand_id: { type: [string, 'null'] }
+          geoTargetId: { type: [integer, 'null'] }
+          languageCode: { type: [string, 'null'] }
+    topics:
+      type: array
+      description: Distinct `topic__`-prefixed tags.
+      items: { $ref: '#/SerenityFilterDimensionItem' }
+    categories:
+      type: array
+      description: Distinct `category__`-prefixed tags.
+      items: { $ref: '#/SerenityFilterDimensionItem' }
+    page_intents:
+      type: array
+      description: Distinct `intent__`-prefixed tags. `id` is the original `intent__`-prefixed tag value.
+      items: { $ref: '#/SerenityFilterDimensionItem' }
+    origins:
+      type: array
+      description: Distinct `source__`-prefixed tags. `id` is the original `source__`-prefixed tag value.
+      items: { $ref: '#/SerenityFilterDimensionItem' }
+    tags:
+      type: array
+      description: |
+        Any prefixed tag whose prefix collides with one of this schema's other
+        properties. Bare prefix declarations with no value are ignored.
+      items: { $ref: '#/SerenityFilterDimensionItem' }
+  additionalProperties:
+    type: array
+    description: Tags grouped by a Semrush tag prefix not covered by the fixed dimensions above.
+    items: { $ref: '#/SerenityFilterDimensionItem' }
+
+# ── Referral Traffic PG schemas ───────────────────────────────────────────────
+
+ReferralTrafficSource:
+  type: string
+  enum: [optel, cdn, adobe_analytics, ga4, cja]
+  default: optel
+  description: "Referral traffic data source. Unrecognised values are silently coerced to `optel` (the default) — the server does not reject out-of-enum values."
+
+ReferralTrafficBusinessImpactSource:
+  type: string
+  enum: [adobe_analytics, ga4, cja]
+  default: adobe_analytics
+  description: "Business-impact data source. Unlike the generic referral-traffic endpoints, an unrecognised or non-business-impact source (optel/cdn) returns HTTP 400."
+
+ReferralTrafficHasData:
+  type: object
+  description: Whether the site has referral traffic data and which sources are available
+  properties:
+    hasData:
+      type: boolean
+      example: true
+    availableSources:
+      type: array
+      description: >-
+        Sources that have data for the site, in resolution-priority order
+        (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`). Callers use the
+        first entry as the active source. The ARRAY order — not the `enum`
+        order, which is an unordered set — is the priority contract.
+      items:
+        type: string
+        enum: [adobe_analytics, cja, ga4, cdn, optel]
+      example: ['adobe_analytics', 'cdn']
+    activeSource:
+      type: [string, 'null']
+      enum: [adobe_analytics, cja, ga4, cdn, optel, null]
+      description: The highest-priority available source (`availableSources[0]`) or null when none.
+      example: adobe_analytics
+  required:
+    - hasData
+    - availableSources
+    - activeSource
+
+ReferralTrafficFilterDimensions:
+  type: object
+  description: Distinct referral traffic filter values for the selected site and date range
+  properties:
+    platforms:
+      type: array
+      items:
+        type: string
+      example: ['ChatGPT', 'Perplexity']
+    regions:
+      type: array
+      items:
+        type: string
+      example: ['US', 'DE']
+    devices:
+      type: array
+      items:
+        type: string
+      example: ['desktop', 'mobile']
+    pageIntents:
+      type: array
+      items:
+        type: string
+      example: ['informational', 'transactional']
+    availableSources:
+      type: array
+      items:
+        type: string
+      example: ['optel', 'cdn']
+  required:
+    - platforms
+    - regions
+    - devices
+    - pageIntents
+    - availableSources
+
+ReferralTrafficKpis:
+  type: object
+  description: Aggregated KPI metrics for a site's referral traffic
+  properties:
+    totalPageviews:
+      type: number
+      example: 12450
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja; meaningful for optel / ga4
+      example: 42.1
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja; meaningful for optel / ga4
+      example: 88.0
+  required:
+    - totalPageviews
+    - bounceRate
+    - consentRate
+
+ReferralTrafficTrendRow:
+  type: object
+  description: Referral traffic metrics for a single day
+  properties:
+    date:
+      type: string
+      format: date
+      example: '2026-03-02'
+    pageviews:
+      type: number
+      example: 600
+    entries:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 540
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 1250.5
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 41.0
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 87.0
+    avgSessionDuration:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 132.4
+    pagesPerVisit:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 2.3
+    orders:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 18
+    conversionRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Non-null only for adobe_analytics / ga4 / cja sources
+      example: 3.1
+  required:
+    - date
+    - pageviews
+
+ReferralTrafficTrend:
+  type: object
+  description: Referral traffic KPI time series ordered by date ascending
+  properties:
+    trend:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficTrendRow'
+  required:
+    - trend
+
+ReferralTrafficByPlatformRow:
+  type: object
+  properties:
+    platform:
+      type: string
+      example: 'ChatGPT'
+    pageviews:
+      type: number
+      example: 4200
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 39.5
+    channels:
+      type: array
+      items:
+        type: string
+      example: ['referral', 'organic']
+    visits:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 3800
+    avgTimeOnSite:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 142.0
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 980.0
+    visitors:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 3100
+    orders:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for optel / cdn sources
+      example: 12
+  required:
+    - platform
+    - pageviews
+    - channels
+
+ReferralTrafficByPlatform:
+  type: object
+  description: Referral traffic grouped by platform, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByPlatformRow'
+  required:
+    - rows
+
+ReferralTrafficByRegionRow:
+  type: object
+  properties:
+    region:
+      type: string
+      example: 'US'
+    pageviews:
+      type: number
+      example: 3200
+  required:
+    - region
+    - pageviews
+
+ReferralTrafficByRegion:
+  type: object
+  description: Referral traffic grouped by region, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByRegionRow'
+  required:
+    - rows
+
+ReferralTrafficByPageIntentRow:
+  type: object
+  properties:
+    pageIntent:
+      type: string
+      example: 'informational'
+    pageviews:
+      type: number
+      example: 2100
+  required:
+    - pageIntent
+    - pageviews
+
+ReferralTrafficByPageIntent:
+  type: object
+  description: Referral traffic grouped by page intent, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByPageIntentRow'
+  required:
+    - rows
+
+ReferralTrafficByUrlRow:
+  type: object
+  properties:
+    urlPath:
+      type: string
+      example: '/blog/my-post'
+    host:
+      type: string
+      example: 'www.adobe.com'
+    pageviews:
+      type: number
+      example: 1500
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 38.0
+    consentRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 86.0
+    pageIntent:
+      oneOf:
+        - type: string
+        - type: 'null'
+      example: 'informational'
+    entries:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 1320
+    exits:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 980
+    avgTimeOnSite:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 128.5
+    revenue:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 540.0
+  required:
+    - urlPath
+    - host
+    - pageviews
+
+ReferralTrafficByUrl:
+  type: object
+  description: Paginated per-URL referral traffic performance analysis
+  properties:
+    totalCount:
+      type: number
+      description: Total number of URLs matching the filters (across all pages)
+      example: 1240
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByUrlRow'
+      description: URLs for the requested page
+  required:
+    - totalCount
+    - rows
+
+ReferralTrafficUrlTrendRow:
+  type: object
+  properties:
+    weekStart:
+      type: string
+      format: date
+      example: '2026-03-02'
+    pageviews:
+      type: number
+      example: 320
+  required:
+    - weekStart
+    - pageviews
+
+ReferralTrafficUrlTrend:
+  type: object
+  description: Weekly pageview trend for a single URL
+  properties:
+    trend:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficUrlTrendRow'
+  required:
+    - trend
+
+ReferralTrafficByDeviceRow:
+  type: object
+  properties:
+    device:
+      type: string
+      example: 'desktop'
+    pageviews:
+      type: number
+      example: 5400
+    bounceRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Null for cdn / adobe_analytics / cja sources
+      example: 40.0
+  required:
+    - device
+    - pageviews
+
+ReferralTrafficByDevice:
+  type: object
+  description: Referral traffic grouped by device, ordered by pageviews descending
+  properties:
+    rows:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficByDeviceRow'
+  required:
+    - rows
+
+ReferralTrafficBusinessImpact:
+  type: object
+  description: Aggregated business impact metrics; only available for adobe_analytics / ga4 / cja sources
+  properties:
+    source:
+      type: string
+      enum: [adobe_analytics, ga4, cja]
+      example: 'adobe_analytics'
+    totalPageviews:
+      type: number
+      example: 12450
+    metrics:
+      type: object
+      properties:
+        visits:
+          type: number
+          example: 9800
+        bounceRate:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 41.0
+        entries:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 8900
+        avgSessionDuration:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 135.0
+        pagesPerVisit:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 2.4
+        conversionRate:
+          oneOf:
+            - type: number
+            - type: 'null'
+          example: 3.0
+        orders:
+          type: number
+          example: 120
+        revenue:
+          type: number
+          example: 15400.0
+      required:
+        - visits
+        - orders
+        - revenue
+  required:
+    - source
+    - totalPageviews
+    - metrics
+
+ReferralTrafficWeekEntry:
+  type: object
+  description: An ISO week for which the site has referral traffic data
+  properties:
+    week:
+      type: string
+      description: ISO week label (YYYY-WNN)
+      example: '2026-W10'
+    startDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-02'
+    endDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-08'
+  required:
+    - week
+
+ReferralTrafficWeeks:
+  type: object
+  description: Available ISO weeks for the site's referral traffic data
+  properties:
+    weeks:
+      type: array
+      items:
+        $ref: '#/ReferralTrafficWeekEntry'
+  required:
+    - weeks
+
+SuggestionReview:
+  type: object
+  description: |
+    A human-review feedback event for a suggestion (Learning Agent feedback loop,
+    SITES-43974). Composed at read time from the feedback_event store. Raw patch
+    fields are omitted unless explicitly requested via ?include=reviews,patches.
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-supplied idempotency key for the review.
+    eventTime:
+      type: string
+      format: date-time
+      description: When the review action happened (server-stamped).
+    source:
+      type: string
+      enum: [backoffice, aso_ui, aemy_pr]
+      description: Capture surface (derived server-side from the route).
+    verdict:
+      type: string
+      enum: [up, down]
+      description: The reviewer's verdict.
+    signal:
+      type: string
+      enum: [positive, negative]
+      description: Persisted training label, derived from the verdict.
+    reviewerId:
+      type: string
+      description: >-
+        Server-derived, opaque IMS user identifier (e.g. <id>@<authSrc>) — NOT a
+        mailbox. Stable per user (reviewer-continuity signal). Null when not set.
+    detailMarkdown:
+      type: string
+      description: Sanitised ESE rationale. Null when not provided.
+    rejectionCategory:
+      type: string
+      enum: [product_bug, bad_recommendation, other]
+      description: Optional reject category. Null when not set.
+    stateTransition:
+      type: string
+      description: The accompanying suggestion state transition. Null when not set.
+    tier:
+      type: string
+      enum: [paid, free]
+    feedbackSubjectId:
+      type: [string, 'null']
+      description: >-
+        SpaceCat-internal id of the sub-item this review is about within the
+        suggestion (e.g. a CWV issue id), used to group per-issue feedback. Null
+        for whole-suggestion reviews.
+    previousFix:
+      type: object
+      description: AI-generated patch snapshot at review time (only when ?include=...,patches).
+    editedFix:
+      type: object
+      description: ESE-edited patch (only when ?include=...,patches).
+    guidanceMarkdown:
+      type: [string, 'null']
+      description: >-
+        AI-generated issue context (title + description) for the reviewed issue
+        (only when ?include=...,patches). Null when not set.
+  required:
+    - eventId
+    - eventTime
+    - source
+    - verdict
+    - signal
+    - tier
+StateAccessMapping:
+  type: object
+  description: |
+    One state-layer binding row. Identifies a subject (user or org) bound to
+    a resource within an IMS org under a product, with the per-resource
+    capability set the binding confers. Tombstoned rows carry non-null
+    `revokedAt` / `revokedBy` / `revokeReason`.
+  required:
+    - id
+    - subjectType
+    - subjectId
+    - resourceType
+    - resourceId
+    - imsOrgId
+    - product
+    - grantedCapabilities
+    - createdAt
+  properties:
+    id: { $ref: '#/Id' }
+    subjectType: { $ref: '#/StateAccessMappingSubjectType' }
+    subjectId:
+      type: string
+      example: someone@AdobeID
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId:
+      type: string
+      example: '11111111-2222-4333-9444-555555555555'
+    imsOrgId:
+      type: string
+      example: ABC123@AdobeOrg
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+      example: LLMO
+    grantedCapabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+    createdBy:
+      type: [string, 'null']
+      example: admin@AdobeID
+    createdAt: { $ref: '#/DateTime' }
+    updatedBy:
+      type: [string, 'null']
+      description: |
+        IMS ident of the last actor to edit the binding's capabilities, or
+        `system` when never edited since creation.
+      example: system
+    updatedAt:
+      oneOf:
+        - { $ref: '#/DateTime' }
+        - type: 'null'
+    revokedAt:
+      oneOf:
+        - { $ref: '#/DateTime' }
+        - type: 'null'
+    revokedBy:
+      type: [string, 'null']
+    revokeReason:
+      type: [string, 'null']
+
+StateAccessMappingCreateRequest:
+  type: object
+  required:
+    - subjectType
+    - subjectId
+    - resourceType
+    - resourceId
+    - grantedCapabilities
+  properties:
+    subjectType: { $ref: '#/StateAccessMappingSubjectType' }
+    subjectId:
+      type: string
+      example: someone@AdobeID
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId:
+      type: string
+      example: '11111111-2222-4333-9444-555555555555'
+    grantedCapabilities:
+      type: array
+      minItems: 1
+      items: { $ref: '#/StateGrantedCapability' }
+
+StateAccessMappingPatchRequest:
+  type: object
+  required:
+    - grantedCapabilities
+  properties:
+    grantedCapabilities:
+      type: array
+      minItems: 1
+      items: { $ref: '#/StateGrantedCapability' }
+
+StateAccessMappingsListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/StateAccessMapping' }
+    cursor:
+      type: [string, 'null']
+      description: Opaque cursor for fetching the next page, or null when the result is the final page.
+
+StateAccessMappingConflictResponse:
+  type: object
+  required: [message]
+  properties:
+    message: { type: string, example: Active access mapping already exists for this subject and resource }
+    id:
+      type: [string, 'null']
+      description: ID of the existing active row when known.
+
+ProductCapabilitiesResponse:
+  type: object
+  required: [product, capabilities]
+  properties:
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+    capabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+
+UserCapabilitiesResponse:
+  type: object
+  required: [product, resourceType, resourceId, capabilities, provenance]
+  description: |
+    Caller's effective capability set for one resource under the current
+    product. `capabilities` is the union over the JWT `facs_permissions` and
+    state-layer user-scoped + org-scoped bindings. `provenance` maps each
+    capability to the set of sources that contributed it (tags from
+    `jwt`, `state:user`, `state:org`).
+  properties:
+    product:
+      type: string
+      enum: [LLMO, ASO, ACO]
+    resourceType: { $ref: '#/StateAccessMappingResourceType' }
+    resourceId: { type: string }
+    capabilities:
+      type: array
+      items: { $ref: '#/StateGrantedCapability' }
+    provenance:
+      type: object
+      additionalProperties:
+        type: array
+        items:
+          type: string
+          enum: [jwt, 'state:user', 'state:org']
+
+FacsAuditEvent:
+  type: object
+  description: |
+    One row from the `facs_access_mapping_audit_events` log — a single
+    state-mapping operation (create / patch / delete / revoke) with its
+    outcome. Shape is intentionally flat so the admin UI can render whichever
+    fields it needs. Fields describing the affected binding (`mappingId`,
+    `binding*`, `resource*`, `grantedCapabilities`, `revokeReason`) are null
+    for operations that did not touch a specific row.
+  required:
+    - id
+    - createdAt
+    - imsOrgId
+    - actorId
+    - operation
+    - outcome
+  properties:
+    id: { $ref: '#/Id' }
+    createdAt: { $ref: '#/DateTime' }
+    requestId:
+      type: [string, 'null']
+      description: Correlates the audit event with the originating request.
+    imsOrgId:
+      type: string
+      example: ABC123@AdobeOrg
+    actorId:
+      type: string
+      description: IMS ident of the caller who performed the operation.
+      example: admin@AdobeID
+    operation:
+      type: string
+      description: The attempted state-mapping operation.
+      example: create
+    outcome:
+      type: string
+      description: Whether the operation was allowed and applied, or denied.
+      example: allowed
+    denialReason:
+      type: [string, 'null']
+      description: Populated when `outcome` is a denial.
+    statusCode:
+      type: [integer, 'null']
+      description: HTTP status the operation returned.
+      example: 201
+    errorMessage:
+      type: [string, 'null']
+    mappingId:
+      type: [string, 'null']
+      description: ID of the affected `facs_access_mappings` row, when applicable.
+    bindingSubjectType:
+      oneOf:
+        - { $ref: '#/StateAccessMappingSubjectType' }
+        - type: 'null'
+    bindingSubjectId:
+      type: [string, 'null']
+      example: someone@AdobeID
+    resourceType:
+      oneOf:
+        - { $ref: '#/StateAccessMappingResourceType' }
+        - type: 'null'
+    resourceId:
+      type: [string, 'null']
+      example: '11111111-2222-4333-9444-555555555555'
+    product:
+      type: [string, 'null']
+      enum: [LLMO, ASO, ACO, null]
+      example: LLMO
+    grantedCapabilities:
+      oneOf:
+        - type: array
+          items: { $ref: '#/StateGrantedCapability' }
+        - type: 'null'
+    revokeReason:
+      type: [string, 'null']
+
+FacsAuditLogsResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/FacsAuditEvent' }
+    cursor:
+      type: [string, 'null']
+      description: Opaque cursor for fetching the next page, or null when the result is the final page.
+# ── Referral Traffic PG schemas ───────────────────────────────────────────────
+
+
+StateAccessMappingSubjectType:
+  type: string
+  enum: [user, org]
+  description: |
+    Subject identifier kind. `user` is an `<ident>@<authSrc>` canonical IMS
+    user id; `org` is an `<ident>@AdobeOrg` canonical IMS org id (must equal
+    the caller's own org on POST).
+
+StateAccessMappingResourceType:
+  type: string
+  description: |
+    Product-specific resource kind. LLMO uses `brand`; ASO uses `site`.
+  example: brand
+
+StateGrantedCapability:
+  type: string
+  description: |
+    Fully-qualified capability string of the form `<product-lower>/<name>`.
+    Must belong to the product's capability catalog (see
+    `GET /product/capabilities`).
+  example: llmo/can_view
+  pattern: '^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$'
+
+# ── Task Management schemas ────────────────────────────────────────────────────
+
+TaskManagementConnection:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+    organizationId:
+      $ref: '#/Id'
+    provider:
+      type: string
+      enum: [jira_cloud]
+    status:
+      type: string
+      enum: [active, requires_reauth, revoked]
+    displayName:
+      type: string
+    instanceUrl:
+      type: string
+      format: uri
+    connectedBy:
+      type: string
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+Ticket:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+    organizationId:
+      $ref: '#/Id'
+    connectionId:
+      $ref: '#/Id'
+    opportunityId:
+      type: string
+    ticketKey:
+      type: string
+      example: 'PROJ-42'
+    ticketUrl:
+      type: string
+      format: uri
+    ticketStatus:
+      type: string
+    ticketProvider:
+      type: string
+      enum: [jira_cloud]
+    suggestions:
+      type: array
+      items:
+        type: string
+      description: Logical suggestion IDs linked to this ticket
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+TicketAttachment:
+  type: object
+  required: [content, mimeType, filename]
+  properties:
+    content:
+      type: string
+      format: byte
+      description: Base64-encoded file content
+    mimeType:
+      type: string
+      enum: [image/png, image/jpeg, image/gif, image/webp, application/pdf, text/csv, text/plain]
+    filename:
+      type: string
+      maxLength: 255
+
+TicketCreateRequest:
+  type: object
+  required: [connectionId, projectKey, summary]
+  properties:
+    connectionId:
+      $ref: '#/Id'
+    projectKey:
+      type: string
+    projectId:
+      type: string
+      description: Numeric Jira project ID
+    issueTypeId:
+      type: string
+    summary:
+      type: string
+      maxLength: 255
+    description:
+      type: string
+    labels:
+      type: array
+      items:
+        type: string
+    mode:
+      type: string
+      enum: [individual, grouped]
+      default: individual
+    suggestionIds:
+      type: array
+      items:
+        type: string
+      maxItems: 1500
+    opportunityId:
+      type: string
+    attachments:
+      type: array
+      items:
+        $ref: '#/TicketAttachment'
+      maxItems: 10

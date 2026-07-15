@@ -26,12 +26,23 @@ import {
   isInteger,
   isValidUUID,
   isValidUrl,
+  isWithinSiteScope,
+  isPathPatternWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 
-import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
+import {
+  Suggestion as SuggestionModel,
+  GeoExperiment as GeoExperimentModel,
+  REVIEW_SOURCES,
+  REVIEW_VERDICTS,
+  REJECTION_CATEGORIES,
+  FEEDBACK_TIERS,
+  verdictToSignal,
+  toReviewView,
+} from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
+import { isValidLocale } from '../utils/validations.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -47,12 +58,36 @@ import {
   isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { redactFeedbackContent } from '../support/feedback-redaction.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// Allowed state_transition values on a backoffice review (SITES-43974). Validated
+// so the Learning Agent corpus never receives arbitrary free-text transitions.
+const FEEDBACK_STATE_TRANSITIONS = [
+  'PENDING_VALIDATION->NEW',
+  'PENDING_VALIDATION->REJECTED',
+  'EDIT',
+];
+
+// Defensive cap on reviews returned by ?include=reviews. Expected volume per
+// suggestion is 2-3, but this bounds payload size (esp. with ?include=patches)
+// and is backed by idx_feedback_event_suggestion (suggestion_id, event_time).
+const FEEDBACK_REVIEW_READ_LIMIT = 100;
+
+// Contextual experiment names by opportunity type to be visible on Oppty Workspace Strategy UI
+const EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE = {
+  prerender: 'Recover content visibility',
+  toc: 'Add table of contents',
+  summarization: 'Add LLM-Friendly Summaries',
+};
+
+const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE[opportunityType]
+  || `${opportunityType.charAt(0).toUpperCase()}${opportunityType.slice(1).replace(/-/g, ' ')}`;
 
 async function isSitePlgTier(site, log) {
   try {
@@ -63,6 +98,43 @@ async function isSitePlgTier(site, log) {
     log.warn(`Failed to determine PLG tier for site ${site.getId()}: ${err.message}`);
     return false;
   }
+}
+
+/**
+ * Derives the feedback tier ('paid' | 'free') for a site from its ASO
+ * entitlement. PAID -> 'paid'; FREE_TRIAL / PLG / no entitlement -> 'free'.
+ * Never throws — defaults to 'free' on any lookup failure (SITES-43974).
+ *
+ * @param {Object} site - Site entity.
+ * @param {Object} log - logger.
+ * @returns {Promise<string>} one of FEEDBACK_TIERS.
+ */
+async function deriveFeedbackTier(site, log) {
+  try {
+    const enrollments = await site.getSiteEnrollments();
+    const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
+    const isPaid = entitlements.some(
+      (e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PAID',
+    );
+    return isPaid ? FEEDBACK_TIERS.PAID : FEEDBACK_TIERS.FREE;
+  } catch (err) {
+    log?.warn?.(`Failed to determine feedback tier for site ${site.getId?.()}: ${err.message}`);
+    return FEEDBACK_TIERS.FREE;
+  }
+}
+
+/**
+ * Parses an `?include=` query value into a set of requested includes.
+ * @param {string|undefined} includeParam
+ * @returns {Set<string>}
+ */
+function parseIncludes(includeParam) {
+  return new Set(
+    String(includeParam ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 }
 
 async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context, isPlgTier) {
@@ -255,7 +327,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -267,6 +339,44 @@ function SuggestionsController(ctx, sqs, env) {
   }
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Loads the human-review history for a suggestion from feedback_event,
+   * newest-first, mapped to the API review view. Returns [] (never throws) when
+   * the feedback store is unavailable or the query fails — reviews are
+   * supplementary to the suggestion payload.
+   *
+   * @param {Object} context - request context.
+   * @param {string} suggestionId
+   * @param {Object} [opts]
+   * @param {boolean} [opts.includePatches=false]
+   * @returns {Promise<Array<Object>>}
+   */
+  const fetchReviewsForSuggestion = async (
+    context,
+    suggestionId,
+    { includePatches = false } = {},
+  ) => {
+    // Reviews are supplementary to the suggestion payload, so this read fails
+    // soft (returns []) rather than failing the whole getByID — intentionally
+    // different from the capture path, which returns 503 when the store is down.
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      context.log?.warn?.('feedback store (postgrestClient) unavailable; returning no reviews');
+      return [];
+    }
+    const { data, error } = await postgrestClient
+      .from('feedback_event')
+      .select('*')
+      .eq('suggestion_id', suggestionId)
+      .order('event_time', { ascending: false })
+      .limit(FEEDBACK_REVIEW_READ_LIMIT);
+    if (error) {
+      context.log?.error?.(`Failed to load reviews for suggestion ${suggestionId}: ${error.message}`);
+      return [];
+    }
+    return (data ?? []).map((row) => toReviewView(row, { includePatches }));
+  };
 
   /**
    * Filters suggestions to only granted ones when summit-plg is enabled for the site
@@ -301,6 +411,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const viewParam = context.data?.view;
     const statusParam = context.data?.status;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -357,7 +472,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok(suggestions);
   };
@@ -376,6 +491,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -418,7 +538,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
 
     return ok({
@@ -441,6 +561,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -476,7 +601,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok(suggestions);
   };
@@ -493,6 +618,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -537,7 +667,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
     return ok({
       suggestions,
@@ -559,6 +689,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -598,7 +733,22 @@ function SuggestionsController(ctx, sqs, env) {
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
-    return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
+
+    const json = SuggestionDto.toJSON(suggestion, view, opportunity, locale);
+
+    // ?include=reviews composes human-review feedback_event rows at read time
+    // (no inline mirror on the suggestion). ?include=reviews,patches additionally
+    // surfaces the raw previous/edited fix (heavy — opt-in only).
+    const includes = parseIncludes(context.data?.include);
+    if (includes.has('reviews')) {
+      json.reviews = await fetchReviewsForSuggestion(
+        context,
+        suggestionId,
+        { includePatches: includes.has('patches') },
+      );
+    }
+
+    return ok(json);
   };
 
   /**
@@ -1193,10 +1343,11 @@ function SuggestionsController(ctx, sqs, env) {
       if (invalidEntry !== undefined) {
         return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
-      const configuration = await Configuration.findLatest();
-      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-      }
+      // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+      // intentionally. Auto-fix deploys are user-initiated one-off actions; gating them
+      // on the scheduled-audit enabled-list blocked legitimate ad-hoc deploys for sites
+      // that simply weren't on that list. Access control (`auto_fix` permission) above
+      // still rejects unauthorized callers.
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
       // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
       await sqs.sendMessage(queueUrl, {
@@ -1227,10 +1378,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const configuration = await Configuration.findLatest();
-    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-    }
+    // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+    // intentionally — see the matching note in the assess-urls branch above.
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );
@@ -1731,7 +1880,8 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
-    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+    const siteBaseURL = site.getBaseURL();
+    const apexBaseUrl = getHostName(siteBaseURL) || siteBaseURL;
 
     if (!isValidUUID(opportunityId)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
@@ -1788,6 +1938,23 @@ function SuggestionsController(ctx, sqs, env) {
     const pathSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
+
+    const isSuggestionInScope = (suggestion) => {
+      const data = suggestion.getData();
+      if (isDomainWideSuggestion(suggestion) || isPathSuggestion(suggestion)) {
+        const patterns = data?.allowedRegexPatterns;
+        if (!isNonEmptyArray(patterns)) {
+          return true;
+        }
+        return patterns.every((pattern) => isPathPatternWithinSiteScope(pattern, siteBaseURL));
+      }
+      const url = getSuggestionUrl(data, opportunity);
+      if (!url) {
+        return true;
+      }
+      return isWithinSiteScope(url, siteBaseURL);
+    };
+
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
@@ -1799,6 +1966,14 @@ function SuggestionsController(ctx, sqs, env) {
           index,
           message: 'Suggestion not found',
           statusCode: 404,
+        });
+      } else if (!isSuggestionInScope(suggestion)) {
+        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} URL is outside site scope`);
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion URL is outside the scope of the site base URL',
+          statusCode: 400,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
         context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);
@@ -1881,7 +2056,6 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (isAsyncExperimentRequested) {
       context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
-      let urls;
       const geoExperimentId = crypto.randomUUID();
 
       context.log.info('[edge-geo-exp] Initiating experiment', {
@@ -1893,8 +2067,10 @@ function SuggestionsController(ctx, sqs, env) {
 
       let geoExperiment = null;
       // Tracks whether the Atomic strategy was successfully written, so the
-      // outer catch knows whether to compensate by deleting it.
+      // outer catch knows whether to compensate by deleting it if a later
+      // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
+      let validSuggestionEntities = [];
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -1903,61 +2079,61 @@ function SuggestionsController(ctx, sqs, env) {
           'pre',
         );
         if (!preScheduleParams.cronExpression || !preScheduleParams.expiryMs) {
-          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
           throw new Error('Missing required environment variables');
         }
-        const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          const newStatus = SuggestionModel.STATUSES.NEW;
-          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
-          const top15ByContentGainRatio = [...allNew]
-            .filter((s) => s.getData()?.isDomainWide !== true)
-            .sort((a, b) => (b.getData()?.contentGainRatio || 0)
-              - (a.getData()?.contentGainRatio || 0))
-            .slice(0, 15);
-          promptSources = top15ByContentGainRatio
-            .sort((a, b) => (b.getData()?.agenticTraffic || 0) - (a.getData()?.agenticTraffic || 0))
-            .slice(0, 10);
+        const hasPatternDeploy = domainWideSuggestions.length > 0 || pathSuggestions.length > 0;
+        // A single request can select multiple pattern suggestions
+        const patternSuggestions = [
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
+        ];
+        const metadataBase = {};
+
+        if (hasPatternDeploy) {
+          const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+          if (!Array.isArray(highImpactIds) || highImpactIds.length === 0
+            || !highImpactIds.every((id) => isValidUUID(id))) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+            throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
+          }
+          const highImpactIdSet = new Set(highImpactIds);
+          const measurementSuggestions = allSuggestions.filter(
+            (s) => highImpactIdSet.has(s.getId()),
+          );
+          if (measurementSuggestions.length === 0) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for pattern deploy`);
+            throw new Error('No high-impact suggestions found for the provided IDs');
+          }
+          // suggestionIds holds only what actually deploys (the pattern[s]); the high-impact
+          // measurement suggestions live in metadata and drive prompt generation only.
+          metadataBase.urls = [
+            ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
+          metadataBase.patterns = patternSuggestions.map((ps) => (
+            ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+          ));
+          metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
         } else {
-          promptSources = validSuggestions;
+          metadataBase.urls = [
+            ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
         }
-        const domainWideSuggestionIds = new Set(
-          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
-        );
-        urls = promptSources
-          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
-          .map((s) => s.getData()?.url)
-          .filter(Boolean);
-        const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
-        if (prompts.length === 0) {
-          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
-          throw new Error('No prompts found in selected suggestions');
-        }
-        const promptsS3Key = `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
-        await s3Client.send(new PutObjectCommand({
-          Bucket: s3Bucket,
-          Key: promptsS3Key,
-          Body: JSON.stringify(prompts),
-          ContentType: 'application/json',
-        }));
-        context.log.info(`[edge-geo-exp] Uploaded ${prompts.length} prompts to S3: ${promptsS3Key}`);
+
+        const experimentName = context.data?.name || getExperimentName(opportunity.getType());
 
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
           siteId,
           opportunityId,
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          name: context.data?.name
-            || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
-          promptsCount: prompts.length,
-          promptsLocation: promptsS3Key,
+          name: experimentName,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
+          phase: GeoExperimentModel.PHASES.INITIATED,
           suggestionIds: validSuggestionIds,
           metadata: buildExperimentMetadata(
             context,
-            { urls },
+            metadataBase,
             GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
             opportunity.getType(),
           ),
@@ -1968,59 +2144,21 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('GeoExperiment was not created');
         }
 
-        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
+        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase INITIATED`);
 
-        // Create the Atomic strategy before DRS / suggestion-marking so a
-        // failure rolls back cheaply via the outer catch.
         await createAtomicStrategy({
           siteId,
           geoExperimentId,
           opportunityId,
           opportunityType: opportunity.getType(),
-          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          name: geoExperiment.getName?.() || experimentName,
           profile,
           s3: context.s3,
           log: context.log,
         });
         atomicStrategyCreated = true;
 
-        let preScheduleId;
-        try {
-          const drsClient = DrsClient.createFrom(context);
-          const drsResult = await drsClient.createExperimentSchedule({
-            siteId,
-            experimentId: geoExperimentId,
-            experimentPhase: EXPERIMENT_PHASES.PRE,
-            cronExpression: preScheduleParams.cronExpression,
-            expiresAt: new Date(Date.now() + preScheduleParams.expiryMs).toISOString(),
-            platforms: preScheduleParams.platforms,
-            providerIds: preScheduleParams.providerIds,
-            triggerImmediately: true,
-            enableBrandPresence: true,
-            metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
-          });
-          preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
-          if (!preScheduleId) {
-            throw new Error('DRS schedule created but returned no schedule ID');
-          }
-          context.log.info(`[edge-geo-exp] DRS pre-analysis schedule created: ${preScheduleId}`);
-        } catch (drsError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, DRS schedule creation failed: ${drsError.message}`, drsError);
-          throw drsError;
-        }
-        try {
-          geoExperiment.setPreScheduleId(preScheduleId);
-          geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
-          await geoExperiment.save();
-        } catch (updateError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
-          throw updateError;
-        }
-        const validSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
+        validSuggestionEntities = [...validSuggestions, ...patternSuggestions];
 
         const markResults = await Promise.allSettled(
           validSuggestionEntities.map(async (suggestion) => {
@@ -2036,7 +2174,7 @@ function SuggestionsController(ctx, sqs, env) {
 
         const markFailures = markResults.filter((r) => r.status === 'rejected');
         if (markFailures.length > 0) {
-          context.log.warn(`[edge-geo-exp-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+          context.log.warn(`[geo-experiment-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
             geoExperimentId,
             errors: markFailures.map((r) => r.reason?.message),
           });
@@ -2059,19 +2197,39 @@ function SuggestionsController(ctx, sqs, env) {
           },
           geoExperimentId,
           geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
-          prePhaseScheduleId: preScheduleId,
+          geoExperimentPhase: GeoExperimentModel.PHASES.INITIATED,
+          // Pre-analysis schedule is created later by the experimentation engine.
+          prePhaseScheduleId: null,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
+
+        // Mark suggestions covered by domain/pattern so they get hidden on the UI (non-fatal).
+        if (hasPatternDeploy) {
+          const tokowakaClient = TokowakaClient.createFrom(context);
+          for (const ps of patternSuggestions) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.markPatternCoveredSuggestions(
+                ps,
+                allSuggestions,
+                siteId,
+                profile?.email || 'geo-experiment',
+              );
+            } catch (coverError) {
+              context.log.warn(`[geo-experiment-failed] Failed to mark pattern-covered suggestions for ${ps.getId()}: ${coverError.message}`, coverError);
+            }
+          }
+        }
+
         return createResponse(experimentResponse, 207);
       } catch (error) {
-        context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
+        context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
         if (geoExperiment?.getId?.()) {
           /* c8 ignore start */
           try {
             await geoExperiment.remove();
           } catch (removeError) {
-            context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
+            context.log.error(`[geo-experiment-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
         }
         // Delete the strategy if it was created so we don't leave an orphan.
@@ -2087,13 +2245,8 @@ function SuggestionsController(ctx, sqs, env) {
             context.log.error(`[atomic-strategy-cleanup-failed] site: ${apexBaseUrl}, Failed to delete atomic strategy ${geoExperimentId}: ${cleanupError.message}`, cleanupError);
           }
         }
-        const allSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
         await Promise.allSettled(
-          allSuggestionEntities
+          validSuggestionEntities
             .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
             .map(async (s) => {
               try {
@@ -2102,7 +2255,7 @@ function SuggestionsController(ctx, sqs, env) {
                 s.setUpdatedBy(profile?.email || 'geo-experiment');
                 await s.save();
               } catch (unblockError) {
-                context.log.error(`[edge-geo-exp-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
+                context.log.error(`[geo-experiment-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
               }
             }),
         );
@@ -2261,9 +2414,33 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.info(`[geo-experiment] Could not fetch prompts for ${geoExperimentId}: ${s3Error.message}`);
     }
 
+    // Fetch impact-measurement insights from S3 only when explicitly requested.
+    // Insights exist once impact measurement completes; the S3 key is stored on the
+    // experiment as insightsLocation (see spacecat-shared GeoExperiment model).
+    let insights;
+    const includeInsights = context.data?.includeInsights === 'true';
+    if (includeInsights) {
+      insights = null;
+      const insightsS3Key = geoExperiment.getInsightsLocation?.();
+      if (insightsS3Key) {
+        try {
+          const { s3Client, s3Bucket, GetObjectCommand } = context.s3;
+          const response = await s3Client.send(
+            new GetObjectCommand({ Bucket: s3Bucket, Key: insightsS3Key }),
+          );
+          const body = await response.Body.transformToString();
+          insights = JSON.parse(body);
+        } catch (s3Error) {
+          // Insights may not exist yet (e.g. impact measurement not yet complete)
+          context.log.info(`[geo-experiment] Could not fetch insights for ${geoExperimentId}: ${s3Error.message}`);
+        }
+      }
+    }
+
     return ok({
       ...GeoExperimentDto.toJSON(geoExperiment),
       prompts,
+      ...(includeInsights ? { insights } : {}),
     });
   };
 
@@ -2694,7 +2871,181 @@ function SuggestionsController(ctx, sqs, env) {
     }
   };
 
+  /**
+   * Capture an ESE review verdict from the Backoffice (SITES-43974 / SITES-39001).
+   *
+   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews
+   *
+   * `source` is bound to 'backoffice' by the route (never trusted from the body —
+   * FR-10). `event_id` is a mandatory client-supplied idempotency key (FR-09):
+   * a duplicate collapses to a no-op (HTTP 200 with the existing row). Customer-
+   * derived fields are secret-scrubbed and the markdown is sanitised before
+   * insert. The raw patches are NOT echoed in the response.
+   *
+   * @param {Object} context - request context.
+   * @returns {Promise<Response>}
+   */
+  const createBackofficeReview = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    const body = isNonEmptyObject(context.data) ? context.data : {};
+    const {
+      eventId, verdict, detailMarkdown, guidanceMarkdown, rejectionCategory,
+      stateTransition, previousFix, editedFix, feedbackSubjectId,
+    } = body;
+
+    // FR-09: event_id is MANDATORY and client-supplied (no server fallback).
+    if (!hasText(eventId) || !isValidUUID(eventId)) {
+      return badRequest('event_id is required and must be a UUID');
+    }
+    // FR-10: a client must not self-assert a higher-trust source.
+    if (hasText(body.source) && body.source !== REVIEW_SOURCES.BACKOFFICE) {
+      return badRequest('source is derived from the route and must not be set in the body');
+    }
+    if (verdict !== REVIEW_VERDICTS.UP && verdict !== REVIEW_VERDICTS.DOWN) {
+      return badRequest('verdict must be "up" or "down"');
+    }
+    if (rejectionCategory != null
+      && !Object.values(REJECTION_CATEGORIES).includes(rejectionCategory)) {
+      return badRequest('invalid rejection_category');
+    }
+    if (stateTransition != null && !FEEDBACK_STATE_TRANSITIONS.includes(stateTransition)) {
+      return badRequest('invalid state_transition');
+    }
+    if (detailMarkdown != null) {
+      if (typeof detailMarkdown !== 'string') {
+        return badRequest('detail_markdown must be a string');
+      }
+      if (Buffer.byteLength(detailMarkdown, 'utf8') > 8192) {
+        return createResponse({ message: 'detail_markdown exceeds the 8 KB limit' }, 413);
+      }
+    }
+    // guidance_markdown is the AI-generated issue context (title + description).
+    // Larger cap than detail_markdown (64 KB) because issue descriptions +
+    // implementation guidance run long.
+    if (guidanceMarkdown != null) {
+      if (typeof guidanceMarkdown !== 'string') {
+        return badRequest('guidance_markdown must be a string');
+      }
+      if (Buffer.byteLength(guidanceMarkdown, 'utf8') > 65536) {
+        return createResponse({ message: 'guidance_markdown exceeds the 64 KB limit' }, 413);
+      }
+    }
+    // feedback_subject_id is an opaque grouping id (e.g. a CWV issue id) — a short
+    // string, not free text. Bounded to guard against abuse.
+    if (feedbackSubjectId != null) {
+      if (typeof feedbackSubjectId !== 'string' || feedbackSubjectId.length > 200) {
+        return badRequest('feedback_subject_id must be a string of at most 200 characters');
+      }
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Suggestion not found');
+    }
+
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      return createResponse({ message: 'Feedback store unavailable' }, 503);
+    }
+
+    // reviewer_id is server-derived from the authenticated principal — never the body.
+    // NOTE: for IMS callers profile.email is the IMS user identifier (an opaque
+    // GUID like <id>@<authSrc>), NOT a mailbox. It is stable per user, so it
+    // serves reviewer-continuity as a training signal; it is documented as an
+    // opaque IMS user id (not "email") in schemas.yaml + the feedback_event
+    // column comment.
+    const { profile } = context.attributes?.authInfo ?? {};
+    const reviewerId = profile?.email ?? null;
+
+    const tier = await deriveFeedbackTier(site, context.log);
+    const signal = verdictToSignal(verdict);
+
+    const {
+      detailMarkdown: cleanMarkdown,
+      guidanceMarkdown: cleanGuidance,
+      previousFix: cleanPreviousFix,
+      editedFix: cleanEditedFix,
+      scrubHits,
+    } = redactFeedbackContent({
+      detailMarkdown, guidanceMarkdown, previousFix, editedFix,
+    });
+
+    const scrubbed = Object.entries(scrubHits);
+    if (scrubbed.length > 0) {
+      context.log?.info?.(`feedback_capture.scrub_hit_total ${JSON.stringify(scrubHits)} suggestion=${suggestionId}`);
+    }
+
+    const row = {
+      event_id: eventId,
+      organization_id: site.getOrganizationId(),
+      site_id: siteId,
+      suggestion_id: suggestionId,
+      opportunity_type: opportunity.getType?.() ?? null,
+      source: REVIEW_SOURCES.BACKOFFICE,
+      signal,
+      reviewer_id: reviewerId,
+      detail_markdown: cleanMarkdown ?? null,
+      guidance_markdown: cleanGuidance ?? null,
+      feedback_subject_id: feedbackSubjectId ?? null,
+      previous_fix: cleanPreviousFix ?? null,
+      edited_fix: cleanEditedFix ?? null,
+      state_transition: hasText(stateTransition) ? stateTransition : null,
+      rejection_category: rejectionCategory ?? null,
+      tier,
+    };
+
+    const { data, error } = await postgrestClient
+      .from('feedback_event')
+      .insert(row)
+      .select()
+      .single();
+
+    if (error) {
+      // 23505 = unique_violation on event_id -> idempotent no-op (FR-09).
+      if (error.code === '23505') {
+        const existing = await postgrestClient
+          .from('feedback_event')
+          .select('*')
+          .eq('event_id', eventId)
+          .single();
+        if (existing?.data) {
+          return ok(toReviewView(existing.data));
+        }
+      }
+      context.log?.error?.(`Failed to record review for suggestion ${suggestionId}: ${error.message}`);
+      return createResponse({ message: 'Failed to record review' }, 500);
+    }
+
+    return createResponse(toReviewView(data), 201);
+  };
+
   return {
+    createBackofficeReview,
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,

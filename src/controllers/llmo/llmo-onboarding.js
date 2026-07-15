@@ -51,10 +51,47 @@ export const BASIC_AUDITS = [
   'prerender',
 ];
 
+// Site-only onboarding (LLMO-5606) enables AND triggers exactly this set. The
+// DRS → SNS path that would otherwise fire llm-error-pages / llmo-customer-analysis
+// is skipped, so llm-error-pages is triggered directly and llmo-customer-analysis
+// is intentionally omitted. Shared by both the enable and trigger lists to prevent
+// drift between them.
+export const SITE_ONLY_AUDITS = [...BASIC_AUDITS, 'llm-error-pages', 'wikipedia-analysis'];
+
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
 export const ASO_CRITICAL_SITES = [];
 const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
+
+// Cap for the best-effort Ahrefs/SEO overrideBaseURL detection during onboarding.
+// It can fire many slow SEO API calls (~10s observed) and, on the synchronous
+// onboarding path, push the response past the CDN first-byte timeout (~15s) — the
+// client gets a 503 even though onboarding succeeded. (LLMO-5606 follow-up.)
+const OVERRIDE_DETECT_TIMEOUT_MS = 5000;
+
+/**
+ * Awaits `promise`, but resolves to `fallback` if it rejects or doesn't settle
+ * within `timeoutMs`. The underlying promise is left running and any late
+ * rejection is swallowed, so a slow/flaky best-effort step can neither block past
+ * the cap nor surface as an unhandled rejection.
+ * @param {Promise<*>} promise - The in-flight work.
+ * @param {number} timeoutMs - Max time to wait before giving up.
+ * @param {*} fallback - Value to resolve to on timeout or rejection.
+ * @returns {Promise<*>} The promise's value, or `fallback`.
+ */
+export async function settleWithin(promise, timeoutMs, fallback) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise).catch(() => fallback),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function resolveUpdatedBy(context) {
   return context.attributes?.authInfo?.profile?.email
@@ -104,6 +141,7 @@ export async function triggerBrandalfOnboardingJob({
   brandName,
   companyWebsite,
   onboardingMode,
+  region,
   log,
   say = () => {},
 }) {
@@ -124,6 +162,10 @@ export async function triggerBrandalfOnboardingJob({
       prompt_type: 'brandalf',
       name: brandName,
       company_website: companyWebsite,
+      // LLMO-5645: forward the operator-selected market so Brandalf honors it as
+      // the authoritative brand region instead of letting the LLM emit 'WW'.
+      // Omitted → DRS keeps the LLM region and falls back to 'US'.
+      ...(region ? { region } : {}),
       metadata,
     },
   });
@@ -136,20 +178,31 @@ export async function triggerBrandalfOnboardingJob({
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
 // triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
+// LLMO-5645: the initial stub brand uses 'gl' (worldwide) as a placeholder until
+// Brandalf returns the real region. When the operator selected a market we seed
+// it directly so the brand record is correct immediately and stays correct even
+// if Brandalf never completes. `region` is a validated ISO 3166-1 alpha-2 code
+// (e.g. 'US'); absent → keep the 'gl' placeholder that Brandalf overwrites.
+export function onboardingStubRegions(region) {
+  return region ? [region] : ['gl'];
+}
+
 export function buildInitialCustomerConfigV2({
   brandName,
   imsOrgId,
   siteId,
   baseURL,
   overrideBaseURL,
+  region,
   updatedBy = 'system',
 }) {
   const primaryUrl = overrideBaseURL || baseURL;
+  const regions = onboardingStubRegions(region);
   const config = convertV1ToV2({
     brands: {
       aliases: [{
         name: brandName,
-        regions: ['gl'],
+        regions,
         status: 'active',
       }],
     },
@@ -166,7 +219,7 @@ export function buildInitialCustomerConfigV2({
   brand.updatedAt = timestamp;
   brand.updatedBy = updatedBy;
   brand.urls = [{ value: primaryUrl, type: 'base' }];
-  brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
+  brand.brandAliases = [{ name: brandName, regions }];
 
   config.customer.customerName = brandName;
 
@@ -180,6 +233,7 @@ export async function ensureInitialCustomerConfigV2({
   siteId,
   baseURL,
   overrideBaseURL,
+  region,
   context,
 }) {
   const postgrestClient = context.dataAccess?.services?.postgrestClient;
@@ -215,6 +269,7 @@ export async function ensureInitialCustomerConfigV2({
       brandId = `${brandId}-${siteId.slice(0, 8)}`;
     }
 
+    const regions = onboardingStubRegions(region);
     brands.push({
       id: brandId,
       v1SiteId: siteId,
@@ -222,11 +277,11 @@ export async function ensureInitialCustomerConfigV2({
       baseUrl: primaryUrl,
       status: 'active',
       origin: 'system',
-      regions: ['gl'],
+      regions,
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
       urls: [{ value: primaryUrl, type: 'base' }],
-      brandAliases: [{ name: trimmedName, regions: ['gl'] }],
+      brandAliases: [{ name: trimmedName, regions }],
     });
 
     await writeCustomerConfigV2ToPostgres(
@@ -245,6 +300,7 @@ export async function ensureInitialCustomerConfigV2({
     siteId,
     baseURL,
     overrideBaseURL,
+    region,
     updatedBy: resolveUpdatedBy(context),
   });
 
@@ -266,19 +322,31 @@ export async function ensureInitialCustomerConfigV2({
  * percent-decoded and individually sanitized: runs of non-alphanumeric characters
  * are replaced with a single `-`, leading/trailing `-` are trimmed, and the
  * result is lowercased. Segments that reduce to empty after sanitization are
- * dropped. Sanitized parts are joined with `--` as the path-segment delimiter.
+ * dropped.
  *
- * The `--` delimiter cannot appear inside a sanitized segment (any run of
- * non-alphanumeric characters collapses to a single `-`), so URLs that differ
- * in path structure produce distinct folder names. Path segments differing only
- * in punctuation (e.g. `us-kings` vs `us_kings`) produce the same sanitized
- * segment and therefore the same folder; this is an inherent limitation of
- * lossy sanitization.
+ * Helix/AEM reserves the double-dash for its `ref--repo--owner` host convention
+ * and rejects any resource path containing `--` with HTTP 400 (LLMO-5859), so the
+ * host/segment boundary cannot be a dash. Instead each sanitized part has its
+ * marker letter self-escaped (`z` -> `zz`) and the parts are joined with `zs`,
+ * a Helix-safe token marking the `/` path boundary. Because a literal `z` is
+ * always doubled, a lone `z` can only introduce a structural token, so `zs` can
+ * never appear by accident inside a part: the encoding is unambiguous and
+ * reversible by a left-to-right scanner that, on each `z`, consumes the next
+ * character to decide escape-vs-boundary (`zz` -> `z`, `zs` -> `/`). A naive
+ * `String.split('zs')` is NOT a correct decoder: a part whose content contains
+ * `zs` is stored as `zzs`, which a blind split would wrongly break apart.
+ *
+ * This keeps the path boundary distinguishable from a `.` (which sanitizes to
+ * `-`): `nba.com/com` -> `nba-comzscom` stays distinct from `nba.com.com` ->
+ * `nba-com-com`. Sanitization is still lossy *within* a single segment, so
+ * segments differing only in punctuation (e.g. `us-kings` vs `us_kings`) collapse
+ * to the same folder; that is an inherent limitation of lossy per-segment
+ * sanitization, unchanged from the prior scheme.
  *
  * Examples:
  *   https://nba.com           -> nba-com
- *   https://nba.com/kings     -> nba-com--kings
- *   https://nba.com/us/kings  -> nba-com--us--kings
+ *   https://nba.com/kings     -> nba-comzskings
+ *   https://nba.com/us/kings  -> nba-comzsuszskings
  *
  * @param {string} baseURL - The site's base URL (must be a fully-qualified URL).
  * @param {string} env - The environment ('prod' for production, anything else is
@@ -291,17 +359,22 @@ export function generateDataFolder(baseURL, env = 'dev') {
     throw new TypeError('Invalid baseURL: hostname is required');
   }
   const sanitize = (s) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
-  const host = sanitize(url.hostname);
+  // Self-escape the boundary marker letter so a lone `z` can only ever introduce
+  // the `zs` path-boundary token (see join below). Run on already-sanitized,
+  // lowercased parts.
+  const escapeZ = (s) => s.replace(/z/g, 'zz');
+  const host = escapeZ(sanitize(url.hostname));
   const segments = url.pathname.split('/').filter(Boolean)
     .map((seg) => {
       let decoded = seg;
       try {
         decoded = decodeURIComponent(seg);
       } catch { /* keep raw on percent-encoded sequences that are not valid UTF-8 */ }
-      return sanitize(decoded);
+      return escapeZ(sanitize(decoded));
     })
     .filter(Boolean);
-  const dataFolderName = segments.length > 0 ? `${host}--${segments.join('--')}` : host;
+  // Join host + path segments with `zs`, the Helix-safe marker for the `/` boundary.
+  const dataFolderName = [host, ...segments].join('zs');
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 }
 
@@ -1226,6 +1299,178 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 }
 
 /**
+ * Activates the brand and kicks off prompt generation for an onboarded site.
+ *
+ * This is the brand/prompt-generation half of onboarding, owned by Piece 2
+ * (LLMO-5605). For v2 it writes the initial brand to the normalized brands table
+ * and triggers the Brandalf DRS job; for v1 it submits the legacy DRS
+ * prompt-generation job directly. Site-only onboarding (LLMO-5606) does NOT call
+ * this — it stands up the site with no brand entity, no Brandalf job, and no
+ * prompt-generation job.
+ *
+ * @param {object} params
+ * @param {string} params.onboardingMode - Resolved LLMO onboarding mode (v1/v2).
+ * @param {object} params.organization - The organization model.
+ * @param {object} params.site - The site model.
+ * @param {object} params.siteConfig - The (already-saved) site config object.
+ * @param {string} params.brandName - Brand name (label).
+ * @param {string} params.imsOrgId - IMS org ID.
+ * @param {string} params.baseURL - Site base URL.
+ * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region.
+ * @param {object} params.context - The request context.
+ * @param {Function} [params.say] - Optional Slack say callback.
+ * @returns {Promise<void>}
+ */
+export async function activateBrandAndGeneratePrompts({
+  onboardingMode,
+  organization,
+  site,
+  siteConfig,
+  brandName,
+  imsOrgId,
+  baseURL,
+  region,
+  context,
+  say = () => {},
+}) {
+  const { log } = context;
+
+  if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+
+    // Write initial brand to normalized brands table so DRS prompt sync can
+    // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
+    // Brandalf will upsert over this with LLM-identified sub-brands later.
+    // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
+    // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
+    // and would fail the exact-match lookup against the sites table.
+    // LLMO-5556: a second site onboarded under an existing brand name must not
+    // re-point that brand's primary site, nor clobber its URLs/aliases via the
+    // full-replace syncs inside upsertBrand. Detect the collision and skip the
+    // initial-brand write — the brand already exists so DRS sync still resolves
+    // it; a human then decides whether the new site is a sub-brand or a URL.
+    try {
+      const { data: existingBrand, error: lookupError } = await postgrestClient
+        .from('brands')
+        .select('id, site_id')
+        .eq('organization_id', organization.getId())
+        .eq('name', brandName.trim())
+        .maybeSingle();
+
+      if (lookupError) {
+        // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a
+        // query failure rather than throwing, so without this check a transient
+        // failure would fall through to upsertBrand and could re-point an
+        // existing brand's primary site. Skip the write as a precaution.
+        log.warn(`Skipping initial brand write: failed to look up existing brand "${brandName.trim()}" `
+          + `(org ${organization.getId()}): ${lookupError.message}`);
+      } else if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
+        log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
+          + `(org ${organization.getId()}) already exists with a different primary site `
+          + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
+          + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
+      } else {
+        // No collision: proceed with upsert (new brand, existing brand with a
+        // null primary site, or a re-onboard of the same site). upsertBrand's
+        // own guard keeps an already-set site_id immutable on the last case.
+        // LLMO-5645: seed operator market when supplied; else the 'gl'
+        // placeholder (consistent with the V2 config + brandAliases, both
+        // overwritten by Brandalf's async result).
+        const stubRegions = onboardingStubRegions(region);
+        await upsertBrand({
+          organizationId: organization.getId(),
+          brand: {
+            name: brandName.trim(),
+            status: 'active',
+            baseSiteId: site.getId(),
+            region: stubRegions,
+            urls: [{ value: baseURL, type: 'base' }],
+            brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
+          },
+          postgrestClient,
+          updatedBy: 'llmo-onboarding',
+          log,
+        });
+        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+      }
+    } catch (brandError) {
+      log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+    }
+
+    // Trigger Brandalf immediately after the v2 config exists so downstream
+    // brand sync can attach results to the newly created organization.
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+        await triggerBrandalfOnboardingJob({
+          drsClient,
+          organizationId: organization.getId(),
+          siteId: site.getId(),
+          imsOrgId,
+          brandName: brandName.trim(),
+          companyWebsite,
+          onboardingMode,
+          region,
+          log,
+          say,
+        });
+      } else {
+        log.debug('DRS client not configured, skipping Brandalf flow');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+      say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+    }
+  } else {
+    // V1 has no Brandalf trigger, so DRS will not submit prompt generation
+    // automatically. Submit it directly here so v1 onboardings still get
+    // prompts written to the legacy LLMO config (LLMO-4534).
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        const trimmedBrand = brandName.trim();
+        const brandProfile = siteConfig.getBrandProfile?.();
+        // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
+        // locale-aware audience from brand_profile.main_profile.target_audience.
+        const audience = brandProfile?.main_profile?.target_audience
+          || `General consumers interested in ${trimmedBrand} products and services`;
+
+        // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
+        // config write path when `onboarding_mode` is absent from the DRS job
+        // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
+        // prompts to the v2 customer-config storage and break v1 onboardings.
+        //
+        // LLMO-4683: forward operator-supplied `region` so the GPT prompt-generation
+        // job conditions on the brand's market. Omitted → DRS client default ('US')
+        // applies, preserving prior behavior.
+        if (region) {
+          log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
+        }
+        const drsJob = await drsClient.submitPromptGenerationJob({
+          baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
+          brandName: trimmedBrand,
+          audience,
+          siteId: site.getId(),
+          imsOrgId,
+          ...(region ? { region } : {}),
+        });
+        if (!drsJob?.job_id) {
+          throw new Error('DRS submitPromptGenerationJob returned no job_id');
+        }
+        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+      } else {
+        log.debug('DRS client not configured, skipping prompt generation');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+      say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
+    }
+  }
+}
+
+/**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
  * @param {string} [params.domain] - The domain name (alternative to baseURL)
@@ -1237,6 +1482,10 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
  *   prompt generation. Omitted → DRS client default ('US') applies.
+ * @param {boolean} [params.siteOnly=false] - Site-only onboarding (LLMO-5606). When true, stands
+ *   up the site, entitlement/enrollment, config, and site-analysis audits, but skips the entire
+ *   brand activation + prompt-generation block (no brand entity, no Brandalf job, no v1
+ *   prompt-generation job) and never enables/triggers llmo-customer-analysis.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
@@ -1244,7 +1493,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding, region,
+    tempOnboarding, region, siteOnly = false,
   } = params;
   const { env, log } = context;
 
@@ -1292,11 +1541,19 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       await updateIndexConfig(dataFolder, context, say);
     }
 
+    // Site-only onboarding (LLMO-5606) omits llmo-customer-analysis entirely — it
+    // belongs to the prompt-gen/brand path (Piece 2) which site-only skips, and it
+    // would otherwise never run (no DRS job to fire it via SNS). The full flow
+    // enables it so the DRS → SNS path can trigger it later.
+    const auditsToEnable = siteOnly
+      ? SITE_ONLY_AUDITS
+      : [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'];
+
     // Enable audits (continues on partial failure, logs warnings)
     await enableAudits(
       site,
       context,
-      [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'],
+      auditsToEnable,
       say,
     );
 
@@ -1316,7 +1573,15 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Only determine override if one doesn't already exist
     if (!currentFetchConfig.overrideBaseURL) {
-      const overrideBaseURL = await determineOverrideBaseURL(baseURL, context);
+      // Timebox the best-effort SEO override detection: it only tunes which host
+      // audits scrape (www vs apex), but can run ~10s (dozens of SEO calls) and push
+      // the synchronous response past the CDN first-byte timeout (~15s) → client 503
+      // even though onboarding succeeded. On timeout/error we skip it. (LLMO-5606.)
+      const overrideBaseURL = await settleWithin(
+        determineOverrideBaseURL(baseURL, context),
+        OVERRIDE_DETECT_TIMEOUT_MS,
+        null,
+      );
       if (overrideBaseURL) {
         siteConfig.updateFetchConfig({
           ...currentFetchConfig,
@@ -1354,6 +1619,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         siteId: site.getId(),
         baseURL,
         overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
+        region,
         context,
       });
 
@@ -1368,107 +1634,40 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         postgrestClient,
       });
       log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
-
-      // Write initial brand to normalized brands table so DRS prompt sync can
-      // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
-      // Brandalf will upsert over this with LLM-identified sub-brands later.
-      // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
-      // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
-      // and would fail the exact-match lookup against the sites table.
-      try {
-        await upsertBrand({
-          organizationId: organization.getId(),
-          brand: {
-            name: brandName.trim(),
-            status: 'active',
-            baseSiteId: site.getId(),
-            urls: [{ value: baseURL, type: 'base' }],
-            brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
-          },
-          postgrestClient,
-          updatedBy: 'llmo-onboarding',
-        });
-        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
-      } catch (brandError) {
-        log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
-      }
-
-      // Trigger Brandalf immediately after the v2 config exists so downstream
-      // brand sync can attach results to the newly created organization.
-      try {
-        const drsClient = DrsClient.createFrom(context);
-        if (drsClient.isConfigured()) {
-          const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
-          await triggerBrandalfOnboardingJob({
-            drsClient,
-            organizationId: organization.getId(),
-            siteId: site.getId(),
-            imsOrgId,
-            brandName: brandName.trim(),
-            companyWebsite,
-            onboardingMode,
-            log,
-            say,
-          });
-        } else {
-          log.debug('DRS client not configured, skipping Brandalf flow');
-        }
-      } catch (drsError) {
-        log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
-        say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
-      }
     } else {
-      log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
-
-      // V1 has no Brandalf trigger, so DRS will not submit prompt generation
-      // automatically. Submit it directly here so v1 onboardings still get
-      // prompts written to the legacy LLMO config (LLMO-4534).
-      try {
-        const drsClient = DrsClient.createFrom(context);
-        if (drsClient.isConfigured()) {
-          const trimmedBrand = brandName.trim();
-          const brandProfile = siteConfig.getBrandProfile?.();
-          // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
-          // locale-aware audience from brand_profile.main_profile.target_audience.
-          const audience = brandProfile?.main_profile?.target_audience
-            || `General consumers interested in ${trimmedBrand} products and services`;
-
-          // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
-          // config write path when `onboarding_mode` is absent from the DRS job
-          // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
-          // prompts to the v2 customer-config storage and break v1 onboardings.
-          //
-          // LLMO-4683: forward operator-supplied `region` so the GPT prompt-generation
-          // job conditions on the brand's market. Omitted → DRS client default ('US')
-          // applies, preserving prior behavior.
-          if (region) {
-            log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
-          }
-          const drsJob = await drsClient.submitPromptGenerationJob({
-            baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
-            brandName: trimmedBrand,
-            audience,
-            siteId: site.getId(),
-            imsOrgId,
-            ...(region ? { region } : {}),
-          });
-          if (!drsJob?.job_id) {
-            throw new Error('DRS submitPromptGenerationJob returned no job_id');
-          }
-          log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
-          say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
-        } else {
-          log.debug('DRS client not configured, skipping prompt generation');
-        }
-      } catch (drsError) {
-        log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-        say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
-      }
+      log.info(`Skipping v2 customer config initialization for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
     }
 
-    // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
-    // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
-    await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
+    // Brand activation + prompt generation. This block is owned by Piece 2
+    // (LLMO-5605). Site-only onboarding (LLMO-5606) skips it entirely — no brand
+    // entity (upsertBrand), no Brandalf job, and no v1 prompt-generation job.
+    // ensureInitialCustomerConfigV2 + the brandalf feature flag deliberately stay
+    // in the always-run path above.
+    if (!siteOnly) {
+      await activateBrandAndGeneratePrompts({
+        onboardingMode,
+        organization,
+        site,
+        siteConfig,
+        brandName,
+        imsOrgId,
+        baseURL,
+        region,
+        context,
+        say,
+      });
+    } else {
+      log.info(`Site-only onboarding: skipping brand activation and prompt generation for site ${site.getId()}`);
+    }
+
+    // Trigger audits. The full flow does NOT trigger llm-error-pages or
+    // llmo-customer-analysis here — they fire after DRS prompt generation via
+    // SNS → audit-worker (LLMO-1819). Site-only (LLMO-5606) skips that DRS path,
+    // so it triggers llm-error-pages directly; llmo-customer-analysis is never run.
+    const auditsToTrigger = siteOnly
+      ? SITE_ONLY_AUDITS
+      : [...BASIC_AUDITS, 'wikipedia-analysis'];
+    await triggerAudits(auditsToTrigger, context, site);
 
     return {
       site,
@@ -1509,7 +1708,13 @@ export async function performLlmoOffboarding(site, config, context) {
   const baseURL = site.getBaseURL();
   const llmoConfig = config.getLlmoConfig();
 
-  // Check if site has LLMO config with data folder, if not calculate it
+  // Check if site has LLMO config with data folder, if not calculate it.
+  // NOTE: re-deriving here assumes the folder was created with the CURRENT
+  // generateDataFolder scheme. A site onboarded under an older scheme whose
+  // stored dataFolder is missing could derive a name that does not match its
+  // actual SharePoint folder (so deleteSharePointFolder below would miss it).
+  // Onboarded sites always persist dataFolder, so this fallback should not fire
+  // in practice (prod scan confirmed zero affected, LLMO-5859).
   let dataFolder = llmoConfig?.dataFolder;
   if (!dataFolder) {
     log.debug(`Data folder not found in LLMO config, calculating from base URL: ${baseURL}`);

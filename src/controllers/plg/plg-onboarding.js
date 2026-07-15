@@ -59,8 +59,9 @@ import {
   bypassDisplaceOnboarded,
   bypassAemSiteCheck,
   bypassDomainAlreadyAssigned,
+  bypassNonProdDomain,
 } from './plg-onboarding/bypass-handlers.js';
-import { getReviewerIdentity, isInternalOrg } from './plg-onboarding/internal-org.js';
+import { getReviewerIdentity, isInternalOrg, isInternalOrgDemoSite } from './plg-onboarding/internal-org.js';
 
 // Re-exported for tests and external callers that validated domains via this controller
 // before the validation helpers were extracted into ./plg-onboarding/validation.js.
@@ -200,6 +201,8 @@ async function resolveImsEmailsForPlgRecords(records, context) {
 const PLG_REJECTION_MESSAGES = {
   'internal-org': { emoji: ':no_entry:', label: 'Rejected — Internal Org' },
   'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
+  'frescopa-domain': { emoji: ':no_entry:', label: 'Rejected — Frescopa Domain' },
+  'demo-site': { emoji: ':no_entry:', label: 'Rejected — Demo/Internal Site' },
 };
 
 async function postPlgRejectionNotification(domain, imsOrgId, reason, context, org) {
@@ -289,6 +292,18 @@ function PlgOnboardingController(ctx) {
     if (!isValidDomain(domain)) {
       log.warn(`PLG onboard rejected — invalid domain syntax. rawDomain=${JSON.stringify(rawDomain)} normalized=${JSON.stringify(domain)} imsOrgId=${imsOrgId}`);
       return badRequest('Invalid domain: must be a valid hostname or hostname/path (e.g. nba.com or nba.com/kings)');
+    }
+
+    if (domain.toLowerCase().includes('frescopa')) {
+      await postPlgRejectionNotification(domain, imsOrgId, 'frescopa-domain', context);
+      return badRequest('PLG onboarding is not available for frescopa domains');
+    }
+
+    const { Site } = context.dataAccess;
+    const siteForDemoCheck = await Site.findByBaseURL(composeBaseURL(domain));
+    if (siteForDemoCheck && isInternalOrgDemoSite(siteForDemoCheck.getId(), context.env)) {
+      await postPlgRejectionNotification(domain, imsOrgId, 'demo-site', context);
+      return badRequest('PLG onboarding is not available for demo/internal sites');
     }
 
     try {
@@ -532,6 +547,8 @@ function PlgOnboardingController(ctx) {
             { onboarding, siteConfig },
             flowContext,
           );
+        case REVIEW_REASONS.NON_PROD_DOMAIN:
+          return await bypassNonProdDomain({ onboarding }, flowContext);
         /* c8 ignore next 2 */
         default:
           return badRequest('Unknown review reason');

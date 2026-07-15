@@ -1,6 +1,7 @@
 site-opportunities:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunities
     summary: |
@@ -71,6 +72,7 @@ site-opportunities-by-status:
       required: true
       schema:
         type: string
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitiesByStatus
     summary: |
@@ -103,6 +105,7 @@ site-opportunity:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunity
     summary: |
@@ -197,6 +200,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionView'
     - $ref: './parameters.yaml#/suggestionStatus'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestions
     summary: |
@@ -278,6 +282,7 @@ site-opportunity-suggestions-by-status:
       schema:
         type: string
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatus
     summary: |
@@ -314,6 +319,7 @@ site-opportunity-suggestions-paged:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPaged
     summary: |
@@ -353,6 +359,7 @@ site-opportunity-suggestions-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPagedWithCursor
     summary: |
@@ -396,6 +403,7 @@ site-opportunity-suggestions-by-status-paged:
         type: string
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPaged
     summary: |
@@ -439,6 +447,7 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPagedWithCursor
     summary: |
@@ -654,11 +663,18 @@ site-opportunity-suggestions-edge-deploy:
                       enum: [GENERATING_BASELINE]
                     geoExperimentPhase:
                       type: string
-                      enum: [pre_analysis_submitted]
+                      enum: [initiated]
+                      description: >-
+                        Initial phase of the newly created experiment. The
+                        experimentation engine advances it through prompt
+                        generation, pre-analysis, deployment, and post-analysis.
                     prePhaseScheduleId:
-                      type: string
+                      type: [string, 'null']
                       format: uuid
-                      description: DRS schedule ID for the pre-analysis phase
+                      description: >-
+                        Always null from this endpoint. The DRS pre-analysis
+                        schedule is created later by the experimentation engine,
+                        not at edge-deploy time.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -719,8 +735,22 @@ site-geo-experiment:
     summary: Get geo experiment details
     description: |
       Returns the full details of a geo experiment, including prompts (fetched from S3).
+      When called with `includeInsights=true`, the impact-measurement insights JSON is
+      also fetched from S3 and returned in the `insights` field.
     tags:
       - geo-experiments
+    parameters:
+      - name: includeInsights
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+            - 'true'
+            - 'false'
+        description: |
+          When `true`, include the impact-measurement insights (ExperimentInsights)
+          fetched from S3. Omitted from the response otherwise.
     responses:
       '200':
         description: Geo experiment details
@@ -752,6 +782,14 @@ site-geo-experiment:
                             items:
                               type: string
                       description: Prompts from S3, or null if not yet available
+                    insights:
+                      type:
+                        - object
+                        - 'null'
+                      description: |
+                        Impact-measurement insights (ExperimentInsights) fetched from S3.
+                        Only present when the request sets `includeInsights=true`; null when
+                        insights do not exist yet or the S3 fetch fails.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -793,6 +831,8 @@ GeoExperiment:
         - deployment_completed
         - post_analysis_submitted
         - post_analysis_done
+        - impact_measurement_started
+        - impact_measurement_done
     siteId:
       type: string
       format: uuid
@@ -821,6 +861,13 @@ GeoExperiment:
         - string
         - 'null'
       description: S3 key of the uploaded prompts JSON file
+    insightsLocation:
+      type:
+        - string
+        - 'null'
+      description: |
+        S3 key of the impact-measurement insights JSON (ExperimentInsights). Null until
+        impact measurement completes. Fetch the object via `includeInsights=true`.
     metadata:
       type:
         - object
@@ -1082,6 +1129,7 @@ site-opportunity-suggestion:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionId'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestion
     summary: |
@@ -1167,6 +1215,106 @@ site-opportunity-suggestion:
         $ref: './responses.yaml#/404'
       '429':
         $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestion-backoffice-reviews:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+  post:
+    operationId: createBackofficeReview
+    summary: |
+      Capture an ESE review verdict for a suggestion (Backoffice feedback loop)
+    description: |
+      Records a single human-review feedback event for the suggestion as part of
+      the Learning Agent feedback loop (SITES-43974). `source` is bound to
+      `backoffice` by this route and must not be supplied in the body. `eventId`
+      is a mandatory client-supplied idempotency key (UUID v4) — a duplicate POST
+      with the same `eventId` collapses to a no-op and returns 200 with the
+      existing review. Customer-derived fields are secret-scrubbed and the
+      markdown is sanitised server-side before storage; raw patches are not
+      echoed in the response.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - eventId
+              - verdict
+            properties:
+              eventId:
+                type: string
+                format: uuid
+                description: Client-supplied idempotency key (UUID v4), retained across retries.
+              verdict:
+                type: string
+                enum: [up, down]
+                description: The reviewer's verdict (translated server-side to a positive/negative signal).
+              detailMarkdown:
+                type: string
+                maxLength: 8192
+                description: Optional ESE rationale (markdown). Required on reject by the UI; sanitised + 8 KB cap server-side.
+              guidanceMarkdown:
+                type: string
+                maxLength: 65536
+                description: >-
+                  AI-generated issue context (title + description) for the reviewed issue.
+                  Gives the Learning Agent "what the issue was" alongside the generated
+                  patch (previousFix) and the review. Sanitised + 64 KB cap server-side.
+              feedbackSubjectId:
+                type: string
+                maxLength: 200
+                description: >-
+                  Optional SpaceCat-internal id of the sub-item this review is about
+                  within the suggestion (e.g. a CWV issue id), so the Backoffice can group
+                  per-issue "previous feedback" when issues share one suggestionId.
+                  Independent of the Fix-entity issue id. Not exported to S3.
+              rejectionCategory:
+                type: string
+                enum: [product_bug, bad_recommendation, other]
+                description: Optional category on a reject.
+              stateTransition:
+                type: string
+                description: The accompanying suggestion state transition, e.g. PENDING_VALIDATION->REJECTED or EDIT.
+              previousFix:
+                type: object
+                description: Patch snapshot at review time (secret-scrubbed server-side).
+              editedFix:
+                type: object
+                description: ESE-edited patch when supplied (optional; secret-scrubbed server-side).
+    responses:
+      '201':
+        description: Review recorded
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '200':
+        description: Idempotent no-op — a review with this eventId already exists
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '413':
+        description: detail_markdown exceeds the 8 KB limit
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -1282,10 +1430,68 @@ site-opportunity-suggestion-fixes:
     security:
       - ims_key: [ ]
 
+site-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
+    - name: status
+      description: Optional fix status to filter by (e.g. `PENDING`, `FAILED`).
+      in: query
+      required: false
+      schema:
+        type: string
+    - name: limit
+      description: |
+        Maximum number of fixes to return. The aggregation spans every opportunity
+        belonging to the site, so the result set is capped to bound response size
+        and downstream user-name enrichment cost.
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 200
+        example: 200
+  get:
+    operationId: getSiteFixes
+    summary: |
+      Retrieve all fixes for a site, across every opportunity
+    description: |
+      Aggregates fixes across every opportunity belonging to the site, avoiding the need to
+      enumerate opportunities and fetch fixes per-opportunity. Optionally filtered by status.
+      Capped by `limit` (default 200, max 1000).
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of fixes
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixes
     summary: |
@@ -1299,6 +1505,8 @@ site-opportunity-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':
@@ -1477,6 +1685,7 @@ site-opportunity-fix-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/fixId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixSuggestions
     summary: |
@@ -1490,6 +1699,8 @@ site-opportunity-fix-suggestions:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':

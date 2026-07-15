@@ -32,6 +32,7 @@ import {
   buildRangeExpr,
   escapeQlString,
   isValidVolume,
+  exactSnapshotDate,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -73,7 +74,7 @@ export async function handleGapTopics(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || TOPICS_REQUEST_ORDER_BY_ENUM.TOTAL_COMPETITOR_MENTIONS;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
-  const date = sp.get('date');
+  const targetDate = exactSnapshotDate(sp);
   const { limit, offset } = parseLimitOffset(sp);
 
   const gapKindsRaw = sp.get('gapKinds');
@@ -102,7 +103,7 @@ export async function handleGapTopics(sp, clients) {
         range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
-        target_date: date,
+        ...(targetDate ? { target_date: targetDate } : {}),
       },
       PROTO_FROM_JSON,
     );

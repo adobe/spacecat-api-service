@@ -27,7 +27,7 @@ import { checkConfiguration } from '@adobe/spacecat-shared-data-access';
 
 import { ConfigurationDto } from '../dto/configuration.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_CONFIGURATION_READ } from '../routes/capability-constants.js';
+import { CAP_CONFIGURATION_READ, CAP_CONFIGURATION_WRITE } from '../routes/capability-constants.js';
 
 function ConfigurationController(ctx) {
   if (!isNonEmptyObject(ctx)) {
@@ -44,12 +44,17 @@ function ConfigurationController(ctx) {
 
   /**
    * Helper function to set updatedBy field from the authenticated user's profile.
+   * For S2S consumers the caller is identified as `s2s:<clientId>` when profile.email
+   * is absent, giving a traceable audit trail without exposing a human email.
    * @param {object} configuration - The configuration entity to update.
    * @param {object} context - The request context containing authInfo.
    */
   const setUpdatedBy = (configuration, context) => {
     const { authInfo: { profile } } = context.attributes;
-    configuration.setUpdatedBy(profile.email || 'system');
+    const s2sClientId = context.s2sConsumer?.getClientId?.();
+    configuration.setUpdatedBy(
+      profile.email || (s2sClientId ? `s2s:${s2sClientId}` : 'system'),
+    );
   };
 
   /**
@@ -74,6 +79,32 @@ function ConfigurationController(ctx) {
     }
     if (s2sResult.allowed) {
       log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_CONFIGURATION_READ} requestId=${requestId}`);
+    }
+    return null;
+  };
+
+  /**
+   * Authorizes a configuration write. Full admins pass as before.
+   * Additionally, an S2S consumer holding `configuration:write` is allowed —
+   * the capability is enforced at Layer 1 by `s2sAuthWrapper` and re-checked
+   * here at Layer 2 via a fresh DB fetch (same dual-layer pattern as read).
+   * @param {UniversalContext} context - Request context.
+   * @param {string} route - Route label used in structured logs.
+   * @param {string} message - Forbidden message returned to the caller.
+   * @returns {Promise<Response|null>} A `forbidden` response when denied, else null.
+   */
+  const authorizeConfigWrite = async (context, route, message) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_CONFIGURATION_WRITE);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden(message);
+    }
+    if (s2sResult.allowed) {
+      log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_CONFIGURATION_WRITE} requestId=${requestId}`);
     }
     return null;
   };
@@ -129,8 +160,9 @@ function ConfigurationController(ctx) {
   };
 
   const registerAudit = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can register audits');
+    const denied = await authorizeConfigWrite(context, 'POST /configurations/audits', 'Only admins can register audits');
+    if (denied) {
+      return denied;
     }
 
     const {
@@ -155,8 +187,9 @@ function ConfigurationController(ctx) {
   };
 
   const unregisterAudit = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can unregister audits');
+    const denied = await authorizeConfigWrite(context, 'DELETE /configurations/audits/:auditType', 'Only admins can unregister audits');
+    if (denied) {
+      return denied;
     }
 
     const auditType = context.params?.auditType;
@@ -181,8 +214,9 @@ function ConfigurationController(ctx) {
    * @return {Promise<Response>} Updated configuration response.
    */
   const updateQueues = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can update queue configuration');
+    const denied = await authorizeConfigWrite(context, 'PUT /configurations/latest/queues', 'Only admins can update queue configuration');
+    if (denied) {
+      return denied;
     }
 
     const queues = context.data;
@@ -213,8 +247,9 @@ function ConfigurationController(ctx) {
    * @return {Promise<Response>} Updated configuration response.
    */
   const updateJob = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can update job configuration');
+    const denied = await authorizeConfigWrite(context, 'PATCH /configurations/latest/jobs/:jobType', 'Only admins can update job configuration');
+    if (denied) {
+      return denied;
     }
 
     const { jobType } = context.params;
@@ -250,8 +285,9 @@ function ConfigurationController(ctx) {
    * @return {Promise<Response>} Updated configuration response.
    */
   const updateHandler = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can update handler configuration');
+    const denied = await authorizeConfigWrite(context, 'PATCH /configurations/latest/handlers/:handlerType', 'Only admins can update handler configuration');
+    if (denied) {
+      return denied;
     }
 
     const { handlerType } = context.params;
@@ -282,14 +318,99 @@ function ConfigurationController(ctx) {
   };
 
   /**
+   * Replaces enabled/disabled lists for a handler.
+   * This is a temporary API that replaces (not merges) the provided arrays.
+   *
+   * TEMPORARY API: This endpoint was created to clean up enabled and disabled lists
+   * by removing unnecessary site IDs. Unlike the existing updateHandler endpoint
+   * which merges arrays, this endpoint completely replaces the specified arrays.
+   * This API will be removed once the cleanup task is completed.
+   *
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Updated configuration response.
+   */
+  const replaceHandlerEnabledDisabled = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update handler configuration');
+    }
+
+    const { handlerType } = context.params;
+    const { data } = context;
+
+    if (!hasText(handlerType)) {
+      return badRequest('Handler type is required');
+    }
+
+    if (!isNonEmptyObject(data)) {
+      return badRequest('Request body is required and cannot be empty');
+    }
+
+    // Validate that at least one of enabled or disabled is provided
+    const hasEnabled = data.enabled !== undefined;
+    const hasDisabled = data.disabled !== undefined;
+
+    if (!hasEnabled && !hasDisabled) {
+      return badRequest('At least one of enabled or disabled must be provided');
+    }
+
+    // Validate that at least one array is provided within enabled/disabled
+    // (empty arrays are allowed)
+    if (hasEnabled) {
+      const hasEnabledSites = data.enabled.sites !== undefined;
+      const hasEnabledOrgs = data.enabled.orgs !== undefined;
+      if (!hasEnabledSites && !hasEnabledOrgs) {
+        return badRequest('At least one of enabled.sites or enabled.orgs must be provided');
+      }
+      // Validate that if provided, they must be arrays
+      if (hasEnabledSites && !Array.isArray(data.enabled.sites)) {
+        return badRequest('enabled.sites must be an array');
+      }
+      if (hasEnabledOrgs && !Array.isArray(data.enabled.orgs)) {
+        return badRequest('enabled.orgs must be an array');
+      }
+    }
+
+    if (hasDisabled) {
+      const hasDisabledSites = data.disabled.sites !== undefined;
+      const hasDisabledOrgs = data.disabled.orgs !== undefined;
+      if (!hasDisabledSites && !hasDisabledOrgs) {
+        return badRequest('At least one of disabled.sites or disabled.orgs must be provided');
+      }
+      // Validate that if provided, they must be arrays
+      if (hasDisabledSites && !Array.isArray(data.disabled.sites)) {
+        return badRequest('disabled.sites must be an array');
+      }
+      if (hasDisabledOrgs && !Array.isArray(data.disabled.orgs)) {
+        return badRequest('disabled.orgs must be an array');
+      }
+    }
+
+    try {
+      const configuration = await Configuration.findLatest();
+      if (!configuration) {
+        return notFound('Configuration not found');
+      }
+
+      configuration.replaceHandlerEnabledDisabled(handlerType, data);
+      setUpdatedBy(configuration, context);
+      await configuration.save();
+
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
+  /**
    * Updates the entire configuration or specific sections.
    * Allows updating handlers, jobs, and/or queues in a single request.
    * @param {UniversalContext} context - Context of the request.
    * @return {Promise<Response>} Updated configuration response.
    */
   const updateConfiguration = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can update configuration');
+    const denied = await authorizeConfigWrite(context, 'PATCH /configurations/latest', 'Only admins can update configuration');
+    if (denied) {
+      return denied;
     }
 
     const configData = context.data;
@@ -330,8 +451,9 @@ function ConfigurationController(ctx) {
    * @return {Promise<Response>} Configuration response.
    */
   const restoreVersion = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can restore configurations');
+    const denied = await authorizeConfigWrite(context, 'POST /configurations/:version/restore', 'Only admins can restore configurations');
+    if (denied) {
+      return denied;
     }
 
     const versionToRestore = context.params?.version;
@@ -392,6 +514,7 @@ function ConfigurationController(ctx) {
     updateQueues,
     updateJob,
     updateHandler,
+    replaceHandlerEnabledDisabled,
     updateConfiguration,
     restoreVersion,
   };

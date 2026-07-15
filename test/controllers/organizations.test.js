@@ -971,6 +971,100 @@ describe('Organizations Controller', () => {
     expect(resultSites[1]).to.have.property('id', 'site2');
   });
 
+  describe('getSitesForOrganization — ReBAC collection filter', () => {
+    // Minimal chained PostgREST stub; resolves every read to the given rows.
+    function fakeFacsPostgrest(rows) {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        is: () => builder,
+        order: () => builder,
+        range: () => builder,
+        then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+      };
+      return { from: () => builder };
+    }
+
+    function setupBothSitesPass() {
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0], sites[1]]);
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'abcd',
+        getTier: () => 'FREE_TRIAL',
+      });
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getId: () => 'e1', getEntitlementId: () => 'entitlement-123', getSiteId: () => 'site1' },
+        { getId: () => 'e2', getEntitlementId: () => 'entitlement-123', getSiteId: () => 'site2' },
+      ]);
+    }
+
+    it('filters own sites to the ReBAC-viewable set when facs flag is set', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([
+          { resource_id: 'site1', granted_capabilities: ['aso/can_view'] },
+        ]),
+      };
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      const resultSites = await result.json();
+      expect(result.status).to.equal(200);
+      // site2 is dropped — the caller has no can_view grant on it.
+      expect(resultSites).to.be.an('array').with.lengthOf(1);
+      expect(resultSites[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns 503 when the facs flag is set but PostgREST is unavailable', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      // No context.dataAccess.services → postgrest guard trips.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(503);
+    });
+
+    it('skips filter when JWT carries the federal can_view grant', async () => {
+      setupBothSitesPass();
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      // Keep is_admin: true so hasAccess passes; add facs_permissions to trigger the bypass.
+      context.attributes.authInfo.withProfile({
+        email: 'test@example.com',
+        is_admin: true,
+        facs_permissions: ['aso/can_view'],
+      });
+      // No postgrestClient needed — the bypass should skip the state-layer query entirely.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(200);
+      const resultSites = await result.json();
+      expect(resultSites).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('skips the site filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
+      setupBothSitesPass();
+      // LLMO ReBAC-scopes `brand`, not `site` — listing sites must NOT be
+      // filtered even though a resource-scoped facs session is active.
+      context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
+      // No postgrestClient: if the filter wrongly engaged it would 503; the
+      // cross-product bypass must skip the state-layer query entirely.
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
+        ...context,
+      });
+      expect(result.status).to.equal(200);
+      const resultSites = await result.json();
+      expect(resultSites).to.be.an('array').with.lengthOf(2);
+    });
+  });
+
   it('gets all sites of an organization for non belonging organization', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Site.allByOrganizationId.resolves(sites);
@@ -1237,6 +1331,114 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(403);
       expect(error).to.have.property('message', 'Only users belonging to the organization can view its projects');
+    });
+
+    function fakeFacsPostgrest(rows) {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        is: () => builder,
+        order: () => builder,
+        range: () => builder,
+        then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+      };
+      return { from: () => builder };
+    }
+
+    it('filters projects to those with a ReBAC-viewable site when facs flag is set', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      mockDataAccess.Site.allByOrganizationId.resolves(sites);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([
+          { resource_id: 'site1', granted_capabilities: ['aso/can_view'] },
+        ]),
+      };
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Only Project 1 survives — it owns site1 (viewable); Project 2 owns only
+      // site3, which the caller cannot view.
+      expect(response).to.be.an('array').with.lengthOf(1);
+      expect(response[0]).to.have.property('id', '550e8400-e29b-41d4-a716-446655440000');
+    });
+
+    it('returns 503 when the facs flag is set but PostgREST is unavailable', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      // No context.dataAccess.services → postgrest guard trips.
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+
+      expect(result.status).to.equal(503);
+    });
+
+    it('returns an empty list when the caller can view none of the org\'s sites', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      mockDataAccess.Site.allByOrganizationId.resolves(sites);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.dataAccess.services = {
+        postgrestClient: fakeFacsPostgrest([]),
+      };
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      // Zero viewable sites must fail closed to [] — never the full project list.
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('skips the project filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      // LLMO ReBAC-scopes `brand`, not `site`; the filter must not engage. No
+      // postgrestClient — if it wrongly engaged this would 503.
+      context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('skips the project filter when the JWT carries an org-wide can_view grant', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[1]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+      context.attributes.authInfo.withProfile({
+        email: 'test@example.com',
+        is_admin: true,
+        facs_permissions: ['aso/can_view'],
+      });
+      // No postgrestClient — the org-wide grant must bypass the state-layer query.
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[1].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array').with.lengthOf(2);
     });
   });
 
@@ -1694,6 +1896,176 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(body.map((s) => s.id)).to.include('site1');
+    });
+  });
+
+  describe('getSitesForOrganization — cross-product scope (SITES-46454)', () => {
+    const orgId2 = '9033554c-de8a-44ac-a356-09b51af8cc28';
+    // Real Site model ids from the shared fixture (lines 41/49/57).
+    const SITE1_ID = 'site1';
+    const SITE2_ID = 'site2';
+    const SITE3_ID = '550e8400-e29b-41d4-a716-446655440001';
+    let tierClientByProduct;
+
+    /**
+     * Returns a per-product TierClient instance whose entitlement reflects the
+     * `entitled` argument (true → an Entitlement object on FREE_TRIAL; false → null).
+     */
+    function makePerProductTier(productCode, { entitled, tier = 'FREE_TRIAL' }) {
+      const entitlement = entitled
+        ? {
+          getId: () => `entitlement-${productCode}`,
+          getProductCode: () => productCode,
+          getTier: () => tier,
+        }
+        : null;
+      return {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement }),
+      };
+    }
+
+    beforeEach(() => {
+      // Cross-product scope present on the session
+      context.attributes.authInfo
+        .withScopes([{ name: 'sites:list:cross_product' }])
+        .withProfile({ is_admin: true, userId: 'preflight-user' });
+
+      mockDataAccess.Site.allByOrganizationId.resolves(sites);
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+      // Default: only ASO is entitled; LLMO/ACO not entitled.
+      tierClientByProduct = {
+        ASO: makePerProductTier('ASO', { entitled: true }),
+        LLMO: makePerProductTier('LLMO', { entitled: false }),
+        ACO: makePerProductTier('ACO', { entitled: false }),
+      };
+      sandbox.stub(TierClient, 'createForOrg').callsFake((_ctx, _org, code) => (
+        tierClientByProduct[code] ?? makePerProductTier(code, { entitled: false })
+      ));
+
+      // Default enrollment: only site1 enrolled under ASO.
+      mockDataAccess.SiteEnrollment.allByEntitlementId = sinon.stub().callsFake((entId) => {
+        if (entId === 'entitlement-ASO') {
+          return Promise.resolve([{ getSiteId: () => SITE1_ID }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      // No delegation in these tests — keep the SiteImsOrgAccess path inert.
+      mockDataAccess.SiteImsOrgAccess = {
+        allByOrganizationIdWithSites: sinon.stub().resolves([]),
+      };
+      organizationsController = OrganizationsController(context, env);
+    });
+
+    it('returns only sites enrolled under products the org is entitled to', async () => {
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id)).to.have.members([SITE1_ID]);
+      expect(context.log.info).to.have.been.calledWithMatch(/cross-product listing for org=/);
+    });
+
+    it('unions sites across multiple entitled products and dedupes by site id', async () => {
+      // Both ASO and LLMO entitled now.
+      tierClientByProduct.LLMO = makePerProductTier('LLMO', { entitled: true });
+      // site2 enrolled under both ASO and LLMO so dedupe is exercised; site3 only under LLMO.
+      mockDataAccess.SiteEnrollment.allByEntitlementId = sinon.stub().callsFake((entId) => {
+        if (entId === 'entitlement-ASO') {
+          return Promise.resolve([
+            { getSiteId: () => SITE1_ID },
+            { getSiteId: () => SITE2_ID },
+          ]);
+        }
+        if (entId === 'entitlement-LLMO') {
+          return Promise.resolve([
+            { getSiteId: () => SITE2_ID },
+            { getSiteId: () => SITE3_ID },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id).sort()).to.eql([SITE3_ID, SITE1_ID, SITE2_ID].sort());
+    });
+
+    it('returns empty array when the org has no entitlements at all', async () => {
+      tierClientByProduct.ASO = makePerProductTier('ASO', { entitled: false });
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.eql([]);
+    });
+
+    it('hides PRE_ONBOARD-tier entitlements from non-admin callers (tier-visibility gate preserved)', async () => {
+      context.attributes.authInfo
+        .withScopes([{ name: 'sites:list:cross_product' }])
+        .withProfile({ is_admin: false, userId: 'preflight-user' });
+      tierClientByProduct.ASO = makePerProductTier('ASO', { entitled: true, tier: 'PRE_ONBOARD' });
+      // Non-admin needs accessControlUtil.hasAccess(organization) to pass.
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      organizationsController = OrganizationsController(context, env);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.eql([]);
+    });
+
+    it('falls back to single-product behaviour when the scope is absent', async () => {
+      context.attributes.authInfo.withScopes([{ name: 'admin' }]);
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      organizationsController = OrganizationsController(context, env);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id)).to.have.members([SITE1_ID]);
+      expect(context.log.info).to.not.have.been.calledWithMatch(/cross-product listing/);
+    });
+
+    it('skips the ReBAC collection filter when the cross-product scope is present', async () => {
+      // A resource-scoped FACS session that would normally trigger the ReBAC
+      // filter under ASO. Deliberately do NOT provide postgrestClient: if the
+      // filter engaged, `requirePostgrestForFacsMappings` would return 503.
+      // The cross-product scope must short-circuit the filter entirely, so we
+      // expect 200 with the full entitled-sites union.
+      context.attributes.facs = { enabled: true, product: 'ASO', subjectId: 'user@AdobeID' };
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Same expectation as the baseline cross-product listing: entitlement gate
+      // still preserved (ASO entitled → only site1 enrolled).
+      expect(body.map((s) => s.id)).to.have.members([SITE1_ID]);
     });
   });
 });
