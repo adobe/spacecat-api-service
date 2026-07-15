@@ -126,6 +126,16 @@ async function main() {
 
   let projectId = opts['project-id'];
   if (!projectId) {
+    console.log('Resolving a real language_id from the Semrush language catalog...');
+    const languages = await transport.listLanguages();
+    const english = (languages?.items || []).find(
+      (item) => String(item?.name).toLowerCase() === 'english',
+    );
+    if (!english?.id) {
+      usageAndExit('Could not resolve an English language_id from /v1/languages');
+    }
+    console.log('language_id:', english.id);
+
     console.log('Creating a minimal AI project to publish into...');
     const created = await transport.createProject(subWorkspaceId, {
       name: 'LLMO-6190 metered-405 canary (delete me)',
@@ -136,7 +146,7 @@ async function main() {
       country_code: 'us',
       location_id: 2840,
       location_name: 'United States',
-      language_id: 1,
+      language_id: english.id,
     });
     projectId = String(created?.id || '');
     if (!projectId) {
@@ -144,6 +154,23 @@ async function main() {
     }
     console.log('Created project', projectId);
   }
+
+  console.log('Creating a tag to attach a draft prompt to...');
+  const tagResp = await transport.createProjectTags(subWorkspaceId, projectId, [`llmo-6190-canary-${Date.now()}`]);
+  const tagList = Array.isArray(tagResp) ? tagResp : (tagResp?.items || []);
+  const tagId = String(tagList[0]?.id || '');
+  if (!tagId) {
+    usageAndExit(`createProjectTags returned no usable tag id — raw: ${JSON.stringify(tagResp)}`);
+  }
+  console.log('tag_id:', tagId);
+
+  console.log('Drafting one prompt (free until publish) to give publish something to meter...');
+  await transport.createPromptsByIds(
+    subWorkspaceId,
+    projectId,
+    ['LLMO-6190 metered-405 canary prompt (delete me)'],
+    [tagId],
+  );
 
   try {
     console.log('Publishing with zero prompt headroom — expecting the disguised metered-quota 405...');
