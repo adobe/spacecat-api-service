@@ -279,7 +279,7 @@ export async function handleUpdatePromptSubworkspace(
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
   const typed = await injectComputedType(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
-  });
+  }, { mode: 'update' });
 
   try {
     await transport.deletePromptsByIds(workspaceId, projectId, [semrushPromptId]);

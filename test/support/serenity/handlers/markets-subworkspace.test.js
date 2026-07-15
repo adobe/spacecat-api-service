@@ -32,9 +32,9 @@ import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtur
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the two standard values (source=ai,
+// Every generated prompt carries the two standard values (origin=ai,
 // intent=Informational); the third tag is the per-prompt computed `type`.
-const STANDARD_IDS = [TAG_IDS.sourceAi, TAG_IDS.intentInformational];
+const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
 
 const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';
@@ -555,7 +555,7 @@ describe('markets-subworkspace handlers', () => {
         null,
         null,
         {
-          generateTopics: true, topicCap: 1, standardTags: ['source:ai'], publishMode: 'require',
+          generateTopics: true, topicCap: 1, standardTags: ['origin:ai'], publishMode: 'require',
         },
       )).to.be.rejectedWith(/topics boom/);
     });
@@ -954,7 +954,7 @@ describe('markets-subworkspace handlers', () => {
       });
       const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
       // Names are unique only per (project, parent): a sub-category `human` and
-      // the `source` value `human` are different tags. Keying by name would drop
+      // the `origin` value `human` are different tags. Keying by name would drop
       // one of them; keying by id keeps both.
       expect(result.items).to.deep.equal([
         { id: 'prompt-id', name: 'human' },

@@ -66,6 +66,31 @@ function fakeLog() {
   };
 }
 
+// `origin` is now injected UNCONDITIONALLY on every create/update, regardless
+// of whether a `classifyPromptType` closure is supplied — see the-origin-
+// dimension spec, WP-O2b item 1. These stubs answer a project that already
+// has an `origin` root with `ai` resolved, so tests not focused on `origin`
+// itself don't need to provision anything; `ORIGIN_AI_ID` is the id every
+// create appends and every update falls back to when it finds no stored one.
+const ORIGIN_AI_ID = 'origin-ai';
+function makeOriginResolvedStubs() {
+  return {
+    // All four roots already exist (only `origin` matters to these tests,
+    // but `ensureDimensionRoots` resolves all four on every call) so no
+    // create is ever attempted.
+    listProjectTags: makeListProjectTagsStub({
+      '': [
+        { id: 'root-category', name: 'category', children_count: 0 },
+        { id: 'root-intent', name: 'intent', children_count: 0 },
+        { id: 'root-origin', name: 'origin', children_count: 1 },
+        { id: 'root-type', name: 'type', children_count: 0 },
+      ],
+      'root-origin': [{ id: ORIGIN_AI_ID, name: 'ai', parent_id: 'root-origin' }],
+    }),
+    createProjectTags: sinon.stub(),
+  };
+}
+
 describe('handlers/prompts.js — handleListPrompts', () => {
   it('400s when geoTargetId is missing', async () => {
     const transport = {};
@@ -278,11 +303,11 @@ describe('handlers/prompts.js — handleListPrompts', () => {
               ],
             },
             {
-              id: TAG_IDS.sourceHuman,
+              id: TAG_IDS.originHuman,
               name: 'human',
               children_count: 0,
-              parent_id: TAG_IDS.sourceRoot,
-              path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+              parent_id: TAG_IDS.originRoot,
+              path: [{ id: TAG_IDS.originRoot, name: 'origin' }],
             },
           ],
         }],
@@ -296,9 +321,9 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
     const { tags } = result.items[0];
     expect(tags).to.have.lengthOf(2);
-    expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'source']);
+    expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'origin']);
     expect(tags[0].parentId).to.equal(TAG_IDS.categoryRunningShoes);
-    expect(tags[1].parentId).to.equal(TAG_IDS.sourceRoot);
+    expect(tags[1].parentId).to.equal(TAG_IDS.originRoot);
     // The deprecated name-keyed view collapses them; only one id survives.
     expect(Object.keys(result.items[0].tagMap)).to.deep.equal(['human']);
     // Listing prompts costs exactly ONE upstream call — no tag-tree walk.
@@ -553,6 +578,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }], existing_count: 0,
       }),
@@ -571,9 +597,9 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'hello',
-      tagIds: ['tag-cat-1', 'tag-child-1'],
+      tagIds: ['tag-cat-1', 'tag-child-1', ORIGIN_AI_ID],
     });
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['tag-cat-1', 'tag-child-1']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['tag-cat-1', 'tag-child-1', ORIGIN_AI_ID]);
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
   });
 
@@ -643,6 +669,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 0, items: [], existing_count: 1,
       }),
@@ -656,8 +683,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     expect(result.created[0].semrushPromptId).to.equal('');
-    expect(result.created[0].tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep']);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', ORIGIN_AI_ID]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', ORIGIN_AI_ID]);
   });
 
   it('returns empty semrushPromptId (not the string "undefined") when createPromptsByIds returns an item with no id', async () => {
@@ -666,6 +693,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ name: 'hello' }],
       }),
@@ -687,6 +715,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -703,8 +732,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep']);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', ORIGIN_AI_ID]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', ORIGIN_AI_ID]);
   });
 
   it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
@@ -713,6 +742,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -726,8 +756,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.have.lengthOf(50);
-    expect(result.created[0].tagIds).to.deep.equal(tooMany.slice(0, 50));
+    // Capped at 50 by sanitizeTagIds BEFORE the unified layer appends the
+    // (never client-settable) computed `origin` tag.
+    expect(result.created[0].tagIds).to.have.lengthOf(51);
+    expect(result.created[0].tagIds).to.deep.equal([...tooMany.slice(0, 50), ORIGIN_AI_ID]);
   });
 
   it('skips a create row when tagIds sanitizes to empty (every entry malformed)', async () => {
@@ -753,6 +785,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([usEn]);
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'good' }],
       }),
@@ -790,6 +823,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const err = Object.assign(new Error('rate limited'), { status: 429 });
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().rejects(err),
       publishProject: sinon.stub().resolves(),
     };
@@ -822,6 +856,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
+      ...makeOriginResolvedStubs(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
       }),
@@ -999,6 +1034,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
     const transport = {
+      ...makeOriginResolvedStubs(),
       deletePromptsByIds: sinon.stub().resolves(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }], existing_count: 0,
@@ -1024,10 +1060,12 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'next',
-      tagIds: ['tag-cat-1'],
+      // No `origin` tag was already present, so the update falls back to `ai`
+      // rather than leave the prompt with none.
+      tagIds: ['tag-cat-1', ORIGIN_AI_ID],
     });
     expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['tag-cat-1']);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['tag-cat-1', ORIGIN_AI_ID]);
   });
 
   it('drops falsy tagIds entries on PATCH before sending to the id-based endpoint', async () => {
@@ -1038,6 +1076,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
     const transport = {
+      ...makeOriginResolvedStubs(),
       deletePromptsByIds: sinon.stub().resolves(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }], existing_count: 0,
@@ -1057,8 +1096,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       fakeLog(),
     );
 
-    expect(result.body.tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep', ORIGIN_AI_ID]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep', ORIGIN_AI_ID]);
   });
 
   it('drops malformed tagIds entries on PATCH like validateParentIdFormat does for parentId', async () => {
@@ -1069,6 +1108,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
     const transport = {
+      ...makeOriginResolvedStubs(),
       deletePromptsByIds: sinon.stub().resolves(),
       createPromptsByIds: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }],
@@ -1092,8 +1132,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       fakeLog(),
     );
 
-    expect(result.body.tagIds).to.deep.equal(['keep']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep', ORIGIN_AI_ID]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep', ORIGIN_AI_ID]);
   });
 
   it('400s when tagIds sanitizes to empty (every entry malformed)', async () => {
@@ -1162,6 +1202,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
     const transport = {
+      ...makeOriginResolvedStubs(),
       // listPromptsByTags is no longer called from PATCH — wiring it as a
       // stub lets us assert callCount(0) so a regression that brings the
       // walk back fails this test.
@@ -1191,7 +1232,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'new text',
-      tagIds: ['tag-fresh'],
+      tagIds: ['tag-fresh', ORIGIN_AI_ID],
     });
     expect(transport.listPromptsByTags).to.have.callCount(0);
     expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
@@ -1209,6 +1250,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     // A generic Error with .status=404 must NOT trip the idempotent path.
     const err = new SerenityTransportError(404, 'not found');
     const transport = {
+      ...makeOriginResolvedStubs(),
       deletePromptsByIds: sinon.stub().rejects(err),
       createPromptsByIds: sinon.stub(),
     };
@@ -1241,6 +1283,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
     const transport = {
+      ...makeOriginResolvedStubs(),
       deletePromptsByIds: sinon.stub().resolves(),
       createPromptsByIds: sinon.stub().resolves({}), // no items
       publishProject: sinon.stub().resolves(),
@@ -1271,6 +1314,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
     const err = Object.assign(new Error('upstream 503'), { status: 503 });
     const transport = {
+      ...makeOriginResolvedStubs(),
       deletePromptsByIds: sinon.stub().rejects(err),
       createPromptsByIds: sinon.stub().resolves({ items: [{ id: 'should-not-happen' }] }),
     };
@@ -1300,6 +1344,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
     const createErr = Object.assign(new Error('unknown tag id: bogus'), { status: 500 });
     const transport = {
+      ...makeOriginResolvedStubs(),
       deletePromptsByIds: sinon.stub().resolves(),
       createPromptsByIds: sinon.stub().rejects(createErr),
       publishProject: sinon.stub().resolves(),
@@ -1680,6 +1725,7 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     } = setupCtx;
 
     // Mutation: handleCreatePrompts pushes a new prompt → invalidate.
+    Object.assign(transport, makeOriginResolvedStubs());
     transport.createPromptsByIds = sinon.stub().resolves({
       page: 1, total: 1, items: [{ id: 'sem-new', name: 'fresh' }],
     });
@@ -1709,6 +1755,7 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
       handleListTags, transport, dataAccess,
     } = setupCtx;
 
+    Object.assign(transport, makeOriginResolvedStubs());
     transport.deletePromptsByIds = sinon.stub().resolves();
     transport.createPromptsByIds = sinon.stub().resolves({
       page: 1, total: 1, items: [{ id: 'sem-new', name: 'updated' }],
@@ -1818,13 +1865,13 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WORKSPACE,
         'proj-us-en',
         ['is Acme good?'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi],
       );
       // The whole taxonomy already exists, so nothing is provisioned.
       expect(transport.createProjectTags).to.not.have.been.called;
@@ -1850,7 +1897,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originAi,
       ]);
     });
 
@@ -1888,7 +1935,9 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      expect(result.created[0].tagIds).to.deep.equal([decoyCategoryId, TAG_IDS.typeBranded]);
+      expect(result.created[0].tagIds).to.deep.equal([
+        decoyCategoryId, TAG_IDS.typeBranded, TAG_IDS.originAi,
+      ]);
     });
 
     // Projects that predate the taxonomy carry none of it; the first write
@@ -1911,15 +1960,23 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      // The four roots are created at the root level, then `branded` beneath
-      // the freshly-minted `type` root.
-      expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', 'intent', 'source', 'type',
+      // Roots (the three blind ones, plus `origin` via its own resolver call)
+      // are created at the root level, then `branded` beneath the freshly-
+      // minted `type` root and `ai` beneath the freshly-minted `origin` root.
+      const rootCalls = createProjectTags.getCalls()
+        .filter((c) => c.args[3].parentId === undefined);
+      expect(rootCalls.map((c) => c.args[2]).flat().sort()).to.deep.equal(
+        ['category', 'intent', 'origin', 'type'].sort(),
+      );
+      const typeValueCall = createProjectTags.getCalls()
+        .find((c) => c.args[3].parentId === 'created::type');
+      expect(typeValueCall.args[2]).to.deep.equal(['branded']);
+      const originValueCall = createProjectTags.getCalls()
+        .find((c) => c.args[3].parentId === 'created::origin');
+      expect(originValueCall.args[2]).to.deep.equal(['ai']);
+      expect(result.created[0].tagIds).to.deep.equal([
+        'tag-cat-1', 'created:created::type:branded', 'created:created::origin:ai',
       ]);
-      expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
-      expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
-      expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'created::type' });
-      expect(result.created[0].tagIds).to.deep.equal(['tag-cat-1', 'created:created::type:branded']);
     });
   });
 
@@ -1944,8 +2001,10 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.status).to.equal(200);
+      // No `origin` tag was already present in the request's tagIds, so the
+      // update falls back to `ai` rather than leave the prompt with none.
       expect(result.body.tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi,
       ]);
     });
 
@@ -1981,32 +2040,40 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       };
       const inject = makeTypeInjector(transport, WORKSPACE, classifyByBrandMention, fakeLog());
 
-      // Resolving one (project, type) key reads two levels: the roots, then the
-      // children of the `type` root.
+      // `origin` is resolved once (per project) and cached across every call
+      // regardless of `type`; `type` is resolved once per distinct (project,
+      // type) key. Both resolutions are two-level reads (roots + the
+      // dimension root's children).
       const a = await inject('proj-1', { text: 'love Acme', geoTargetId: 2840, tagIds: ['x'] });
-      expect(transport.listProjectTags).to.have.callCount(2);
+      const readsAfterFirst = transport.listProjectTags.callCount;
 
       // Same project + same computed type => served from cache, no new reads.
       const b = await inject('proj-1', { text: 'Acme rocks', geoTargetId: 2840, tagIds: ['y'] });
-      expect(transport.listProjectTags).to.have.callCount(2);
-      expect(a.tagIds).to.deep.equal(['x', TAG_IDS.typeBranded]);
-      expect(b.tagIds).to.deep.equal(['y', TAG_IDS.typeBranded]);
+      expect(transport.listProjectTags).to.have.callCount(readsAfterFirst);
+      expect(a.tagIds).to.deep.equal(['x', TAG_IDS.typeBranded, TAG_IDS.originAi]);
+      expect(b.tagIds).to.deep.equal(['y', TAG_IDS.typeBranded, TAG_IDS.originAi]);
 
-      // A different computed type is a new cache key => one more resolution.
+      // A different computed type is a new `type` cache key => more `type`
+      // reads, but `origin` is still served from cache (already resolved).
       const c = await inject('proj-1', { text: 'best running shoes', geoTargetId: 2840, tagIds: ['z'] });
-      expect(transport.listProjectTags).to.have.callCount(4);
-      expect(c.tagIds).to.deep.equal(['z', TAG_IDS.typeNonBranded]);
+      expect(transport.listProjectTags.callCount).to.be.greaterThan(readsAfterFirst);
+      expect(c.tagIds).to.deep.equal(['z', TAG_IDS.typeNonBranded, TAG_IDS.originAi]);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
-    it('passes the input through untouched when no classifier is supplied', async () => {
-      const transport = { listProjectTags: sinon.stub(), createProjectTags: sinon.stub() };
+    it('always injects `origin` even when no `type` classifier is supplied', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
       const inject = makeTypeInjector(transport, WORKSPACE, undefined, fakeLog());
 
       const out = await inject('proj-1', { text: 'anything', geoTargetId: 2840, tagIds: ['x'] });
 
-      expect(out.tagIds).to.deep.equal(['x']);
-      expect(transport.listProjectTags).to.not.have.been.called;
+      // `type` is untouched (no classifier), but `origin` is always injected —
+      // it is never client-settable, unlike `type` which merely skips
+      // classification when no closure is supplied.
+      expect(out.tagIds).to.deep.equal(['x', TAG_IDS.originAi]);
     });
   });
 });
