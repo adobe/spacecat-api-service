@@ -12006,7 +12006,7 @@ SuggestionReview:
       type: string
       enum: [paid, free]
     feedbackSubjectId:
-      type: string
+      type: [string, 'null']
       description: >-
         SpaceCat-internal id of the sub-item this review is about within the
         suggestion (e.g. a CWV issue id), used to group per-issue feedback. Null
@@ -12018,7 +12018,7 @@ SuggestionReview:
       type: object
       description: ESE-edited patch (only when ?include=...,patches).
     guidanceMarkdown:
-      type: string
+      type: [string, 'null']
       description: >-
         AI-generated issue context (title + description) for the reviewed issue
         (only when ?include=...,patches). Null when not set.
