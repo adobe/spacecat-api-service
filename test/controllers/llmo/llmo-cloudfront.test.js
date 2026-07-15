@@ -2295,6 +2295,11 @@ describe('LlmoCloudFrontController', () => {
       const callArgs = createCdnLogDeliveryStub.firstCall.args[1];
       expect(callArgs.provider).to.equal('cloudfront');
       expect(callArgs.resourceId).to.equal('E2EXAMPLE123');
+      expect(callArgs.accountId).to.equal('120569600543');
+      expect(callArgs.imsOrgId).to.equal('ABC123@AdobeOrg');
+      expect(callArgs.deliveryDestinationArn).to.equal(
+        'arn:aws:logs:us-east-1:111122223333:delivery-destination:cdn-logs-org',
+      );
     });
 
     it('is a no-op when forwarding is already enabled', async () => {
@@ -2583,6 +2588,37 @@ describe('LlmoCloudFrontController', () => {
 
       expect(result.status).to.equal(500);
       expect((await result.json()).message).to.equal('An unexpected error occurred');
+    });
+
+    it('returns an empty distribution list when the account has no distributions', async () => {
+      listDistributionsStub.resolves([]);
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(0);
+      expect(body.distributions).to.deep.equal([]);
+      expect(createCdnLogDeliveryStub.called).to.equal(false);
+    });
+
+    it('caps distributions at CDN_LOG_RESCAN_MAX_DISTRIBUTIONS and sets truncated flag', async () => {
+      listDistributionsStub.resolves([
+        { id: 'E2DIST000001' }, { id: 'E2DIST000002' }, { id: 'E2DIST000003' },
+      ]);
+      createCdnLogDeliveryStub.resolves({ created: true, alreadyExisted: false });
+
+      const result = await controller.rescanCdnLogDelivery({
+        ...rescanContext,
+        env: { ...rescanContext.env, CDN_LOG_RESCAN_MAX_DISTRIBUTIONS: '2' },
+      });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(2);
+      expect(body.truncated).to.equal(true);
+      expect(body.totalFound).to.equal(3);
+      expect(createCdnLogDeliveryStub.callCount).to.equal(2);
     });
   });
 });

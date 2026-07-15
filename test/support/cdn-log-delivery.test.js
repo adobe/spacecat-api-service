@@ -113,11 +113,18 @@ describe('cdn-log-delivery support', () => {
     const rnf = () => Object.assign(new Error('not found'), { name: 'ResourceNotFoundException' });
 
     it('creates source + delivery when none exists', async () => {
+      let putCmd;
+      let createCmd;
       sendStub.callsFake((cmd) => {
         if (cmd.type === 'get') {
           return Promise.reject(rnf());
         }
+        if (cmd.type === 'put') {
+          putCmd = cmd;
+          return Promise.resolve({});
+        }
         if (cmd.type === 'create') {
+          createCmd = cmd;
           return Promise.resolve({ delivery: { id: 'del-new' } });
         }
         return Promise.resolve({});
@@ -129,6 +136,17 @@ describe('cdn-log-delivery support', () => {
       expect(result.alreadyExisted).to.equal(false);
       expect(result.deliveryId).to.equal('del-new');
       expect(result.deliverySourceName).to.equal('llmo-cf-abc123-E2EXAMPLE123');
+
+      // Assert the exact inputs sent to each AWS command.
+      expect(putCmd.input.name).to.equal('llmo-cf-abc123-E2EXAMPLE123');
+      expect(putCmd.input.resourceArn).to.equal(
+        `arn:aws:cloudfront::${baseParams.accountId}:distribution/${baseParams.resourceId}`,
+      );
+      expect(putCmd.input.logType).to.equal('ACCESS_LOGS');
+      expect(createCmd.input.deliverySourceName).to.equal('llmo-cf-abc123-E2EXAMPLE123');
+      expect(createCmd.input.deliveryDestinationArn).to.equal(baseParams.deliveryDestinationArn);
+      expect(createCmd.input.s3DeliveryConfiguration).to.deep.equal({ suffixPath: '/{yyyy}/{MM}/{dd}/{HH}' });
+      expect(createCmd.input.recordFields).to.include('cs-uri-stem');
     });
 
     it('is idempotent when a delivery already exists (paginated)', async () => {
@@ -189,13 +207,35 @@ describe('cdn-log-delivery support', () => {
       expect(describeCalls).to.equal(1); // looked up the winner's delivery id after the conflict
     });
 
+    it('recovers when the source already exists but no delivery is found (partial state)', async () => {
+      sendStub.callsFake((cmd) => {
+        if (cmd.type === 'get') {
+          return Promise.resolve({}); // source already exists → skip PutDeliverySource
+        }
+        if (cmd.type === 'describe') {
+          // No existing delivery found for this source+destination pair.
+          return Promise.resolve({ deliveries: [] });
+        }
+        if (cmd.type === 'create') {
+          return Promise.resolve({ delivery: { id: 'del-recovered' } });
+        }
+        return Promise.resolve({});
+      });
+
+      const result = await mod.createCdnLogDelivery(creds, baseParams);
+
+      expect(result.created).to.equal(true);
+      expect(result.alreadyExisted).to.equal(false);
+      expect(result.deliveryId).to.equal('del-recovered');
+    });
+
     it('on a conflict, returns alreadyExisted with undefined id when the raced delivery is not found', async () => {
       sendStub.callsFake((cmd) => {
         if (cmd.type === 'get') {
           return Promise.reject(rnf()); // source absent → reach PutDeliverySource + CreateDelivery
         }
         if (cmd.type === 'create') {
-          return Promise.reject(Object.assign(new Error('exists'), { name: 'ResourceAlreadyExistsException' }));
+          return Promise.reject(Object.assign(new Error('exists'), { name: 'ConflictException' }));
         }
         if (cmd.type === 'describe') {
           // Paginate through pages with no matching deliverySourceName, then exhaust nextToken

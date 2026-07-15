@@ -201,12 +201,13 @@ function LlmoCloudFrontController(ctx) {
   // `{ accountId, distributionId, error }` where `error` is a badRequest Response when validation
   // fails (undefined otherwise).
   const validateCloudfrontCredentials = (context, { requireDistribution = false } = {}) => {
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const rawAccountId = String(context.data?.accountId || '');
     const distributionId = String(context.data?.distributionId || '').trim();
 
-    if (accountId.length !== 12) {
+    if (!/^\d{12}$/.test(rawAccountId)) {
       return { error: badRequest('accountId must be a 12-digit AWS account ID') };
     }
+    const accountId = rawAccountId;
     if (requireDistribution && !hasText(distributionId)) {
       return { error: badRequest('distributionId is required') };
     }
@@ -1228,6 +1229,7 @@ function LlmoCloudFrontController(ctx) {
       } catch (deliveryError) {
         // Adobe destination not provisioned yet → clear 4xx instead of a raw AWS error + retry.
         if (deliveryError?.name === 'ResourceNotFoundException') {
+          log.warn(`[cdn-onboard-cloudfront] Adobe log destination not provisioned for site ${siteId} (imsOrgId=${imsOrgId})`);
           return badRequest('Adobe log destination is not provisioned for this organization yet — run cdn-logs provisioning first');
         }
         throw deliveryError;
@@ -1283,7 +1285,10 @@ function LlmoCloudFrontController(ctx) {
         accountId, externalId, roleName,
       });
 
-      const distributions = await cloudFrontClient.listDistributions();
+      const allDistributions = await cloudFrontClient.listDistributions();
+      const maxDists = Number(env?.CDN_LOG_RESCAN_MAX_DISTRIBUTIONS) || 0;
+      const truncated = maxDists > 0 && allDistributions.length > maxDists;
+      const distributions = truncated ? allDistributions.slice(0, maxDists) : allDistributions;
 
       // Run in bounded batches (CDN_LOG_RESCAN_CONCURRENCY) so a large account doesn't trip
       // CloudWatch Logs per-account throttling. slice()/push() preserve order, so the per-index
@@ -1332,6 +1337,7 @@ function LlmoCloudFrontController(ctx) {
         created: createdCount,
         alreadyExisted,
         failed,
+        ...(truncated && { truncated: true, totalFound: allDistributions.length }),
         distributions: summary,
       });
     } catch (error) {

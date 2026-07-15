@@ -88,7 +88,11 @@ export function buildDeliverySourceName({
   resourceId,
 }) {
   const { sourceNamePrefix } = getProviderConfig(provider);
-  const name = `${sourceNamePrefix}-${toSafeAwsName(imsOrgId)}-${resourceId}`;
+  const safeOrg = toSafeAwsName(imsOrgId);
+  if (!safeOrg || !/^[a-z0-9]/.test(safeOrg)) {
+    throw new Error(`IMS org ID '${imsOrgId}' produces an invalid AWS resource name segment`);
+  }
+  const name = `${sourceNamePrefix}-${safeOrg}-${resourceId}`;
   if (name.length <= MAX_DELIVERY_SOURCE_NAME_LENGTH) {
     return name;
   }
@@ -147,9 +151,12 @@ export async function createCdnLogDelivery(credentials, {
 
   // Find the existing delivery for this source pointing at the expected destination (paginated).
   // The DescribeDeliveries API does not accept a server-side filter; pagination is client-side.
+  const MAX_DESCRIBE_PAGES = 50;
   const findExistingDelivery = async () => {
     let nextToken;
+    let pages = 0;
     do {
+      pages += 1;
       // eslint-disable-next-line no-await-in-loop
       const page = await client.send(new DescribeDeliveriesCommand({
         ...(nextToken && { nextToken }),
@@ -164,7 +171,7 @@ export async function createCdnLogDelivery(credentials, {
         return match;
       }
       nextToken = page.nextToken;
-    } while (nextToken);
+    } while (nextToken && pages < MAX_DESCRIBE_PAGES);
     return undefined;
   };
 
@@ -220,7 +227,7 @@ export async function createCdnLogDelivery(credentials, {
     // TOCTOU: a concurrent enable/rescan for the same distribution can both pass the existence
     // check above and race here; the losing CreateDelivery conflicts. Treat as already-enabled to
     // preserve the idempotency contract instead of surfacing a 500.
-    if (err?.name === 'ConflictException' || err?.name === 'ResourceAlreadyExistsException') {
+    if (err?.name === 'ConflictException') {
       const existing = await findExistingDelivery();
       // deliveryId may be undefined here if DescribeDeliveries hasn't caught up to the winning
       // CreateDelivery yet (eventual consistency). That is acceptable: delivery IS enabled — the
