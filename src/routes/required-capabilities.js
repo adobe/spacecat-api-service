@@ -65,10 +65,6 @@ export const INTERNAL_ROUTES = [
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 
-  // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
-  'GET /org/:spaceCatId/brands/all/brand-presence/stats',
-  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
-
   // Agentic traffic PG dashboard endpoints (site-scoped) - non-mutating POST queries
   // (complex payloads / export trigger); UI only, not yet required by S2S
   'POST /sites/:siteId/agentic-traffic/hits-by-urls',
@@ -320,6 +316,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/fanout-report': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/stats': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': 'brand:read',
