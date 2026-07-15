@@ -1,3 +1,10 @@
+## [1.652.1](https://github.com/adobe/spacecat-api-service/compare/v1.652.0...v1.652.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **LLMO-5003:** wire shared tokowaka client version  ([#2794](https://github.com/adobe/spacecat-api-service/issues/2794)) ([4f2d488](https://github.com/adobe/spacecat-api-service/commit/4f2d488a5bc62357d26e1b19f6411666f430ec59))
+
 # [1.652.0](https://github.com/adobe/spacecat-api-service/compare/v1.651.0...v1.652.0) (2026-07-15)
 
 
