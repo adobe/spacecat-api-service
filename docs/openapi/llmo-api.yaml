@@ -6141,6 +6141,23 @@ site-llmo-akamai-plan:
                   items:
                     type: string
                   description: Top-level rule names after the merge.
+                validated:
+                  type: boolean
+                  description: >-
+                    Whether the dry-run PAPI validation ran. When false, it could not be performed
+                    and errors/warnings fall back to the base version's own warnings.
+                errors:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                  description: PAPI validation errors for the change deploy would make (empty if none).
+                warnings:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                  description: PAPI validation warnings for the change deploy would make.
                 merged:
                   type: object
                   additionalProperties: true

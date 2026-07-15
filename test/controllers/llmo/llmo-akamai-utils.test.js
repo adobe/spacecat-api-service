@@ -203,6 +203,21 @@ describe('llmo-akamai-utils', () => {
       expect(parents).to.have.length(1);
     });
 
+    it('replaces a legacy managed rule name with a trailing space', () => {
+      const treeTrailing = {
+        rules: {
+          name: 'default',
+          children: [{ name: 'Existing Rule' }, { name: 'Optimize at Edge ' }],
+          variables: [],
+        },
+      };
+      const names = mergeIntoTree(treeTrailing, cfg).rules.children.map((c) => c.name);
+      // The trailing-space legacy rule is gone and exactly one managed wrapper remains — matching
+      // buildRuleTreePatch, so the plan preview no longer shows a phantom duplicate.
+      expect(names).to.not.include('Optimize at Edge ');
+      expect(names.filter((n) => n.trim() === cfg.ruleNames.parent)).to.have.length(1);
+    });
+
     it('strips leftover flat routing/failover-test rules from the older layout', () => {
       const flatTree = {
         rules: {
@@ -333,6 +348,22 @@ describe('llmo-akamai-utils', () => {
       };
       const ops = buildRuleTreePatch(tree, cfg, 'nope');
       expect(addChildOps(ops)[0].path).to.equal('/rules/children/0');
+    });
+
+    it('clamps a negative insertIndex to 0', () => {
+      const tree = {
+        rules: { name: 'default', children: [{ name: 'A' }], variables: [{ name: cfg.cacheKeyVariable.name }] },
+      };
+      const ops = buildRuleTreePatch(tree, cfg, -5);
+      expect(addChildOps(ops)[0].path).to.equal('/rules/children/0');
+    });
+
+    it('appends via `-` into a present-but-empty children array', () => {
+      const tree = {
+        rules: { name: 'default', children: [], variables: [{ name: cfg.cacheKeyVariable.name }] },
+      };
+      const ops = buildRuleTreePatch(tree, cfg);
+      expect(addChildOps(ops)[0].path).to.equal('/rules/children/-');
     });
 
     it('throws when the tree has no top-level rules object', () => {

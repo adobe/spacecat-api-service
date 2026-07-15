@@ -197,6 +197,9 @@ function LlmoAkamaiController(ctx) {
     // scanning the whole string: the response body (up to 1000 chars) can itself contain a
     // "-> 404" and mis-map a genuine 5xx. Take the FIRST such token, which is the real status.
     const status = Number(message.match(/-> (\d{3}):/)?.[1]);
+    // Surface a version the operation may have already created before a later call threw (e.g.
+    // deploy created a new version, then patchRuleTree failed) so the caller can find/clean it up.
+    const extra = fields.newVersion !== undefined ? { newVersion: fields.newVersion } : {};
     if (status === 401) {
       return unauthorized('Akamai authentication failed');
     }
@@ -208,9 +211,9 @@ function LlmoAkamaiController(ctx) {
       return notFound(`Akamai ${action} target not found`);
     }
     if (status === 429) {
-      return createResponse({ message: 'Akamai rate limit exceeded' }, 429);
+      return createResponse({ message: 'Akamai rate limit exceeded', ...extra }, 429);
     }
-    return createResponse({ message: `Akamai ${action} failed` }, 502);
+    return createResponse({ message: `Akamai ${action} failed`, ...extra }, 502);
   };
 
   // The LLMO API key is a CONFIDENTIAL string: it is injected into the managed rule tree
@@ -541,9 +544,11 @@ function LlmoAkamaiController(ctx) {
 
     log.info(auditLine(context, 'deploy', 'started', { siteId, propertyId }));
 
+    // Hoisted so the catch can report it: createVersion may succeed before a later call throws.
+    let newVersion;
     try {
       const baseVersion = await client.getLatestVersion(propertyId, contractId, groupId);
-      const newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
+      newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
       // Build the patch against the NEW version's own tree (a clone of baseVersion): stable
       // indices, no concurrent editors, and its etag guards the PATCH via If-Match. Applying only
       // these deltas leaves every existing behavior as PAPI stored it — no full-tree re-write.
@@ -588,7 +593,7 @@ function LlmoAkamaiController(ctx) {
         warnings,
       });
     } catch (e) {
-      return papiErrorResponse(e, 'deploy', context, { siteId, propertyId });
+      return papiErrorResponse(e, 'deploy', context, { siteId, propertyId, newVersion });
     }
   };
 

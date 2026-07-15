@@ -420,7 +420,9 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
     cfg.ruleNames.routing,
     cfg.ruleNames.failoverTest,
   ]);
-  const children = (root.children || []).filter((c) => !managedNames.has(c?.name));
+  // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is replaced, not left
+  // as a duplicate — keeps this preview in step with buildRuleTreePatch (which also trims).
+  const children = (root.children || []).filter((c) => !managedNames.has((c?.name ?? '').trim()));
 
   const n = Math.trunc(Number(insertIndex));
   // Non-numeric / NaN (e.g. a direct caller passing garbage) clamps to 0 rather than corrupting

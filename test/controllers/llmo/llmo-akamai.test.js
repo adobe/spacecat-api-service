@@ -86,6 +86,10 @@ describe('LlmoAkamaiController', () => {
       getActivation: sandbox.stub().resolves({ activationId: 'atv_123', status: 'ACTIVE' }),
       latestActivation: sandbox.stub().resolves({ activationId: 'atv_999', status: 'PENDING' }),
     };
+    // Deploy fetches the NEW version (8); return a distinct etag so the deploy test proves it uses
+    // the freshly-fetched version's etag, not a stale one from the latest-version (v7) lookup.
+    mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 8)
+      .resolves({ ruleTree: RULE_TREE, ruleFormat: 'v2024-01-01', etag: 'etag-8' });
 
     mockTokowakaClient = {
       fetchMetaconfig: sandbox.stub().resolves({ apiKeys: [LLMO_API_KEY] }),
@@ -232,13 +236,14 @@ describe('LlmoAkamaiController', () => {
       expect(body.errors).to.deep.equal([]);
     });
 
-    it('surfaces dry-run validation errors from the same patch deploy would apply', async () => {
-      mockAkamaiClient.patchRuleTree.resolves({ errors: [{ detail: 'bad' }], warnings: [] });
+    it('surfaces dry-run validation errors and warnings from the patch deploy would apply', async () => {
+      mockAkamaiClient.patchRuleTree.resolves({ errors: [{ detail: 'bad' }], warnings: [{ detail: 'w' }] });
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.validated).to.equal(true);
       expect(body.errors).to.have.length(1);
+      expect(body.warnings).to.have.length(1);
     });
 
     it('degrades to validated:false (200) when the dry-run itself cannot run', async () => {
@@ -288,7 +293,8 @@ describe('LlmoAkamaiController', () => {
       expect(mockAkamaiClient.patchRuleTree).to.have.been.calledOnce;
       const [, version, , , ops, etag] = mockAkamaiClient.patchRuleTree.firstCall.args;
       expect(version).to.equal(8);
-      expect(etag).to.equal('etag-7');
+      // v8's etag (from the fresh getRuleTree(8)), not the latest-version (v7) etag.
+      expect(etag).to.equal('etag-8');
       const addParent = ops.find((o) => o.op === 'add' && o.value?.name === 'Optimize at Edge');
       expect(addParent).to.exist;
       expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
@@ -315,6 +321,14 @@ describe('LlmoAkamaiController', () => {
       mockAkamaiClient.getLatestVersion.rejects(new Error('PAPI GET /x -> 403: locked'));
       const res = await controller.deploy(withData(propertyRef));
       expect(res.status).to.equal(403);
+    });
+
+    it('reports the created newVersion when patch throws after createVersion', async () => {
+      mockAkamaiClient.patchRuleTree.rejects(new Error('PAPI PATCH /x -> 500: boom'));
+      const res = await controller.deploy(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(502);
+      expect(body.newVersion).to.equal(8);
     });
   });
 
