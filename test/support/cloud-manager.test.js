@@ -65,6 +65,26 @@ describe('CloudManagerClient', () => {
     });
   });
 
+  describe('action methods', () => {
+    it('getProgram hits /api/program/{id}', async () => {
+      const c = new CloudManagerClient({ functionName: 'fn', log });
+      const send = sandbox.stub(c.client, 'send').resolves(payload({ ok: true, statusCode: 200, data: { id: 'p1' } }));
+      const res = await c.getProgram('p1');
+      expect(res.data).to.deep.equal({ id: 'p1' });
+      expect(JSON.parse(Buffer.from(send.firstCall.args[0].input.Payload).toString()))
+        .to.deep.equal({ action: 'get_program', programId: 'p1' });
+    });
+
+    it('listEnvironments hits list_environments for the program', async () => {
+      const c = new CloudManagerClient({ functionName: 'fn', log });
+      const send = sandbox.stub(c.client, 'send').resolves(payload({ ok: true, statusCode: 200, data: { _embedded: { environments: [] } } }));
+      const res = await c.listEnvironments('p1');
+      expect(res.ok).to.equal(true);
+      expect(JSON.parse(Buffer.from(send.firstCall.args[0].input.Payload).toString()))
+        .to.deep.equal({ action: 'list_environments', programId: 'p1' });
+    });
+  });
+
   describe('verifyProgram (graceful degradation)', () => {
     it('degrades (no throw) when the connector is not configured', async () => {
       const res = await new CloudManagerClient({ log }).verifyProgram('p1');
