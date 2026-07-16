@@ -59,6 +59,17 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
         }),
       },
       services: { postgrestClient: { from: () => ({}) } },
+      // Only consumed by getSerenityBrandPresenceStats's aggregate (no-region)
+      // path — without at least one project, getStats 404s before ever
+      // reaching the service call.
+      BrandSemrushProject: {
+        allByBrandId: () => Promise.resolve([{
+          getBrandId: () => BRAND,
+          getSemrushProjectId: () => 'proj-1',
+          getGeoTargetId: () => 2840,
+          getLanguageCode: () => 'en',
+        }]),
+      },
     },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
     data,
@@ -358,6 +369,36 @@ const FIXTURES = {
       }],
     },
   },
+  // Also served by ElementsController — see the note on
+  // listSerenityUrlInspectorFilterDimensions above.
+  getSerenityBrandPresenceStats: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getStats',
+    serviceMethod: 'getBrandPresenceStats',
+    handlerResult: {
+      stats: {
+        total_executions: 19528,
+        average_visibility_score: 48.77,
+        total_mentions: 14635,
+        total_citations: 158903,
+      },
+      trends: [
+        {
+          startDate: '2026-07-01',
+          endDate: '2026-07-07',
+          data: {
+            stats: {
+              total_executions: 9764,
+              average_visibility_score: 47.2,
+              total_mentions: 7318,
+              total_citations: 79451,
+            },
+          },
+        },
+      ],
+    },
+  },
 };
 
 function makeAjv() {
@@ -420,6 +461,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({
                 [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
+                resolveRegionProjectId: sinon.stub().resolves(null),
               }),
             },
           },
