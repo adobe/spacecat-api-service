@@ -141,16 +141,27 @@ Elements API calls per date range, matching
 
 ## 2. Element mapping (confirmed against live sample payloads)
 
-All 5 element UUIDs already exist in `src/support/elements/element-ids.js` — **no new
-constants needed**: `TOTAL_EXECUTIONS`, `MENTIONS`, `VISIBILITY`, `CITATIONS_KPI`, `TRENDS_MV`.
+> **Element change (post-implementation):** `TOTAL_EXECUTIONS` was originally
+> `a4defa1a-02f7-4443-b6ed-f2ca22b23402` (row 4, filter-dimensions "Total Executions" —
+> top-level `project_id` param, no brand filter). Semrush replaced it with a new element,
+> `601590e0-a4a1-462a-96a7-5ddae8993140`, with the **same semantics but a shape aligned
+> to Mentions/Visibility/Citations** instead: `CBF_ws_brand` + `CBF_model` + optional
+> `CBF_project` OR-list (all three wrapped in their own `or` block — see below).
+> `element-ids.js#TOTAL_EXECUTIONS` and `buildStatsTotalExecutionsPayload` were updated
+> to the new UUID/shape; the old UUID is kept only as a code comment for history.
+
+`MENTIONS`, `VISIBILITY`, `CITATIONS_KPI`, and the current `TOTAL_EXECUTIONS` are all
+defined in `src/support/elements/element-ids.js`.
 
 | Stats field | Element (constant) | Response envelope | Extraction |
 |---|---|---|---|
-| `total_executions` | `TOTAL_EXECUTIONS` (`a4defa1a`) | `simpleNumeric` | `blocks.firstSectionMainValue[0].firstSectionMainValue` |
+| `total_executions` | `TOTAL_EXECUTIONS` (`601590e0`) | `simpleNumeric` | `blocks.firstSectionMainValue[0].firstSectionMainValue` |
 | `total_mentions` | `MENTIONS` (`e1a6811b`) | `simpleNumeric` | `blocks.firstSectionMainValue[0].firstSectionMainValue` |
 | `average_visibility_score` | `VISIBILITY` (`2724878e`) | `simpleNumeric` | `blocks.firstSectionMainValue[0].firstSectionMainValue` **× 100** (see §4.3 — value comes back as a 0–1 fraction, e.g. `0.4877`) |
 | `total_citations` | `CITATIONS_KPI` (`588054fe`) | `simpleNumeric` | `blocks.firstSectionMainValue[0].firstSectionMainValue` |
-| `trends[]` (mentions + visibility per week) | `TRENDS_MV` (`b5281393`) | `line` | `blocks.lines[]` filtered to `legend === brand.name`, one entry per ISO week `x` |
+
+`trends[]` (all 4 fields per week) reuses these same 4 elements, called once per week
+window — see §3.2. `TRENDS_MV` (`b5281393`) is not used — see §3.2/§4.5.
 
 > **Note on `comparison_start_date`/`comparison_end_date`:** the captured Mentions/
 > Visibility/Citations sample payloads include these fields (Semrush's built-in
@@ -209,22 +220,31 @@ uses `CBF_brand` (not `CBF_ws_brand`) and `CBF_projects` (**plural** column name
 ] }
 ```
 
-**Total Executions (`TOTAL_EXECUTIONS`)** — no `advanced.CBF_project*` filter at all;
-project scoping is a **top-level `project_id`** (singular value, not an array):
+**Total Executions (`TOTAL_EXECUTIONS`, `601590e0-a4a1-462a-96a7-5ddae8993140`)** —
+**current** shape, confirmed against a live sample: `CBF_ws_brand`, `CBF_model`, and an
+optional `CBF_project` OR-list, **all three wrapped in their own `or` block** (unlike
+Mentions, which uses a bare `eq` for brand/model):
 ```json
 {
-  "project_id": "<projectId>",
   "comparison_data_formatting": "union",
   "filters": {
-    "simple": { "start_date": "...", "end_date": "..." },
-    "advanced": { "op": "and", "filters": [{ "op": "eq", "val": "<model>", "col": "CBF_model" }] }
+    "simple": { "start_date": "...", "end_date": "...", "comparison_start_date": "...", "comparison_end_date": "..." },
+    "advanced": { "op": "and", "filters": [
+      { "op": "or", "filters": [{ "op": "eq", "val": "<brand>", "col": "CBF_ws_brand" }] },
+      { "op": "or", "filters": [{ "op": "eq", "val": "<model>", "col": "CBF_model" }] },
+      { "op": "or", "filters": [
+        { "op": "eq", "val": "<projectId1>", "col": "CBF_project" },
+        { "op": "eq", "val": "<projectId2>", "col": "CBF_project" }
+      ] }
+    ] }
   }
 }
 ```
-Per the team's clarification (§4.1, resolved): **omitting `project_id` returns the
-total automatically combined across all projects in the subworkspace** — this is
-exactly what's needed for the aggregate "all regions" view, so no fan-out/summing is
-required.
+Per the team's clarification (§4.1, resolved): **omitting the `CBF_project` filter
+entirely returns the total automatically combined across all projects in the
+subworkspace** — this is exactly what's needed for the aggregate "all regions" view,
+so no fan-out/summing is required. (This element previously took a top-level
+`project_id` param instead of a `CBF_project` filter — see the note in §2.)
 
 **Trends — Mentions & Visibility (`TRENDS_MV`)** — `auto_bucketing: "week"`, no brand
 filter at all (returns one line-series per brand/competitor found in the subworkspace):
@@ -260,7 +280,9 @@ used — see §3.2 for why:
 ```js
 export function transformStatsSimpleNumericResponse(raw) { ... } // shared extractor, -> number
 
-export function buildStatsTotalExecutionsPayload({ model, platform, startDate, endDate, projectId }) { ... }
+// brandName is always included (CBF_ws_brand, wrapped in its own or block, same as
+// model) — see §2's element-change note and Open Decision 4.4 (resolved: keep).
+export function buildStatsTotalExecutionsPayload({ model, platform, startDate, endDate, projectIds, brandName }) { ... }
 export const transformStatsTotalExecutionsResponse = transformStatsSimpleNumericResponse;
 
 // brandName is always included (CBF_ws_brand) — see Open Decision 4.4 (resolved: keep).
@@ -280,10 +302,14 @@ export const transformStatsCitationsResponse = transformStatsSimpleNumericRespon
 Each `build*Payload` accepts `projectIds` as an array — the **common, single-region
 case** (a user has picked one region+language on the Brand Presence page) is simply
 `projectIds: [oneProjectId]`; the aggregate "all regions" case passes every project id
-the brand owns. Mentions/Visibility/Trends OR them under `CBF_project` (singular);
+the brand owns (or `[]`/`undefined`, which omits the project filter entirely).
+Total Executions/Mentions/Visibility/Trends OR them under `CBF_project` (singular);
 Citations ORs them under `CBF_projects` (plural) — see §2. A single-element `or` block
 degrades gracefully to "exactly one project", so no special-casing is needed in the
-payload builders themselves for the single-region path.
+payload builders themselves for the single-region path. All 4 KPI elements now share
+this exact same project-scoping shape (`CBF_project`/`CBF_projects` OR-list, optional)
+— Total Executions used to be the one exception (a top-level `project_id`), until
+Semrush replaced it with the current element (see §2).
 
 Export all six from `definitions/index.js` (barrel).
 
@@ -308,15 +334,18 @@ async getBrandPresenceStats(workspaceId, {
 }) {
   // A single resolved region (projectId) is the common path — every element scopes
   // to that one project. The aggregate "all regions" path (projectId absent,
-  // projectIds = every project the brand owns) needs no fan-out either: Mentions/
-  // Visibility/Citations OR all project ids into one call, and Total Executions
-  // omits project_id entirely (resolved decision — see §4.1).
+  // projectIds = every project the brand owns) needs no fan-out either: all 4 KPI
+  // elements (including Total Executions, since the element change in §2) OR every
+  // project id into one call, or omit the project filter entirely when projectIds
+  // is empty (resolved decision — see §4.1).
   const resolvedProjectIds = projectId ? [projectId] : projectIds;
 
   const fetchStatsForRange = async (rangeStart, rangeEnd) => {
     const [totalExec, mentions, visibility, citations] = await Promise.all([
       transport.fetchElement(workspaceId, ELEMENT_IDS.TOTAL_EXECUTIONS,
-        buildStatsTotalExecutionsPayload({ model, platform, startDate: rangeStart, endDate: rangeEnd, projectId })),
+        buildStatsTotalExecutionsPayload({
+          model, platform, startDate: rangeStart, endDate: rangeEnd, projectIds: resolvedProjectIds, brandName,
+        })),
       transport.fetchElement(workspaceId, ELEMENT_IDS.MENTIONS,
         buildStatsMentionsPayload({
           model, platform, startDate: rangeStart, endDate: rangeEnd, projectIds: resolvedProjectIds, brandName,
@@ -398,16 +427,22 @@ Replace the zeroed `response` object with:
 
 ## 4. Decisions (all resolved)
 
-### 4.1 — How to compute `total_executions` when a brand has multiple projects (regions) — **RESOLVED: omit `project_id`**
+### 4.1 — How to compute `total_executions` when a brand has multiple projects (regions) — **RESOLVED: omit the project filter**
 
 **Decision: when no single region is selected (aggregate "all regions" view), omit
-`project_id` from the `TOTAL_EXECUTIONS` payload entirely** — per team confirmation,
-Semrush automatically combines data across all projects in the subworkspace's response
-when `project_id` is not passed. No fan-out/sum needed; this is a single call in both
-the single-region path (`project_id` set) and the aggregate path (`project_id` omitted).
-`getTotalExecutions`/`buildStatsTotalExecutionsPayload` (§3.1/§3.2) simplify to: pass
-`project_id` only when `projectId` was resolved from a selected region, otherwise omit
-the field.
+the project-scoping filter from the `TOTAL_EXECUTIONS` payload entirely** — per team
+confirmation, Semrush automatically combines data across all projects in the
+subworkspace's response when no project filter is passed. No fan-out/sum needed; this
+is a single call in both the single-region path (one project id) and the aggregate
+path (filter omitted).
+
+Originally (see §2) this element took a top-level `project_id` (singular) param
+instead of a `CBF_project` filter, making it the one KPI element with a different
+scoping mechanism from Mentions/Visibility/Citations. Semrush has since replaced it
+with a new element (`601590e0-...`) whose scoping is identical in shape to the other
+3 — `buildStatsTotalExecutionsPayload` (§3.1/§3.2) now just OR's `projectIds` under
+`CBF_project` like Mentions does, and omits that filter block entirely when
+`projectIds` is empty/undefined. No special-casing remains for this element.
 
 ### 4.2 — `has_data_for_last_week` — **MOOT: field does not exist in the real contract**
 

@@ -53,31 +53,53 @@ describe('brand-presence-stats definitions', () => {
   });
 
   describe('buildStatsTotalExecutionsPayload', () => {
-    it('omits project_id when no projectId is given (aggregate view)', () => {
+    it('wraps CBF_ws_brand and CBF_model each in their own or block', () => {
       const payload = buildStatsTotalExecutionsPayload({
-        model: 'search-gpt', startDate: '2026-07-01', endDate: '2026-07-14',
+        model: 'search-gpt', startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac',
       });
-      expect(payload).to.not.have.property('project_id');
       expect(payload.filters.simple).to.deep.equal({
         start_date: '2026-07-01',
         end_date: '2026-07-14',
       });
       expect(payload.filters.advanced).to.deep.equal({
         op: 'and',
-        filters: [{ op: 'eq', val: 'search-gpt', col: 'CBF_model' }],
+        filters: [
+          { op: 'or', filters: [{ op: 'eq', val: 'Lovesac', col: 'CBF_ws_brand' }] },
+          { op: 'or', filters: [{ op: 'eq', val: 'search-gpt', col: 'CBF_model' }] },
+        ],
       });
     });
 
-    it('sets a top-level project_id when a single region is selected', () => {
+    it('omits the project filter when projectIds is empty (aggregate view)', () => {
       const payload = buildStatsTotalExecutionsPayload({
-        model: 'search-gpt', startDate: '2026-07-01', endDate: '2026-07-14', projectId: 'proj-1',
+        model: 'search-gpt', startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectIds: [],
       });
-      expect(payload.project_id).to.equal('proj-1');
+      expect(payload.filters.advanced.filters).to.have.lengthOf(2);
+    });
+
+    it('ORs multiple project ids under CBF_project (singular)', () => {
+      const payload = buildStatsTotalExecutionsPayload({
+        model: 'search-gpt',
+        startDate: '2026-07-01',
+        endDate: '2026-07-14',
+        brandName: 'Lovesac',
+        projectIds: ['proj-1', 'proj-2'],
+      });
+      const projectFilter = payload.filters.advanced.filters.find(
+        (f) => f.filters.some((sub) => sub.col === 'CBF_project'),
+      );
+      expect(projectFilter).to.deep.equal({
+        op: 'or',
+        filters: [
+          { op: 'eq', val: 'proj-1', col: 'CBF_project' },
+          { op: 'eq', val: 'proj-2', col: 'CBF_project' },
+        ],
+      });
     });
 
     it('never includes comparison_start_date/comparison_end_date', () => {
       const payload = buildStatsTotalExecutionsPayload({
-        model: 'search-gpt', startDate: '2026-07-01', endDate: '2026-07-14',
+        model: 'search-gpt', startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac',
       });
       expect(payload.filters.simple).to.not.have.property('comparison_start_date');
       expect(payload.filters.simple).to.not.have.property('comparison_end_date');
@@ -86,9 +108,9 @@ describe('brand-presence-stats definitions', () => {
 
     it('resolves an unknown model to the default model', () => {
       const payload = buildStatsTotalExecutionsPayload({
-        model: 'not-a-real-model', startDate: '2026-07-01', endDate: '2026-07-14',
+        model: 'not-a-real-model', startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac',
       });
-      expect(payload.filters.advanced.filters[0].val).to.equal('search-gpt');
+      expect(payload.filters.advanced.filters[1].filters[0].val).to.equal('search-gpt');
     });
   });
 

@@ -333,7 +333,7 @@ export function createElementsService(transport) {
 
     /**
      * Fetches the Brand Presence Stats KPI cards (`GET .../brand-presence/stats`),
-     * backed by Total Executions (a4defa1a), Mentions (e1a6811b), Visibility
+     * backed by Total Executions (601590e0), Mentions (e1a6811b), Visibility
      * (2724878e), and Citations (588054fe) — see
      * docs/elements/brand-presence-stats-plan.md for the full design.
      *
@@ -363,7 +363,12 @@ export function createElementsService(transport) {
 
       const fetchStatsForRange = async (rangeStart, rangeEnd) => {
         const totalExecutionsPayload = buildStatsTotalExecutionsPayload({
-          model, platform, startDate: rangeStart, endDate: rangeEnd, projectId,
+          model,
+          platform,
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          projectIds: resolvedProjectIds,
+          brandName,
         });
         const mentionsPayload = buildStatsMentionsPayload({
           model,

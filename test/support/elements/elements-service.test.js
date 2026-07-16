@@ -267,21 +267,28 @@ describe('createElementsService', () => {
       expect(transport.fetchElement.callCount).to.equal(4);
     });
 
-    it('passes project_id (singular) to Total Executions, but omits it entirely in aggregate mode', async () => {
+    it('scopes Total Executions to the single resolved project via CBF_project, same as the other KPI elements', async () => {
       await service.getBrandPresenceStats('ws-1', {
         startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectId: 'proj-1',
       });
       const totalExecCall = transport.fetchElement.getCalls()
         .find((c) => c.args[1] === ELEMENT_IDS.TOTAL_EXECUTIONS);
-      expect(totalExecCall.args[2].project_id).to.equal('proj-1');
+      const projectFilter = totalExecCall.args[2].filters.advanced.filters.find(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_project'),
+      );
+      expect(projectFilter.filters).to.deep.equal([{ op: 'eq', val: 'proj-1', col: 'CBF_project' }]);
+    });
 
-      transport.fetchElement.resetHistory();
+    it('omits the CBF_project filter on Total Executions in aggregate mode (no projectIds)', async () => {
       await service.getBrandPresenceStats('ws-1', {
-        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectIds: ['proj-1', 'proj-2'],
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectIds: [],
       });
-      const aggregateCall = transport.fetchElement.getCalls()
+      const totalExecCall = transport.fetchElement.getCalls()
         .find((c) => c.args[1] === ELEMENT_IDS.TOTAL_EXECUTIONS);
-      expect(aggregateCall.args[2]).to.not.have.property('project_id');
+      const hasProjectFilter = totalExecCall.args[2].filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_project'),
+      );
+      expect(hasProjectFilter).to.equal(false);
     });
 
     it('fetches weekly trends for each week when showTrends is true', async () => {
