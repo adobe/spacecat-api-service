@@ -30,11 +30,16 @@ import {
   transformPromptsResponse,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
+  buildSentimentOverviewPayload,
+  transformSentimentOverviewResponse,
   buildOwnedUrlsStatsPayload,
   buildOwnedUrlsTrendPayload,
   transformOwnedUrlsResponse,
   buildDomainUrlsPayload,
   transformDomainUrlsResponse,
+  buildMarketMentionsTrendPayload,
+  buildMarketCitationsTrendPayload,
+  transformMarketTrackingTrends,
   buildStatsTotalExecutionsPayload,
   transformStatsTotalExecutionsResponse,
   buildStatsMentionsPayload,
@@ -160,6 +165,30 @@ export function createElementsService(transport) {
         buildCitedDomainsPayload(params),
       );
       return transformCitedDomainsResponse(raw, params);
+    },
+
+    /**
+     * Fetches per-week brand sentiment (positive/neutral/negative) from the Sentiment
+     * element (f4153af8…), transformed into the legacy Brand Presence
+     * `sentiment-overview` contract `{ weeklyTrends: [...] }`.
+     *
+     * Single call (like getCitedDomains, not a per-project fan-out): the element returns
+     * an aggregate daily sentiment breakdown that we roll up to ISO weeks. Region scoping,
+     * when requested, is a top-level `project_id` on the payload (resolved by the controller
+     * via resolveRegionProjectId); region=all/absent → the brand's whole sub-workspace.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate, category,
+     *   projectId).
+     * @returns {Promise<{ weeklyTrends: object[] }>} Legacy contract.
+     */
+    async getSentimentOverview(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.SENTIMENT,
+        buildSentimentOverviewPayload(params),
+      );
+      return transformSentimentOverviewResponse(raw);
     },
 
     /**
@@ -328,6 +357,53 @@ export function createElementsService(transport) {
       return transformDomainUrlsResponse(projectResults, {
         hostname, channel, page, pageSize,
       });
+    },
+    /* c8 ignore stop */
+
+    /**
+     * Fetches weekly per-competitor mentions + citations for the Competitor
+     * Comparison chart (`GET .../brand-presence/market-tracking-trends`), backed by
+     * two weekly `line` elements fetched in parallel — TRENDS_MV (b5281393, mentions)
+     * and MARKET_CITATIONS_TREND (2e5a6f4e, citations). Both return one series per
+     * market participant keyed by `legend` = name; the transform splits the tracked
+     * brand from its competitors and merges the two metrics per ISO week. No per-week
+     * fan-out: the elements are already `auto_bucketing: "week"`.
+     *
+     * `projectId` (a single selected region) takes precedence over `projectIds` (the
+     * aggregate "all regions" view — every project the brand owns). Both are OR-ed into
+     * one call per element, so neither path fans out.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - YYYY-MM-DD.
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} params.brandName - Tracked brand display name (matches its legend).
+     * @returns {Promise<{weeklyTrends: object[]}>}
+     */
+    /* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
+    async getMarketTrackingTrends(workspaceId, {
+      model, platform, startDate, endDate, projectId, projectIds, brandName,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const [mentions, citations] = await Promise.all([
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.TRENDS_MV,
+          buildMarketMentionsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.MARKET_CITATIONS_TREND,
+          buildMarketCitationsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+      ]);
+      return { weeklyTrends: transformMarketTrackingTrends(mentions, citations, brandName) };
     },
     /* c8 ignore stop */
 
