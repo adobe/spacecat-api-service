@@ -291,7 +291,7 @@ export async function registerPromptSuggestionSchedules({
   // per-pipeline registerPromptSuggestionSchedule log "not configured" N times.
   if (!drsClient.isConfigured()) {
     log.debug(`DRS client not configured, skipping prompt-suggestion schedules for site ${siteId}`);
-    return;
+    return { completed: true };
   }
 
   await Promise.all(
@@ -315,6 +315,10 @@ export async function registerPromptSuggestionSchedules({
       }
     }),
   );
+
+  // Sentinel so the caller can distinguish "finished" from a settleWithin timeout
+  // (which resolves to the fallback, not this object).
+  return { completed: true };
 }
 
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
@@ -1596,7 +1600,7 @@ export async function activateBrandAndGeneratePrompts({
       // onboarding. On timeout we stop waiting — createSchedule is idempotent, the
       // durable outcome is the server-side schedule row, and per-pipeline ERROR
       // logging inside registerPromptSuggestionSchedules stays deterministic.
-      await settleWithin(
+      const scheduleResult = await settleWithin(
         registerPromptSuggestionSchedules({
           drsClient,
           siteId: site.getId(),
@@ -1606,6 +1610,16 @@ export async function activateBrandAndGeneratePrompts({
         SCHEDULE_REGISTRATION_TIMEOUT_MS,
         null,
       );
+      // null fallback === timed out with calls still pending: the per-pipeline
+      // catch blocks never fired, so this is the only place a hung DRS is visible.
+      // Schedules may still land server-side (createSchedule is idempotent), but
+      // the operator needs a signal that registration was abandoned mid-flight.
+      if (scheduleResult === null) {
+        log.warn('DRS prompt-suggestion schedule registration timed out after '
+          + `${SCHEDULE_REGISTRATION_TIMEOUT_MS}ms for site ${site.getId()} `
+          + '(schedules may still have been created server-side; may need manual verification)');
+        say(':warning: DRS schedule registration timed out (may need manual verification)');
+      }
     }
   } else {
     // V1 has no Brandalf trigger, so DRS will not submit prompt generation

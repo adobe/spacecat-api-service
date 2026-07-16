@@ -5864,7 +5864,36 @@ describe('LLMO Onboarding Functions', () => {
         say: sandbox.stub(),
       });
 
-      expect(log.info).to.have.been.calledWithMatch('already existed');
+      // Assert the full context is logged, not just the 'already existed' suffix,
+      // so a silent degradation of the log line (dropping scheduleId/providerId)
+      // is caught.
+      expect(log.info).to.have.been.calledWithMatch(/already existed/);
+      expect(log.info).to.have.been.calledWithMatch(/sched-9/);
+      expect(log.info).to.have.been.calledWithMatch(/prompt_generation_semrush/);
+    });
+
+    it('registerPromptSuggestionSchedules resolves to a completion sentinel on success', async () => {
+      // The caller distinguishes "finished" from a settleWithin timeout by this
+      // sentinel (timeout resolves to the null fallback instead).
+      const result = await onboardingModule.registerPromptSuggestionSchedules({
+        drsClient: buildDrsClient(
+          sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
+        ),
+        siteId: 'site-123',
+        log: buildLog(),
+        say: sandbox.stub(),
+      });
+      expect(result).to.deep.equal({ completed: true });
+    });
+
+    it('registerPromptSuggestionSchedules resolves to the sentinel when DRS is not configured', async () => {
+      const drsClient = buildDrsClient(sandbox.stub());
+      drsClient.isConfigured = sandbox.stub().returns(false);
+      const result = await onboardingModule.registerPromptSuggestionSchedules({
+        drsClient, siteId: 'site-123', log: buildLog(), say: sandbox.stub(),
+      });
+      expect(result).to.deep.equal({ completed: true });
+      expect(drsClient.createSchedule).to.not.have.been.called;
     });
   });
 
@@ -5956,8 +5985,11 @@ describe('LLMO Onboarding Functions', () => {
       expect(semrushLog, 'expected an ERROR log for the failed semrush schedule').to.be.a('string');
       expect(semrushLog).to.include('site_id=site-123');
       expect(semrushLog).to.include('status=500');
-      // All three providers are surfaced, none swallowed.
-      expect(context.log.error).to.have.been.calledThrice;
+      // All three providers are surfaced, none swallowed. Filter by the
+      // schedule-failure message instead of asserting a bare calledThrice, so an
+      // unrelated future ERROR log in V2 onboarding does not break this test.
+      const scheduleFailureLogs = errorLogs.filter((m) => m.includes('Failed to register DRS'));
+      expect(scheduleFailureLogs).to.have.lengthOf(3);
       // Operator gets a Slack warning per failed schedule (manual-trigger signal).
       expect(params.say).to.have.been.calledWithMatch(/Failed to register DRS .*schedule/);
       // Brandalf still fired — the schedule failures did not abort onboarding.
@@ -6044,6 +6076,37 @@ describe('LLMO Onboarding Functions', () => {
       const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
       expect(errorLogs.some((m) => m.includes('DRS client creation failed'))).to.be.true;
       expect(params.say).to.have.been.calledWithMatch(/DRS client unavailable/);
+    });
+
+    it('warns when schedule registration times out (settleWithin fallback)', async () => {
+      // createSchedule never settles → settleWithin resolves to its null fallback
+      // after the timeout; the caller must surface a WARN + Slack signal so a hung
+      // DRS is visible (the per-pipeline catch blocks never fire on a pending call).
+      const clock = sandbox.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const createSchedule = sandbox.stub().returns(new Promise(() => {})); // never settles
+        const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+        const { activateBrandAndGeneratePrompts } = await esmock(
+          '../../../src/controllers/llmo/llmo-onboarding.js',
+          createCommonEsmockDependencies({
+            mockDrsClient,
+            mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+          }),
+        );
+        const context = buildV2Context();
+        const params = buildV2Params(context);
+        const pending = activateBrandAndGeneratePrompts(params);
+        // Advance past every pending timer (schedule-registration + any sibling
+        // settleWithin), flushing microtasks between ticks.
+        await clock.tickAsync(60000);
+        await pending;
+
+        const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
+        expect(warnLogs.some((m) => m.includes('schedule registration timed out'))).to.be.true;
+        expect(params.say).to.have.been.calledWithMatch(/schedule registration timed out/);
+      } finally {
+        clock.restore();
+      }
     });
   });
 });
