@@ -790,18 +790,35 @@ export default function ElementsController(context, log, env) {
 
       // Date range is optional (defaults to a 28-day trailing window); when a value is
       // sent it must be a valid YYYY-MM-DD and correctly ordered.
-      const startDate = query.startDate || query.start_date;
-      const endDate = query.endDate || query.end_date;
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
       if (hasText(startDate) && !isYmdDate(startDate)) {
         return badRequest('startDate must be a valid YYYY-MM-DD date');
       }
       if (hasText(endDate) && !isYmdDate(endDate)) {
         return badRequest('endDate must be a valid YYYY-MM-DD date');
       }
-      if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
+      // Require both or neither (mirrors listOwnedUrls/listDomainUrls): a half-supplied
+      // range would otherwise pair a caller-provided date with the default's other half,
+      // silently producing an unbounded window that bypasses the 28-day-default contract.
+      // If either is absent, fall back to the full default range as a unit.
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultTrailingDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
         return badRequest('startDate must not be after endDate');
       }
-      const defaultRange = defaultTrailingDateRange();
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year range fanned
+      // across every project is needlessly expensive upstream, and this endpoint also
+      // aggregates across all projects when no region is given, compounding the fan-out.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
 
       const service = await buildService(ctx);
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
@@ -829,8 +846,8 @@ export default function ElementsController(context, log, env) {
       const result = await service.getMarketTrackingTrends(workspaceId, {
         model: query.model,
         platform: query.platform,
-        startDate: startDate || defaultRange.startDate,
-        endDate: endDate || defaultRange.endDate,
+        startDate,
+        endDate,
         projectId,
         projectIds,
         brandName: brand.name,

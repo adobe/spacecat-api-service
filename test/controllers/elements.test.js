@@ -1009,6 +1009,28 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('falls back to the default range as a unit when only one bound is supplied', async () => {
+      // A valid startDate with no endDate must NOT pair with today's default end
+      // (that would be an unbounded window) — both are replaced by the 28-day default.
+      const ctx = fakeContext({ url: mttUrl('?startDate=2020-01-01') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getMarketTrackingTrends.firstCall.args;
+      expect(params.startDate).to.not.equal('2020-01-01');
+      const spanDays = (Date.parse(`${params.endDate}T00:00:00Z`)
+        - Date.parse(`${params.startDate}T00:00:00Z`)) / 86400000;
+      expect(spanDays).to.equal(28);
+    });
+
+    it('returns 400 when the supplied date range exceeds the 366-day cap', async () => {
+      const ctx = fakeContext({ url: mttUrl('?startDate=2020-01-01&endDate=2026-07-15') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getMarketTrackingTrends).to.not.have.been.called;
+    });
+
     it('returns 400 when siteId does not belong to the brand', async () => {
       getBrandBySiteStub.resolves({ id: 'other-brand', name: 'Other' });
       const ctx = fakeContext({ url: mttUrl('?siteId=some-site') });
