@@ -342,6 +342,24 @@ const FIXTURES = {
       tags: [],
     },
   },
+  // Also served by ElementsController (see note above) — the Market Tracking
+  // Trends endpoint backed by the two Semrush trend elements.
+  listSerenityMarketTrackingTrends: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getMarketTrackingTrends',
+    serviceMethod: 'getMarketTrackingTrends',
+    handlerResult: {
+      weeklyTrends: [{
+        week: '2026-07-05',
+        weekNumber: 27,
+        year: 2026,
+        mentions: 900,
+        citations: 5000,
+        competitors: [{ name: 'Rival One', mentions: 150, citations: 300 }],
+      }],
+    },
+  },
   listSerenityBrandPresenceSentimentOverview: {
     expectedStatus: 200,
     usesElementsController: true,

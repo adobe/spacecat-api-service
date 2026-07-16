@@ -34,6 +34,11 @@ export {
 } from './owned-urls.js';
 export { buildDomainUrlsPayload, transformDomainUrlsResponse } from './domain-urls.js';
 export {
+  buildMarketMentionsTrendPayload,
+  buildMarketCitationsTrendPayload,
+  transformMarketTrackingTrends,
+} from './market-tracking-trends.js';
+export {
   transformStatsSimpleNumericResponse,
   buildStatsTotalExecutionsPayload,
   transformStatsTotalExecutionsResponse,

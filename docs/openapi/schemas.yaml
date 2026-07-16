@@ -11717,6 +11717,50 @@ SerenityUrlInspectorFilterDimensions:
     description: Tags grouped by a Semrush tag prefix not covered by the fixed dimensions above.
     items: { $ref: '#/SerenityFilterDimensionItem' }
 
+SerenityMarketTrackingTrends:
+  type: object
+  description: |
+    Weekly Market Tracking Trends for the Serenity (Semrush Elements-backed)
+    Brand Presence Competitor Comparison chart. Each entry is one ISO week; the
+    tracked brand's own totals are at the top level and every tracked competitor
+    (a Semrush benchmark) is an entry in `competitors`. Mentions come from the
+    Trends Mentions/Visibility element and citations from the Market Tracking
+    citations element; both are already weekly-bucketed by Semrush.
+  required: [weeklyTrends]
+  properties:
+    weeklyTrends:
+      type: array
+      description: One entry per ISO week, sorted ascending by `week`.
+      items:
+        type: object
+        required: [week, weekNumber, year, mentions, citations, competitors]
+        properties:
+          week:
+            type: string
+            format: date
+            description: ISO week-start date (`YYYY-MM-DD`), from the Semrush bucket's `x`.
+          weekNumber:
+            type: integer
+            description: ISO week number (1–53).
+          year:
+            type: integer
+            description: ISO week-numbering year.
+          mentions:
+            type: integer
+            description: The tracked brand's own mentions in this week.
+          citations:
+            type: integer
+            description: The tracked brand's own citations in this week.
+          competitors:
+            type: array
+            description: Per-competitor mentions + citations for this week, sorted by mentions desc.
+            items:
+              type: object
+              required: [name, mentions, citations]
+              properties:
+                name: { type: string }
+                mentions: { type: integer }
+                citations: { type: integer }
 SerenityBrandPresenceStatsValues:
   type: object
   description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.

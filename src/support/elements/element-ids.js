@@ -56,6 +56,15 @@ export const ELEMENT_IDS = Object.freeze({
   TRENDS_MV: 'b5281393-ee98-4c38-9ed5-3437b0c450c3',
   // Shared UUID: powers both rows 10 and 12 (Citation Trends).
   TRENDS_CITATIONS: 'b81af644-a8db-462b-a001-ecc1eedc0552',
+  // Market Tracking Trends — Citations, the element behind the Brand Presence MFE's
+  // "Citations" tab. Distinct
+  // from TRENDS_CITATIONS (b81af644, the wiki's domain-level citation trend): this one
+  // is a `line` element returning one series per market participant, keyed by
+  // `legend` = brand/competitor NAME. Its primary numeric field is `y__mentions`, but
+  // in this element that value is the CITATION count (not mentions) — Semrush reuses
+  // the generic key. Scoped by `CBF_projects` (plural, unlike TRENDS_MV's `CBF_project`).
+  // Backs the competitor-comparison chart's Citations view (see market-tracking-trends).
+  MARKET_CITATIONS_TREND: '2e5a6f4e-f287-4951-a7e2-7e29981c86d8',
   // Shared UUID: powers rows 13 (daily) and 14 (weekly) Sentiment.
   SENTIMENT: 'f4153af8-6ce9-4058-8872-8a3cf11b9907',
 
