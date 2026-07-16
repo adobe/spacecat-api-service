@@ -32,6 +32,9 @@ describe('getRouteHandlers', () => {
     updateQueues: sinon.stub(),
     updateJob: sinon.stub(),
     updateHandler: sinon.stub(),
+    // TEMPORARY: Mock for temporary cleanup API - will be removed once cleanup is done
+    // This is added here to prevent route tests from failing, not for unit testing the endpoint
+    replaceHandlerEnabledDisabled: sinon.stub(),
     restoreVersion: sinon.stub(),
   };
 
@@ -602,6 +605,17 @@ describe('getRouteHandlers', () => {
     getPreview: sinon.stub(),
   };
 
+  const mockTaskManagementController = {
+    listConnections: sinon.stub(),
+    getConnection: sinon.stub(),
+    listTickets: sinon.stub(),
+    getTicketBySuggestion: sinon.stub(),
+    listTicketsByOpportunity: sinon.stub(),
+    createTicket: sinon.stub(),
+    listProjects: sinon.stub(),
+    listIssueTypes: sinon.stub(),
+  };
+
   const mockRedirectsController = {
     getRedirects: sinon.stub(),
   };
@@ -680,6 +694,7 @@ describe('getRouteHandlers', () => {
       mockSerenityController,
       mockElementsController,
       mockProxyController,
+      mockTaskManagementController,
       mockRedirectsController,
       mockAuditPolicyController,
     );
@@ -858,6 +873,7 @@ describe('getRouteHandlers', () => {
       'DELETE /configurations/audits/:auditType',
       'PATCH /configurations/latest/jobs/:jobType',
       'PATCH /configurations/latest/handlers/:handlerType',
+      'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled',
       'POST /event/fulfillment/:eventType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
@@ -910,8 +926,11 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
@@ -1304,6 +1323,14 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audit-scope/pages',
       'GET /sites/:siteId/audit-scope/summary',
       'GET /sites/:siteId/audit-scope/sections',
+      'GET /organizations/:organizationId/task-management/connections',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId',
+      'GET /organizations/:organizationId/task-management/tickets',
+      'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
+      'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
+      'POST /organizations/:organizationId/task-management/:provider/tickets',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId/projects',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 

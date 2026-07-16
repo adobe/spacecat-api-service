@@ -27,9 +27,14 @@ import {
 } from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
 use(sinonChai);
+
+// Every generated prompt carries the two standard values (source=ai,
+// intent=Informational); the third tag is the per-prompt computed `type`.
+const STANDARD_IDS = [TAG_IDS.sourceAi, TAG_IDS.intentInformational];
 
 const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';
@@ -63,7 +68,9 @@ function makeTransport(overrides = {}) {
     listGlobalAiModels: sinon.stub().resolves({ items: [] }),
     addAiModel: sinon.stub().resolves(null),
     deleteAiModelsByIds: sinon.stub().resolves(null),
-    createProjectTags: sinon.stub().resolves(null),
+    createProjectTags: sinon.stub().resolves([]),
+    listProjectTags: makeListProjectTagsStub(),
+    createPromptsByIds: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
     createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
@@ -468,13 +475,12 @@ describe('markets-subworkspace handlers', () => {
       await expect(handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' })).to.be.rejectedWith(/boom/);
     });
 
-    it('attaches selected AI models and generated topic-tagged prompts before publish', async () => {
+    it('attaches selected AI models and generated prompts by tag id before publish', async () => {
       const transport = makeTransport({
         getBrandTopics: sinon.stub().resolves([
           { topic: 'Running Shoes', volume: 900, prompts: ['best running shoes', 'top trail shoes'] },
           { topic: 'Sandals', volume: 100, prompts: ['best sandals'] },
         ]),
-        createTaggedPrompts: sinon.stub().resolves(null),
         listAiModels: sinon.stub().resolves({ items: [] }),
       });
       const res = await handleCreateMarketSubworkspace(
@@ -489,28 +495,27 @@ describe('markets-subworkspace handlers', () => {
           modelIds: ['m-1', 'm-2'],
           generateTopics: true,
           topicCap: 1,
-          standardTags: ['source:ai'],
-          projectTags: ['intent:Informational', 'type:branded'],
           publishMode: 'require',
         },
       );
       expect(res.status).to.equal(201);
-      // project-level tag taxonomy registered (independent of prompts)
-      expect(transport.createProjectTags).to.have.been.calledOnceWith(WS, 'new-proj', ['intent:Informational', 'type:branded']);
+      // The taxonomy is provisioned by resolving the tree; this project already
+      // carries all four roots and every closed value, so nothing is created.
+      expect(transport.createProjectTags).to.not.have.been.called;
       // models attached
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-2');
-      // only the top-1 topic by volume was attached, tagged topic:<name> +
-      // source:ai + a branded type: tag. Brand name is 'Trail' (needle 'trail'):
-      // the shared classifier now matches on WORD boundaries, so 'top trail
-      // shoes' contains the whole word 'trail' => branded, while 'best running
-      // shoes' does not => non-branded (serenity-docs#31).
-      expect(transport.createTaggedPrompts).to.have.been.calledOnce;
-      const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
-      expect(promptsByText).to.deep.equal({
-        'best running shoes': ['topic:Running Shoes', 'source:ai', 'type:non-branded'],
-        'top trail shoes': ['topic:Running Shoes', 'source:ai', 'type:branded'],
-      });
+
+      // Only the top-1 topic by volume is attached. The generated prompts carry
+      // NO category tag — the topic name is not a tag under this model — just the
+      // two standard values plus the computed `type`. Brand name is 'Trail'
+      // (needle 'trail'): the shared classifier matches on WORD boundaries, so
+      // 'top trail shoes' is branded and 'best running shoes' is not. Prompts are
+      // grouped by computed type, one upstream call per group, because
+      // createPromptsByIds carries ONE shared tag_ids array per call.
+      expect(transport.createPromptsByIds).to.have.been.calledTwice;
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['best running shoes'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['top trail shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
       expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
       // Models are STAGED (no inner publish) — only the single final publish runs,
       // so a quota 405 can never escape mid-flow from the model-set commit.
@@ -568,7 +573,6 @@ describe('markets-subworkspace handlers', () => {
             ],
           },
         ]),
-        createTaggedPrompts: sinon.stub().resolves(null),
       });
       const res = await handleCreateMarketSubworkspace(
         transport,
@@ -580,18 +584,24 @@ describe('markets-subworkspace handlers', () => {
         null,
         {
           generateTopics: true,
-          standardTags: ['source:ai'],
           brandAliases: ['Zoom'],
           publishMode: 'skip',
         },
       );
       expect(res.status).to.equal(201);
-      const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
-      expect(promptsByText).to.deep.equal({
-        'Best ACME running shoes': ['topic:Shoes', 'source:ai', 'type:branded'],
-        'top trail sneakers from zoom': ['topic:Shoes', 'source:ai', 'type:branded'],
-        'most comfortable sandals': ['topic:Shoes', 'source:ai', 'type:non-branded'],
-      });
+      // Two branded prompts share one call; the single non-branded one gets its own.
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(
+        WS,
+        'new-proj',
+        ['Best ACME running shoes', 'top trail sneakers from zoom'],
+        [...STANDARD_IDS, TAG_IDS.typeBranded],
+      );
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(
+        WS,
+        'new-proj',
+        ['most comfortable sandals'],
+        [...STANDARD_IDS, TAG_IDS.typeNonBranded],
+      );
     });
 
     it('best-effort publish marks the project published when the publish succeeds', async () => {
@@ -616,7 +626,6 @@ describe('markets-subworkspace handlers', () => {
         getBrandTopics: sinon.stub().resolves({
           items: [{ topic: 'Boots', volume: 500, prompts: ['best boots'] }],
         }),
-        createTaggedPrompts: sinon.stub().resolves(null),
       });
       const res = await handleCreateMarketSubworkspace(
         transport,
@@ -626,12 +635,12 @@ describe('markets-subworkspace handlers', () => {
         log,
         null,
         null,
-        { generateTopics: true, standardTags: ['source:ai'], publishMode: 'skip' },
+        { generateTopics: true, publishMode: 'skip' },
       );
       expect(res.status).to.equal(201);
-      expect(transport.createTaggedPrompts).to.have.been.calledOnce;
-      const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
-      expect(promptsByText).to.have.property('best boots');
+      expect(transport.createPromptsByIds).to.have.been.calledOnce;
+      const [, , items] = transport.createPromptsByIds.firstCall.args;
+      expect(items).to.deep.equal(['best boots']);
     });
 
     it('skips the prompt attach (topicCount/promptCount 0) when topics yield no prompts', async () => {
@@ -641,7 +650,6 @@ describe('markets-subworkspace handlers', () => {
           { topic: 'Empty', volume: 10, prompts: [] },
           { topic: 'AlsoEmpty', volume: 5 },
         ]),
-        createTaggedPrompts: sinon.stub().resolves(null),
       });
       const res = await handleCreateMarketSubworkspace(
         transport,
@@ -651,11 +659,11 @@ describe('markets-subworkspace handlers', () => {
         log,
         null,
         null,
-        { generateTopics: true, standardTags: ['source:ai'], publishMode: 'skip' },
+        { generateTopics: true, publishMode: 'skip' },
       );
       expect(res.status).to.equal(201);
       expect(res.body).to.include({ topicCount: 0, promptCount: 0 });
-      expect(transport.createTaggedPrompts).to.not.have.been.called;
+      expect(transport.createPromptsByIds).to.not.have.been.called;
     });
 
     it('409s when a LIVE project already exists for the slice', async () => {
@@ -808,6 +816,7 @@ describe('markets-subworkspace handlers', () => {
     it('aggregates unique tag names across the slice prompts', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        listProjectTags: sinon.stub().resolves({ items: [] }),
         listPromptsByTags: sinon.stub().resolves({
           items: [
             { id: 'q1', tags: [{ id: 't-1', name: 'Topic A' }] },
@@ -933,20 +942,41 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
     });
 
-    it('keeps the first (prompt-derived) real id when both sources supply different real ids for a name', async () => {
+    it('keeps BOTH tags when two real ids share a name (a name is not an identity)', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
         listPromptsByTags: sinon.stub().resolves({
-          items: [{ id: 'q1', tags: [{ id: 'prompt-id', name: 'category:Running Shoes' }] }],
+          items: [{ id: 'q1', tags: [{ id: 'prompt-id', name: 'human' }] }],
         }),
         listProjectTags: sinon.stub().resolves({
-          items: [{ id: 'standalone-id', name: 'category:Running Shoes' }],
+          items: [{ id: 'standalone-id', name: 'human' }],
         }),
       });
       const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
-      // Both ids are real (≠ name), so the synthetic-id upgrade does not fire and
-      // first-writer-wins holds: the prompt-derived id is kept deterministically.
-      expect(result.items).to.deep.equal([{ id: 'prompt-id', name: 'category:Running Shoes' }]);
+      // Names are unique only per (project, parent): a sub-category `human` and
+      // the `source` value `human` are different tags. Keying by name would drop
+      // one of them; keying by id keeps both.
+      expect(result.items).to.deep.equal([
+        { id: 'prompt-id', name: 'human' },
+        { id: 'standalone-id', name: 'human' },
+      ]);
+    });
+
+    it('collapses two id-less same-named placeholders to one (indistinguishable without an id)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
+        // Two DISTINCT tags both arrive as bare strings (no upstream id) sharing a
+        // name. With no id there is nothing to tell them apart, so they collapse to
+        // one placeholder rather than emitting a duplicate `{ id: name, name }` row.
+        // The by-id merge (see the sibling test) is what preserves two same-named
+        // tags whenever either carries a real id — the common case.
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'q1', tags: ['human', 'human'] }],
+        }),
+        listProjectTags: sinon.stub().resolves({ items: [] }),
+      });
+      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items).to.deep.equal([{ id: 'human', name: 'human' }]);
     });
 
     it('warns when the standalone tag page ceiling is hit (possible truncation)', async () => {
@@ -1005,7 +1035,8 @@ describe('markets-subworkspace handlers', () => {
       const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
       // A full first page (=== limit) forces a second fetch; a short page ends it.
       expect(listProjectTags.callCount).to.equal(2);
-      expect(listProjectTags.secondCall.args).to.deep.equal([WS, 'p-tag', { page: 2, limit: 100 }]);
+      expect(listProjectTags.secondCall.args)
+        .to.deep.equal([WS, 'p-tag', { page: 2, limit: 100, draft: true }]);
       expect(result.items).to.have.lengthOf(101);
       expect(result.items).to.deep.include({ id: 't-last', name: 'category:Last' });
     });
@@ -1237,7 +1268,6 @@ describe('markets-subworkspace — defensive branch coverage', () => {
         { topic: 'Alpha', prompts: ['alpha prompt'] },
         { topic: 'Beta', prompts: ['beta prompt'] },
       ]),
-      createTaggedPrompts: sinon.stub().resolves(null),
     });
     const brand = makeBrand();
     const res = await handleCreateMarketSubworkspace(
@@ -1248,11 +1278,14 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       log,
       null,
       null,
-      { generateTopics: true, standardTags: [], publishMode: 'skip' },
+      { generateTopics: true, publishMode: 'skip' },
     );
     expect(res.status).to.equal(201);
-    // Both prompts are attached — no crash from the sort comparator.
-    expect(transport.createTaggedPrompts).to.have.been.calledOnce;
+    // Both prompts are attached (both non-branded, so one call) — no crash from
+    // the sort comparator.
+    expect(transport.createPromptsByIds).to.have.been.calledOnce;
+    expect(transport.createPromptsByIds.firstCall.args[2])
+      .to.deep.equal(['alpha prompt', 'beta prompt']);
   });
 
   // Line 198: `String(s || '')` — the `|| ''` branch fires for a falsy element
@@ -1264,7 +1297,6 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       getBrandTopics: sinon.stub().resolves([
         { topic: 'T', volume: 10, prompts: ['adobe shoes'] },
       ]),
-      createTaggedPrompts: sinon.stub().resolves(null),
     });
     const brand = makeBrand();
     const res = await handleCreateMarketSubworkspace(
@@ -1278,16 +1310,14 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       null,
       {
         generateTopics: true,
-        standardTags: [],
         // null element → String(null || '') = '' → trimmed → filtered out.
         brandAliases: [null, 'AdobeSub'],
         publishMode: 'skip',
       },
     );
     expect(res.status).to.equal(201);
-    const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
     // 'adobe shoes' contains 'adobe' → branded (null alias was dropped, not used).
-    expect(promptsByText['adobe shoes']).to.include('type:branded');
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'new-proj', ['adobe shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
   });
 
   // Line 115 truthy branch: body.name is provided and valid — String(body.name) is used
@@ -1368,7 +1398,6 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       getBrandTopics: sinon.stub().resolves([
         { topic: 'T', volume: 10, prompts: ['real deal', 'plain text'] },
       ]),
-      createTaggedPrompts: sinon.stub().resolves(null),
     });
     const res = await handler.handleCreateMarketSubworkspace(
       transport,
@@ -1380,16 +1409,79 @@ describe('markets-subworkspace — defensive branch coverage', () => {
       null,
       {
         generateTopics: true,
-        standardTags: [],
         brandAliases: [{ name: 'ignored', regions: ['us'] }],
         publishMode: 'skip',
       },
     );
     expect(res.status).to.equal(201);
-    const [, , promptsByText] = transport.createTaggedPrompts.firstCall.args;
     // Needles = ['b','real'] (the '' element was coerced + filtered out).
     // 'real deal' contains 'real' → branded; 'plain text' → non-branded.
-    expect(promptsByText['real deal']).to.include('type:branded');
-    expect(promptsByText['plain text']).to.include('type:non-branded');
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['real deal'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
+  });
+
+  // The two guards below both fire when the tag tree, freshly provisioned, still
+  // does not contain a name we asked for. That is not hypothetical: upstream tag
+  // writes land in the project's DRAFT layer while a default read serves the LIVE
+  // view, so a create can answer 201 and echo nothing while the re-read still
+  // shows the level as it was. `createProjectTags` resolving `[]` over a level
+  // that stays empty is exactly that sequence.
+  //
+  // Attaching a prompt to a guessed id is the failure these prevent:
+  // `createPromptsByIds` is ATOMIC on an unresolvable id — it 500s and writes
+  // nothing — so the handler must fail before it builds the call, not after.
+  it('generateAndAttachPrompts: 502s when the standard prompt tag ids cannot be resolved', async () => {
+    // The four roots exist; no closed value under any of them does, and the
+    // create echoes nothing back. `provisionDimensionTree` fails closed, so the
+    // handler never reaches a prompt write holding an unresolved id.
+    const transport = makeTransport({
+      listProjectTags: makeListProjectTagsStub({ '': dimensionTreeLevels()[''] }),
+      createProjectTags: sinon.stub().resolves([]),
+      getBrandTopics: sinon.stub().resolves([{ topic: 'T', volume: 10, prompts: ['plain text'] }]),
+    });
+
+    const err = await handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      { generateTopics: true, publishMode: 'skip' },
+    ).then(() => null, (e) => e);
+
+    expect(err.status).to.equal(502);
+    expect(err.message).to.match(/did not persist the tag\(s\)/);
+    // Nothing was attached — the seam fails before any prompt write is built.
+    expect(transport.createPromptsByIds).to.have.not.been.called;
+  });
+
+  it('generateAndAttachPrompts: 502s when the type vocabulary cannot be provisioned', async () => {
+    // The `type` root exists but its level holds only `branded`, and the create
+    // that would add `non-branded` echoes nothing. The prompt below classifies to
+    // `non-branded`, so a tolerant seam would have written it untyped.
+    const levels = dimensionTreeLevels();
+    const typeLevel = levels[TAG_IDS.typeRoot].filter((t) => t.name === 'branded');
+    const transport = makeTransport({
+      listProjectTags: makeListProjectTagsStub({ ...levels, [TAG_IDS.typeRoot]: typeLevel }),
+      createProjectTags: sinon.stub().resolves([]),
+      getBrandTopics: sinon.stub().resolves([{ topic: 'T', volume: 10, prompts: ['plain text'] }]),
+    });
+
+    const err = await handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      { generateTopics: true, publishMode: 'skip' },
+    ).then(() => null, (e) => e);
+
+    expect(err.status).to.equal(502);
+    expect(err.message).to.match(/did not persist the tag\(s\): non-branded/);
+    expect(transport.createPromptsByIds).to.have.not.been.called;
   });
 });

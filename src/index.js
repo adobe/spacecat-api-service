@@ -45,6 +45,7 @@ import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
+import TaskManagementController from './controllers/task-management.js';
 import OrganizationsController from './controllers/organizations.js';
 import ProjectsController from './controllers/project.js';
 import SitesController from './controllers/sites.js';
@@ -297,6 +298,7 @@ async function run(request, context) {
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
+    const taskManagementController = TaskManagementController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -362,6 +364,7 @@ async function run(request, context) {
       serenityController,
       elementsController,
       proxyController,
+      taskManagementController,
       redirectsController,
       auditPolicyController,
     );
@@ -398,6 +401,9 @@ async function run(request, context) {
       }
       if (params.preflightId && !isValidUUID(params.preflightId)) {
         return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.connectionId && !isValidUUIDAnyVersion(params.connectionId)) {
+        return badRequest('Connection Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;

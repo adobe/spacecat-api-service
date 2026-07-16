@@ -255,26 +255,26 @@ export function createSerenityTransport({ env, imsToken }) {
     return imsToken;
   };
 
-  // Typed Project Engine client over the project gateway. maxRetries:0 preserves
-  // the one-shot behaviour the hand-rolled transport had; the injected fetch
-  // re-adds the 15s timeout + Accept header the client does not impose. `root` is
-  // the validated origin; the client appends its own '/enterprise/projects/api'
-  // prefix.
+  // Typed Project Engine client; appends '/enterprise/projects/api'. Retry,
+  // backoff, and the POST-never-retries-on-5xx idempotency gate are the shared
+  // library's contract, not this file's — see createRetryingFetch in
+  // spacecat-shared-project-engine-client's internal.js (library defaults:
+  // maxRetries 2, retryBaseDelayMs 200; per-attempt timeout via the injected
+  // `createTimeoutFetch` below, since the retry layer wraps it and calls it
+  // once per attempt).
   const projects = createSerenityProjectEngineApiClient({
     baseUrl: root,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
-  // Typed User Manager client over the sub-workspace lifecycle gateway. Same
-  // shape as the project client; appends its own '/enterprise/users/api' prefix.
-  // Uses `usersRoot` (SEMRUSH_USERS_BASE_URL, or `root` by fallback) so the
-  // lifecycle gateway can be a separate host from Project Engine.
+  // Typed User Manager client over the sub-workspace lifecycle gateway (same
+  // retry/timeout contract as above); appends '/enterprise/users/api'. Uses
+  // `usersRoot` (SEMRUSH_USERS_BASE_URL, falling back to `root`) since this
+  // gateway can be a separate host from Project Engine.
   const users = createSerenityUserManagerApiClient({
     baseUrl: usersRoot,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
@@ -317,29 +317,16 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v2/.../aio/prompts/tagged — bulk-creates prompts with their tags.
-     * Body shape: { prompts: { [promptText]: [tagName, ...] } } — keyed by
-     * prompt text, each value the list of tag names to attach. Both flat and
-     * subworkspace callers send this same prompt-text-keyed shape; `promptsByTag`
-     * is a legacy parameter name kept for continuity, not an indication of the
-     * key.
-     */
-    async createTaggedPrompts(semrushWorkspaceId, projectId, promptsByTag) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tagged',
-        {
-          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
-          body: { prompts: promptsByTag },
-        },
-      ));
-    },
-
-    /**
      * POST /v2/.../aio/prompts — bulk-creates prompts by ID-BASED tag
-     * references (as opposed to {@link createTaggedPrompts}'s name-keyed
-     * shape). Body: { items: [text, ...], tag_ids: [id, ...] } — ONE shared
-     * `tag_ids` array applies to every text in `items` (unlike the name-based
-     * endpoint, there is no per-prompt tag list on this call).
+     * references. Body: { items: [text, ...], tag_ids: [id, ...] } — ONE shared
+     * `tag_ids` array applies to every text in `items`, so a caller with more
+     * than one distinct tag set must partition its texts and issue one call per
+     * set.
+     *
+     * This is the ONLY prompt-create path. The name-keyed `aio/prompts/tagged`
+     * endpoint cannot address a nested tag — its request shape carries no parent,
+     * so an unknown name mints a new ROOT tag — which under the dimension-root
+     * model is never what a caller means.
      *
      * Response is a paginated LIST WRAPPER — `{ page, total, items: [{id,
      * name}, ...], existing_count }` — NOT the vendored public swagger's
@@ -347,8 +334,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * 2026-07-02). ATOMIC on an unresolvable tag id: live 500s and creates
      * NOTHING, so every id in `tagIds` must already be a known-good upstream
      * tag id (resolved/created by the caller first, never guessed).
-     * Text-dedupe mirrors `createTaggedPrompts`: a text already present is
-     * folded into `existing_count`, not re-created.
+     * A text already present is folded into `existing_count`, not re-created.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
@@ -375,6 +361,59 @@ export function createSerenityTransport({ env, imsToken }) {
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { ids },
+        },
+      ));
+    },
+
+    /**
+     * POST /v2/.../aio/prompts/{prompt_id}/rename — edits ONE prompt's text IN
+     * PLACE. In the AIO model a prompt's `name` IS its text, so rename is the
+     * text-edit operation. Live-verified 2026-07-14 (serenity-docs#63 §2): the
+     * prompt id is preserved across draft, publish and live (`{ id, name,
+     * is_updated }` echoes the SAME id), and renaming onto ANOTHER prompt's
+     * exact text fails with a clean 409 — no mutation, no duplicate. A rename
+     * onto the prompt's OWN current text is a documented `is_updated: false`
+     * no-op, not a conflict. The edit lands in the DRAFT layer; the live view
+     * keeps the old text until the project is published.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} promptId - upstream prompt id to rename.
+     * @param {string} newName - the prompt's next text.
+     */
+    async renamePrompt(semrushWorkspaceId, projectId, promptId, newName) {
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/{prompt_id}/rename',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId, prompt_id: promptId },
+          },
+          body: { new_name: newName },
+        },
+      ));
+    },
+
+    /**
+     * PUT /v2/.../aio/prompts/tags — batch-updates prompts' tag REFERENCES by
+     * id (aio-update-prompts-batch), in place. Body: { items: [{ id,
+     * references: [tagId…], replace }] } — per item, `replace: false` MERGES
+     * the references onto the prompt's existing tag set, `replace: true` makes
+     * the tag set EXACTLY `references`. The prompt id is preserved (verified
+     * live 2026-07-14, serenity-docs#63 §2). Answers 204 with no body; an
+     * unknown prompt id is skipped SILENTLY (still 204), so a caller needing
+     * existence must establish it separately (the update handlers do, via the
+     * preceding rename's 404).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {Array<{ id: string, references: string[], replace: boolean }>} items
+     */
+    async updatePromptTagsByIds(semrushWorkspaceId, projectId, items) {
+      return unwrap('PUT', await projects.PUT(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tags',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items },
         },
       ));
     },
@@ -413,7 +452,9 @@ export function createSerenityTransport({ env, imsToken }) {
      * brand topics (with up to 100 prompt strings each) for a domain + market,
      * fetched live from the AI-SEO service. Workspace-scoped, NOT project-scoped.
      * Returns an array of `{ topic, volume, prompts: string[] }`. Used at
-     * brand-create to seed the new project's prompts (tagged `topic:<NAME>`).
+     * brand-create to seed the new project's prompt TEXT. The topic name itself
+     * is not attached as a tag: the service returns topics with no category to
+     * hang them under, so generated prompts arrive uncategorized.
      */
     async getBrandTopics(semrushWorkspaceId, { domain, country }) {
       return unwrap('GET', await projects.GET(
@@ -429,9 +470,10 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/aio/tags — creates project-level
-     * AIO tags (the standard taxonomy: intent/source/type, plus `category:`
-     * values) independent of any prompt. Body shape: { names: string[],
-     * parent_id?: string } (model.TreeNodeListRequest). Tags already attached to
+     * AIO tags (the standard taxonomy: intent/source/type, plus the customer's
+     * own values beneath the `category` root) independent of any prompt. Body
+     * shape: { names: string[], parent_id?: string } (model.TreeNodeListRequest).
+     * Tags already attached to
      * prompts are reused by name, so pre-creating a tag that a later prompt also
      * carries does not duplicate.
      *
@@ -466,7 +508,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * GET /v2/workspaces/{ws}/projects/{pid}/aio/tags — lists the project's
      * STANDALONE AIO tags (the ones `createProjectTags` registers), independent of
      * whether any prompt carries them. This is the only read that surfaces a tag
-     * with no carrying prompt — e.g. a freshly-created, still-empty `category:<NAME>`
+     * with no carrying prompt — e.g. a freshly-created, still-empty category
      * — so the Categories surface can round-trip it. `parent_id` + `search` are
      * required by the upstream contract; pass empty strings to list all.
      *
@@ -512,31 +554,34 @@ export function createSerenityTransport({ env, imsToken }) {
      * updated tag (200); an unknown `tagId` returns 404 `{message:'not found'}`
      * (both verified live 2026-07-01).
      *
-     * `name` is required by the upstream contract. `parentId` has three
-     * meanings, all live-verified 2026-07-02 (serenity-docs#24 §3.1 gate 1):
-     * a non-empty string RE-PARENTS; explicit `null` PROMOTES a child to root
-     * (sent upstream as literal JSON `null`); `undefined` (or an empty string)
-     * OMITS `parent_id` from the body entirely, a no-op that preserves the
-     * current parent. Explicit `null` and omission are NOT interchangeable —
-     * only the former promotes.
+     * `name` is required by the upstream contract. So, effectively, is
+     * `parent_id`: a body that OMITS it PROMOTES the tag to a root, stranding a
+     * nested tag outside its dimension while every carrying prompt stays
+     * attached. Omission and explicit `null` are the SAME destructive operation
+     * upstream — there is no "leave the parent alone" body. Any rename of a
+     * nested tag must therefore re-send that tag's current `parent_id`.
+     *
+     * `parentId` is consequently mandatory here, and has two meanings: a
+     * non-empty string RE-PARENTS (pass the tag's current parent to rename in
+     * place); `null` PROMOTES the tag to a root. `undefined` and `''` are
+     * rejected rather than silently promoting.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
      * @param {string} tagId - upstream tag id to update.
      * @param {object} update
-     * @param {string} update.name - the tag's (possibly renamed) full name.
-     * @param {string | null} [update.parentId] - re-parent target, `null` to
-     *   promote to root, or omit to leave the current parent unchanged.
+     * @param {string} update.name - the tag's (possibly renamed) bare name.
+     * @param {string | null} update.parentId - re-parent target (pass the current
+     *   parent to rename in place), or `null` to promote the tag to a root.
      */
     async updateProjectTag(semrushWorkspaceId, projectId, tagId, { name, parentId }) {
-      const body = { name };
-      if (parentId === null) {
-        body.parent_id = null;
-      } else if (typeof parentId === 'string' && parentId !== '') {
-        body.parent_id = parentId;
+      if (parentId !== null && !(typeof parentId === 'string' && parentId !== '')) {
+        throw new TypeError(
+          'updateProjectTag: parentId is required — omitting it promotes the tag to a root. '
+          + 'Pass the tag\'s current parent id to rename in place, or null to promote deliberately.',
+        );
       }
-      // parentId undefined or '' → parent_id omitted from body (no-op, preserves
-      // the current parent).
+      const body = { name, parent_id: parentId };
       return unwrap('PATCH', await projects.PATCH(
         '/v2/workspaces/{id}/projects/{project_id}/aio/tags/{tag_id}',
         {
@@ -681,6 +726,21 @@ export function createSerenityTransport({ env, imsToken }) {
     async getWorkspaceStatus(workspaceId) {
       return unwrap('GET', await users.GET(
         '/v1/workspaces/{id}/status',
+        { params: { path: { id: workspaceId } } },
+      ));
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/resources — the workspace's own AI resources
+     * (`NewWorkspaceResources`: `product_resources.ai.resources.{projects,prompts,weekly_prompts}`
+     * as `{ used, drafted, total }`). Read by the dynamic-allocation allocator before a metered op
+     * (child headroom) and against the MASTER workspace for the org pool (`free = total − used`).
+     * NOTE: use this on the master id for the pool — `/parent/resources` returns the workspace's
+     * OWN allocation, not the master pool (live-verified 2026-07-02).
+     */
+    async getWorkspaceResources(workspaceId) {
+      return unwrap('GET', await users.GET(
+        '/v1/workspaces/{id}/resources',
         { params: { path: { id: workspaceId } } },
       ));
     },

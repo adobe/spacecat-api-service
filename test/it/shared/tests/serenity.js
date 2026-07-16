@@ -11,7 +11,9 @@
  */
 
 import { expect } from 'chai';
-import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
+import {
+  ORG_1_ID, BRAND_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
+} from '../seed-ids.js';
 
 /**
  * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
@@ -53,7 +55,12 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  *     `publish_status` -> `live`. Pinned by the bumped client deps, so it runs
  *     unconditionally.
  */
-export default function serenityTests(getHttpClient, resetData, resetMocks = async () => {}) {
+export default function serenityTests(
+  getHttpClient,
+  resetData,
+  resetMocks = async () => {},
+  mockControls = {},
+) {
   // Seed the baseline org/brand rows the catalog + brand-resolution tests read.
   // (The route-gate cases fire before any DB access, but the org-level reads
   // need ORG_1 present.) Mirrors every other postgres factory.
@@ -297,11 +304,25 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       });
       expect(res.status).to.equal(201);
       expect(res.body.type).to.equal('category');
-      expect(res.body.tag).to.equal('category:Footwear');
+      // The name is BARE. A tag's dimension is the root it descends from, so the
+      // create hangs it under the `category` root rather than decorating the name.
+      expect(res.body.name).to.equal('Footwear');
+      expect(res.body.parentId).to.be.a('string').that.is.not.empty;
       expect(res.body.geoTargetId).to.equal(US_GEO);
       expect(res.body.languageCode).to.equal('en');
       // The create echoes the upstream tag id (needed to nest / re-parent).
       expect(res.body.id).to.be.a('string').that.is.not.empty;
+
+      // The four dimension roots are provisioned on first touch, and the new
+      // category is a CHILD of the `category` root, not a root itself.
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      expect(roots.status).to.equal(200);
+      expect(roots.body.items.map((t) => t.name))
+        .to.have.members(['category', 'intent', 'source', 'type']);
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      expect(res.body.parentId).to.equal(categoryRoot.id);
     });
 
     // 1-level nested category tags (needs PE mock >= 1.6.0 — adobe/spacecat-shared#1758,
@@ -326,24 +347,34 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(parent.status).to.equal(201);
       const parentId = parent.body.id;
       expect(parentId).to.be.a('string').that.is.not.empty;
+      const categoryRootId = parent.body.parentId;
 
       const child = await createTag('Sneakers', parentId);
       expect(child.status).to.equal(201);
-      // A child is created BARE (no dimension prefix) — mirrors the migration CLI's
-      // write shape (serenity-docs#24 §2); only roots keep the `category:` prefix.
-      expect(child.body.tag).to.equal('Sneakers');
+      // Every name is bare at every depth — the dimension is the root ancestor.
+      expect(child.body.name).to.equal('Sneakers');
       // parent_id echoes back through the JSON body faithfully — the child is nested.
       expect(child.body.parentId).to.equal(parentId);
 
-      // Roots view (parentId=''): the parent lists as a root (parentId null) and its
-      // childrenCount — derived server-side from the stored parentage — reflects the new child.
+      // The `category` ROOT is what lists at the root level, and the customer's
+      // category is one level down.
       const roots = await getHttpClient().admin.get(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
       expect(roots.status).to.equal(200);
-      const parentRow = roots.body.items.find((t) => t.id === parentId);
-      expect(parentRow, 'the parent should list among the roots').to.exist;
-      expect(parentRow.parentId).to.equal(null);
+      const categoryRoot = roots.body.items.find((t) => t.id === categoryRootId);
+      expect(categoryRoot, 'the category root should list among the roots').to.exist;
+      expect(categoryRoot.parentId).to.equal(null);
+      expect(categoryRoot.childrenCount).to.be.greaterThan(0);
+
+      // Drill the category root to find `Footwear`, whose own childrenCount — derived
+      // server-side from the stored parentage — reflects the new child.
+      const categories = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRootId}`,
+      );
+      expect(categories.status).to.equal(200);
+      const parentRow = categories.body.items.find((t) => t.id === parentId);
+      expect(parentRow, 'Footwear should list under the category root').to.exist;
       expect(parentRow.childrenCount).to.be.greaterThan(0);
 
       // Drill the parent's CHILDREN by id (parentId=<parent's upstream id>) — round-trips through
@@ -356,40 +387,92 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(children.body.items.find((t) => t.id === child.body.id).parentId).to.equal(parentId);
     });
 
+    // The parent is validated by ANCESTRY, so declaring the open dimension while
+    // pointing at a closed root cannot smuggle a customer value into `intent`.
+    it('POST /serenity/tags 400s a category whose parentId roots in another dimension', async () => {
+      await createUsMarket();
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const intentRoot = roots.body.items.find((t) => t.name === 'intent');
+      expect(intentRoot, 'the intent root should be provisioned').to.exist;
+
+      const res = await createTag('ai', intentRoot.id);
+      expect(res.status).to.equal(400);
+    });
+
     it('PATCH /serenity/tags/:tagId renames a child by id (URL-safe id round-trips through the path)', async () => {
       await createUsMarket();
       const parent = await createTag('Footwear');
       const child = await createTag('Sneakers', parent.body.id);
-      const childId = child.body.id;
+      const childTagId = child.body.id;
 
       // Rename-only: parentId omitted — the proxy must re-send the child's current parent itself
       // (gate 5) so the child stays nested, not promoted to root.
-      const renamed = await getHttpClient().admin.patch(`${base}/tags/${childId}`, {
+      const renamed = await getHttpClient().admin.patch(`${base}/tags/${childTagId}`, {
         name: 'Boots', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(renamed.status).to.equal(200);
-      expect(renamed.body.tag).to.equal('Boots');
+      expect(renamed.body.name).to.equal('Boots');
       expect(renamed.body.parentId).to.equal(parent.body.id);
 
-      // Promote to root: explicit parentId: null (gate 1).
-      const promoted = await getHttpClient().admin.patch(`${base}/tags/${childId}`, {
+      // An explicit null parent is refused: the root level is reserved for the four
+      // dimension roots, so promoting a tag would leave it with no dimension.
+      const promoted = await getHttpClient().admin.patch(`${base}/tags/${childTagId}`, {
         name: 'Boots', parentId: null, geoTargetId: US_GEO, languageCode: 'en',
       });
-      expect(promoted.status).to.equal(200);
-      expect(promoted.body.parentId).to.equal(null);
+      expect(promoted.status).to.equal(400);
     });
 
-    it('PATCH /serenity/tags/:tagId route reaches upstream (unknown id → 502)', async () => {
+    // Upstream stores a parent pointer, not a tree, so it would accept a parent
+    // that already descends from the tag being moved. Both nodes would then hang
+    // off no root, and — since every tree walk starts at the roots — neither could
+    // be found again: the subtree would be unreachable and unrepairable through
+    // this API. The proxy refuses the edge rather than depend on upstream to.
+    it('PATCH /serenity/tags/:tagId 400s a re-parent onto the tag\'s own descendant', async () => {
       await createUsMarket();
-      // A UUID tag id the mock has never stored → upstream 404, which the serenity proxy
-      // deliberately collapses to 502 (mapError does not echo upstream detail — same convention as
-      // every other serenity write). Proves the PATCH route → controller → handler → transport →
-      // upstream wiring for a genuinely unknown id (the known-id round trip is covered above).
+      const parent = await createTag('Outerwear');
+      const child = await createTag('Parkas', parent.body.id);
+
+      const cycled = await getHttpClient().admin.patch(`${base}/tags/${parent.body.id}`, {
+        name: 'Outerwear',
+        parentId: child.body.id,
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(cycled.status).to.equal(400);
+
+      // The tree is untouched: the parent still sits under the `category` root and
+      // still carries its child.
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      expect(children.status).to.equal(200);
+      expect(children.body.items.map((t) => t.id)).to.include(child.body.id);
+    });
+
+    it('PATCH /serenity/tags/:tagId 404s an id absent from this market tree', async () => {
+      await createUsMarket();
+      // Without the target's current parent there is no PATCH body that preserves it,
+      // and an upstream PATCH omitting parent_id promotes the tag to a root. The proxy
+      // therefore resolves the id against the tree and refuses rather than forwarding.
       const res = await getHttpClient().admin.patch(
         `${base}/tags/00000000-0000-4000-8000-000000000000`,
-        { name: 'category:Ghost', geoTargetId: US_GEO, languageCode: 'en' },
+        { name: 'Ghost', geoTargetId: US_GEO, languageCode: 'en' },
       );
-      expect(res.status).to.equal(502);
+      expect(res.status).to.equal(404);
+    });
+
+    it('PATCH /serenity/tags/:tagId 400s a rename of a dimension root', async () => {
+      await createUsMarket();
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      const res = await getHttpClient().admin.patch(`${base}/tags/${categoryRoot.id}`, {
+        name: 'Categories', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(400);
     });
 
     it('POST /serenity/tags resolves a closed-dimension tag idempotently (source/intent/type)', async () => {
@@ -398,15 +481,32 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
         type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(first.status).to.equal(200);
-      expect(first.body).to.include({ tag: 'source:ai', created: true });
+      expect(first.body).to.include({ type: 'source', name: 'ai' });
       expect(first.body.id).to.be.a('string').that.is.not.empty;
+      // The value hangs under the `source` root, never at the root level.
+      expect(first.body.parentId).to.be.a('string').that.is.not.empty;
 
       // Same closed-dimension value again — resolved, not re-created (no upstream collision).
       const second = await getHttpClient().admin.post(`${base}/tags`, {
         type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(second.status).to.equal(200);
-      expect(second.body).to.include({ tag: 'source:ai', id: first.body.id, created: false });
+      expect(second.body).to.include({ name: 'ai', id: first.body.id, created: false });
+    });
+
+    // The fixed vocabulary is not editable: every resolve-or-create keys on the bare
+    // name under the root, so a rename would mint a second value and orphan the prompts
+    // still carrying the first.
+    it('PATCH /serenity/tags/:tagId 400s a rename of a closed-dimension value', async () => {
+      await createUsMarket();
+      const created = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(created.status).to.equal(200);
+      const res = await getHttpClient().admin.patch(`${base}/tags/${created.body.id}`, {
+        name: 'automated', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(400);
     });
 
     it('POST /serenity/tags 400s a closed-dimension value outside the fixed enum', async () => {
@@ -521,11 +621,24 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(res.body.semrushProjectId).to.equal(created.body.projectId);
     });
 
+    // Tags are addressed by upstream id: a bulk-create row carries `tagIds`, never
+    // names, because a name cannot identify a nested tag.
+    const createCategory = async (name) => {
+      const res = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'category', name, geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(201);
+      return res.body.id;
+    };
+
     it('POST /serenity/prompts attaches a prompt to the created slice, then lists it', async () => {
       await createUsMarket();
+      const tagId = await createCategory('Running');
       const text = 'What are the best trail running shoes?';
       const post = await getHttpClient().admin.post(`${base}/prompts`, {
-        prompts: [{ text, geoTargetId: US_GEO, languageCode: 'en' }],
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
       });
       expect(post.status).to.equal(200);
       // With the slice resolvable, the prompt is created (not skipped "No market for slice").
@@ -541,10 +654,26 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       expect(list.body.items.some((p) => p.text === text)).to.equal(true);
     });
 
+    it('POST /serenity/prompts skips a row that supplies no tagIds, and says why', async () => {
+      await createUsMarket();
+      const post = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{ text: 'Untagged prompt', geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(post.status).to.equal(200);
+      expect(post.body.created).to.be.an('array').that.is.empty;
+      expect(post.body.skipped).to.have.lengthOf(1);
+      expect(post.body.skipped[0].reason).to.match(/tagIds must be a non-empty array/);
+    });
+
     it('POST /serenity/prompts dedups a repeated prompt text on the same slice', async () => {
       await createUsMarket();
+      const tagId = await createCategory('Laptops');
       const text = 'Which laptop has the best battery life?';
-      const body = { prompts: [{ text, geoTargetId: US_GEO, languageCode: 'en' }] };
+      const body = {
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      };
       const first = await getHttpClient().admin.post(`${base}/prompts`, body);
       expect(first.status).to.equal(200);
       expect(first.body.created).to.have.lengthOf(1);
@@ -558,6 +687,165 @@ export default function serenityTests(getHttpClient, resetData, resetMocks = asy
       );
       expect(list.status).to.equal(200);
       expect(list.body.items.filter((p) => p.text === text)).to.have.lengthOf(1);
+    });
+
+    // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the
+    // upstream rename + batch tag write, so the id survives the edit — the
+    // response echoes it unchanged, the listing carries the new text under the
+    // SAME id, and the prompt count is unchanged (no duplicate was minted).
+    it('PATCH /serenity/prompts/:id edits the text in place — the id survives the edit', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Footwear');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{
+          text: 'What are the best running shoes?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(created.status).to.equal(200);
+      const promptId = created.body.created[0].semrushPromptId;
+
+      const patched = await getHttpClient().admin.patch(`${base}/prompts/${promptId}`, {
+        text: 'What are the best trail running shoes?',
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(patched.status).to.equal(200);
+      expect(patched.body.semrushPromptId).to.equal(promptId);
+      expect(patched.body.text).to.equal('What are the best trail running shoes?');
+
+      const list = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(list.status).to.equal(200);
+      const edited = list.body.items.find((p) => p.semrushPromptId === promptId);
+      expect(edited, 'the edited prompt lists under its ORIGINAL id').to.exist;
+      expect(edited.text).to.equal('What are the best trail running shoes?');
+      // No duplicate was minted: the old text is gone from the slice.
+      expect(list.body.items.filter((p) => /best (trail )?running shoes/.test(p.text)))
+        .to.have.lengthOf(1);
+    });
+
+    // Gate G2: a rename onto a SIBLING prompt's exact text is a 409 conflict
+    // with nothing mutated upstream — both prompts keep their text and ids.
+    it('PATCH /serenity/prompts/:id 409s when the new text collides with a sibling prompt', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [
+          {
+            text: 'Which DSLR is best for beginners?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+          },
+          {
+            text: 'Which mirrorless camera is best?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+          },
+        ],
+      });
+      expect(created.status).to.equal(200);
+      expect(created.body.created).to.have.lengthOf(2);
+      const [first, second] = created.body.created;
+
+      const res = await getHttpClient().admin.patch(`${base}/prompts/${second.semrushPromptId}`, {
+        text: 'Which DSLR is best for beginners?', // the FIRST prompt's exact text
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(res.status).to.equal(409);
+      expect(res.body.error).to.equal('conflict');
+
+      // Nothing mutated: both prompts still list with their original text + id.
+      const list = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      const byId = new Map(list.body.items.map((p) => [p.semrushPromptId, p.text]));
+      expect(byId.get(first.semrushPromptId)).to.equal('Which DSLR is best for beginners?');
+      expect(byId.get(second.semrushPromptId)).to.equal('Which mirrorless camera is best?');
+    });
+
+    it('PATCH /serenity/prompts/:id 404s promptNotFound for an unknown prompt id', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Ghosts');
+      const res = await getHttpClient().admin.patch(
+        `${base}/prompts/00000000-0000-4000-8000-00000000dead`,
+        {
+          text: 'x', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        },
+      );
+      expect(res.status).to.equal(404);
+      expect(res.body.error).to.equal('promptNotFound');
+    });
+  });
+
+  // Dynamic-allocation kill-switch ON — drives the JIT top-up FRONTING end-to-end against the live
+  // metered User Manager mock (Rainer's review item #4). ORG_1 carries a parent workspace
+  // (SERENITY_ORG_PARENT_WS_ID) so BRAND_1's sub-workspace resolves a non-null parent id and
+  // the guard engages; the flag is a global env kill-switch read per request, toggled here around
+  // the block. The `__quota` / `__dump` mock control routes are injected by the postgres harness.
+  describe('Serenity API — dynamic allocation ON (metered JIT via the live UM mock)', () => {
+    const { setUmMockQuota, dumpUmMock } = mockControls;
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+    const US_GEO = 2840;
+    const CHILD = SERENITY_MOCK_WORKSPACE_ID; // BRAND_1's sub-workspace (the metered child)
+    const PARENT = SERENITY_ORG_PARENT_WS_ID; // ORG_1's parent workspace (advisory units pool)
+
+    const childTotal = (dump, dim) => {
+      const rec = (dump.workspace_resources || []).find((r) => r.id === CHILD);
+      // A missing record (shape mismatch / wiring regression) must fail with an ACTIONABLE message
+      // here, not surface downstream as the opaque "expected undefined to be above 0".
+      expect(rec, `expected a workspace_resources record for CHILD (${CHILD}) in the mock dump`)
+        .to.exist;
+      return rec.ai?.[dim]?.total;
+    };
+
+    // Skip cleanly if a wiring didn't inject the mock control routes (only the postgres harness has
+    // the live containers); this keeps the shared factory usable by any future non-metered wiring.
+    before(function skipWithoutMockControls() {
+      if (typeof setUmMockQuota !== 'function' || typeof dumpUmMock !== 'function') {
+        this.skip();
+      }
+    });
+
+    beforeEach(async () => {
+      await resetData();
+      await resetMocks();
+      process.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
+      // Parent (units pool) amply provisioned; child seeded at ZERO total so a metered write must
+      // top it up. Both metered so the allocator's strict /resources reads resolve.
+      await setUmMockQuota(PARENT, { projects: 100, prompts: 100000 });
+      await setUmMockQuota(CHILD, {
+        projects: { used: 0, drafted: 0, total: 0 },
+        prompts: { used: 0, drafted: 0, total: 0 },
+      });
+    });
+
+    afterEach(() => {
+      delete process.env.SERENITY_DYNAMIC_ALLOCATION;
+    });
+
+    it('tops up the sub-workspace via a live /resources transfer when a metered write needs headroom', async () => {
+      // create-market fronts PROJECT headroom before createProject: from a seeded 0 total the guard
+      // tops the child up to a whole block (>=1) with a REAL /resources transfer to the mock, then
+      // creates + publishes the project.
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+
+      // Positive proof the flag-ON JIT engaged end-to-end over the wire: the child's PROJECT total
+      // grew from the seeded 0 via a live transfer. A flag-OFF run never fronts/transfers, so it
+      // would still read 0 — asserting the top-up AND that the kill-switch env toggle took effect
+      // for the request. (The prompt dimension's `texts × models` sizing is covered by the
+      // resource-manager unit tests; here the project carve is the decisive over-the-wire signal.)
+      const dump = await dumpUmMock();
+      expect(childTotal(dump, 'projects'), 'projects topped up from 0 via a live transfer')
+        .to.be.greaterThan(0);
+
+      // Smoke: the prompt write path also runs cleanly under the flag (fronts, then publishes).
+      const post = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{ text: 'best trail running shoes?', geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(post.status).to.equal(200);
     });
   });
 }

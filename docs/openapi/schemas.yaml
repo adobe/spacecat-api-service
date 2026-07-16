@@ -10976,7 +10976,7 @@ SerenityPrompt:
   properties:
     semrushPromptId:
       type: string
-      description: Upstream prompt id. Changes whenever the prompt is re-created (e.g. on PATCH).
+      description: Upstream prompt id. Stable across edits — PATCH updates the prompt in place and echoes the same id.
     geoTargetId:
       type: integer
       minimum: 1
@@ -10987,35 +10987,78 @@ SerenityPrompt:
       description: BCP-47 primary subtag (lowercase) for the slice.
     text:
       type: string
+    tags:
+      type: array
+      items: { $ref: '#/SerenityPromptTag' }
+      description: |
+        The tags carried by this prompt, one entry per tag, keyed by upstream
+        id. Present on `GET /serenity/prompts` list items.
+
+        Tag names are NOT unique: uniqueness is scoped per (project, parent)
+        upstream, so a prompt can carry two tags with the same bare name from
+        different dimensions (a sub-category `human` and the `source` value
+        `human`). Read a tag's dimension from `path[0].name`, never from its
+        own name.
     tagMap:
       type: object
       additionalProperties: { type: string }
+      deprecated: true
       description: |
-        Map of tag name → upstream tag id. Keys are the tag names (e.g.
-        "category:Firefly"); values are the Semrush tag UUIDs to pass back as
-        `tagIds` query params when filtering. Tags without an upstream id carry
-        an empty string value and are excluded from tag_ids filter calls.
-        Tag names are assumed unique per Semrush project; if duplicates exist,
-        only the last entry is retained.
-      example: { "category:Firefly": "uuid-1", "intent:research": "uuid-2" }
-    tags:
-      type: array
-      items: { type: string }
-      description: |
-        Echo of the tag NAMES this prompt was created/updated with via the
-        legacy name-based write path (`SerenityPromptInput.tags` /
-        `SerenityUpdatePromptRequest.tags`). Only present on a create/update
-        response (`SerenityCreatePromptsResponse.created`, the
-        `updateSerenityPrompt` 200); absent on `GET /serenity/prompts` list
-        items, which carry `tagMap` instead.
+        DEPRECATED — use `tags`. Map of tag name → upstream tag id. Being keyed
+        by name, it cannot represent a prompt carrying two same-named tags from
+        different dimensions: only one survives, and which one depends on
+        upstream ordering. Removed once every consumer reads `tags`.
+      example: { "Firefly": "uuid-1", "Commercial": "uuid-2" }
     tagIds:
       type: array
       items: { type: string }
       description: |
-        Echo of the upstream tag ids this prompt was created/updated with via
-        the id-based write path (serenity-docs#24). Only present when the
-        request used `tagIds` rather than `tags` — mutually exclusive with a
-        non-empty `tags` on the same response.
+        Echo of the upstream tag ids this prompt was created/updated with.
+        Present on a create/update response
+        (`SerenityCreatePromptsResponse.created`, the `updateSerenityPrompt`
+        200); absent on `GET /serenity/prompts` list items, which carry `tags`.
+
+SerenityPromptTag:
+  type: object
+  description: |
+    One tag carried by a prompt, with its own parentage.
+
+    Upstream serializes a tag identically wherever it appears — embedded on a
+    prompt, or listed by the tag tree read — so a prompt's tags carry their own
+    parentage. What varies is DEPTH, not endpoint: upstream omits `parent_id` and
+    `path` on a dimension root and carries both on a descendant. This API
+    normalizes that absence to `null`, so a tag whose `path` is `null` is a
+    dimension root and its own `name` is its dimension.
+  required: [id, name]
+  properties:
+    id:
+      type: string
+      description: Upstream tag id. Pass back as a `tagIds` query param to filter.
+    name:
+      type: string
+      description: The tag's bare name. Never contains a ':' and is not unique on its own.
+    parentId:
+      type: [string, 'null']
+      description: Upstream id of this tag's parent, or null when it is a dimension root.
+    path:
+      type: [array, 'null']
+      description: |
+        Root-first ancestry, EXCLUDING the tag itself. `path[0]` is the tag's
+        dimension root (`category`, `intent`, `source` or `type`), which is how
+        a tag's dimension is determined at any depth. Null for a dimension root.
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string }
+          name: { type: string }
+  example:
+    id: "uuid-1"
+    name: "Trail"
+    parentId: "uuid-cat"
+    path:
+      - { id: "uuid-root", name: "category" }
+      - { id: "uuid-cat", name: "Running Shoes" }
 
 SerenityPromptListResponse:
   type: object
@@ -11031,24 +11074,18 @@ SerenityPromptListResponse:
 SerenityPromptInput:
   type: object
   description: |
-    One row in a bulk-create prompts request. `tags` (names, via the legacy
-    name-based upstream write path) and `tagIds` (upstream tag ids from a
-    prior tags list/create, via the id-based write path — serenity-docs#24)
-    are mutually exclusive: supply at most one. `tagIds`, when present, must
-    be non-empty.
-  required: [text, geoTargetId, languageCode]
+    One row in a bulk-create prompts request. Tags are addressed by upstream id
+    (`tagIds`, from a prior tags list/create) and never by name: a name cannot
+    identify a nested tag, because upstream scopes tag-name uniqueness to
+    (project, parent). A `tags` key is rejected with 400.
+  required: [text, geoTargetId, languageCode, tagIds]
   properties:
     text: { type: string }
-    tags:
-      type: array
-      items: { type: string }
-      default: []
-      description: Tag NAMES. Mutually exclusive with tagIds.
     tagIds:
       type: array
       items: { type: string }
       minItems: 1
-      description: Upstream tag ids. Mutually exclusive with tags.
+      description: Upstream tag ids to attach to this prompt.
     geoTargetId:
       type: integer
       minimum: 1
@@ -11096,15 +11133,14 @@ SerenityCreatePromptsResponse:
 SerenityUpdatePromptRequest:
   type: object
   description: |
-    Replace the prompt's text and tags. Carries the owning slice in
+    Edit the prompt's text and tags in place. Carries the owning slice in
     `geoTargetId` + `languageCode` so the server can resolve the upstream
     project without scanning. `geoTargetId`, `languageCode`, and `text` are
-    always required — the upstream provider's API has no in-place update or
-    GET-by-id, so the server runs DELETE-old + POST-new and treats the body
-    as the full next state. Exactly one of `tags` (pass `[]` to clear) or
-    `tagIds` (non-empty, id-based write path — serenity-docs#24) must also be
-    present; they are mutually exclusive.
-  required: [geoTargetId, languageCode, text]
+    always required — the upstream provider's API has no GET-by-id, so the
+    body is treated as the full next state. `tagIds` (non-empty) is required;
+    tags are addressed by upstream id and never by name, so a `tags` key is
+    rejected with 400.
+  required: [geoTargetId, languageCode, text, tagIds]
   properties:
     geoTargetId:
       type: integer
@@ -11113,15 +11149,11 @@ SerenityUpdatePromptRequest:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     text: { type: string }
-    tags:
-      type: array
-      items: { type: string }
-      description: Tag NAMES. Mutually exclusive with tagIds.
     tagIds:
       type: array
       items: { type: string }
       minItems: 1
-      description: Upstream tag ids. Mutually exclusive with tags.
+      description: Upstream tag ids the prompt carries after the edit (full replacement set).
 
 SerenityBulkDeletePromptsRequest:
   type: object
@@ -11328,6 +11360,14 @@ SerenityActivateResponse:
         `pending` and the response is HTTP 502 (incomplete activation; body carries
         `error`/`message` and the per-market outcomes — retry to converge). Mirrors
         the persisted brand status.
+    baseSiteId:
+      type: string
+      format: uuid
+      description: |
+        The brand's primary Site (`brands.site_id`), present on a successful
+        activation (HTTP 200) — set to the primary domain's mirror Site so an
+        active Serenity brand is always anchored by a base site (same contract as
+        a non-Serenity brand). Absent on incomplete activations.
     error:
       type: string
       description: |
@@ -11514,17 +11554,90 @@ SerenityErrorResponse:
     error: { type: string }
     message: { type: string }
 
+SerenityBrandPresenceSentimentOverview:
+  type: object
+  description: |
+    Per-week brand sentiment for the Serenity (Semrush Elements-backed) brand
+    presence dashboard, sourced from the Semrush Sentiment element and rolled up
+    from daily rows into ISO weeks. Emits the legacy `sentiment-overview` contract
+    verbatim so the existing chart consumes it drop-in — the absolute values
+    differ from the Postgres-backed legacy endpoint (Semrush metrics), but the
+    shape, `sentiment[]` ordering, and colors are identical.
+  required: [weeklyTrends]
+  properties:
+    weeklyTrends:
+      type: array
+      description: One entry per ISO week in the requested range, ordered oldest-first.
+      items:
+        type: object
+        required:
+          - week
+          - weekNumber
+          - year
+          - sentiment
+          - totalPrompts
+          - promptsWithSentiment
+        properties:
+          week:
+            type: string
+            description: ISO week label (`YYYY-Wnn`).
+            example: '2026-W24'
+          weekNumber: { type: integer, example: 24 }
+          year: { type: integer, example: 2026 }
+          sentiment:
+            type: array
+            description: |
+              Positive/Neutral/Negative percentages (integers summing to 100),
+              in that fixed order. `color` is the legacy swatch hex.
+            items:
+              type: object
+              required: [name, value, color]
+              properties:
+                name:
+                  type: string
+                  enum: [Positive, Neutral, Negative]
+                value:
+                  type: integer
+                  description: Percentage of prompts-with-sentiment in this bucket (0-100).
+                color:
+                  type: string
+                  description: Legacy sentiment swatch hex.
+          totalPrompts:
+            type: integer
+            description: |
+              Total prompts for the week (from the element's total-prompts line).
+          promptsWithSentiment:
+            type: integer
+            description: |
+              Positive + Neutral + Negative prompt counts. NOTE: the three
+              sentiment buckets are overlapping sets (a prompt with mixed-sentiment
+              mentions counts in each), so this can exceed `totalPrompts`; do not
+              derive a coverage ratio from the two.
+          mentions:
+            type: integer
+            description: Stubbed 0 (parity with the legacy contract).
+          citations:
+            type: integer
+            description: Stubbed 0 (parity with the legacy contract).
+          visibilityScore:
+            type: integer
+            description: Stubbed 0 (parity with the legacy contract).
+          competitors:
+            type: array
+            description: Stubbed empty (parity with the legacy contract).
+            items: { type: object }
+
 SerenityFilterDimensionItem:
   type: object
   description: |
     A single id/label option for a Serenity Elements filter dropdown. `id` is
     the original, unmodified tag value returned by Semrush (including its
-    `prefix:` and any `Parent__Child` encoding, e.g. `topic:Furniture__Sofas`).
-    `parent_id`/`parent_label` are present only when the source tag encoded a
-    "Parent__Child" hierarchy; `parent_id` is the same `prefix:` reconstructed
-    over just the parent segment (e.g. for
-    `category:Living Room Furniture Retail__Living Room Furniture and Sofas`,
-    `parent_id` is `category:Living Room Furniture Retail`).
+    `prefix__` and any further `parent__child` encoding, e.g.
+    `topic__Furniture__Sofas`). `parent_id`/`parent_label` are present only
+    when the source tag encoded a "parent__child" hierarchy; `parent_id` is
+    the same `prefix__` reconstructed over just the parent segment (e.g. for
+    `category__Living Room Furniture Retail__Living Room Furniture and Sofas`,
+    `parent_id` is `category__Living Room Furniture Retail`).
   required: [id, label]
   properties:
     id: { type: string }
@@ -11541,10 +11654,12 @@ SerenityUrlInspectorFilterDimensions:
     `brands`, `regions`, `topics`, `categories`, `page_intents`, `origins`, and
     `tags` are always present (empty array when Semrush has no data). Any
     additional Semrush tag prefix not already covered by the fixed dimensions
-    (e.g. a future `type:branded` tag) surfaces as an extra dynamic array
+    (e.g. a future `type__branded` tag) surfaces as an extra dynamic array
     property keyed by that prefix — this is why the schema allows
     `additionalProperties`. Prefixes that would collide with one of the fixed
-    keys above are routed into `tags` instead of clobbering that key.
+    keys above are routed into `tags` instead of clobbering that key. Bare
+    prefix declarations with no value (e.g. a lone `category` row) are ignored
+    entirely and never appear in any dimension.
   required: [brands, regions, topics, categories, page_intents, origins, tags]
   properties:
     brands:
@@ -11577,30 +11692,120 @@ SerenityUrlInspectorFilterDimensions:
           languageCode: { type: [string, 'null'] }
     topics:
       type: array
-      description: Distinct `topic:`-prefixed tags.
+      description: Distinct `topic__`-prefixed tags.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     categories:
       type: array
-      description: Distinct `category:`-prefixed tags.
+      description: Distinct `category__`-prefixed tags.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     page_intents:
       type: array
-      description: Distinct `intent:`-prefixed tags. `id` is the original `intent:`-prefixed tag value.
+      description: Distinct `intent__`-prefixed tags. `id` is the original `intent__`-prefixed tag value.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     origins:
       type: array
-      description: Distinct `source:`-prefixed tags. `id` is the original `source:`-prefixed tag value.
+      description: Distinct `source__`-prefixed tags. `id` is the original `source__`-prefixed tag value.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     tags:
       type: array
       description: |
-        Prefix-less tags, plus any prefixed tag whose prefix collides with one
-        of this schema's other properties.
+        Any prefixed tag whose prefix collides with one of this schema's other
+        properties. Bare prefix declarations with no value are ignored.
       items: { $ref: '#/SerenityFilterDimensionItem' }
   additionalProperties:
     type: array
     description: Tags grouped by a Semrush tag prefix not covered by the fixed dimensions above.
     items: { $ref: '#/SerenityFilterDimensionItem' }
+
+SerenityMarketTrackingTrends:
+  type: object
+  description: |
+    Weekly Market Tracking Trends for the Serenity (Semrush Elements-backed)
+    Brand Presence Competitor Comparison chart. Each entry is one ISO week; the
+    tracked brand's own totals are at the top level and every tracked competitor
+    (a Semrush benchmark) is an entry in `competitors`. Mentions come from the
+    Trends Mentions/Visibility element and citations from the Market Tracking
+    citations element; both are already weekly-bucketed by Semrush.
+  required: [weeklyTrends]
+  properties:
+    weeklyTrends:
+      type: array
+      description: One entry per ISO week, sorted ascending by `week`.
+      items:
+        type: object
+        required: [week, weekNumber, year, mentions, citations, competitors]
+        properties:
+          week:
+            type: string
+            format: date
+            description: ISO week-start date (`YYYY-MM-DD`), from the Semrush bucket's `x`.
+          weekNumber:
+            type: integer
+            description: ISO week number (1–53).
+          year:
+            type: integer
+            description: ISO week-numbering year.
+          mentions:
+            type: integer
+            description: The tracked brand's own mentions in this week.
+          citations:
+            type: integer
+            description: The tracked brand's own citations in this week.
+          competitors:
+            type: array
+            description: Per-competitor mentions + citations for this week, sorted by mentions desc.
+            items:
+              type: object
+              required: [name, mentions, citations]
+              properties:
+                name: { type: string }
+                mentions: { type: integer }
+                citations: { type: integer }
+SerenityBrandPresenceStatsValues:
+  type: object
+  description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.
+  required: [total_executions, average_visibility_score, total_mentions, total_citations]
+  properties:
+    total_executions:
+      type: number
+      description: Total prompt executions in range, from the Semrush Total Executions element.
+    average_visibility_score:
+      type: number
+      description: Average visibility score as a 0-100 percentage (the Semrush Visibility element returns a 0-1 fraction, converted here).
+    total_mentions:
+      type: number
+      description: Total brand mention count, from the Semrush Mentions element.
+    total_citations:
+      type: number
+      description: Total brand citation count, from the Semrush Citations element.
+
+SerenityBrandPresenceStats:
+  type: object
+  description: |
+    Aggregated Brand Presence KPI stats for a brand over a date range, backed by
+    the Semrush Elements API (Total Executions, Mentions, Visibility, Citations).
+  required: [stats]
+  properties:
+    stats:
+      allOf:
+        - $ref: '#/SerenityBrandPresenceStatsValues'
+      description: Aggregated stats for the full `[startDate, endDate]` range.
+    trends:
+      type: array
+      description: |
+        Present only when `showTrends`/`show_trends` is truthy. One entry per
+        week, split backward from `endDate` into up to 8 7-day weeks.
+      items:
+        type: object
+        required: [startDate, endDate, data]
+        properties:
+          startDate: { type: string, format: date }
+          endDate: { type: string, format: date }
+          data:
+            type: object
+            required: [stats]
+            properties:
+              stats: { $ref: '#/SerenityBrandPresenceStatsValues' }
 
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
@@ -11625,14 +11830,24 @@ ReferralTrafficHasData:
       example: true
     availableSources:
       type: array
-      description: Available sources in priority order; items are `optel` or `cdn` only (optel first)
+      description: >-
+        Sources that have data for the site, in resolution-priority order
+        (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`). Callers use the
+        first entry as the active source. The ARRAY order — not the `enum`
+        order, which is an unordered set — is the priority contract.
       items:
         type: string
-        enum: [optel, cdn]
-      example: ['optel', 'cdn']
+        enum: [adobe_analytics, cja, ga4, cdn, optel]
+      example: ['adobe_analytics', 'cdn']
+    activeSource:
+      type: [string, 'null']
+      enum: [adobe_analytics, cja, ga4, cdn, optel, null]
+      description: The highest-priority available source (`availableSources[0]`) or null when none.
+      example: adobe_analytics
   required:
     - hasData
     - availableSources
+    - activeSource
 
 ReferralTrafficFilterDimensions:
   type: object
@@ -12136,12 +12351,23 @@ SuggestionReview:
     tier:
       type: string
       enum: [paid, free]
+    feedbackSubjectId:
+      type: [string, 'null']
+      description: >-
+        SpaceCat-internal id of the sub-item this review is about within the
+        suggestion (e.g. a CWV issue id), used to group per-issue feedback. Null
+        for whole-suggestion reviews.
     previousFix:
       type: object
-      description: Patch snapshot at review time (only when ?include=...,patches).
+      description: AI-generated patch snapshot at review time (only when ?include=...,patches).
     editedFix:
       type: object
       description: ESE-edited patch (only when ?include=...,patches).
+    guidanceMarkdown:
+      type: [string, 'null']
+      description: >-
+        AI-generated issue context (title + description) for the reviewed issue
+        (only when ?include=...,patches). Null when not set.
   required:
     - eventId
     - eventTime
@@ -12409,3 +12635,119 @@ StateGrantedCapability:
   example: llmo/can_view
   pattern: '^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$'
 
+# ── Task Management schemas ────────────────────────────────────────────────────
+
+TaskManagementConnection:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+    organizationId:
+      $ref: '#/Id'
+    provider:
+      type: string
+      enum: [jira_cloud]
+    status:
+      type: string
+      enum: [active, requires_reauth, revoked]
+    displayName:
+      type: string
+    instanceUrl:
+      type: string
+      format: uri
+    connectedBy:
+      type: string
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+Ticket:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+    organizationId:
+      $ref: '#/Id'
+    connectionId:
+      $ref: '#/Id'
+    opportunityId:
+      type: string
+    ticketKey:
+      type: string
+      example: 'PROJ-42'
+    ticketUrl:
+      type: string
+      format: uri
+    ticketStatus:
+      type: string
+    ticketProvider:
+      type: string
+      enum: [jira_cloud]
+    suggestions:
+      type: array
+      items:
+        type: string
+      description: Logical suggestion IDs linked to this ticket
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+TicketAttachment:
+  type: object
+  required: [content, mimeType, filename]
+  properties:
+    content:
+      type: string
+      format: byte
+      description: Base64-encoded file content
+    mimeType:
+      type: string
+      enum: [image/png, image/jpeg, image/gif, image/webp, application/pdf, text/csv, text/plain]
+    filename:
+      type: string
+      maxLength: 255
+
+TicketCreateRequest:
+  type: object
+  required: [connectionId, projectKey, summary]
+  properties:
+    connectionId:
+      $ref: '#/Id'
+    projectKey:
+      type: string
+    projectId:
+      type: string
+      description: Numeric Jira project ID
+    issueTypeId:
+      type: string
+    summary:
+      type: string
+      maxLength: 255
+    description:
+      type: string
+    labels:
+      type: array
+      items:
+        type: string
+    mode:
+      type: string
+      enum: [individual, grouped]
+      default: individual
+    suggestionIds:
+      type: array
+      items:
+        type: string
+      maxItems: 1500
+    opportunityId:
+      type: string
+    attachments:
+      type: array
+      items:
+        $ref: '#/TicketAttachment'
+      maxItems: 10
