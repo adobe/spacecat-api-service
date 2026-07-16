@@ -1,3 +1,10 @@
+## [1.655.1](https://github.com/adobe/spacecat-api-service/compare/v1.655.0...v1.655.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **llmo-akamai:** apply Optimize-at-Edge rules via JSON Patch, not full-tree PUT ([#2820](https://github.com/adobe/spacecat-api-service/issues/2820)) ([e88e7a9](https://github.com/adobe/spacecat-api-service/commit/e88e7a92744cf59ce44a283454f682c85cfe792e)), closes [adobe/spacecat-shared#1813](https://github.com/adobe/spacecat-shared/issues/1813) [#2407](https://github.com/adobe/spacecat-api-service/issues/2407)
+
 # [1.655.0](https://github.com/adobe/spacecat-api-service/compare/v1.654.4...v1.655.0) (2026-07-16)
 
 
