@@ -46,15 +46,21 @@ function defaultDateRange() {
  * Builds the payload for the Sentiment element
  * (f4153af8-6ce9-4058-8872-8a3cf11b9907, "powers rows 13 daily / 14 weekly Sentiment").
  *
- * Filter shape mirrors the Cited Domains element exactly (verified canonical for these
- * brand-presence elements — see cited-domains.js):
- *  - The date range is expressed as `CBF_date__start`/`CBF_date__end` and passed in BOTH
- *    the `simple` and `advanced` blocks — the element expects the duplication.
+ * CONTRACT VERIFIED against the legacy Semrush MFE (which hits this SAME element) — it
+ * differs from Cited Domains, so an earlier CBF_date-based payload was silently ignored:
+ *  - Date range → `filters.simple.start_date` / `filters.simple.end_date` (YYYY-MM-DD).
+ *    This element does NOT read `CBF_date__start`/`CBF_date__end` (Cited Domains' convention);
+ *    sending those made it fall back to a fixed ~45-day window, ignoring the requested range.
+ *  - `auto_bucketing` controls server-side time bucketing (`day`|`week`|`month`). We request
+ *    `week` so the element returns weekly buckets within the range — no client-side daily
+ *    rollup, and the date range is honored upstream.
  *  - `CBF_model` sits inside an `or` block within `advanced`.
+ *  - Region scoping → `CBF_project` (Semrush project id) inside an `or` block within
+ *    `advanced` (NOT a top-level `project_id`, which this element ignores).
  *  - `category` (when present) → the namespaced tag `category__<label>` on `CBF_tags`.
- *  - Region scoping is the top-level `project_id` (NOT a CBF filter — ignored otherwise).
- *  - Brand scoping is NOT a filter (`CBF_ws_brand` is a no-op); it comes from the request
- *    targeting the brand's sub-workspace (resolved in the controller).
+ *  - Brand scoping comes from the request targeting the brand's sub-workspace (resolved in
+ *    the controller); the MFE also passes `CBF_brand` (name), but the sub-workspace already
+ *    scopes to the brand, so we don't duplicate it here.
  *
  * @param {object} [params]
  * @param {string} [params.model] - AI model filter value (Semrush engine name or UI
@@ -63,7 +69,7 @@ function defaultDateRange() {
  * @param {string} [params.startDate] - ISO date (YYYY-MM-DD). Defaults to 28 days ago.
  * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Defaults to today.
  * @param {string} [params.category] - Category label, pushed as the tag `category__<label>`.
- * @param {string} [params.projectId] - Semrush project id for region scoping (top-level).
+ * @param {string} [params.projectId] - Semrush project id for region scoping (as `CBF_project`).
  */
 export function buildSentimentOverviewPayload({
   model, platform, startDate, endDate, category, projectId,
@@ -75,18 +81,20 @@ export function buildSentimentOverviewPayload({
 
   const advancedFilters = [
     { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
-    { op: 'gte', val: start, col: 'CBF_date__start' },
-    { op: 'lte', val: end, col: 'CBF_date__end' },
   ];
+  // Region: this element scopes by CBF_project (a Semrush project id), NOT a top-level
+  // project_id. Resolved from the UI region code by the controller (via the Markets element).
+  if (projectId) {
+    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: projectId, col: 'CBF_project' }] });
+  }
   if (category) {
     advancedFilters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
   }
 
   return {
-    ...(projectId && { project_id: projectId }),
-    comparison_data_formatting: 'union',
+    auto_bucketing: 'week',
     filters: {
-      simple: { CBF_date__start: start, CBF_date__end: end },
+      simple: { start_date: start, end_date: end },
       advanced: { op: 'and', filters: advancedFilters },
     },
   };
@@ -125,22 +133,26 @@ function isoDayOf(bar) {
  *       visibilityScore, competitors }] }
  * ordered oldest-first (matches the legacy aggregateSentimentByWeek sort).
  *
- * VERIFIED ELEMENT SHAPE (probed live on dev, workspace 3cbb3c36…, 2026-07-16):
+ * VERIFIED ELEMENT SHAPE (probed live on dev + the legacy Semrush MFE, 2026-07-16):
  *   { type: 'bar', blocks: {
- *       data: [{ bar: '<ISO day>', legend: 'Positive'|'Neutral'|'Negative',
- *                value: <mentions>, value__prompts: <prompts> }],   // one row per (day × legend)
- *       line: [{ bar: '<ISO day>', value: <total prompts that day> }],
+ *       data: [{ bar: '<ISO week-start>', legend: 'Positive'|'Neutral'|'Negative',
+ *                value: <mentions>, value__prompts: <prompts> }],  // one row per (week × legend)
+ *       line: [{ bar: '<ISO week-start>', value: <total prompts that week> }],
  *   } }
- * The element returns DAILY rows (this is the "row 13 daily" payload); we roll them
- * up into ISO weeks here (the "row 14 weekly" view the chart wants). Field mapping:
- *   positive/neutral/negative prompt counts ← Σ `value__prompts` per legend over the week
- *   totalPrompts                            ← Σ `blocks.line[].value` over the week's days
+ * With `auto_bucketing: 'week'` (see buildSentimentOverviewPayload) the element returns
+ * WEEKLY buckets directly, honoring the requested date range — so this transform no longer
+ * rolls daily→weekly; it just maps each weekly `bar` to its ISO-week label. (The aggregation
+ * below is granularity-agnostic: one row per week means the per-week sums are identities, and
+ * it would still correctly roll up were the element ever queried at daily granularity.)
+ * Field mapping:
+ *   positive/neutral/negative prompt counts ← `value__prompts` per legend for the week
+ *   totalPrompts                            ← `blocks.line[].value` for the week
  *   mentions/citations/visibilityScore/competitors — stubbed 0/[] (as in the legacy handler)
  *
- * WIKI DISCREPANCY / SEMANTIC NOTE: the three legends are OVERLAPPING sets, not a
- * partition — a prompt with mixed-sentiment mentions is counted in every legend it
- * appears in. So Σ(value__prompts across legends) for a day (~1318 in the probe)
- * EXCEEDS blocks.line for that day (~750 total prompts). Consequences:
+ * SEMANTIC NOTE: the three legends are OVERLAPPING sets, not a partition — a prompt with
+ * mixed-sentiment mentions is counted in every legend it appears in. So Σ(value__prompts
+ * across legends) for a week EXCEEDS blocks.line for that week (the distinct total).
+ * Consequences:
  *   - `promptsWithSentiment` is defined as positive+neutral+negative (the legacy
  *     invariant in aggregateSentimentByWeek where the three counts sum to it), so it
  *     can exceed `totalPrompts`. Do NOT compute promptsWithSentiment/totalPrompts as a
