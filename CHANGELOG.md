@@ -1,3 +1,24 @@
+# [1.655.0](https://github.com/adobe/spacecat-api-service/compare/v1.654.4...v1.655.0) (2026-07-16)
+
+
+### Features
+
+* **aso-overlay:** CloudWatch EMF instrumentation for READ path (SITES-48140) ([#2822](https://github.com/adobe/spacecat-api-service/issues/2822)) ([4606c73](https://github.com/adobe/spacecat-api-service/commit/4606c7395aab9bd214ee5a506e0df770fb3ccd7b)), closes [adobe/spacecat-infrastructure#675](https://github.com/adobe/spacecat-infrastructure/issues/675)
+
+## [1.654.4](https://github.com/adobe/spacecat-api-service/compare/v1.654.3...v1.654.4) (2026-07-16)
+
+
+### Bug Fixes
+
+* **serenity:** enable bounded-backoff retry on the Semrush REST transport ([#2766](https://github.com/adobe/spacecat-api-service/issues/2766)) ([c923da3](https://github.com/adobe/spacecat-api-service/commit/c923da369ff554f4469056082d026cb8c35231a2))
+
+## [1.654.3](https://github.com/adobe/spacecat-api-service/compare/v1.654.2...v1.654.3) (2026-07-15)
+
+
+### Bug Fixes
+
+* **aso-overlay:** add Surrogate-Key header for Fastly targeted purge (SITES-48140) ([#2826](https://github.com/adobe/spacecat-api-service/issues/2826)) ([9c1fa79](https://github.com/adobe/spacecat-api-service/commit/9c1fa79f9f03920007a8c24a08c42e25db6f5284)), closes [experience-platform/mystique#3381](https://github.com/experience-platform/mystique/issues/3381) [experience-platform/mystique-deploy#568](https://github.com/experience-platform/mystique-deploy/issues/568) [mystique#3381](https://github.com/mystique/issues/3381) [mystique#3381](https://github.com/mystique/issues/3381) [adobe/spacecat-api-service#2822](https://github.com/adobe/spacecat-api-service/issues/2822)
+
 ## [1.654.2](https://github.com/adobe/spacecat-api-service/compare/v1.654.1...v1.654.2) (2026-07-15)
 
 
