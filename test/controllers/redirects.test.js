@@ -378,6 +378,38 @@ describe('RedirectsController', () => {
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
+  it('does not double-emit AsoOverlayS3ReadDurationMs when the body stream throws', async () => {
+    // Regression guard: `s3Client.send()` resolves (S3 GET succeeded, headers
+    // received) then `transformToString()` throws (stream/decode failure).
+    // Without the emitS3Duration guard, we'd get two duration samples with
+    // contradictory S3Result dimensions (SUCCESS + UNEXPECTED) for one request,
+    // skewing the S3-tier chart. The guard makes emitS3Duration idempotent
+    // per-request so only the first result sticks.
+    const streamErr = new Error('stream aborted');
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().rejects(streamErr) },
+    });
+
+    // Spy on the EMF sink (metrics-emf.js writes envelopes to stdout).
+    const stdoutWrite = sandbox.spy(process.stdout, 'write');
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(500);
+    // Count only the AsoOverlayS3ReadDurationMs envelopes — other metrics
+    // (RequestTotal, RequestDurationMs) legitimately emit on every request.
+    const durationEmissions = stdoutWrite.getCalls()
+      .map((c) => c.args[0])
+      .filter((s) => typeof s === 'string' && s.includes('AsoOverlayS3ReadDurationMs'));
+    expect(durationEmissions).to.have.lengthOf(
+      1,
+      `expected exactly one AsoOverlayS3ReadDurationMs emission, got ${durationEmissions.length}`,
+    );
+    // First-writer-wins: the SUCCESS from the initial send() resolution.
+    expect(durationEmissions[0]).to.include('"S3Result":"success"');
+  });
+
   it('returns 400 for a malformed service identifier', async () => {
     requestContext.params.service = 'not-a-cm-service';
     const response = await controller.getRedirects(requestContext);

@@ -248,15 +248,30 @@ function RedirectsController(ctx) {
     // Emits AsoOverlayS3ReadDurationMs with the S3-scoped result. Kept separate
     // from `emitFinal`'s request-level Outcome so dashboards don't ambiguously
     // slice S3 latency by request-level codes (e.g. "S3 success on a 304").
-    const emitS3Duration = (s3Result) => emitMetric(
-      {
-        name: 'AsoOverlayS3ReadDurationMs',
-        value: Date.now() - s3StartedAt,
-        unit: 'Milliseconds',
-        dimensions: { S3Result: s3Result },
-      },
-      emitOpts,
-    );
+    // Guard against double-emission: on the 200 path we emit SUCCESS right
+    // after `s3Client.send()` resolves, but the body stream (`transformToString`
+    // below) can still throw with an SDK / network error that lands in the
+    // outer catch and would fire another `emitS3Duration(UNEXPECTED)` for the
+    // same request. Emitting two duration samples with contradictory S3Result
+    // dimensions skews the histogram — the caller-observable outcome (200 vs
+    // 500) is still correctly recorded by `emitFinal`, but the S3-tier chart
+    // would double-count.
+    let s3DurationEmitted = false;
+    const emitS3Duration = (s3Result) => {
+      if (s3DurationEmitted) {
+        return;
+      }
+      s3DurationEmitted = true;
+      emitMetric(
+        {
+          name: 'AsoOverlayS3ReadDurationMs',
+          value: Date.now() - s3StartedAt,
+          unit: 'Milliseconds',
+          dimensions: { S3Result: s3Result },
+        },
+        emitOpts,
+      );
+    };
     try {
       const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
       const response = await s3Client.send(command);
