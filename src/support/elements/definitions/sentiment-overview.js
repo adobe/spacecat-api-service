@@ -194,7 +194,11 @@ export function transformSentimentOverviewResponse(raw) {
         ? Math.round((entry.positive / promptsWithSentiment) * 100) : 0;
       const negativePct = promptsWithSentiment > 0
         ? Math.round((entry.negative / promptsWithSentiment) * 100) : 0;
-      const neutralPct = promptsWithSentiment > 0 ? 100 - positivePct - negativePct : 0;
+      // Clamp to 0: independent rounding of positive & negative can push their sum
+      // over 100 (e.g. 50.5→51 and 49.5→50), which would make the remainder negative
+      // and violate the schema's 0-100 contract. 0 is the correct floor for the UI.
+      const neutralPct = promptsWithSentiment > 0
+        ? Math.max(0, 100 - positivePct - negativePct) : 0;
 
       return {
         week,
