@@ -957,7 +957,7 @@ describe('Organizations Controller', () => {
 
       const response = await organizationsController.getByProductType({
         ...context,
-        params: { productType: 'LLMO' },
+        pathInfo: { headers: { 'x-product': 'LLMO' } },
       });
 
       expect(response.status).to.equal(200);
@@ -985,7 +985,7 @@ describe('Organizations Controller', () => {
 
       const response = await organizationsController.getByProductType({
         ...context,
-        params: { productType: 'LLMO' },
+        pathInfo: { headers: { 'x-product': 'LLMO' } },
       });
 
       expect(response.status).to.equal(200);
@@ -1019,7 +1019,7 @@ describe('Organizations Controller', () => {
 
       const response = await organizationsController.getByProductType({
         ...context,
-        params: { productType: 'LLMO' },
+        pathInfo: { headers: { 'x-product': 'LLMO' } },
       });
 
       expect(response.status).to.equal(200);
@@ -1031,7 +1031,17 @@ describe('Organizations Controller', () => {
     it('returns bad request for an invalid product type', async () => {
       const response = await organizationsController.getByProductType({
         ...context,
-        params: { productType: 'not-a-product' },
+        pathInfo: { headers: { 'x-product': 'not-a-product' } },
+      });
+
+      expect(response.status).to.equal(400);
+      expect(mockDataAccess.Entitlement.allByProductCodeWithOrganization).to.not.have.been.called;
+    });
+
+    it('returns bad request when the x-product header is missing', async () => {
+      const response = await organizationsController.getByProductType({
+        ...context,
+        pathInfo: { headers: {} },
       });
 
       expect(response.status).to.equal(400);
@@ -1043,7 +1053,7 @@ describe('Organizations Controller', () => {
 
       const response = await organizationsController.getByProductType({
         ...context,
-        params: { productType: 'LLMO' },
+        pathInfo: { headers: { 'x-product': 'LLMO' } },
       });
       const error = await response.json();
 

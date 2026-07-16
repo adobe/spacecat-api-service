@@ -110,10 +110,10 @@ export default function organizationTests(getHttpClient, resetData) {
       });
     });
 
-    describe('GET /organizations/by-product-type/:productType', () => {
-      it('admin: returns only organizations entitled to LLMO', async () => {
+    describe('GET /organizations/by-product-type', () => {
+      it('admin: returns only organizations entitled to LLMO (via x-product header)', async () => {
         const http = getHttpClient();
-        const res = await http.admin.get('/organizations/by-product-type/LLMO');
+        const res = await http.admin.get('/organizations/by-product-type', { 'x-product': 'LLMO' });
         expect(res.status).to.equal(200);
         // ORG_1 (ENTITLEMENT_1, FREE_TRIAL) + ORG_3 (ENTITLEMENT_3, PAID).
         expect(res.body).to.be.an('array').with.lengthOf(2);
@@ -125,9 +125,9 @@ export default function organizationTests(getHttpClient, resetData) {
         expect(ids).to.not.include(ORG_2_ID);
       });
 
-      it('admin: returns only organizations entitled to ASO', async () => {
+      it('admin: returns only organizations entitled to ASO (via x-product header)', async () => {
         const http = getHttpClient();
-        const res = await http.admin.get('/organizations/by-product-type/ASO');
+        const res = await http.admin.get('/organizations/by-product-type', { 'x-product': 'ASO' });
         expect(res.status).to.equal(200);
         // ORG_1 (ENTITLEMENT_2, PAID) only.
         expect(res.body).to.be.an('array').with.lengthOf(1);
@@ -136,19 +136,25 @@ export default function organizationTests(getHttpClient, resetData) {
 
       it('admin: returns 400 for an unknown product code', async () => {
         const http = getHttpClient();
-        const res = await http.admin.get('/organizations/by-product-type/NOT_A_PRODUCT');
+        const res = await http.admin.get('/organizations/by-product-type', { 'x-product': 'NOT_A_PRODUCT' });
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: returns 400 when the x-product header is missing', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-type', { 'x-product': null });
         expect(res.status).to.equal(400);
       });
 
       it('user: returns 403', async () => {
         const http = getHttpClient();
-        const res = await http.user.get('/organizations/by-product-type/LLMO');
+        const res = await http.user.get('/organizations/by-product-type', { 'x-product': 'LLMO' });
         expect(res.status).to.equal(403);
       });
 
       it('s2sConsumerReadAll: returns organizations entitled to LLMO (organization:readAll)', async () => {
         const http = getHttpClient();
-        const res = await http.s2sConsumerReadAll.get('/organizations/by-product-type/LLMO');
+        const res = await http.s2sConsumerReadAll.get('/organizations/by-product-type', { 'x-product': 'LLMO' });
         expect(res.status).to.equal(200);
         const ids = res.body.map((org) => org.id);
         expect(ids).to.include(ORG_1_ID);
@@ -157,7 +163,7 @@ export default function organizationTests(getHttpClient, resetData) {
 
       it('s2sConsumerReadOnly: returns 403 (only has site:read, no organization:readAll)', async () => {
         const http = getHttpClient();
-        const res = await http.s2sConsumerReadOnly.get('/organizations/by-product-type/LLMO');
+        const res = await http.s2sConsumerReadOnly.get('/organizations/by-product-type', { 'x-product': 'LLMO' });
         expect(res.status).to.equal(403);
       });
     });

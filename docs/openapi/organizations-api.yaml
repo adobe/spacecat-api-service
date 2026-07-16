@@ -61,12 +61,12 @@ organizations-by-product-type:
       - organization
     summary: Retrieve all organizations entitled to a given product
     description: |
-      Returns only the organizations that have an entitlement for the given product code
-      (LLMO, ASO or ACO). Non-admin callers only see organizations whose entitlement tier
-      is customer-visible.
+      Returns only the organizations that have an entitlement for the product code given
+      in the `x-product` header (LLMO, ASO or ACO). Non-admin callers only see
+      organizations whose entitlement tier is customer-visible.
     operationId: getOrganizationsByProductType
     parameters:
-      - $ref: './parameters.yaml#/productType'
+      - $ref: './parameters.yaml#/xProductHeader'
     responses:
       '200':
         description: A list of organizations entitled to the given product

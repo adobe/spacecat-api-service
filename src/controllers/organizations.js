@@ -150,9 +150,10 @@ function OrganizationsController(ctx, env) {
   };
 
   /**
-   * Gets all organizations that have an entitlement for the given product code.
-   * Accessible to admin callers (legacy admin path) and to S2S consumers that hold the
-   * `organization:readAll` capability - see `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   * Gets all organizations that have an entitlement for the product code given in the
+   * `x-product` header. Accessible to admin callers (legacy admin path) and to S2S
+   * consumers that hold the `organization:readAll` capability - see
+   * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    * Non-admin callers only see organizations whose entitlement tier is customer-visible
    * (see `CUSTOMER_VISIBLE_TIERS`).
    * @param {object} context - Context of the request.
@@ -160,6 +161,7 @@ function OrganizationsController(ctx, env) {
    */
   const getByProductType = async (context) => {
     const { log } = ctx;
+    const { pathInfo } = context;
     const requestId = context?.invocation?.id || 'unknown';
     const isAdmin = accessControlUtil.hasAdminReadAccess();
     const s2sResult = isAdmin
@@ -170,10 +172,10 @@ function OrganizationsController(ctx, env) {
       return forbidden('Forbidden: admin access or organization:readAll capability required');
     }
 
-    const { productType } = context.params;
+    const productType = pathInfo.headers[X_PRODUCT_HEADER];
     const validProductCodes = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
     if (!validProductCodes.has(productType)) {
-      return badRequest(`Invalid product type: ${productType}`);
+      return badRequest(`Product code required in ${X_PRODUCT_HEADER} header (LLMO, ASO or ACO)`);
     }
 
     const entitlements = await Entitlement.allByProductCodeWithOrganization(productType);

@@ -296,10 +296,10 @@ productCode:
       - 'ASO'
       - 'ACO'
 
-productType:
-  name: productType
-  description: The product code to filter organizations by (LLMO, ASO or ACO)
-  in: path
+xProductHeader:
+  name: x-product
+  description: The product code to scope the request to (LLMO, ASO or ACO)
+  in: header
   required: true
   schema:
     type: string
