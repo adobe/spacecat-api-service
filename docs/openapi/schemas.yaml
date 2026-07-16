@@ -10976,7 +10976,7 @@ SerenityPrompt:
   properties:
     semrushPromptId:
       type: string
-      description: Upstream prompt id. Changes whenever the prompt is re-created (e.g. on PATCH).
+      description: Upstream prompt id. Stable across edits — PATCH updates the prompt in place and echoes the same id.
     geoTargetId:
       type: integer
       minimum: 1
@@ -11133,13 +11133,13 @@ SerenityCreatePromptsResponse:
 SerenityUpdatePromptRequest:
   type: object
   description: |
-    Replace the prompt's text and tags. Carries the owning slice in
+    Edit the prompt's text and tags in place. Carries the owning slice in
     `geoTargetId` + `languageCode` so the server can resolve the upstream
     project without scanning. `geoTargetId`, `languageCode`, and `text` are
-    always required — the upstream provider's API has no in-place update or
-    GET-by-id, so the server runs DELETE-old + POST-new and treats the body
-    as the full next state. `tagIds` (non-empty) is required; tags are addressed
-    by upstream id and never by name, so a `tags` key is rejected with 400.
+    always required — the upstream provider's API has no GET-by-id, so the
+    body is treated as the full next state. `tagIds` (non-empty) is required;
+    tags are addressed by upstream id and never by name, so a `tags` key is
+    rejected with 400.
   required: [geoTargetId, languageCode, text, tagIds]
   properties:
     geoTargetId:
@@ -11153,7 +11153,7 @@ SerenityUpdatePromptRequest:
       type: array
       items: { type: string }
       minItems: 1
-      description: Upstream tag ids to attach to the replacement prompt.
+      description: Upstream tag ids the prompt carries after the edit (full replacement set).
 
 SerenityBulkDeletePromptsRequest:
   type: object
@@ -11643,6 +11643,52 @@ SerenityUrlInspectorFilterDimensions:
     type: array
     description: Tags grouped by a Semrush tag prefix not covered by the fixed dimensions above.
     items: { $ref: '#/SerenityFilterDimensionItem' }
+
+SerenityBrandPresenceStatsValues:
+  type: object
+  description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.
+  required: [total_executions, average_visibility_score, total_mentions, total_citations]
+  properties:
+    total_executions:
+      type: number
+      description: Total prompt executions in range, from the Semrush Total Executions element.
+    average_visibility_score:
+      type: number
+      description: Average visibility score as a 0-100 percentage (the Semrush Visibility element returns a 0-1 fraction, converted here).
+    total_mentions:
+      type: number
+      description: Total brand mention count, from the Semrush Mentions element.
+    total_citations:
+      type: number
+      description: Total brand citation count, from the Semrush Citations element.
+
+SerenityBrandPresenceStats:
+  type: object
+  description: |
+    Aggregated Brand Presence KPI stats for a brand over a date range, backed by
+    the Semrush Elements API (Total Executions, Mentions, Visibility, Citations).
+  required: [stats]
+  properties:
+    stats:
+      allOf:
+        - $ref: '#/SerenityBrandPresenceStatsValues'
+      description: Aggregated stats for the full `[startDate, endDate]` range.
+    trends:
+      type: array
+      description: |
+        Present only when `showTrends`/`show_trends` is truthy. One entry per
+        week, split backward from `endDate` into up to 8 7-day weeks.
+      items:
+        type: object
+        required: [startDate, endDate, data]
+        properties:
+          startDate: { type: string, format: date }
+          endDate: { type: string, format: date }
+          data:
+            type: object
+            required: [stats]
+            properties:
+              stats: { $ref: '#/SerenityBrandPresenceStatsValues' }
 
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
