@@ -423,11 +423,16 @@ describe('prompts-subworkspace handlers', () => {
       const transport = makeTransport({
         updatePromptTagsByIds: sinon.stub().rejects(tagErr),
       });
+      const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
       await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
-      }, log)).to.be.rejectedWith(/tag write boom/);
+      }, warnLog)).to.be.rejectedWith(/tag write boom/);
       expect(transport.renamePrompt).to.have.been.calledOnce;
       expect(transport.publishProject).to.not.have.been.called;
+      expect(warnLog.warn).to.have.been.calledOnceWith(
+        'updatePromptTagsByIds failed after a successful rename — text updated, tags stale',
+        { semrushPromptId: 'old-id', projectId: 'p-us-en', error: 'tag write boom' },
+      );
     });
   });
 

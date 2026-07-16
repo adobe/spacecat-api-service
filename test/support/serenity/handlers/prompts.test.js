@@ -1303,7 +1303,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
   // A tag-write failure after a successful rename is a half-applied edit (text
   // updated, tags not) — retryable, nothing lost. The error propagates and the
-  // publish never fires.
+  // publish never fires, and the partial mutation is logged for on-call.
   it('throws when the tag write fails after a successful rename (no publish)', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
@@ -1318,6 +1318,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       publishProject: sinon.stub().resolves(),
     };
 
+    const log = fakeLog();
     await expect(handleUpdatePrompt(
       transport,
       dataAccess,
@@ -1327,10 +1328,14 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       {
         geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['tag-1'],
       },
-      fakeLog(),
+      log,
     )).to.be.rejectedWith(/tag write boom/);
     expect(transport.renamePrompt).to.have.been.calledOnce;
     expect(transport.publishProject).to.not.have.been.called;
+    expect(log.warn).to.have.been.calledOnceWith(
+      'updatePromptTagsByIds failed after a successful rename — text updated, tags stale',
+      { semrushPromptId: 'sem-1', projectId: 'proj-us-en', error: 'tag write boom' },
+    );
   });
 });
 

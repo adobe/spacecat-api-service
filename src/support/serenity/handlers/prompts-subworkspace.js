@@ -308,9 +308,19 @@ export async function handleUpdatePromptSubworkspace(
   // caller-supplied type value, plus the server-computed one. An unknown
   // prompt id would be skipped silently (204) — the rename above has already
   // established existence.
-  await transport.updatePromptTagsByIds(workspaceId, projectId, [
-    { id: semrushPromptId, references: typed.tagIds, replace: true },
-  ]);
+  try {
+    await transport.updatePromptTagsByIds(workspaceId, projectId, [
+      { id: semrushPromptId, references: typed.tagIds, replace: true },
+    ]);
+  } catch (e) {
+    // The rename above already landed: the prompt's text has moved while its
+    // tags are stale. Record the partial mutation before propagating, so the
+    // generic upstream error the caller sees is attributable on-call.
+    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+      semrushPromptId, projectId, error: e.message,
+    });
+    throw e;
+  }
 
   invalidateTagCacheForProject(workspaceId, projectId);
 
