@@ -154,21 +154,22 @@ v2-serenity-prompt-by-id:
     tags: [serenity]
     summary: Update a Serenity prompt
     description: |
-      Body carries `{geoTargetId, languageCode, text}` plus exactly one of
-      `tags` (names) or `tagIds` (upstream ids, the id-based write path —
-      serenity-docs#24). `geoTargetId`/`languageCode`/`text` are always
-      required — the upstream provider has no in-place update (and no
-      GET-by-id), so the implementation is DELETE-old + POST-new + publish
-      and the payload is treated as the full next state. Clients always
-      have the current text/tags(-ids) available locally (from the list
-      call that rendered the edit form), which keeps this endpoint a
-      single straight line and avoids the per-request pagination
-      "preserve-on-omit" semantics would force.
+      Body carries `{geoTargetId, languageCode, text, tagIds}` — all
+      required; tags are addressed by upstream id, never by name
+      (serenity-docs#24), and the payload is treated as the full next
+      state. Clients always have the current text/tagIds available
+      locally (from the list call that rendered the edit form), which
+      keeps this endpoint a single straight line and avoids the
+      per-request pagination "preserve-on-omit" semantics would force.
 
-      An explicit empty `tags: []` clears tags (not applicable to
-      `tagIds`, which must be non-empty when present). The response
-      carries the new `semrushPromptId` (the value changes on every
-      upstream re-create).
+      The edit is applied IN PLACE upstream (serenity-docs#63): the text
+      and the tag set are written without deleting the prompt, so the
+      response echoes the UNCHANGED `semrushPromptId` and anything keyed
+      to that id survives the edit. A `text` that exactly matches a
+      DIFFERENT prompt's text in the same slice is refused with 409
+      `conflict`, with nothing changed upstream. The edit lands in the
+      upstream draft layer and is published as part of the request (same
+      publish contract as create).
     operationId: updateSerenityPrompt
     security:
       - ims_key: []
@@ -186,6 +187,11 @@ v2-serenity-prompt-by-id:
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, slice, or prompt not found, or serenity is not active for the organization.
+      '409':
+        description: The new text exactly matches a different prompt's text in this slice; nothing was changed upstream.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: Upstream returned a non-2xx response.
         content:
