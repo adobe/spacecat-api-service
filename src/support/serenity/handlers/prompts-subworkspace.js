@@ -142,6 +142,19 @@ export async function handleCreatePromptsSubworkspace(
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
 
+  // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
+  // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
+  // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
+  // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
+  // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
+  // under). No-op when the flag is OFF.
+  const headroom = createHeadroomGuard(
+    transport,
+    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    log,
+  );
+  await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
+
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
@@ -208,32 +221,17 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
-  // PROMPT metering seam: the just-created prompts are drafted synchronously across the affected
-  // projects of THIS child; size headroom from `used + drafted` (includeDrafted, staleness-immune)
-  // before the publish. One workspace-level top-up covers all affected projects (the allocation is
-  // per sub-workspace, not per project). No-op when the flag is OFF; skipped when nothing was
-  // created so the OFF path and the empty path issue zero headroom reads (and, deliberately, no
-  // fail-loud id validation either — nothing here needs metering).
-  let headroom = null;
-  if (affectedProjectIds.length > 0) {
-    headroom = createHeadroomGuard(
-      transport,
-      { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
-      log,
-    );
-    await headroom.ensure({}, { includeDrafted: true });
-  }
-
-  // LLMO-6190 item 4: when something was created, route each project's publish through
-  // `headroom.retryOnQuota` — a bounded top-up+retry if it 405s as a disguised metered-quota
-  // rejection despite the sizing above. `publishAffected` nests this per-project, so a surviving
-  // 405 after the retry still lands in `publishErrors` for that project rather than throwing.
+  // LLMO-6190 item 4: route each project's publish through `headroom.retryOnQuota` — a bounded
+  // top-up+retry if it STILL 405s as a disguised metered-quota rejection despite the pre-write
+  // sizing above (e.g. a raced concurrent write on the same child). `publishAffected` nests this
+  // per-project, so a surviving 405 after the retry still lands in `publishErrors` for that project
+  // rather than throwing. `headroom` is always defined (a genuine no-op when the flag is OFF).
   const publishErrors = await publishAffected(
     transport,
     workspaceId,
     affectedProjectIds,
     log,
-    headroom ? (fn) => headroom.retryOnQuota(fn) : undefined,
+    (fn) => headroom.retryOnQuota(fn),
   );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.

@@ -167,7 +167,10 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
 describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () => {
   afterEach(() => clearResourceLocks());
 
-  const quota405 = () => new SerenityTransportError(405, 'Semrush POST .../publish failed: 405', { message: 'quota exceeded' });
+  // isMeteredQuota keys on body SHAPE (live-verified, LLMO-6190): a bare string/HTML body is the
+  // disguised quota rejection; a JSON object is a genuine app-level error. Mirror the real pinned
+  // fixture here, not a JSON guess.
+  const quota405 = () => new SerenityTransportError(405, 'Semrush POST .../publish failed: 405', '<html>405 Not Allowed</html>');
   const otherError = () => new SerenityTransportError(404, 'not found', { message: 'not found' });
 
   it('OFF: pure passthrough — fn called once, zero transport/ensure calls, even on failure', async () => {
