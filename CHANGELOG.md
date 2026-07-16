@@ -1,3 +1,10 @@
+# [1.657.0](https://github.com/adobe/spacecat-api-service/compare/v1.656.0...v1.657.0) (2026-07-16)
+
+
+### Features
+
+* introduce brand presence semrush stats api ([#2823](https://github.com/adobe/spacecat-api-service/issues/2823)) ([be416a8](https://github.com/adobe/spacecat-api-service/commit/be416a8263fe8341b87fb6785552d1afaabf61df))
+
 # [1.656.0](https://github.com/adobe/spacecat-api-service/compare/v1.655.2...v1.656.0) (2026-07-16)
 
 

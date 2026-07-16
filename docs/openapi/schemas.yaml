@@ -11644,6 +11644,52 @@ SerenityUrlInspectorFilterDimensions:
     description: Tags grouped by a Semrush tag prefix not covered by the fixed dimensions above.
     items: { $ref: '#/SerenityFilterDimensionItem' }
 
+SerenityBrandPresenceStatsValues:
+  type: object
+  description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.
+  required: [total_executions, average_visibility_score, total_mentions, total_citations]
+  properties:
+    total_executions:
+      type: number
+      description: Total prompt executions in range, from the Semrush Total Executions element.
+    average_visibility_score:
+      type: number
+      description: Average visibility score as a 0-100 percentage (the Semrush Visibility element returns a 0-1 fraction, converted here).
+    total_mentions:
+      type: number
+      description: Total brand mention count, from the Semrush Mentions element.
+    total_citations:
+      type: number
+      description: Total brand citation count, from the Semrush Citations element.
+
+SerenityBrandPresenceStats:
+  type: object
+  description: |
+    Aggregated Brand Presence KPI stats for a brand over a date range, backed by
+    the Semrush Elements API (Total Executions, Mentions, Visibility, Citations).
+  required: [stats]
+  properties:
+    stats:
+      allOf:
+        - $ref: '#/SerenityBrandPresenceStatsValues'
+      description: Aggregated stats for the full `[startDate, endDate]` range.
+    trends:
+      type: array
+      description: |
+        Present only when `showTrends`/`show_trends` is truthy. One entry per
+        week, split backward from `endDate` into up to 8 7-day weeks.
+      items:
+        type: object
+        required: [startDate, endDate, data]
+        properties:
+          startDate: { type: string, format: date }
+          endDate: { type: string, format: date }
+          data:
+            type: object
+            required: [stats]
+            properties:
+              stats: { $ref: '#/SerenityBrandPresenceStatsValues' }
+
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
 ReferralTrafficSource:
