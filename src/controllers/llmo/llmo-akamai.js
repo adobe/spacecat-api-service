@@ -19,7 +19,7 @@ import AkamaiClient, { normalizeDomain } from '@adobe/spacecat-shared-akamai-cli
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  buildRuleConfig, mergeIntoTree, managedRuleNames, redactApiKey,
+  buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, redactApiKey,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -197,6 +197,9 @@ function LlmoAkamaiController(ctx) {
     // scanning the whole string: the response body (up to 1000 chars) can itself contain a
     // "-> 404" and mis-map a genuine 5xx. Take the FIRST such token, which is the real status.
     const status = Number(message.match(/-> (\d{3}):/)?.[1]);
+    // Surface a version the operation may have already created before a later call threw (e.g.
+    // deploy created a new version, then patchRuleTree failed) so the caller can find/clean it up.
+    const extra = fields.newVersion !== undefined ? { newVersion: fields.newVersion } : {};
     if (status === 401) {
       return unauthorized('Akamai authentication failed');
     }
@@ -208,9 +211,9 @@ function LlmoAkamaiController(ctx) {
       return notFound(`Akamai ${action} target not found`);
     }
     if (status === 429) {
-      return createResponse({ message: 'Akamai rate limit exceeded' }, 429);
+      return createResponse({ message: 'Akamai rate limit exceeded', ...extra }, 429);
     }
-    return createResponse({ message: `Akamai ${action} failed` }, 502);
+    return createResponse({ message: `Akamai ${action} failed`, ...extra }, 502);
   };
 
   // The LLMO API key is a CONFIDENTIAL string: it is injected into the managed rule tree
@@ -430,15 +433,44 @@ function LlmoAkamaiController(ctx) {
 
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);
-      const { ruleTree, ruleFormat } = await client.getRuleTree(
-        propertyId,
-        version,
-        contractId,
-        groupId,
-      );
+      const {
+        ruleTree, ruleFormat, etag,
+      } = await client.getRuleTree(propertyId, version, contractId, groupId);
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
+
+      // Validate the exact change deploy will make: dry-run the same JSON Patch. PAPI applies it to
+      // the STORED tree and returns errors/warnings without saving, so Review reflects the real
+      // deploy outcome. (mergeIntoTree alone only echoes the base version's GET-time warnings — a
+      // merged tree can look clean here yet be rejected at deploy.)
+      const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
+      let errors = [];
+      let warnings = [];
+      let validated = true;
+      try {
+        const dryRun = await client.patchRuleTree(
+          propertyId,
+          version,
+          contractId,
+          groupId,
+          ops,
+          etag,
+          { dryRun: true },
+        );
+        errors = dryRun?.errors || [];
+        warnings = dryRun?.warnings || [];
+      } catch (dryRunError) {
+        // A dry-run is best-effort: never fail the read-only preview because validation couldn't be
+        // performed. Fall back to the base tree's own warnings and flag that this preview is
+        // unvalidated so the UI can say so.
+        validated = false;
+        warnings = ruleTree.warnings || [];
+        log.warn(auditLine(context, 'plan', 'dry-run-failed', {
+          siteId: site.getId(), propertyId, version, error: dryRunError.message,
+        }));
+      }
+
       log.info(auditLine(context, 'plan', 'ok', {
-        siteId: site.getId(), propertyId, version,
+        siteId: site.getId(), propertyId, version, validated, errorCount: errors.length,
       }));
       return ok({
         propertyId,
@@ -449,6 +481,11 @@ function LlmoAkamaiController(ctx) {
         // only its children may be absent. merge always writes a children array.
         currentChildRules: (ruleTree.rules.children || []).map((c) => c.name),
         mergedChildRules: merged.rules.children.map((c) => c.name),
+        // PAPI validation of the exact change deploy will make (see the dry-run above). `validated`
+        // is false only when the dry-run itself couldn't run.
+        validated,
+        errors,
+        warnings,
         // Redact the injected LLMO API key before returning the preview — plan is read-only and
         // the real key is only needed server-side at deploy; the merged tree ends up in browser
         // devtools / HAR exports / proxy logs otherwise.
@@ -462,10 +499,11 @@ function LlmoAkamaiController(ctx) {
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy
    * Body: { propertyId, contractId, groupId, insertIndex? }
-   * Creates a NEW property version from the latest, merges the managed rules into it, and PUTs the
-   * rule tree with PAPI-side validation. Does NOT activate (that is a separate, explicit step).
-   * Guarded so the target property must serve the site's own domain. Idempotent by rule name: the
-   * merge replaces any previously-managed rules rather than duplicating them.
+   * Creates a NEW property version from the latest and applies the managed rules to it via a JSON
+   * Patch (PAPI-side validation) — a delta so existing behaviors are never re-serialized. Does NOT
+   * activate (that is a separate, explicit step). Guarded so the target property must serve the
+   * site's own domain. Idempotent by rule name (trimmed): re-running replaces any previously
+   * managed rules rather than duplicating them.
    */
   const deploy = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -506,28 +544,32 @@ function LlmoAkamaiController(ctx) {
 
     log.info(auditLine(context, 'deploy', 'started', { siteId, propertyId }));
 
+    // Hoisted so the catch can report it: createVersion may succeed before a later call throws.
+    let newVersion;
     try {
       const baseVersion = await client.getLatestVersion(propertyId, contractId, groupId);
-      const { ruleTree, ruleFormat } = await client.getRuleTree(
-        propertyId,
-        baseVersion,
-        contractId,
-        groupId,
-      );
-      const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
-
-      const newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
-      const updateResult = await client.updateRuleTree(
+      newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
+      // Build the patch against the NEW version's own tree (a clone of baseVersion): stable
+      // indices, no concurrent editors, and its etag guards the PATCH via If-Match. Applying only
+      // these deltas leaves every existing behavior as PAPI stored it — no full-tree re-write.
+      const { ruleTree, etag } = await client.getRuleTree(
         propertyId,
         newVersion,
         contractId,
         groupId,
-        merged,
-        ruleFormat,
+      );
+      const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
+      const patchResult = await client.patchRuleTree(
+        propertyId,
+        newVersion,
+        contractId,
+        groupId,
+        ops,
+        etag,
       );
 
-      const papiErrors = updateResult?.errors || [];
-      const warnings = updateResult?.warnings || [];
+      const papiErrors = patchResult?.errors || [];
+      const warnings = patchResult?.warnings || [];
       if (papiErrors.length > 0) {
         log.error(auditLine(context, 'deploy', 'papi-rejected', {
           siteId, propertyId, newVersion, errorCount: papiErrors.length,
@@ -551,7 +593,7 @@ function LlmoAkamaiController(ctx) {
         warnings,
       });
     } catch (e) {
-      return papiErrorResponse(e, 'deploy', context, { siteId, propertyId });
+      return papiErrorResponse(e, 'deploy', context, { siteId, propertyId, newVersion });
     }
   };
 

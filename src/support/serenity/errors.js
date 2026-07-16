@@ -26,9 +26,9 @@ import { SerenityTransportError } from './rest-transport.js';
  * cannot silently turn into "upstream-idempotent-success" and swallow
  * a real failure.
  *
- * Used by every idempotent-DELETE site in the serenity surface:
+ * Used by every "upstream target gone" site in the serenity surface:
  *   - markets.js handleDeleteMarket  (upstream project gone)
- *   - prompts.js handleUpdatePrompt  (deleted-then-create, the delete leg)
+ *   - prompts.js handleUpdatePrompt  (in-place rename of a missing prompt → promptNotFound)
  *   - prompts.js handleBulkDeletePrompts  (per-project bucket delete)
  */
 export function isUpstreamGone(e) {
