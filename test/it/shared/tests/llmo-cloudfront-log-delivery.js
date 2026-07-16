@@ -106,19 +106,9 @@ export default function llmoCloudFrontLogDeliveryTests(getHttpClient, resetData)
         expect(res.status).to.equal(400);
       });
 
-      it('returns 400 when externalId is missing', async () => {
-        const http = getHttpClient();
-        const res = await http.llmoAdmin.post(path, {
-          accountId: VALID_ACCOUNT_ID, distributionId: VALID_DISTRIBUTION_ID,
-        });
-        expect(res.status).to.equal(400);
-      });
-
       it('returns 400 when distributionId is missing', async () => {
         const http = getHttpClient();
-        const res = await http.llmoAdmin.post(path, {
-          accountId: VALID_ACCOUNT_ID, externalId: VALID_EXTERNAL_ID,
-        });
+        const res = await http.llmoAdmin.post(path, { accountId: VALID_ACCOUNT_ID });
         expect(res.status).to.equal(400);
       });
 
@@ -139,12 +129,6 @@ export default function llmoCloudFrontLogDeliveryTests(getHttpClient, resetData)
         const res = await http.llmoAdmin.post(path, {
           accountId: '123', externalId: VALID_EXTERNAL_ID,
         });
-        expect(res.status).to.equal(400);
-      });
-
-      it('returns 400 when externalId is missing', async () => {
-        const http = getHttpClient();
-        const res = await http.llmoAdmin.post(path, { accountId: VALID_ACCOUNT_ID });
         expect(res.status).to.equal(400);
       });
     });
