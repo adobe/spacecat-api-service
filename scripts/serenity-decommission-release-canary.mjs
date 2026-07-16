@@ -14,9 +14,11 @@
 /* eslint-disable no-console */
 
 /**
- * Live-gateway canary for LLMO-6189 — proves `releaseFullAllocation` actually reclaims a
- * sub-workspace's AI allocation to the parent pool via delete, and that the pre-fix behavior
- * (a to-zero transfer reporting false success) stays closed off when `allowDelete` is false.
+ * Live-gateway canary for LLMO-6189 — proves `releaseFullAllocation` actually returns a
+ * sub-workspace's AI allocation surplus to the parent pool by lowering the child to a small
+ * non-zero floor, WITHOUT ever deleting the workspace (production never deletes a sub-workspace —
+ * Rainer, 2026-07-16 PR review; serenity-docs#22 §4: "the cheapest fix is a one-shot operator
+ * script issuing a lowering transfer to a non-zero floor").
  *
  * WHY THIS CAN'T RUN IN CI OR BE RUN BY the implementing agent: every Semrush call needs a live
  * IMS bearer token and a real workspace the token is admin on. A human with dev credentials must
@@ -27,22 +29,23 @@
  *   node scripts/serenity-decommission-release-canary.mjs
  *
  * MUTATING: creates one throwaway `decommission-canary-*` child under MASTER_WS, carves it a small
- * allocation, then exercises both `releaseFullAllocation` branches against it. Cleans up by
- * deleting the child at the end regardless of which branch ran (idempotent if already deleted).
+ * allocation, then exercises `releaseFullAllocation`. Cleans up by deleting the child at the end
+ * (test/smoke-only use of `deleteWorkspace` — the thing under test never deletes it itself).
  *
  * What it proves:
- *   1. allowDelete=false: releaseFullAllocation returns { released:false, reason:'requires-
- *      decommission' } and does NOT touch the workspace (still exists, same total) — the FIXED
- *      "never lie about success" contract, replacing the old silent-no-op-reported-as-success bug.
- *   2. allowDelete=true: deleteAllProjects + releaseFullAllocation return { released:true,
- *      reason:'deleted' }, the workspace is genuinely gone afterward (getWorkspaceStatus 403s),
- *      and the MASTER pool's own total is restored by the released amount.
+ *   1. releaseFullAllocation lowers the child's AI allocation to the (default) non-zero floor
+ *      { projects:1, prompts:1 } — NOT to zero (a proven silent no-op) and NOT via deletion.
+ *   2. The workspace still exists afterward (getWorkspaceStatus succeeds) — decommission never
+ *      deletes it.
+ *   3. The MASTER pool's own total reflects exactly (carved - floor) coming back — the floor
+ *      amount stays reserved on the child by design until an actual decommission/delete (never
+ *      done by this fix; only by this canary's own throwaway test cleanup) reclaims it too.
  */
 
 import { env, exit } from 'node:process';
 import { createSerenityTransport } from '../src/support/serenity/rest-transport.js';
 import {
-  deleteAllProjects, releaseFullAllocation,
+  deleteAllProjects, releaseFullAllocation, DEFAULT_RELEASE_FLOOR,
 } from '../src/support/serenity/workspace-lifecycle.js';
 
 const need = (name) => {
@@ -75,6 +78,8 @@ const transport = createSerenityTransport({
   env: {
     SEMRUSH_PROJECTS_BASE_URL: PROJECTS,
     SEMRUSH_USERS_BASE_URL: USERS,
+    // Test/smoke-cleanup-only opt-in (see rest-transport.js's deleteWorkspace doc) — used here
+    // ONLY for this canary's own teardown, never by releaseFullAllocation itself.
     SERENITY_ALLOW_WORKSPACE_DELETE: 'true',
   },
   imsToken: IMS_TOKEN,
@@ -93,9 +98,28 @@ async function settle(id) {
   return false;
 }
 
-async function poolTotal(id, dim) {
+async function readTotals(id) {
   const r = await transport.getWorkspaceResources(id);
-  return r?.product_resources?.ai?.resources?.[dim]?.total;
+  return r?.product_resources?.ai?.resources;
+}
+
+// Master-pool restoration reconciles asynchronously and can lag noticeably longer than a child
+// workspace's own settle time (live-verified) — give it a longer window than `poll.attempts`.
+const RECONCILE_ATTEMPTS = 90;
+const RECONCILE_INTERVAL_MS = 2000;
+
+async function pollUntil(fn, attempts = poll.attempts, intervalMs = poll.intervalMs) {
+  let last;
+  for (let i = 0; i < attempts; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    last = await fn();
+    if (last) {
+      return last;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await poll.sleep(intervalMs);
+  }
+  return last;
 }
 
 let childId = null;
@@ -110,14 +134,14 @@ const check = (ok, msg) => {
 (async () => {
   console.log(`Decommission-release canary — master=${MASTER_WS}  gateway=${USERS}`);
   try {
-    const masterBefore = await poolTotal(MASTER_WS, 'prompts');
-    console.log(`\n[read] master prompts total (before) = ${masterBefore}`);
+    const masterBefore = await readTotals(MASTER_WS);
+    console.log(`\n[read] master prompts total (before) = ${masterBefore?.prompts?.total}`);
 
-    console.log('\n[create] throwaway child at { projects:1, prompts:100 }...');
+    console.log('\n[create] throwaway child at { projects:5, prompts:800 } (simulates a legacy over-carve)...');
     const created = await transport.createSubworkspace(
       MASTER_WS,
       `decommission-canary-${Date.now()}`,
-      { ai: { projects: 1, prompts: 100 } },
+      { ai: { projects: 5, prompts: 800 } },
     );
     childId = created?.id;
     if (!childId) {
@@ -126,50 +150,47 @@ const check = (ok, msg) => {
     console.log(`   child ${childId} (status ${created.status})`);
     await settle(childId);
 
-    // --- Case 1: allowDelete=false must refuse to reclaim and must NOT lie about success ---
-    console.log('\n[case 1] releaseFullAllocation with allowDelete=false (today\'s default)...');
-    const emptied1 = await deleteAllProjects(transport, childId);
-    console.log(`   deleteAllProjects: ${emptied1} project(s) attempted`);
-    const result1 = await releaseFullAllocation(
-      transport,
-      childId,
-      MASTER_WS,
-      log,
-      { allowDelete: false },
-    );
-    console.log(`   → ${JSON.stringify(result1)}`);
-    check(result1.released === false, 'released === false');
-    check(result1.reason === 'requires-decommission', "reason === 'requires-decommission'");
+    console.log('\n[release] deleteAllProjects + releaseFullAllocation (default floor)...');
+    const emptied = await deleteAllProjects(transport, childId);
+    console.log(`   deleteAllProjects: ${emptied} project(s) attempted`);
+    const result = await releaseFullAllocation(transport, childId, MASTER_WS, log);
+    console.log(`   → ${JSON.stringify(result)}`);
+    check(result.released === true, 'released === true');
+    check(result.reason === 'lowered-to-floor', "reason === 'lowered-to-floor'");
+
+    console.log('   confirming the workspace still EXISTS (never deleted)...');
     const stillExists = await transport.getWorkspaceStatus(childId)
       .then(() => true).catch(() => false);
     check(stillExists, 'workspace still exists (was NOT deleted)');
 
-    // --- Case 2: allowDelete=true must genuinely reclaim via delete ---
-    console.log('\n[case 2] releaseFullAllocation with allowDelete=true (explicit opt-in)...');
-    const result2 = await releaseFullAllocation(
-      transport,
-      childId,
-      MASTER_WS,
-      log,
-      { allowDelete: true },
+    console.log('   confirming the child settled at the non-zero floor...');
+    const childAfter = await pollUntil(async () => {
+      const totals = await readTotals(childId);
+      const atFloor = totals?.prompts?.total === DEFAULT_RELEASE_FLOOR.prompts
+        && totals?.projects?.total === DEFAULT_RELEASE_FLOOR.projects;
+      return atFloor ? totals : null;
+    });
+    check(
+      childAfter?.prompts?.total === DEFAULT_RELEASE_FLOOR.prompts
+        && childAfter?.projects?.total === DEFAULT_RELEASE_FLOOR.projects,
+      `child lowered to the floor (${JSON.stringify(DEFAULT_RELEASE_FLOOR)})`,
     );
-    console.log(`   → ${JSON.stringify(result2)}`);
-    check(result2.released === true, 'released === true');
-    check(result2.reason === 'deleted', "reason === 'deleted'");
 
-    console.log('   confirming the workspace is genuinely gone...');
-    const goneAfter = await transport.getWorkspaceStatus(childId)
-      .then(() => false)
-      .catch((e) => e?.status === 403 || e?.status === 404);
-    check(goneAfter, 'getWorkspaceStatus now fails (403/404) — workspace genuinely deleted');
+    // The floor release only ever returns (carved - floor) — the floor amount stays reserved on
+    // the child by design (immediate headroom for its next reactivation) until this canary's own
+    // test-only cleanup below deletes the whole throwaway child, which reclaims that last bit too.
+    // So AT THIS POINT master is expected to be short by exactly floor.prompts, not fully restored.
+    const expectedAfterRelease = (masterBefore?.prompts?.total ?? 0)
+      - DEFAULT_RELEASE_FLOOR.prompts;
+    console.log(`   confirming the master pool total reflects the release, short by exactly the floor (${DEFAULT_RELEASE_FLOOR.prompts}) until this canary's own cleanup delete reclaims that last bit (async reconciliation can take a while)...`);
+    const masterAfter = await pollUntil(async () => {
+      const totals = await readTotals(MASTER_WS);
+      return totals?.prompts?.total === expectedAfterRelease ? totals : null;
+    }, RECONCILE_ATTEMPTS, RECONCILE_INTERVAL_MS);
+    console.log(`\n[read] master prompts total (after release, before cleanup) = ${masterAfter?.prompts?.total} (expect ${expectedAfterRelease} = before(${masterBefore?.prompts?.total}) - floor(${DEFAULT_RELEASE_FLOOR.prompts}))`);
+    check(masterAfter?.prompts?.total === expectedAfterRelease, 'master pool total reflects the released surplus (short only by the floor)');
 
-    const masterAfter = await poolTotal(MASTER_WS, 'prompts');
-    console.log(`\n[read] master prompts total (after) = ${masterAfter} (expect back to ${masterBefore})`);
-    check(masterAfter === masterBefore, 'master pool total restored to pre-carve value');
-
-    childId = null; // already deleted by case 2 — skip the cleanup block below
-
-    console.log(`\n${pass ? '✅ FIX VERIFIED' : '❌ FIX NOT VERIFIED'} — both releaseFullAllocation branches behave as designed against the live gateway.`);
+    console.log(`\n${pass ? '✅ FIX VERIFIED' : '❌ FIX NOT VERIFIED'} — releaseFullAllocation lowers to a non-zero floor, returns the surplus, and never deletes the workspace.`);
   } catch (e) {
     const status = e?.status ? `HTTP ${e.status}` : '';
     console.log(`\n✗ FAILED ${status}: ${e?.message}`);
@@ -179,7 +200,7 @@ const check = (ok, msg) => {
     pass = false;
   } finally {
     if (childId) {
-      console.log(`\nCleaning up leftover child ${childId}...`);
+      console.log(`\nCleaning up throwaway child ${childId} (test-only delete)...`);
       try {
         await transport.deleteWorkspace(childId);
         console.log('  deleted ✔');
