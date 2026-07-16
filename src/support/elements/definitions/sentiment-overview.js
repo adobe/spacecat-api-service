@@ -190,15 +190,26 @@ export function transformSentimentOverviewResponse(raw) {
     .map(([week, entry]) => {
       const { weekNumber, year } = parseIsoWeekParts(week);
       const promptsWithSentiment = entry.positive + entry.neutral + entry.negative;
-      const positivePct = promptsWithSentiment > 0
-        ? Math.round((entry.positive / promptsWithSentiment) * 100) : 0;
-      const negativePct = promptsWithSentiment > 0
-        ? Math.round((entry.negative / promptsWithSentiment) * 100) : 0;
-      // Clamp to 0: independent rounding of positive & negative can push their sum
-      // over 100 (e.g. 50.5→51 and 49.5→50), which would make the remainder negative
-      // and violate the schema's 0-100 contract. 0 is the correct floor for the UI.
-      const neutralPct = promptsWithSentiment > 0
-        ? Math.max(0, 100 - positivePct - negativePct) : 0;
+      let positivePct = 0;
+      let negativePct = 0;
+      let neutralPct = 0;
+      if (promptsWithSentiment > 0) {
+        positivePct = Math.round((entry.positive / promptsWithSentiment) * 100);
+        negativePct = Math.round((entry.negative / promptsWithSentiment) * 100);
+        neutralPct = 100 - positivePct - negativePct;
+        // Independent rounding of positive & negative can push their sum to 101
+        // (e.g. 50.5→51 and 49.5→50), making the neutral remainder negative. Absorb
+        // that 1-point overflow from the larger of the two so all three stay
+        // non-negative AND sum to exactly 100 — the contract the comment/schema state.
+        if (neutralPct < 0) {
+          if (positivePct >= negativePct) {
+            positivePct += neutralPct;
+          } else {
+            negativePct += neutralPct;
+          }
+          neutralPct = 0;
+        }
+      }
 
       return {
         week,
