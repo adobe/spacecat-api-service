@@ -16,6 +16,9 @@ import { dateToIsoWeek } from '../week-utils.js';
 // Legacy default window is a rolling 28 days (see defaultDateRange in
 // llmo-brand-presence.js). Kept inline here so this definition stays pure and does
 // not import controller code (support/elements must never depend on controllers).
+// Defensive default only: the controller requires + validates startDate/endDate
+// before calling the service, so this fallback is not reached via the HTTP path. It
+// is retained for parity with the sibling definitions (e.g. cited-domains.js).
 const DEFAULT_WINDOW_DAYS = 28;
 
 // Legacy sentiment swatch colors (llmo-brand-presence.js SENTIMENT_COLORS). Duplicated
