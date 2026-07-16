@@ -207,10 +207,12 @@ function validateCreateBody(body) {
  *   already-provisioned dimension tree. The caller provisions it unconditionally,
  *   so re-resolving it here would read the whole taxonomy a second time per request.
  * @param {object} log - logger.
- * @param {{ ensure: Function }} [headroom] - the caller's headroom guard (createHeadroomGuard). A
- *   genuine no-op when the flag is OFF. PROMPT metering seam (Rainer, live-verified LLMO-6190):
- *   the metered write is `createPromptsByIds` below, NOT publish — front it BEFORE the write loop,
- *   sized on the real prompt count now that it's known (`texts.size`), not an estimate.
+ * @param {{ ensure: Function }} headroom - the caller's headroom guard (createHeadroomGuard) —
+ *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
+ *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
+ *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
+ *   LLMO-6190): the metered write is `createPromptsByIds` below, NOT publish — front it BEFORE the
+ *   write loop, sized on the real prompt count now that it's known (`texts.size`), not an estimate.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned,
@@ -272,7 +274,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     }
   }
 
-  await headroom?.ensure({ prompts: texts.size }, { includeDrafted: true });
+  await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
   for (const [value, items] of byTypeValue) {
     // `branded` / `non-branded` are the classifier's only outputs and both are in

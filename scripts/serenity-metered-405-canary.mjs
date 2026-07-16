@@ -16,13 +16,15 @@
 /**
  * LLMO-6190 item 5 — live-gateway canary for the disguised metered-quota 405.
  *
- * `isMeteredQuota` (src/support/serenity/errors.js) currently matches the bare substring "quota" or
- * "allocation exhausted" in a 405 response body — a GUESS, not a pinned contract. This script
- * drives the REAL Semrush transport against a REAL (throwaway) sub-workspace, deliberately drains
- * its AI prompt allocation to zero, and publishes into it — which the workspace design doc says
- * 405s as a disguised quota rejection (as opposed to a genuine Method-Not-Allowed). It prints the
- * raw response status, headers, and body so a human can confirm the real shape and pin it as a
- * fixture + narrow `isMeteredQuota` to match it exactly (rather than the current substring guess).
+ * `isMeteredQuota` (src/support/serenity/errors.js) is now shape-based (a string body is the
+ * disguised gateway-level rejection, a JSON object is a genuine app-level error) — pinned from a
+ * real body captured live (Rainer, LLMO-6190, LLMO-Dev-2): a bare nginx `text/html` 405 page with
+ * no "quota"/"allocation exhausted" text at all. This script remains useful for re-confirming that
+ * shape against a fresh gateway/tenant, or capturing a new fixture if the upstream body ever
+ * changes. It drives the REAL Semrush transport against a REAL (throwaway) sub-workspace,
+ * deliberately drains its AI prompt allocation to zero, and publishes into it — which the workspace
+ * design doc says 405s as a disguised quota rejection (as opposed to a genuine Method-Not-Allowed).
+ * It prints the raw response status, headers, and body so a human can re-confirm the shape.
  *
  * WHY THIS CAN'T RUN IN CI OR BE RUN BY the implementing agent: it needs a live IMS bearer token
  * and a real Semrush sub-workspace id — neither exists in this environment. A human with
@@ -53,12 +55,9 @@
  * API top-up (or just re-activate the brand) afterwards if the workspace needs to keep working, or
  * decommission the throwaway workspace entirely.
  *
- * Once you have the real body:
- *   1. Save it as a fixture (e.g. test/support/serenity/fixtures/metered-405-body.json).
- *   2. Narrow `isMeteredQuota` (src/support/serenity/errors.js) to match the PINNED shape instead
- *      of the current "quota" / "allocation exhausted" substring guess.
- *   3. Add a contract test asserting the classifier matches the pinned fixture and does NOT match
- *      a plausible genuine 405 (e.g. `{ message: "Method Not Allowed" }`).
+ * If the captured body's SHAPE ever changes (e.g. the gateway starts returning JSON for this
+ * rejection too), `isMeteredQuota` and its pinned fixture in `test/support/serenity/errors.test.js`
+ * need to be revisited — the classifier keys on shape, not content, so it would need a new signal.
  */
 
 import { env, argv, exit } from 'node:process';
