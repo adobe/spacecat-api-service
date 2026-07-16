@@ -322,6 +322,23 @@ const FIXTURES = {
       tags: [],
     },
   },
+  // Also served by ElementsController (see note above) — the Market Tracking
+  // Trends endpoint backed by the two Semrush trend elements.
+  listSerenityMarketTrackingTrends: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getMarketTrackingTrends',
+    handlerResult: {
+      weeklyTrends: [{
+        week: '2026-07-05',
+        weekNumber: 27,
+        year: 2026,
+        mentions: 900,
+        citations: 5000,
+        competitors: [{ name: 'Rival One', mentions: 150, citations: 300 }],
+      }],
+    },
+  },
 };
 
 function makeAjv() {
@@ -384,6 +401,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({
                 getUrlInspectorFilterDimensions: sinon.stub().resolves(fx.handlerResult),
+                getMarketTrackingTrends: sinon.stub().resolves(fx.handlerResult),
               }),
             },
           },
