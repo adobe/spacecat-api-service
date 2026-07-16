@@ -1246,7 +1246,7 @@ v2-serenity-brand-presence-sentiment-overview:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '503':
-        description: PostgREST client not configured for this deployment.
+        description: PostgREST client not available (required to resolve the brand's Semrush workspace before the element call).
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
