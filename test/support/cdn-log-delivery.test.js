@@ -85,6 +85,12 @@ describe('cdn-log-delivery support', () => {
         .to.throw('Unsupported CDN provider');
     });
 
+    it('throws when the org id produces an empty or non-alphanumeric-start AWS name segment', () => {
+      // '@AdobeOrg' alone strips to '' → falsy → throws
+      expect(() => mod.buildDeliverySourceName({ imsOrgId: '@AdobeOrg', resourceId: 'E2X' }))
+        .to.throw("IMS org ID '@AdobeOrg' produces an invalid AWS resource name segment");
+    });
+
     it('hashes-truncates to <=60 chars (deterministically) for long ids', () => {
       const imsOrgId = `${'A'.repeat(40)}@AdobeOrg`;
       const resourceId = 'E'.repeat(40);
@@ -270,6 +276,21 @@ describe('cdn-log-delivery support', () => {
       const err = await mod.createCdnLogDelivery(creds, baseParams).catch((e) => e);
       expect(err.name).to.equal('DeliverySourceConflict');
       expect(err.message).to.include('different delivery source');
+    });
+
+    it('rethrows a non-conflict error from PutDeliverySource', async () => {
+      sendStub.callsFake((cmd) => {
+        if (cmd.type === 'get') {
+          return Promise.reject(rnf()); // source absent → reach PutDeliverySource
+        }
+        if (cmd.type === 'put') {
+          return Promise.reject(Object.assign(new Error('throttled'), { name: 'ThrottlingException' }));
+        }
+        return Promise.resolve({});
+      });
+
+      await expect(mod.createCdnLogDelivery(creds, baseParams))
+        .to.be.rejectedWith('throttled');
     });
 
     it('rethrows a non-conflict error from CreateDelivery', async () => {

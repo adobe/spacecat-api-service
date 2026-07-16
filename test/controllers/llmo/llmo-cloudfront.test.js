@@ -2284,6 +2284,16 @@ describe('LlmoCloudFrontController', () => {
       };
     });
 
+    it('returns 400 when the distribution does not serve the site', async () => {
+      listDistributionsStub.resolves([
+        { id: 'E2EXAMPLE123', aliases: ['other.example.com'] },
+      ]);
+
+      const result = await controller.enableCdnLogDelivery(logDeliveryContext);
+
+      expect(result.status).to.equal(400);
+    });
+
     it('enables log forwarding and returns the delivery result', async () => {
       const result = await controller.enableCdnLogDelivery(logDeliveryContext);
 
@@ -2433,6 +2443,16 @@ describe('LlmoCloudFrontController', () => {
         },
         env: { CDN_LOG_DELIVERY_DEST_ACCOUNT_ID: '111122223333' },
       };
+    });
+
+    it('returns 400 when all distributions fail with ResourceNotFoundException', async () => {
+      const rnfErr = Object.assign(new Error('delivery destination not found'), { name: 'ResourceNotFoundException' });
+      createCdnLogDeliveryStub.rejects(rnfErr);
+
+      const result = await controller.rescanCdnLogDelivery(rescanContext);
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('not provisioned');
     });
 
     it('scans all distributions and returns a summary', async () => {
