@@ -105,10 +105,13 @@ describe('AuditPolicyController — E1 getPolicy', () => {
     expect(body).to.include({ version: 0, budget: 5000, strategyName: 'tiered' });
   });
 
-  it('returns 403 when caller is not an org member', async () => {
+  it('returns 403 when caller is not an org member, without reading the policy', async () => {
+    const client = buildClient();
+    const fromSpy = sinon.spy(client, 'from');
     const controller = loadController(sinon.stub().resolves(false));
-    const res = await controller.getPolicy(buildContext());
+    const res = await controller.getPolicy(buildContext({ client }));
     expect(res.status).to.equal(403);
+    expect(fromSpy).to.not.have.been.called;
   });
 
   it('returns 404 when the site does not exist', async () => {
@@ -133,7 +136,7 @@ describe('AuditPolicyController — E1 getPolicy', () => {
     expect(res.status).to.equal(500);
   });
 
-  it('returns 500 when the PostgREST read fails', async () => {
+  it('returns 500 and logs the PostgREST error when the read fails', async () => {
     const client = {
       from: () => ({
         select: () => ({
@@ -143,8 +146,10 @@ describe('AuditPolicyController — E1 getPolicy', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    const res = await controller.getPolicy(buildContext({ client }));
+    const ctx = buildContext({ client });
+    const res = await controller.getPolicy(ctx);
     expect(res.status).to.equal(500);
+    expect(ctx.log.error).to.have.been.calledWith(sinon.match(/500.*boom/));
   });
 });
 
@@ -200,85 +205,41 @@ describe('AuditPolicyController — E2 putPolicy', () => {
     expect(client.rpc.firstCall.args[1]).to.not.have.property('p_author', 'FORGED');
   });
 
-  it('returns 400 when reason is missing', async () => {
-    const controller = loadController();
-    const noReason = { ...validBody, reason: undefined };
-    const res = await controller.putPolicy(writeCtx(noReason));
-    expect(res.status).to.equal(400);
+  // Each entry drives validatePolicyBody into exactly one rejection branch.
+  // context.data || {} only coalesces falsy values, so a truthy non-object body
+  // (e.g. a string) is what actually reaches the isObject check, not null/undefined.
+  [
+    ['the request body is not a JSON object', () => 'not-an-object'],
+    ['reason is missing', () => ({ ...validBody, reason: undefined })],
+    ['expectedVersion is missing', () => ({ ...validBody, expectedVersion: undefined })],
+    ['budget is zero', () => ({ ...validBody, budget: 0 })],
+    ['strategyName is not a recognized strategy', () => ({ ...validBody, strategyName: 'bogus' })],
+    ['exclusionGlobs is not an array', () => ({ ...validBody, exclusionGlobs: 'nope' })],
+    ['an exclusionGlobs entry is not a string', () => ({ ...validBody, exclusionGlobs: [123] })],
+    ['exclusionGlobs exceeds the cap', () => ({
+      ...validBody, exclusionGlobs: Array.from({ length: 1001 }, (_, i) => `/p${i}/*`),
+    })],
+    ['manualUrls is not an array', () => ({ ...validBody, manualUrls: 'nope' })],
+    ['scopeConfig is not an object', () => ({ ...validBody, scopeConfig: 'nope' })],
+    ['lifecycleOverrides is not an object', () => ({ ...validBody, lifecycleOverrides: 'nope' })],
+    ['note is too long', () => ({ ...validBody, note: 'x'.repeat(2001) })],
+  ].forEach(([label, makeBody]) => {
+    it(`returns 400 when ${label}`, async () => {
+      const client = buildClient();
+      const controller = loadController();
+      const res = await controller.putPolicy(writeCtx(makeBody(), { client }));
+      expect(res.status).to.equal(400);
+      // a rejected body must never reach the write RPC
+      expect(client.rpc).to.not.have.been.called;
+    });
   });
 
-  it('returns 400 when expectedVersion is missing', async () => {
-    const controller = loadController();
-    const noVer = { ...validBody, expectedVersion: undefined };
-    const res = await controller.putPolicy(writeCtx(noVer));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when budget <= 0 or globs over cap', async () => {
-    const controller = loadController();
-    const zeroBudgetRes = await controller.putPolicy(writeCtx({ ...validBody, budget: 0 }));
-    expect(zeroBudgetRes.status).to.equal(400);
-    const tooMany = Array.from({ length: 1001 }, (_, i) => `/p${i}/*`);
-    const tooManyGlobsRes = await controller.putPolicy(
-      writeCtx({ ...validBody, exclusionGlobs: tooMany }),
-    );
-    expect(tooManyGlobsRes.status).to.equal(400);
-  });
-
-  it('returns 400 when the request body is not a JSON object', async () => {
-    const controller = loadController();
-    // context.data || {} only coalesces falsy values, so a truthy non-object
-    // (e.g. a string) is what actually reaches validatePolicyBody's isObject check.
-    const res = await controller.putPolicy(writeCtx('not-an-object'));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when strategyName is not a recognized strategy', async () => {
-    const controller = loadController();
-    const res = await controller.putPolicy(writeCtx({ ...validBody, strategyName: 'bogus' }));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when exclusionGlobs is not an array', async () => {
-    const controller = loadController();
-    const res = await controller.putPolicy(writeCtx({ ...validBody, exclusionGlobs: 'nope' }));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when an exclusionGlobs entry is not a string', async () => {
-    const controller = loadController();
-    const res = await controller.putPolicy(writeCtx({ ...validBody, exclusionGlobs: [123] }));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when manualUrls is not an array', async () => {
-    const controller = loadController();
-    const res = await controller.putPolicy(writeCtx({ ...validBody, manualUrls: 'nope' }));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when scopeConfig is not an object', async () => {
-    const controller = loadController();
-    const res = await controller.putPolicy(writeCtx({ ...validBody, scopeConfig: 'nope' }));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when lifecycleOverrides is not an object', async () => {
-    const controller = loadController();
-    const res = await controller.putPolicy(writeCtx({ ...validBody, lifecycleOverrides: 'nope' }));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 400 when note is too long', async () => {
-    const controller = loadController();
-    const res = await controller.putPolicy(writeCtx({ ...validBody, note: 'x'.repeat(2001) }));
-    expect(res.status).to.equal(400);
-  });
-
-  it('returns 403 when the caller fails the shared read authorization (not an org member)', async () => {
+  it('returns 403 when the caller fails the shared read authorization, without writing', async () => {
+    const client = buildClient();
     const controller = loadController(sinon.stub().resolves(false));
-    const res = await controller.putPolicy(writeCtx(validBody));
+    const res = await controller.putPolicy(writeCtx(validBody, { client }));
     expect(res.status).to.equal(403);
+    expect(client.rpc).to.not.have.been.called;
   });
 
   it('attributes the write to "system" when the caller has no identity on the token', async () => {
@@ -338,6 +299,9 @@ describe('AuditPolicyController — E2 putPolicy', () => {
     const controller = loadController(hasAccess);
     const res = await controller.putPolicy(writeCtx(validBody, { client }));
     expect(res.status).to.equal(200);
+    // proves the fallthrough actually happened, not just that the end result was 200
+    expect(hasAccess).to.have.been.calledWith(sinon.match.any, '', 'ASO');
+    expect(hasAccess).to.have.been.calledWith(sinon.match.any, '', 'LLMO');
   });
 
   it('maps SQLSTATE 40000 to 409 with currentVersion from error.details', async () => {
@@ -479,13 +443,16 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     expect(ltSpy).to.have.been.calledWith('version', 5);
   });
 
-  it('returns 403 when the caller fails the shared read authorization (not an org member)', async () => {
+  it('returns 403 when the caller fails the shared read authorization, without querying revisions', async () => {
+    const client = buildClient();
+    const fromSpy = sinon.spy(client, 'from');
     const controller = loadController(sinon.stub().resolves(false));
-    const res = await controller.listRevisions(buildContext());
+    const res = await controller.listRevisions(buildContext({ client }));
     expect(res.status).to.equal(403);
+    expect(fromSpy).to.not.have.been.called;
   });
 
-  it('returns 500 when the PostgREST read fails', async () => {
+  it('returns 500 and logs the PostgREST error when the read fails', async () => {
     const limitSpy = sinon.stub().resolves({ data: null, error: { code: '500', message: 'boom' } });
     const order = sinon.stub().returnsThis();
     const client = {
@@ -493,7 +460,9 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    const res = await controller.listRevisions(buildContext({ client }));
+    const ctx = buildContext({ client });
+    const res = await controller.listRevisions(ctx);
+    expect(ctx.log.error).to.have.been.calledWith(sinon.match(/500.*boom/));
     expect(res.status).to.equal(500);
   });
 });
