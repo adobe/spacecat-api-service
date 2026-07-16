@@ -11554,6 +11554,79 @@ SerenityErrorResponse:
     error: { type: string }
     message: { type: string }
 
+SerenityBrandPresenceSentimentOverview:
+  type: object
+  description: |
+    Per-week brand sentiment for the Serenity (Semrush Elements-backed) brand
+    presence dashboard, sourced from the Semrush Sentiment element and rolled up
+    from daily rows into ISO weeks. Emits the legacy `sentiment-overview` contract
+    verbatim so the existing chart consumes it drop-in — the absolute values
+    differ from the Postgres-backed legacy endpoint (Semrush metrics), but the
+    shape, `sentiment[]` ordering, and colors are identical.
+  required: [weeklyTrends]
+  properties:
+    weeklyTrends:
+      type: array
+      description: One entry per ISO week in the requested range, ordered oldest-first.
+      items:
+        type: object
+        required:
+          - week
+          - weekNumber
+          - year
+          - sentiment
+          - totalPrompts
+          - promptsWithSentiment
+        properties:
+          week:
+            type: string
+            description: ISO week label (`YYYY-Wnn`).
+            example: '2026-W24'
+          weekNumber: { type: integer, example: 24 }
+          year: { type: integer, example: 2026 }
+          sentiment:
+            type: array
+            description: |
+              Positive/Neutral/Negative percentages (integers summing to 100),
+              in that fixed order. `color` is the legacy swatch hex.
+            items:
+              type: object
+              required: [name, value, color]
+              properties:
+                name:
+                  type: string
+                  enum: [Positive, Neutral, Negative]
+                value:
+                  type: integer
+                  description: Percentage of prompts-with-sentiment in this bucket (0-100).
+                color:
+                  type: string
+                  description: Legacy sentiment swatch hex.
+          totalPrompts:
+            type: integer
+            description: |
+              Total prompts for the week (from the element's total-prompts line).
+          promptsWithSentiment:
+            type: integer
+            description: |
+              Positive + Neutral + Negative prompt counts. NOTE: the three
+              sentiment buckets are overlapping sets (a prompt with mixed-sentiment
+              mentions counts in each), so this can exceed `totalPrompts`; do not
+              derive a coverage ratio from the two.
+          mentions:
+            type: integer
+            description: Stubbed 0 (parity with the legacy contract).
+          citations:
+            type: integer
+            description: Stubbed 0 (parity with the legacy contract).
+          visibilityScore:
+            type: integer
+            description: Stubbed 0 (parity with the legacy contract).
+          competitors:
+            type: array
+            description: Stubbed empty (parity with the legacy contract).
+            items: { type: object }
+
 SerenityFilterDimensionItem:
   type: object
   description: |

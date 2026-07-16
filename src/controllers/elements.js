@@ -534,6 +534,83 @@ export default function ElementsController(context, log, env) {
   /* c8 ignore stop */
 
   /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview
+   * Returns per-week brand sentiment (positive/neutral/negative percentages) sourced from
+   * the Semrush Sentiment element, in the legacy `{ weeklyTrends: [...] }` contract so the
+   * existing brand-presence sentiment chart consumes it drop-in. Single upstream call
+   * (aggregate, no fan-out); region → top-level project_id like cited-domains.
+   */
+  /* c8 ignore start -- LLMO-6300 POC endpoint; unit tests intentionally deferred */
+  const listSentimentOverview = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is required + validated (mirrors cited-domains) — never silently
+      // default to a rolling window nor forward a malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year range is
+      // needlessly expensive upstream and inflates the in-memory weekly rollup.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+
+      // Region scoping: a Semrush project == one (brand, market). Resolve the UI's region
+      // code to that project's id (via the Markets element) and pass it as top-level
+      // `project_id`. region=all/absent → aggregate across all the brand's markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          [brand],
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      }
+
+      const params = {
+        projectId,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        category: query.categoryId || query.category,
+      };
+
+      const result = await service.getSentimentOverview(workspaceId, params);
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/owned-urls
    * The URL Inspector "Your cited URLs" table. Hybrid: per-URL citations +
@@ -744,6 +821,7 @@ export default function ElementsController(context, log, env) {
     listWeeks,
     listPrompts,
     listCitedDomains,
+    listSentimentOverview,
     listOwnedUrls,
     listDomainUrls,
   };
