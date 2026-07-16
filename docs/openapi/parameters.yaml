@@ -296,6 +296,18 @@ productCode:
       - 'ASO'
       - 'ACO'
 
+productType:
+  name: productType
+  description: The product code to filter organizations by (LLMO, ASO or ACO)
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'LLMO'
+      - 'ASO'
+      - 'ACO'
+
 # New parameters for site enrollments API
 siteEnrollmentId:
   name: siteEnrollmentId

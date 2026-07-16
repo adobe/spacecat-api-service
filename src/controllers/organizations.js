@@ -150,6 +150,56 @@ function OrganizationsController(ctx, env) {
   };
 
   /**
+   * Gets all organizations that have an entitlement for the given product code.
+   * Accessible to admin callers (legacy admin path) and to S2S consumers that hold the
+   * `organization:readAll` capability - see `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   * Non-admin callers only see organizations whose entitlement tier is customer-visible
+   * (see `CUSTOMER_VISIBLE_TIERS`).
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of organizations response.
+   */
+  const getByProductType = async (context) => {
+    const { log } = ctx;
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /organizations/by-product-type - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or organization:readAll capability required');
+    }
+
+    const { productType } = context.params;
+    const validProductCodes = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
+    if (!validProductCodes.has(productType)) {
+      return badRequest(`Invalid product type: ${productType}`);
+    }
+
+    const entitlements = await Entitlement.allByProductCodeWithOrganization(productType);
+    const visibleEntitlements = isAdmin
+      ? entitlements
+      : entitlements.filter(
+        ({ entitlement }) => CUSTOMER_VISIBLE_TIERS.includes(entitlement.tier),
+      );
+
+    const organizationIds = [...new Set(
+      visibleEntitlements.map(({ organization }) => organization.id),
+    )];
+    const organizations = (await Promise.all(
+      organizationIds.map((id) => Organization.findById(id)),
+    ))
+      .filter(Boolean)
+      .map((organization) => OrganizationDto.toJSON(organization));
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /organizations/by-product-type granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_ORG_READ_ALL} count=${organizations.length} requestId=${requestId}`);
+    }
+
+    return ok(organizations);
+  };
+
+  /**
    * Gets an organization by ID.
    * @param {object} context - Context of the request.
    * @returns {Promise<object>} Organization.
@@ -618,6 +668,7 @@ function OrganizationsController(ctx, env) {
   return {
     createOrganization,
     getAll,
+    getByProductType,
     getByID,
     getByImsOrgID,
     getSlackConfigByImsOrgID,

@@ -191,6 +191,8 @@ paths:
   /organizations/{organizationId}/trial-user-invite:
     $ref: './trial-users-api.yaml#/trial-user-invite'
 
+  /organizations/by-product-type/{productType}:
+    $ref: './organizations-api.yaml#/organizations-by-product-type'
   /organizations/by-ims-org-id/{imsOrgId}:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:

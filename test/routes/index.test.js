@@ -77,6 +77,7 @@ describe('getRouteHandlers', () => {
 
   const mockOrganizationsController = {
     getAll: sinon.stub(),
+    getByProductType: sinon.stub(),
     getByID: sinon.stub(),
     getSitesForOrganization: sinon.stub(),
     getByImsOrgID: sinon.stub(),
@@ -868,6 +869,7 @@ describe('getRouteHandlers', () => {
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
+      'GET /organizations/by-product-type/:productType',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
@@ -1327,6 +1329,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/:organizationId'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['GET /organizations/:organizationId/sites'].handler).to.equal(mockOrganizationsController.getSitesForOrganization);
     expect(dynamicRoutes['GET /organizations/:organizationId/sites'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['GET /organizations/by-product-type/:productType'].handler).to.equal(mockOrganizationsController.getByProductType);
+    expect(dynamicRoutes['GET /organizations/by-product-type/:productType'].paramNames).to.deep.equal(['productType']);
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId'].handler).to.equal(mockOrganizationsController.getByImsOrgID);
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId'].paramNames).to.deep.equal(['imsOrgId']);
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId/slack-config'].handler).to.equal(mockOrganizationsController.getSlackConfigByImsOrgID);

@@ -110,6 +110,58 @@ export default function organizationTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /organizations/by-product-type/:productType', () => {
+      it('admin: returns only organizations entitled to LLMO', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-type/LLMO');
+        expect(res.status).to.equal(200);
+        // ORG_1 (ENTITLEMENT_1, FREE_TRIAL) + ORG_3 (ENTITLEMENT_3, PAID).
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        const sorted = sortById(res.body);
+        sorted.forEach((org) => expectOrgDto(org));
+        const ids = sorted.map((org) => org.id);
+        expect(ids).to.include(ORG_1_ID);
+        expect(ids).to.include(ORG_3_ID);
+        expect(ids).to.not.include(ORG_2_ID);
+      });
+
+      it('admin: returns only organizations entitled to ASO', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-type/ASO');
+        expect(res.status).to.equal(200);
+        // ORG_1 (ENTITLEMENT_2, PAID) only.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(ORG_1_ID);
+      });
+
+      it('admin: returns 400 for an unknown product code', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-type/NOT_A_PRODUCT');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 403', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/organizations/by-product-type/LLMO');
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerReadAll: returns organizations entitled to LLMO (organization:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get('/organizations/by-product-type/LLMO');
+        expect(res.status).to.equal(200);
+        const ids = res.body.map((org) => org.id);
+        expect(ids).to.include(ORG_1_ID);
+        expect(ids).to.include(ORG_3_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no organization:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get('/organizations/by-product-type/LLMO');
+        expect(res.status).to.equal(403);
+      });
+    });
+
     describe('GET /organizations/:organizationId', () => {
       it('admin: returns accessible org by ID', async () => {
         const http = getHttpClient();

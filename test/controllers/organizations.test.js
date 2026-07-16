@@ -191,6 +191,7 @@ describe('Organizations Controller', () => {
   const organizationFunctions = [
     'createOrganization',
     'getAll',
+    'getByProductType',
     'getByID',
     'getSitesForOrganization',
     'getProjectsByOrganizationId',
@@ -226,6 +227,7 @@ describe('Organizations Controller', () => {
       },
       Entitlement: {
         findByOrganizationIdAndProductCode: sinon.stub(),
+        allByProductCodeWithOrganization: sinon.stub(),
       },
       SiteEnrollment: {
         allBySiteId: sinon.stub(),
@@ -933,6 +935,121 @@ describe('Organizations Controller', () => {
 
       expect(response.status).to.equal(403);
       expect(context.log.info).to.have.been.calledWithMatch(/reason=not-found clientId=svc-1/);
+    });
+  });
+
+  describe('getByProductType', () => {
+    it('returns organizations entitled to the given product code', async () => {
+      mockDataAccess.Entitlement.allByProductCodeWithOrganization.resolves([
+        {
+          entitlement: { id: 'ent-1', productCode: 'LLMO', tier: 'PAID' },
+          organization: { id: organizations[0].getId(), name: 'Org 1' },
+        },
+        {
+          entitlement: { id: 'ent-2', productCode: 'LLMO', tier: 'FREE_TRIAL' },
+          organization: { id: organizations[1].getId(), name: 'Org 2' },
+        },
+      ]);
+      mockDataAccess.Organization.findById
+        .withArgs(organizations[0].getId()).resolves(organizations[0]);
+      mockDataAccess.Organization.findById
+        .withArgs(organizations[1].getId()).resolves(organizations[1]);
+
+      const response = await organizationsController.getByProductType({
+        ...context,
+        params: { productType: 'LLMO' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Entitlement.allByProductCodeWithOrganization)
+        .to.have.been.calledOnceWith('LLMO');
+      const body = await response.json();
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(body[0]).to.have.property('id', organizations[0].getId());
+      expect(body[1]).to.have.property('id', organizations[1].getId());
+    });
+
+    it('dedupes organizations with multiple matching entitlements', async () => {
+      mockDataAccess.Entitlement.allByProductCodeWithOrganization.resolves([
+        {
+          entitlement: { id: 'ent-1', productCode: 'LLMO', tier: 'PAID' },
+          organization: { id: organizations[0].getId(), name: 'Org 1' },
+        },
+        {
+          entitlement: { id: 'ent-3', productCode: 'LLMO', tier: 'PAID' },
+          organization: { id: organizations[0].getId(), name: 'Org 1' },
+        },
+      ]);
+      mockDataAccess.Organization.findById
+        .withArgs(organizations[0].getId()).resolves(organizations[0]);
+
+      const response = await organizationsController.getByProductType({
+        ...context,
+        params: { productType: 'LLMO' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledOnce;
+      const body = await response.json();
+      expect(body).to.be.an('array').with.lengthOf(1);
+    });
+
+    it('hides non-customer-visible tiers from non-admin callers', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = { getClientId: () => 'svc-1', getImsOrgId: () => 'AAA111111111111111111111@AdobeOrg' };
+      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sinon.stub() };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId.resolves({
+        getId: () => 'consumer-id-1',
+        getCapabilities: () => ['organization:readAll'],
+        getStatus: () => 'ACTIVE',
+        isRevoked: () => false,
+      });
+      mockDataAccess.Entitlement.allByProductCodeWithOrganization.resolves([
+        {
+          entitlement: { id: 'ent-1', productCode: 'LLMO', tier: 'PRE_ONBOARD' },
+          organization: { id: organizations[0].getId(), name: 'Org 1' },
+        },
+        {
+          entitlement: { id: 'ent-2', productCode: 'LLMO', tier: 'PAID' },
+          organization: { id: organizations[1].getId(), name: 'Org 2' },
+        },
+      ]);
+      mockDataAccess.Organization.findById
+        .withArgs(organizations[1].getId()).resolves(organizations[1]);
+
+      const response = await organizationsController.getByProductType({
+        ...context,
+        params: { productType: 'LLMO' },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.be.an('array').with.lengthOf(1);
+      expect(body[0]).to.have.property('id', organizations[1].getId());
+    });
+
+    it('returns bad request for an invalid product type', async () => {
+      const response = await organizationsController.getByProductType({
+        ...context,
+        params: { productType: 'not-a-product' },
+      });
+
+      expect(response.status).to.equal(400);
+      expect(mockDataAccess.Entitlement.allByProductCodeWithOrganization).to.not.have.been.called;
+    });
+
+    it('returns forbidden for non-admin callers without the readAll capability', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const response = await organizationsController.getByProductType({
+        ...context,
+        params: { productType: 'LLMO' },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error).to.have.property('message', 'Forbidden: admin access or organization:readAll capability required');
+      expect(mockDataAccess.Entitlement.allByProductCodeWithOrganization).to.not.have.been.called;
     });
   });
 
