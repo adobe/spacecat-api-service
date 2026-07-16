@@ -1431,6 +1431,54 @@ describe('utils', () => {
     });
   });
 
+  describe('queueDeliveryConfigWriter — Cloud Manager verification (SITES-47815)', () => {
+    const makeSite = () => ({
+      getId: () => 'site-1',
+      getBaseURL: () => 'https://example.com',
+      getAuthoringType: () => 'cs',
+      getDeliveryType: () => 'aem_cs',
+      getDeliveryConfig: () => ({ programId: 'p1', environmentId: 'e1' }),
+    });
+
+    const makeContext = () => ({
+      env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.example.com/queue' },
+      log: { error: sinon.stub(), info: sinon.stub(), warn: sinon.stub() },
+      sqs: { sendMessage: sinon.stub().resolves() },
+    });
+
+    // Load utils with a controllable CloudManager client so we can exercise the
+    // verified / not-verified / degraded branches of queueDeliveryConfigWriter.
+    const loadWith = (cmResult) => esmock('../../src/support/utils.js', {
+      '../../src/support/cloud-manager.js': {
+        createCloudManagerClient: () => ({ verifyProgram: async () => cmResult }),
+      },
+    });
+
+    it('stamps programVerified=true when Cloud Manager verifies the program', async () => {
+      const { queueDeliveryConfigWriter: q } = await loadWith({ verified: true });
+      const context = makeContext();
+      await q({ site: makeSite(), baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(context.sqs.sendMessage.firstCall.args[1].programVerified).to.equal(true);
+      expect(context.log.warn).to.not.have.been.called;
+    });
+
+    it('warns and stamps programVerified=false when CM reports not-verified (not degraded)', async () => {
+      const { queueDeliveryConfigWriter: q } = await loadWith({ verified: false, degraded: false });
+      const context = makeContext();
+      await q({ site: makeSite(), baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(context.sqs.sendMessage.firstCall.args[1].programVerified).to.equal(false);
+      expect(context.log.warn).to.have.been.calledOnce;
+    });
+
+    it('does not warn when the connector is unavailable (degraded)', async () => {
+      const { queueDeliveryConfigWriter: q } = await loadWith({ verified: false, degraded: true });
+      const context = makeContext();
+      await q({ site: makeSite(), baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(context.sqs.sendMessage.firstCall.args[1].programVerified).to.equal(false);
+      expect(context.log.warn).to.not.have.been.called;
+    });
+  });
+
   describe('sendAutofixMessage', () => {
     let mockSqs;
 
