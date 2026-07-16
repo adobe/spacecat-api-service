@@ -5983,5 +5983,67 @@ describe('LLMO Onboarding Functions', () => {
       const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
       expect(errorLogs.some((m) => m.includes('status=unknown'))).to.be.true;
     });
+
+    it('isolates a single pipeline failure: the other two register, exactly one ERROR, onboarding completes', async () => {
+      // One provider's createSchedule rejects; the other two resolve. The
+      // per-item try/catch must isolate the failure — 2 schedules registered,
+      // exactly 1 ERROR log, and onboarding still completes.
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 503;
+      const createSchedule = sandbox.stub();
+      createSchedule
+        .withArgs(sinon.match((a) => a.providerIds[0] === 'prompt_generation_agentic_traffic'))
+        .rejects(err);
+      createSchedule.resolves({ scheduleId: 'sched-ok', alreadyExisted: false });
+
+      const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      await activateBrandAndGeneratePrompts(params);
+
+      const instance = mockDrsClient.createFrom();
+      // All three were attempted; two resolved, one rejected.
+      expect(instance.createSchedule).to.have.been.calledThrice;
+      // Exactly one ERROR — the failing agentic-traffic pipeline, not the others.
+      expect(context.log.error).to.have.been.calledOnce;
+      const errorLog = context.log.error.firstCall.args[0];
+      expect(errorLog).to.include('prompt_generation_agentic_traffic');
+      expect(errorLog).to.include('status=503');
+      // Onboarding still completed (Brandalf fired, resolve did not throw).
+      expect(instance.submitJob).to.have.been.calledOnce;
+    });
+
+    it('does not abort onboarding when DrsClient.createFrom throws (best-effort contract)', async () => {
+      // A malformed context / SDK regression must not 500 onboarding: createFrom
+      // throwing is treated as "DRS unavailable" — no Brandalf, no schedules, but
+      // onboarding resolves.
+      const createFromErr = new Error('DRS client init boom');
+      const mockDrsClient = { createFrom: sandbox.stub().throws(createFromErr) };
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      // Resolves (does not reject) despite createFrom throwing.
+      await activateBrandAndGeneratePrompts(params);
+
+      expect(mockDrsClient.createFrom).to.have.been.calledOnce;
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('DRS client creation failed'))).to.be.true;
+      expect(params.say).to.have.been.calledWithMatch(/DRS client unavailable/);
+    });
   });
 });

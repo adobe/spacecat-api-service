@@ -69,6 +69,13 @@ const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
 // client gets a 503 even though onboarding succeeded. (LLMO-5606 follow-up.)
 const OVERRIDE_DETECT_TIMEOUT_MS = 5000;
 
+// Cap for the best-effort recurring prompt-suggestion schedule registration. The
+// three createSchedule calls are awaited on the synchronous onboarding response
+// path, so a slow/hung DRS under partial outage could otherwise stall onboarding
+// past the CDN first-byte timeout. createSchedule is idempotent and the durable
+// outcome is the server-side schedule row, so on timeout we stop waiting.
+const SCHEDULE_REGISTRATION_TIMEOUT_MS = 8000;
+
 /**
  * Awaits `promise`, but resolves to `fallback` if it rejects or doesn't settle
  * within `timeoutMs`. The underlying promise is left running and any late
@@ -280,6 +287,13 @@ export async function registerPromptSuggestionSchedule({
 export async function registerPromptSuggestionSchedules({
   drsClient, siteId, log, say = () => {},
 }) {
+  // Short-circuit once for an unconfigured client instead of letting each
+  // per-pipeline registerPromptSuggestionSchedule log "not configured" N times.
+  if (!drsClient.isConfigured()) {
+    log.debug(`DRS client not configured, skipping prompt-suggestion schedules for site ${siteId}`);
+    return;
+  }
+
   await Promise.all(
     PROMPT_SUGGESTION_PIPELINES.map(async ({ name, providerId, cadence }) => {
       try {
@@ -1526,52 +1540,73 @@ export async function activateBrandAndGeneratePrompts({
     }
 
     // One DRS client, shared by the Brandalf trigger and the recurring
-    // prompt-suggestion schedule registration below.
-    const drsClient = DrsClient.createFrom(context);
-
-    // Trigger Brandalf immediately after the v2 config exists so downstream
-    // brand sync can attach results to the newly created organization.
+    // prompt-suggestion schedule registration below. createFrom can throw on a
+    // malformed context or SDK regression; treat that as "DRS unavailable" and
+    // skip both best-effort side-effects rather than 500 the whole onboarding
+    // (the Brandalf trigger and schedule registration are both best-effort).
+    let drsClient;
     try {
-      if (drsClient.isConfigured()) {
-        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
-        await triggerBrandalfOnboardingJob({
-          drsClient,
-          organizationId: organization.getId(),
-          siteId: site.getId(),
-          imsOrgId,
-          brandName: brandName.trim(),
-          companyWebsite,
-          onboardingMode,
-          region,
-          log,
-          say,
-        });
-      } else {
-        log.debug('DRS client not configured, skipping Brandalf flow');
-      }
-    } catch (drsError) {
-      log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
-      say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+      drsClient = DrsClient.createFrom(context);
+    } catch (drsClientError) {
+      log.error(`DRS client creation failed, skipping Brandalf + schedules: ${drsClientError.message}`);
+      say(':warning: DRS client unavailable (will need manual trigger)');
     }
 
-    // Register the recurring "prompt suggestion" schedules, each with an
-    // immediate first run. These fire right after we SUBMIT the async Brandalf
-    // job above (submit, not completion), so they race Brandalf: for a genuinely
-    // new site the immediate first run typically no-ops because base-prompt/brand
-    // data does not exist yet. That is acceptable — the durable outcome is the
-    // recurring schedule row, and the next scheduled run self-heals once brand
-    // data exists. Cold-start latency is worst for synthetic_personas (quarterly):
-    // if its immediate run no-ops, the first real output can be up to a quarter
-    // out. Chaining registration off base-prompt-generation completion is
-    // cross-repo (DRS owns the Brandalf→prompt-gen chain) and out of scope here.
-    // TODO(LLMO-4258 follow-up): have DRS trigger these schedules once base prompt
-    // generation completes, instead of racing the Brandalf submit.
-    await registerPromptSuggestionSchedules({
-      drsClient,
-      siteId: site.getId(),
-      log,
-      say,
-    });
+    if (drsClient) {
+      // Trigger Brandalf immediately after the v2 config exists so downstream
+      // brand sync can attach results to the newly created organization.
+      try {
+        if (drsClient.isConfigured()) {
+          const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+          await triggerBrandalfOnboardingJob({
+            drsClient,
+            organizationId: organization.getId(),
+            siteId: site.getId(),
+            imsOrgId,
+            brandName: brandName.trim(),
+            companyWebsite,
+            onboardingMode,
+            region,
+            log,
+            say,
+          });
+        } else {
+          log.debug('DRS client not configured, skipping Brandalf flow');
+        }
+      } catch (drsError) {
+        log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+        say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+      }
+
+      // Register the recurring "prompt suggestion" schedules, each with an
+      // immediate first run. These fire right after we SUBMIT the async Brandalf
+      // job above (submit, not completion), so they race Brandalf: for a genuinely
+      // new site the immediate first run typically no-ops because base-prompt/brand
+      // data does not exist yet. That is acceptable — the durable outcome is the
+      // recurring schedule row, and the next scheduled run self-heals once brand
+      // data exists. Cold-start latency is worst for synthetic_personas (quarterly):
+      // if its immediate run no-ops, the first real output can be up to a quarter
+      // out. Chaining registration off base-prompt-generation completion is
+      // cross-repo (DRS owns the Brandalf→prompt-gen chain) and out of scope here.
+      // TODO(LLMO-4258 follow-up): have DRS trigger these schedules once base prompt
+      // generation completes, instead of racing the Brandalf submit.
+      //
+      // Bound by settleWithin: the three createSchedule calls are awaited on the
+      // synchronous response path, so a slow/hung DRS could otherwise stall
+      // onboarding. On timeout we stop waiting — createSchedule is idempotent, the
+      // durable outcome is the server-side schedule row, and per-pipeline ERROR
+      // logging inside registerPromptSuggestionSchedules stays deterministic.
+      await settleWithin(
+        registerPromptSuggestionSchedules({
+          drsClient,
+          siteId: site.getId(),
+          log,
+          say,
+        }),
+        SCHEDULE_REGISTRATION_TIMEOUT_MS,
+        null,
+      );
+    }
   } else {
     // V1 has no Brandalf trigger, so DRS will not submit prompt generation
     // automatically. Submit it directly here so v1 onboardings still get
