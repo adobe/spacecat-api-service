@@ -366,6 +366,59 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * POST /v2/.../aio/prompts/{prompt_id}/rename — edits ONE prompt's text IN
+     * PLACE. In the AIO model a prompt's `name` IS its text, so rename is the
+     * text-edit operation. Live-verified 2026-07-14 (serenity-docs#63 §2): the
+     * prompt id is preserved across draft, publish and live (`{ id, name,
+     * is_updated }` echoes the SAME id), and renaming onto ANOTHER prompt's
+     * exact text fails with a clean 409 — no mutation, no duplicate. A rename
+     * onto the prompt's OWN current text is a documented `is_updated: false`
+     * no-op, not a conflict. The edit lands in the DRAFT layer; the live view
+     * keeps the old text until the project is published.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} promptId - upstream prompt id to rename.
+     * @param {string} newName - the prompt's next text.
+     */
+    async renamePrompt(semrushWorkspaceId, projectId, promptId, newName) {
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/{prompt_id}/rename',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId, prompt_id: promptId },
+          },
+          body: { new_name: newName },
+        },
+      ));
+    },
+
+    /**
+     * PUT /v2/.../aio/prompts/tags — batch-updates prompts' tag REFERENCES by
+     * id (aio-update-prompts-batch), in place. Body: { items: [{ id,
+     * references: [tagId…], replace }] } — per item, `replace: false` MERGES
+     * the references onto the prompt's existing tag set, `replace: true` makes
+     * the tag set EXACTLY `references`. The prompt id is preserved (verified
+     * live 2026-07-14, serenity-docs#63 §2). Answers 204 with no body; an
+     * unknown prompt id is skipped SILENTLY (still 204), so a caller needing
+     * existence must establish it separately (the update handlers do, via the
+     * preceding rename's 404).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {Array<{ id: string, references: string[], replace: boolean }>} items
+     */
+    async updatePromptTagsByIds(semrushWorkspaceId, projectId, items) {
+      return unwrap('PUT', await projects.PUT(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tags',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items },
+        },
+      ));
+    },
+
+    /**
      * POST /v1/workspaces/{ws}/projects/{pid}/publish — moves draft state to
      * live. Semrush publishes asynchronously; mutations land in draft until
      * this is called.
