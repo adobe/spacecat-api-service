@@ -11,12 +11,15 @@
  */
 
 import { expect, use } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import AuditPolicyController from '../../src/controllers/audit-policy.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
+import { UnauthorizedProductError } from '../../src/support/errors.js';
 
 use(sinonChai);
+use(chaiAsPromised);
 
 const SITE_ID = '7b2e3f9c-0000-4000-8000-000000000001';
 
@@ -115,6 +118,34 @@ describe('AuditPolicyController — E1 getPolicy', () => {
     const res = await controller.getPolicy(ctx);
     expect(res.status).to.equal(404);
   });
+
+  it('returns 400 when siteId is not a valid UUID', async () => {
+    const controller = loadController();
+    const res = await controller.getPolicy(buildContext({ params: { siteId: 'not-a-uuid' } }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 500 when the PostgREST client is not available', async () => {
+    const controller = loadController();
+    const ctx = buildContext();
+    ctx.dataAccess.services.postgrestClient = undefined;
+    const res = await controller.getPolicy(ctx);
+    expect(res.status).to.equal(500);
+  });
+
+  it('returns 500 when the PostgREST read fails', async () => {
+    const client = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: { code: '500', message: 'boom' } }) }),
+        }),
+      }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    const res = await controller.getPolicy(buildContext({ client }));
+    expect(res.status).to.equal(500);
+  });
 });
 
 const UPSERT_RPC = 'wrpc_upsert_audit_policy';
@@ -192,6 +223,121 @@ describe('AuditPolicyController — E2 putPolicy', () => {
       writeCtx({ ...validBody, exclusionGlobs: tooMany }),
     );
     expect(tooManyGlobsRes.status).to.equal(400);
+  });
+
+  it('returns 400 when the request body is not a JSON object', async () => {
+    const controller = loadController();
+    // context.data || {} only coalesces falsy values, so a truthy non-object
+    // (e.g. a string) is what actually reaches validatePolicyBody's isObject check.
+    const res = await controller.putPolicy(writeCtx('not-an-object'));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when strategyName is not a recognized strategy', async () => {
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, strategyName: 'bogus' }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when exclusionGlobs is not an array', async () => {
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, exclusionGlobs: 'nope' }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when an exclusionGlobs entry is not a string', async () => {
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, exclusionGlobs: [123] }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when manualUrls is not an array', async () => {
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, manualUrls: 'nope' }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when scopeConfig is not an object', async () => {
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, scopeConfig: 'nope' }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when lifecycleOverrides is not an object', async () => {
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, lifecycleOverrides: 'nope' }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 400 when note is too long', async () => {
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx({ ...validBody, note: 'x'.repeat(2001) }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 403 when the caller fails the shared read authorization (not an org member)', async () => {
+    const controller = loadController(sinon.stub().resolves(false));
+    const res = await controller.putPolicy(writeCtx(validBody));
+    expect(res.status).to.equal(403);
+  });
+
+  it('attributes the write to "system" when the caller has no identity on the token', async () => {
+    const newRow = {
+      site_id: SITE_ID,
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      created_by: 'a',
+      updated_by: 'system',
+      reason: 'trim crawl',
+      note: null,
+      created_at: 'x',
+      updated_at: 'y',
+    };
+    const client = buildClient({ rpcResult: { data: newRow, error: null } });
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx(validBody, { client, profile: {} }));
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({ p_author: 'system' }));
+  });
+
+  it('propagates a non-UnauthorizedProductError error raised by the entitlement check', async () => {
+    const hasAccess = sinon.stub();
+    hasAccess.withArgs(sinon.match.any).resolves(true);
+    hasAccess.withArgs(sinon.match.any, '', 'ASO').rejects(new Error('entitlement service unavailable'));
+    const controller = loadController(hasAccess);
+    await expect(controller.putPolicy(writeCtx(validBody))).to.be.rejectedWith('entitlement service unavailable');
+  });
+
+  it('treats an UnauthorizedProductError on ASO as false and falls through to check LLMO', async () => {
+    const hasAccess = sinon.stub();
+    hasAccess.withArgs(sinon.match.any).resolves(true);
+    hasAccess.withArgs(sinon.match.any, '', 'ASO').rejects(new UnauthorizedProductError('wrong x-product'));
+    hasAccess.withArgs(sinon.match.any, '', 'LLMO').resolves(true);
+    const newRow = {
+      site_id: SITE_ID,
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      created_by: 'a',
+      updated_by: 'u@x.com',
+      reason: 'trim crawl',
+      note: null,
+      created_at: 'x',
+      updated_at: 'y',
+    };
+    const client = buildClient({ rpcResult: { data: newRow, error: null } });
+    const controller = loadController(hasAccess);
+    const res = await controller.putPolicy(writeCtx(validBody, { client }));
+    expect(res.status).to.equal(200);
   });
 
   it('maps SQLSTATE 40000 to 409 with currentVersion from error.details', async () => {
@@ -311,6 +457,44 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     const tamperedCursor = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'utf8').toString('base64url');
     await controller.listRevisions(buildContext({ client, params: { cursor: tamperedCursor } }));
     expect(ltSpy).to.not.have.been.called;
+  });
+
+  it('applies .lt(version, cursor) for a valid in-range cursor', async () => {
+    const limitSpy = sinon.stub().resolves({ data: [], error: null });
+    const order = sinon.stub().returnsThis();
+    const ltSpy = sinon.stub().returnsThis();
+    const client = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            order, limit: limitSpy, lt: ltSpy,
+          }),
+        }),
+      }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    const cursor = Buffer.from('5', 'utf8').toString('base64url');
+    await controller.listRevisions(buildContext({ client, params: { cursor } }));
+    expect(ltSpy).to.have.been.calledWith('version', 5);
+  });
+
+  it('returns 403 when the caller fails the shared read authorization (not an org member)', async () => {
+    const controller = loadController(sinon.stub().resolves(false));
+    const res = await controller.listRevisions(buildContext());
+    expect(res.status).to.equal(403);
+  });
+
+  it('returns 500 when the PostgREST read fails', async () => {
+    const limitSpy = sinon.stub().resolves({ data: null, error: { code: '500', message: 'boom' } });
+    const order = sinon.stub().returnsThis();
+    const client = {
+      from: () => ({ select: () => ({ eq: () => ({ order, limit: limitSpy }) }) }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client }));
+    expect(res.status).to.equal(500);
   });
 });
 
