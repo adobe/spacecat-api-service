@@ -1,3 +1,57 @@
+# [1.655.0](https://github.com/adobe/spacecat-api-service/compare/v1.654.4...v1.655.0) (2026-07-16)
+
+
+### Features
+
+* **aso-overlay:** CloudWatch EMF instrumentation for READ path (SITES-48140) ([#2822](https://github.com/adobe/spacecat-api-service/issues/2822)) ([4606c73](https://github.com/adobe/spacecat-api-service/commit/4606c7395aab9bd214ee5a506e0df770fb3ccd7b)), closes [adobe/spacecat-infrastructure#675](https://github.com/adobe/spacecat-infrastructure/issues/675)
+
+## [1.654.4](https://github.com/adobe/spacecat-api-service/compare/v1.654.3...v1.654.4) (2026-07-16)
+
+
+### Bug Fixes
+
+* **serenity:** enable bounded-backoff retry on the Semrush REST transport ([#2766](https://github.com/adobe/spacecat-api-service/issues/2766)) ([c923da3](https://github.com/adobe/spacecat-api-service/commit/c923da369ff554f4469056082d026cb8c35231a2))
+
+## [1.654.3](https://github.com/adobe/spacecat-api-service/compare/v1.654.2...v1.654.3) (2026-07-15)
+
+
+### Bug Fixes
+
+* **aso-overlay:** add Surrogate-Key header for Fastly targeted purge (SITES-48140) ([#2826](https://github.com/adobe/spacecat-api-service/issues/2826)) ([9c1fa79](https://github.com/adobe/spacecat-api-service/commit/9c1fa79f9f03920007a8c24a08c42e25db6f5284)), closes [experience-platform/mystique#3381](https://github.com/experience-platform/mystique/issues/3381) [experience-platform/mystique-deploy#568](https://github.com/experience-platform/mystique-deploy/issues/568) [mystique#3381](https://github.com/mystique/issues/3381) [mystique#3381](https://github.com/mystique/issues/3381) [adobe/spacecat-api-service#2822](https://github.com/adobe/spacecat-api-service/issues/2822)
+
+## [1.654.2](https://github.com/adobe/spacecat-api-service/compare/v1.654.1...v1.654.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* domain/segement wide deployment support in IVE ([#2800](https://github.com/adobe/spacecat-api-service/issues/2800)) ([344c45c](https://github.com/adobe/spacecat-api-service/commit/344c45c0a88eae9cef72e52649cb4f5a1ec82a72))
+
+## [1.654.1](https://github.com/adobe/spacecat-api-service/compare/v1.654.0...v1.654.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **preflight:** thread ims_org_id to mysticat analyze; fail-closed when missing (SITES-48037) ([#2818](https://github.com/adobe/spacecat-api-service/issues/2818)) ([123db03](https://github.com/adobe/spacecat-api-service/commit/123db03dc71a7d64b27a96bfe88cb010fc2b8c43)), closes [let-it-throu#and-fail-late](https://github.com/let-it-throu/issues/and-fail-late) [#3408](https://github.com/adobe/spacecat-api-service/issues/3408)
+
+# [1.654.0](https://github.com/adobe/spacecat-api-service/compare/v1.653.0...v1.654.0) (2026-07-15)
+
+
+### Features
+
+* capture guidance_markdown + feedback_subject_id on backoffice reviews ([#2798](https://github.com/adobe/spacecat-api-service/issues/2798)) ([1435d52](https://github.com/adobe/spacecat-api-service/commit/1435d52111e8ee2748488dcc8c918717f64e7cdd)), closes [#790](https://github.com/adobe/spacecat-api-service/issues/790)
+
+# [1.653.0](https://github.com/adobe/spacecat-api-service/compare/v1.652.1...v1.653.0) (2026-07-15)
+
+
+### Bug Fixes
+
+* move read-only lookup routes (regions, brand-presence stats) to capability-gated access ([#2819](https://github.com/adobe/spacecat-api-service/issues/2819)) ([312180b](https://github.com/adobe/spacecat-api-service/commit/312180bc7791848d036e7778da6b8556f3f4681a))
+
+
+### Features
+
+* **prompts:** source-aware upsertPrompts + reject unregistered sources ([#2810](https://github.com/adobe/spacecat-api-service/issues/2810)) ([04e9fc8](https://github.com/adobe/spacecat-api-service/commit/04e9fc8a8b1b38b8b9ac6d28dd3fd101b9face58)), closes [#793](https://github.com/adobe/spacecat-api-service/issues/793) [#793](https://github.com/adobe/spacecat-api-service/issues/793) [#793](https://github.com/adobe/spacecat-api-service/issues/793) [#793](https://github.com/adobe/spacecat-api-service/issues/793) [#2692](https://github.com/adobe/spacecat-api-service/issues/2692)
+
 ## [1.652.1](https://github.com/adobe/spacecat-api-service/compare/v1.652.0...v1.652.1) (2026-07-15)
 
 

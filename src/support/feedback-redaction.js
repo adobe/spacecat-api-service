@@ -129,12 +129,16 @@ export function scrubDeep(value, hits) {
  *
  * @param {object} input
  * @param {string} [input.detailMarkdown]
+ * @param {string} [input.guidanceMarkdown]
  * @param {*} [input.previousFix]
  * @param {*} [input.editedFix]
- * @returns {{ detailMarkdown: (string|undefined), previousFix: *, editedFix: *,
+ * @returns {{ detailMarkdown: (string|undefined),
+ *   guidanceMarkdown: (string|undefined), previousFix: *, editedFix: *,
  *   scrubHits: Record<string, number> }}
  */
-export function redactFeedbackContent({ detailMarkdown, previousFix, editedFix } = {}) {
+export function redactFeedbackContent({
+  detailMarkdown, guidanceMarkdown, previousFix, editedFix,
+} = {}) {
   const scrubHits = {};
 
   let cleanMarkdown = detailMarkdown;
@@ -142,8 +146,17 @@ export function redactFeedbackContent({ detailMarkdown, previousFix, editedFix }
     cleanMarkdown = scrubString(sanitizeMarkdown(detailMarkdown), scrubHits);
   }
 
+  // guidance_markdown is AI-generated issue context, but we secret-scrub it too
+  // (defence in depth — it can quote customer HTML/config). Sanitised like the
+  // reviewer's rationale.
+  let cleanGuidance = guidanceMarkdown;
+  if (typeof guidanceMarkdown === 'string') {
+    cleanGuidance = scrubString(sanitizeMarkdown(guidanceMarkdown), scrubHits);
+  }
+
   return {
     detailMarkdown: cleanMarkdown,
+    guidanceMarkdown: cleanGuidance,
     previousFix: previousFix === undefined ? undefined : scrubDeep(previousFix, scrubHits),
     editedFix: editedFix === undefined ? undefined : scrubDeep(editedFix, scrubHits),
     scrubHits,

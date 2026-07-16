@@ -255,26 +255,26 @@ export function createSerenityTransport({ env, imsToken }) {
     return imsToken;
   };
 
-  // Typed Project Engine client over the project gateway. maxRetries:0 preserves
-  // the one-shot behaviour the hand-rolled transport had; the injected fetch
-  // re-adds the 15s timeout + Accept header the client does not impose. `root` is
-  // the validated origin; the client appends its own '/enterprise/projects/api'
-  // prefix.
+  // Typed Project Engine client; appends '/enterprise/projects/api'. Retry,
+  // backoff, and the POST-never-retries-on-5xx idempotency gate are the shared
+  // library's contract, not this file's — see createRetryingFetch in
+  // spacecat-shared-project-engine-client's internal.js (library defaults:
+  // maxRetries 2, retryBaseDelayMs 200; per-attempt timeout via the injected
+  // `createTimeoutFetch` below, since the retry layer wraps it and calls it
+  // once per attempt).
   const projects = createSerenityProjectEngineApiClient({
     baseUrl: root,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
-  // Typed User Manager client over the sub-workspace lifecycle gateway. Same
-  // shape as the project client; appends its own '/enterprise/users/api' prefix.
-  // Uses `usersRoot` (SEMRUSH_USERS_BASE_URL, or `root` by fallback) so the
-  // lifecycle gateway can be a separate host from Project Engine.
+  // Typed User Manager client over the sub-workspace lifecycle gateway (same
+  // retry/timeout contract as above); appends '/enterprise/users/api'. Uses
+  // `usersRoot` (SEMRUSH_USERS_BASE_URL, falling back to `root`) since this
+  // gateway can be a separate host from Project Engine.
   const users = createSerenityUserManagerApiClient({
     baseUrl: usersRoot,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
