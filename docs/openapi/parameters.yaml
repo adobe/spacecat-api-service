@@ -522,3 +522,18 @@ akamaiAccountSwitchKey:
     Akamai accounts. Client-supplied per request; never persisted or logged.
   schema:
     type: string
+fields:
+  name: fields
+  in: query
+  required: false
+  description: >-
+    Optional sparse-fieldset selector (JSON:API / Google `fields` convention). A
+    comma-separated list of top-level field names to include in each returned
+    item, e.g. `fields=id,baseURL,name`. When omitted, the full representation is
+    returned (fully backwards compatible). `id` is always included even if not
+    listed. Unknown field names are ignored; if none of the requested names match
+    a returned item, the request returns 400. Use this to reduce response payload
+    size for size-constrained consumers.
+  schema:
+    type: string
+    example: 'id,baseURL,name'

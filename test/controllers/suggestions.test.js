@@ -562,6 +562,39 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
   });
 
+  it('projects suggestions to the requested fields when ?fields= is passed', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+      data: { ...context.data, fields: 'type,status' },
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('type');
+    expect(suggestions[0]).to.have.property('status');
+    // heavy fields are dropped when not requested
+    expect(suggestions[0]).to.not.have.property('data');
+  });
+
+  it('returns 400 when ?fields= matches no known suggestion field', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('returns all suggestions when grant filtering throws an error', async () => {
     mockSuggestionGrant.splitSuggestionsByGrantStatus.rejects(new Error('db failure'));
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {

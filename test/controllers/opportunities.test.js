@@ -288,6 +288,47 @@ describe('Opportunities Controller', () => {
     expect(opportunities[0]).to.have.property('id', OPPORTUNITY_ID);
   });
 
+  it('projects opportunities to the requested fields when ?fields= is passed', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      data: { fields: 'title,type' },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(1);
+    // id is always retained; only requested fields plus id are present
+    expect(Object.keys(opportunities[0]).sort()).to.deep.equal(['id', 'title', 'type']);
+    expect(opportunities[0]).to.not.have.property('guidance');
+    expect(opportunities[0]).to.not.have.property('data');
+  });
+
+  it('returns the full shape when ?fields= is omitted', async () => {
+    const response = await opportunitiesController.getAllForSite({ params: { siteId: SITE_ID } });
+    const opportunities = await response.json();
+    expect(opportunities[0]).to.have.property('guidance');
+    expect(opportunities[0]).to.have.property('data');
+  });
+
+  it('returns 400 when ?fields= matches no known field', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      data: { fields: 'nope,missing' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope, missing');
+  });
+
+  it('projects opportunities by status to the requested fields', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      data: { fields: 'title' },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(Object.keys(opportunities[0]).sort()).to.deep.equal(['id', 'title']);
+  });
+
   it('gets all opportunities for a site returns bad request if no site ID is passed', async () => {
     const response = await opportunitiesController.getAllForSite({ params: {} });
     expect(mockOpportunityDataAccess.Opportunity.allBySiteId.calledOnce).to.be.false;
