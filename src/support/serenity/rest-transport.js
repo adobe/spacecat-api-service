@@ -581,7 +581,9 @@ export function createSerenityTransport({ env, imsToken }) {
           + 'Pass the tag\'s current parent id to rename in place, or null to promote deliberately.',
         );
       }
-      const body = { name, parent_id: parentId ?? undefined };
+      // parent_id: null is intentional (promotes tag to root); cast needed because the
+      // generated type omits null even though the API accepts it for field-clearing PATCH.
+      const body = /** @type {any} */({ name, parent_id: parentId });
       return unwrap('PATCH', await projects.PATCH(
         '/v2/workspaces/{id}/projects/{project_id}/aio/tags/{tag_id}',
         {
