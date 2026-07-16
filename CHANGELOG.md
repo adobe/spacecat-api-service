@@ -1,3 +1,10 @@
+## [1.654.4](https://github.com/adobe/spacecat-api-service/compare/v1.654.3...v1.654.4) (2026-07-16)
+
+
+### Bug Fixes
+
+* **serenity:** enable bounded-backoff retry on the Semrush REST transport ([#2766](https://github.com/adobe/spacecat-api-service/issues/2766)) ([c923da3](https://github.com/adobe/spacecat-api-service/commit/c923da369ff554f4469056082d026cb8c35231a2))
+
 ## [1.654.3](https://github.com/adobe/spacecat-api-service/compare/v1.654.2...v1.654.3) (2026-07-15)
 
 
