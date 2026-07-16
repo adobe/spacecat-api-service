@@ -174,6 +174,17 @@ function mapError(e, log) {
         e.status,
       );
     }
+    if (e.status === 409) {
+      // An upstream refusal of a conflicting write (e.g. a prompt rename onto a
+      // sibling prompt's exact text — serenity-docs#63) is the caller's to act
+      // on, not an upstream outage: surface the status and the `conflict` token
+      // instead of flattening it into the generic 502. Message stays redacted
+      // for the same reason as the 401/403 branch above.
+      return createResponse(
+        { error: errorTokenForStatus(e.status), message: 'Upstream rejected the request as a conflict' },
+        e.status,
+      );
+    }
     return createResponse({
       error: 'serenityUpstreamError',
       message: 'Upstream request failed',
