@@ -1,3 +1,10 @@
+# [1.656.0](https://github.com/adobe/spacecat-api-service/compare/v1.655.2...v1.656.0) (2026-07-16)
+
+
+### Features
+
+* **serenity:** edit prompts in place — id-stable rename and tag update with 409 conflict mapping ([#2833](https://github.com/adobe/spacecat-api-service/issues/2833)) ([5f7a1bf](https://github.com/adobe/spacecat-api-service/commit/5f7a1bf088a57945cd8656436c44dfbad8c9296d)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.655.2](https://github.com/adobe/spacecat-api-service/compare/v1.655.1...v1.655.2) (2026-07-16)
 
 
