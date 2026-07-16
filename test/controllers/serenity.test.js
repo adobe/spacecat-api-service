@@ -1263,8 +1263,6 @@ describe('SerenityController', () => {
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
           // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
           dynamicAllocation: false,
-          // Workspace-delete capability (LLMO-6189) also defaults OFF (env unset).
-          allowDelete: false,
         });
       // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
       // options bag — the same id given to ensureSubworkspace.
@@ -1865,7 +1863,6 @@ describe('SerenityController', () => {
         competitors: [],
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
         dynamicAllocation: false,
-        allowDelete: false,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       expect(firstCall.args[7]).to.deep.equal(expectedOpts);
@@ -2180,9 +2177,9 @@ describe('SerenityController', () => {
         'subworkspace-ws-1',
         sinon.match.any,
         WORKSPACE,
-        { enforceLinkedGuard: false, allowDelete: false },
+        { enforceLinkedGuard: false },
       );
-      // The pointer is cleared (disconnect) — never the workspace deleted (flag off, default).
+      // The pointer is cleared (disconnect) — the workspace itself is never deleted.
       expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
       expect(brand.save).to.have.been.called;
@@ -2218,7 +2215,7 @@ describe('SerenityController', () => {
         'subworkspace-ws-1',
         sinon.match.any,
         WORKSPACE,
-        { enforceLinkedGuard: true, allowDelete: false },
+        { enforceLinkedGuard: true },
       );
     });
 

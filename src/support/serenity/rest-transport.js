@@ -729,21 +729,19 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * DELETE /v1/workspaces/{ws} — fail-closed: throws unless
      * SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which is unset (off) in every
-     * deployed environment by default. Two capabilities share this one gate (LLMO-6189): the
-     * net-zero live smoke / IT-harness teardown (original use), and, when an operator explicitly
-     * opts an environment in, the production decommission/cleanup lifecycle paths in
-     * workspace-lifecycle.js's `releaseFullAllocation` — the only way to genuinely reclaim a
-     * sub-workspace's FULL AI allocation (a to-zero transfer is a proven no-op against the
-     * gateway). With the flag off, those paths log the allocation as stranded instead of calling
-     * this. Delete cascades over the workspace's projects (subsequent reads return 403, workspace
-     * doc §4); every lifecycle caller of this method deletes projects explicitly first regardless,
-     * rather than relying on that cascade.
+     * deployed environment by default (LLMO-6189). Production lifecycle paths (decommission,
+     * failed-provisioning cleanup) never call this — a sub-workspace is only ever reclaimed by
+     * lowering its allocation to a non-zero floor via `workspace-lifecycle.js`'s
+     * `releaseFullAllocation`, never by deletion. This primitive exists purely for
+     * net-zero live smoke / IT-harness teardown (its original and only intended use) and manual
+     * operator cleanup of throwaway test workspaces. Delete cascades over the workspace's projects
+     * (subsequent reads return 403, workspace doc §4).
      */
     async deleteWorkspace(workspaceId) {
       if (!allowWorkspaceDelete) {
         throw new Error(
           'Serenity workspace deletion is disabled. Set SERENITY_ALLOW_WORKSPACE_DELETE=true to '
-          + 'enable it (test cleanup, or a deliberate production reclaim-capability opt-in).',
+          + 'enable it (test/smoke cleanup only — production never deletes a sub-workspace).',
         );
       }
       return unwrap('DELETE', await users.DELETE(

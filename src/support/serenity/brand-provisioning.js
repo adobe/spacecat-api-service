@@ -20,11 +20,6 @@ import { resolveWorkspaceId } from './workspace-resolver.js';
 import { deleteAllProjects, releaseFullAllocation } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 
-// LLMO-6189: env flag gate shared with workspace-lifecycle.js / rest-transport.js. Read here (not
-// exported from rest-transport.js) so this module stays the single place that turns `context.env`
-// into the `allowDelete` option threaded into `releaseFullAllocation`.
-const isWorkspaceDeleteAllowed = (env) => env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
-
 // Re-exported for callers/tests that drive brand provisioning. The tag
 // vocabularies themselves live in `prompt-tags.js` (single source of truth).
 
@@ -158,35 +153,21 @@ export async function provisionBrandSubworkspace(context, {
   // Best-effort; never masks the original error.
   //
   // LLMO-6189: a zero-payload transfer is a silent no-op against the gateway, so it can never
-  // actually reclaim the captured workspace's allocation. Delete-project(s)-then-delete-workspace
-  // when SERENITY_ALLOW_WORKSPACE_DELETE is explicitly on (genuine reclaim); otherwise log the
-  // stranding loudly instead of the previous false "released" success. The workspace may already
-  // have a project in it at this point (a failure at/after createProject) or may still be empty (an
-  // earlier failure) — deleteAllProjects tolerates both.
+  // actually reclaim the captured workspace's allocation. Delete the projects, then lower the
+  // allocation to a non-zero floor (releaseFullAllocation) — the workspace itself is never deleted
+  // (production never deletes a sub-workspace). The workspace may already have a project in it at
+  // this point (a failure at/after createProject) or may still be empty (an earlier failure) —
+  // deleteAllProjects tolerates both.
   const releaseCapturedOnFailure = async () => {
     if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
       return;
     }
     try {
-      const allowDelete = isWorkspaceDeleteAllowed(context.env);
       await deleteAllProjects(transport, capturedWorkspaceId);
-      const release = await releaseFullAllocation(
-        transport,
-        capturedWorkspaceId,
-        parentWorkspaceId,
-        log,
-        { allowDelete },
-      );
+      await releaseFullAllocation(transport, capturedWorkspaceId, parentWorkspaceId, log);
       log?.info?.(
-        release.released
-          ? 'serenity: deleted sub-workspace after failed brand provisioning — allocation fully reclaimed'
-          : 'serenity: sub-workspace allocation could not be reclaimed after failed brand provisioning '
-            + '— units remain stranded pending decommission',
-        {
-          semrushWorkspaceId: capturedWorkspaceId,
-          released: release.released,
-          reason: release.reason,
-        },
+        'serenity: emptied sub-workspace after failed brand provisioning — allocation lowered to floor',
+        { semrushWorkspaceId: capturedWorkspaceId },
       );
     } catch (releaseErr) {
       log?.error?.('serenity: failed to release sub-workspace allocation after failed provisioning', {
@@ -235,10 +216,6 @@ export async function provisionBrandSubworkspace(context, {
         publishMode: (Array.isArray(modelIds) && modelIds.length > 0) || generateTopics
           ? 'require'
           : 'best-effort',
-        // reloadPointer is null on this single-create path, so the internal ensureSubworkspace
-        // concurrency-loser branch never fires here — threaded anyway for consistency with every
-        // other ensureSubworkspace call site (LLMO-6189).
-        allowDelete: isWorkspaceDeleteAllowed(context.env),
       },
     );
   } catch (e) {
@@ -289,12 +266,11 @@ export async function provisionBrandSubworkspace(context, {
  *
  * At this point provisioning fully SUCCEEDED (project created, models attached, possibly
  * published) before the subsequent brand-row write failed — the workspace always has exactly one
- * project. Deletes it, then reclaims the allocation via {@link releaseFullAllocation} (LLMO-6189):
- * a genuine reclaim (workspace deleted) when `SERENITY_ALLOW_WORKSPACE_DELETE === 'true'`;
- * otherwise the stranding is logged loudly rather than falsely reported as released — the previous
- * zero-payload transfer this replaced was a silent no-op against the gateway. Never throws: the
- * caller is already on an error path, so any failure here is logged at ERROR (with the workspace
- * id, for manual recovery) and swallowed.
+ * project. Deletes the project, then lowers the allocation to a non-zero floor via
+ * {@link releaseFullAllocation} (LLMO-6189) — the workspace itself is never deleted (production
+ * never deletes a sub-workspace); the previous zero-payload transfer this replaced was a silent
+ * no-op against the gateway. Never throws: the caller is already on an error path, so any failure
+ * here is logged at ERROR (with the workspace id, for manual recovery) and swallowed.
  *
  * @param {object} context - request context (env, pathInfo headers, attributes).
  * @param {string} workspaceId - the orphaned sub-workspace id to release.
@@ -325,20 +301,10 @@ export async function releaseProvisionedWorkspace(
       ? (await resolveWorkspaceId(context, spaceCatId)) ?? undefined
       : undefined;
     await deleteAllProjects(transport, workspaceId);
-    const allowDelete = isWorkspaceDeleteAllowed(context.env);
-    const release = await releaseFullAllocation(
-      transport,
-      workspaceId,
-      parentWorkspaceId,
-      log,
-      { allowDelete },
-    );
+    await releaseFullAllocation(transport, workspaceId, parentWorkspaceId, log);
     log?.info?.(
-      release.released
-        ? 'serenity: deleted orphaned subworkspace — allocation fully reclaimed'
-        : 'serenity: orphaned subworkspace allocation could not be reclaimed — units remain '
-          + 'stranded pending decommission',
-      { semrushWorkspaceId: workspaceId, released: release.released, reason: release.reason },
+      'serenity: emptied orphaned subworkspace — allocation lowered to floor',
+      { semrushWorkspaceId: workspaceId },
     );
   } catch (e) {
     log?.error?.('serenity: failed to release orphaned subworkspace allocation', {

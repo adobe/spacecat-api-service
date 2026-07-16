@@ -197,8 +197,6 @@ describe('provisionBrandSubworkspace', () => {
       brandUrlSources: null,
       competitors: [],
       publishMode: 'require',
-      // LLMO-6189: workspace-delete capability defaults OFF (env unset in buildContext()).
-      allowDelete: false,
     });
     // The stub drives the sub-workspace title off the brand's name + id.
     expect(brandStub.getName()).to.equal('Acme');
@@ -400,13 +398,12 @@ describe('provisionBrandSubworkspace', () => {
     };
   }
 
-  it('LLMO-6189: logs the stranded allocation (never a zero-payload transfer) when provisioning throws after creation, allowDelete off (default)', async () => {
+  it('LLMO-6189: lowers the orphaned workspace allocation to a non-zero floor when provisioning throws after creation', async () => {
     // ensureSubworkspace creates the workspace (captured via the stub) and THEN
     // a later step returns a 4xx — provisioning throws. The orphaned workspace's
-    // projects are emptied; its allocation cannot be reclaimed via transfer (a
-    // to-zero transfer is a proven no-op), so — with the delete capability off,
-    // the default in every deployed env — it is logged as stranded rather than
-    // falsely reported as released.
+    // projects are emptied, and its allocation is lowered to a non-zero floor
+    // (never a to-zero transfer — proven no-op; never a delete — production
+    // never deletes a sub-workspace).
     const transport = makeReleaseTransport({
       listProjects: sinon.stub().resolves({ items: [{ id: 'proj-1' }] }),
     });
@@ -433,42 +430,11 @@ describe('provisionBrandSubworkspace', () => {
       expect(e.status).to.equal(502);
     }
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'proj-1');
-    expect(transport.transferWorkspaceResources).to.not.have.been.called;
+    expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+      NEW_WS,
+      { ai: { projects: 1, prompts: 1 } },
+    );
     expect(transport.deleteWorkspace).to.not.have.been.called;
-  });
-
-  it('LLMO-6189: deletes the orphaned sub-workspace outright when allowDelete is on', async () => {
-    const transport = makeReleaseTransport({
-      listProjects: sinon.stub().resolves({ items: [{ id: 'proj-1' }] }),
-    });
-    const handler = sinon.stub().callsFake(async (t, brand) => {
-      brand.setSemrushSubWorkspaceId(NEW_WS);
-      return { status: 502, body: { message: 'upstream blew up' } };
-    });
-    const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
-      '../../../src/support/serenity/workspace-resolver.js': {
-        resolveWorkspaceId: sinon.stub().resolves(PARENT_WS),
-      },
-      '../../../src/support/serenity/rest-transport.js': {
-        createSerenityTransport: () => transport,
-        SerenityTransportError,
-      },
-      '../../../src/support/serenity/handlers/markets-subworkspace.js': {
-        handleCreateMarketSubworkspace: handler,
-      },
-    });
-    try {
-      await mod.provisionBrandSubworkspace(
-        { ...buildContext(), env: { SERENITY_ALLOW_WORKSPACE_DELETE: 'true' } },
-        baseParams,
-      );
-      expect.fail('should have thrown');
-    } catch (e) {
-      expect(e.status).to.equal(502);
-    }
-    expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'proj-1');
-    expect(transport.deleteWorkspace).to.have.been.calledOnceWithExactly(NEW_WS);
-    expect(transport.transferWorkspaceResources).to.not.have.been.called;
   });
 
   it('does NOT attempt a release when provisioning fails before the workspace is created', async () => {
@@ -540,7 +506,7 @@ describe('releaseProvisionedWorkspace', () => {
     return esmock('../../../src/support/serenity/brand-provisioning.js', overrides);
   }
 
-  it('LLMO-6189: allowDelete off (default) — empties projects, logs the stranded allocation, never sends a zero-payload transfer', async () => {
+  it('LLMO-6189: empties projects and lowers the allocation to a non-zero floor, never a zero-payload transfer or a delete', async () => {
     const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }) });
     const resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
     const { releaseProvisionedWorkspace } = await loadWithTransport(
@@ -550,34 +516,13 @@ describe('releaseProvisionedWorkspace', () => {
     const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
     await releaseProvisionedWorkspace(buildAuthedContext(), NEW_WS, 'org-1', log);
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'p1');
-    expect(transport.transferWorkspaceResources.called).to.equal(false);
+    expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+      NEW_WS,
+      { ai: { projects: 1, prompts: 1 } },
+    );
     expect(transport.deleteWorkspace.called).to.equal(false);
     expect(log.error.called).to.equal(false);
-    expect(log.info.calledOnce).to.equal(true);
-    expect(log.info.firstCall.args[1]).to.include({ released: false, reason: 'requires-decommission' });
-  });
-
-  it('LLMO-6189: allowDelete on — deletes the workspace, a genuine reclaim', async () => {
-    const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }) });
-    const resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
-    const { releaseProvisionedWorkspace } = await loadWithTransport(
-      transport,
-      { resolveWorkspaceId },
-    );
-    const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
-    await releaseProvisionedWorkspace(
-      buildAuthedContext({ SERENITY_ALLOW_WORKSPACE_DELETE: 'true' }),
-      NEW_WS,
-      'org-1',
-      log,
-    );
-    expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'p1');
-    expect(transport.deleteWorkspace).to.have.been.calledOnceWithExactly(NEW_WS);
-    expect(transport.transferWorkspaceResources.called).to.equal(false);
-    expect(log.error.called).to.equal(false);
-    // releaseFullAllocation logs its own info line first; releaseProvisionedWorkspace's summary
-    // (the one carrying released/reason) is the LAST info call.
-    expect(log.info.lastCall.args[1]).to.include({ released: true, reason: 'deleted' });
+    expect(log.info.called).to.equal(true);
   });
 
   it('resolves the org parent workspace via spaceCatId and refuses to act on it (assertNotParent)', async () => {
