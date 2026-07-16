@@ -34,3 +34,14 @@ export {
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
 } from './market-tracking-trends.js';
+export {
+  transformStatsSimpleNumericResponse,
+  buildStatsTotalExecutionsPayload,
+  transformStatsTotalExecutionsResponse,
+  buildStatsMentionsPayload,
+  transformStatsMentionsResponse,
+  buildStatsVisibilityPayload,
+  transformStatsVisibilityResponse,
+  buildStatsCitationsPayload,
+  transformStatsCitationsResponse,
+} from './brand-presence-stats.js';

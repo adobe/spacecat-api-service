@@ -311,4 +311,120 @@ describe('createElementsService', () => {
       })).to.be.rejectedWith('trends upstream failure');
     });
   });
+
+  describe('getBrandPresenceStats', () => {
+    const simpleNumeric = (value) => ({
+      blocks: { firstSectionMainValue: [{ firstSectionMainValue: value }] },
+    });
+
+    beforeEach(() => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.TOTAL_EXECUTIONS, sinon.match.any)
+        .resolves(simpleNumeric(19528));
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.MENTIONS, sinon.match.any)
+        .resolves(simpleNumeric(14635));
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.VISIBILITY, sinon.match.any)
+        .resolves(simpleNumeric(0.4877));
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.CITATIONS_KPI, sinon.match.any)
+        .resolves(simpleNumeric(158903));
+    });
+
+    it('fetches the 4 KPI elements in parallel and returns the combined stats', async () => {
+      const result = await service.getBrandPresenceStats('ws-1', {
+        model: 'search-gpt',
+        startDate: '2026-07-01',
+        endDate: '2026-07-14',
+        brandName: 'Lovesac',
+        projectId: 'proj-1',
+      });
+      expect(result).to.deep.equal({
+        stats: {
+          total_executions: 19528,
+          total_mentions: 14635,
+          average_visibility_score: 48.77,
+          total_citations: 158903,
+        },
+      });
+    });
+
+    it('does not fetch trends when showTrends is falsy', async () => {
+      await service.getBrandPresenceStats('ws-1', {
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectId: 'proj-1',
+      });
+      expect(transport.fetchElement.callCount).to.equal(4);
+    });
+
+    it('scopes Total Executions to the single resolved project via CBF_project, same as the other KPI elements', async () => {
+      await service.getBrandPresenceStats('ws-1', {
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectId: 'proj-1',
+      });
+      const totalExecCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.TOTAL_EXECUTIONS);
+      const projectFilter = totalExecCall.args[2].filters.advanced.filters.find(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_project'),
+      );
+      expect(projectFilter.filters).to.deep.equal([{ op: 'eq', val: 'proj-1', col: 'CBF_project' }]);
+    });
+
+    it('omits the CBF_project filter on Total Executions in aggregate mode (no projectIds)', async () => {
+      await service.getBrandPresenceStats('ws-1', {
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectIds: [],
+      });
+      const totalExecCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.TOTAL_EXECUTIONS);
+      const hasProjectFilter = totalExecCall.args[2].filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_project'),
+      );
+      expect(hasProjectFilter).to.equal(false);
+    });
+
+    it('fetches weekly trends for each week when showTrends is true', async () => {
+      const result = await service.getBrandPresenceStats('ws-1', {
+        startDate: '2026-07-01',
+        endDate: '2026-07-14',
+        brandName: 'Lovesac',
+        projectId: 'proj-1',
+        showTrends: true,
+      });
+      // 4 for the overall range + 4 per week (2 weeks in a 14-day range) = 12
+      expect(transport.fetchElement.callCount).to.equal(12);
+      expect(result.trends).to.deep.equal([
+        {
+          startDate: '2026-07-01',
+          endDate: '2026-07-07',
+          data: {
+            stats: {
+              total_executions: 19528,
+              total_mentions: 14635,
+              average_visibility_score: 48.77,
+              total_citations: 158903,
+            },
+          },
+        },
+        {
+          startDate: '2026-07-08',
+          endDate: '2026-07-14',
+          data: {
+            stats: {
+              total_executions: 19528,
+              total_mentions: 14635,
+              average_visibility_score: 48.77,
+              total_citations: 158903,
+            },
+          },
+        },
+      ]);
+    });
+
+    it('propagates transport errors', async () => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.MENTIONS, sinon.match.any)
+        .rejects(new Error('mentions upstream failure'));
+      await expect(service.getBrandPresenceStats('ws-1', {
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectId: 'proj-1',
+      })).to.be.rejectedWith('mentions upstream failure');
+    });
+  });
 });
