@@ -153,7 +153,7 @@ function BrandsController(ctx, log, env) {
             Product: context?.pathInfo?.headers?.['x-product'],
           },
         },
-        { environment: resolveEnvironment(env), namespace: BRAND_METRICS_NAMESPACE },
+        { environment: resolveEnvironment(env, { log }), namespace: BRAND_METRICS_NAMESPACE },
       );
       log.warn(`BrandDemotionBlocked: ${operation} attempted an active->pending demotion `
         + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
