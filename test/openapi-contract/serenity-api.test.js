@@ -126,15 +126,18 @@ const FIXTURES = {
     handlerName: 'handleUpdatePrompt',
     handlerResult: {
       status: 200,
+      // The edit is in place: the response echoes the UNCHANGED prompt id.
       body: {
-        semrushPromptId: 'sem-new',
+        semrushPromptId: 'sem-1',
         geoTargetId: 2840,
         languageCode: 'en',
         text: 'new text',
       },
     },
     params: { semrushPromptId: 'sem-1' },
-    data: { geoTargetId: 2840, languageCode: 'en', text: 'new text' },
+    data: {
+      geoTargetId: 2840, languageCode: 'en', text: 'new text', tagIds: ['t-1'],
+    },
   },
   bulkDeleteSerenityPrompts: {
     expectedStatus: 200,
