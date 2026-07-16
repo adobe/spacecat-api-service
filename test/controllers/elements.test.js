@@ -980,6 +980,23 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 when the explicit date range exceeds 56 days (8 weeks)', async () => {
+      const ctx = statsCtx({ url: statsUrl('?startDate=2026-01-01&endDate=2026-12-31') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+      const body = await readBody(res);
+      expect(body.message).to.match(/Date range must not exceed 56 days/);
+      expect(serviceStub.getBrandPresenceStats).to.not.have.been.called;
+    });
+
+    it('allows an explicit date range of exactly 56 days', async () => {
+      const ctx = statsCtx({ url: statsUrl('?startDate=2026-01-01&endDate=2026-02-26') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+    });
+
     it('resolves regionCode to a single projectId via resolveRegionProjectId', async () => {
       serviceStub.resolveRegionProjectId.resolves('proj-us');
       const ctx = fakeContext({ url: statsUrl('?regionCode=US') });

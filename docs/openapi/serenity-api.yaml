@@ -1167,6 +1167,10 @@ v2-serenity-brand-presence-stats:
       (`trends`) for sparklines, split backward from `endDate` into up to 8
       7-day weeks.
 
+      The effective `[startDate, endDate]` range (after defaulting) must not
+      exceed 56 days (8 weeks) — matching the Brand Presence date picker's
+      maximum selectable range and the trends fan-out cap; a wider range 400s.
+
       `categoryId`/`categoryIds`, `topicIds`, `origin`, `userIntent`, and
       `promptBranding` are accepted by the reference Postgres-backed endpoint
       but are not yet supported here — the Elements API has no confirmed

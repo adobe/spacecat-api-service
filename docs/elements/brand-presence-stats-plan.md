@@ -466,3 +466,30 @@ All steps complete:
 7. Not done — `categoryId(s)`/`topicIds`/`origin` query params are accepted but are
    currently no-ops (documented in the `getStats` docstring) pending a confirmed
    Semrush filter equivalent — see the wiki gap analysis from the initial research.
+8. ✅ `MAX_RANGE_DAYS = 56` (8 weeks) cap on the effective `[startDate, endDate]`
+   range, matching the Brand Presence date picker's max selectable range and the
+   `TRENDS_MAX_WEEKS` trends fan-out cap — mirrors the `MAX_RANGE_DAYS` pattern in
+   `listOwnedUrls`/`listDomainUrls` (366 there; 56 here since this endpoint has no
+   equivalent "unbounded historical browse" use case).
+
+### Known gap: no integration test coverage (blocked on infra, not in scope here)
+
+**Status: not done, and not currently possible without new test infrastructure.**
+`test/it/` has zero IT coverage for this endpoint — and in fact zero for *any*
+`ElementsController` endpoint (`url-inspector/filter-dimensions`, `weeks`, `prompts`,
+`cited-domains`, `owned-urls`, `domain-urls`). This is a pre-existing gap across the
+whole file, not something introduced by this change.
+
+**Root cause:** `test/it/postgres/docker-compose.yml` only ships two Semrush vendor
+mocks — `project-engine-mock` and `user-manager-mock` — Counterfact mocks of the
+classic Semrush Project Engine API (`@adobe/spacecat-shared-project-engine-client`:
+markets/tags/prompts/models) used by `SerenityController`. There is **no mock for the
+Elements API** (`POST .../products/ai/elements/{elementId}/data`) that
+`ElementsController` (and this endpoint) depends on — confirmed by inspecting the
+Project Engine client package source, which has zero references to "elements". A true
+happy-path 200 IT test isn't achievable today without standing up a new Elements API
+mock container (or extending an existing one).
+
+**Follow-up needed** (tracked as a separate infra effort, not part of this PR): add an
+Elements-API-compatible vendor mock to the IT stack, then backfill IT coverage for the
+whole `ElementsController` surface (not just `/stats`) in one pass.

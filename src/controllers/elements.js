@@ -817,6 +817,18 @@ export default function ElementsController(context, log, env) {
         return badRequest('startDate must not be after endDate');
       }
       const defaultRange = defaultStatsDateRange();
+      const effectiveStartDate = startDate || defaultRange.startDate;
+      const effectiveEndDate = endDate || defaultRange.endDate;
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): the Brand Presence
+      // date picker only allows selecting up to 8 weeks, matching the trends
+      // fan-out cap (splitDateRangeIntoWeeksBackward's TRENDS_MAX_WEEKS), so a
+      // wider range can only come from a caller bypassing the UI.
+      const MAX_RANGE_DAYS = 56;
+      const spanDays = (Date.parse(`${effectiveEndDate}T00:00:00Z`)
+        - Date.parse(`${effectiveStartDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
 
       const service = await buildService(ctx);
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
@@ -850,8 +862,8 @@ export default function ElementsController(context, log, env) {
       const result = await service.getBrandPresenceStats(workspaceId, {
         model: query.model,
         platform: query.platform,
-        startDate: startDate || defaultRange.startDate,
-        endDate: endDate || defaultRange.endDate,
+        startDate: effectiveStartDate,
+        endDate: effectiveEndDate,
         projectId,
         projectIds,
         brandName: brand.name,
