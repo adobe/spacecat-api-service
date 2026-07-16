@@ -11878,12 +11878,18 @@ ReferralTrafficFilterDimensions:
       items:
         type: string
       example: ['optel', 'cdn']
+    categories:
+      type: array
+      items:
+        type: string
+      example: ['Apparel', 'Footwear']
   required:
     - platforms
     - regions
     - devices
     - pageIntents
     - availableSources
+    - categories
 
 ReferralTrafficKpis:
   type: object
