@@ -1943,7 +1943,7 @@ export const onboardSingleSite = async (
     const importsMessage = reportLine.imports || 'None';
     const statusMessage = scheduledRun
       ? `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`
-      : `:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`;
+      : `:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage}; triggered (not scheduled) audits: ${auditsMessage}`;
     await say(statusMessage);
 
     // trigger audit runs
