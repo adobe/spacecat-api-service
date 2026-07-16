@@ -1893,35 +1893,40 @@ export const onboardSingleSite = async (
       ? additionalParams.scheduledRun
       : (profile.config?.scheduledRun || false);
 
-    const latestConfiguration = await Configuration.findLatest();
-
-    // Enable audits in configuration for all runs so the audit-worker creates opportunities.
-    // For non-scheduled runs the task processor disables them after the wait period.
-    const auditsEnabled = [];
-    for (const auditType of auditTypes) {
-      /* eslint-disable no-await-in-loop */
-      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-      if (!isEnabled) {
-        latestConfiguration.enableHandlerForSite(auditType, site);
-        auditsEnabled.push(auditType);
-      }
-    }
-
-    if (auditsEnabled.length > 0) {
-      try {
-        await latestConfiguration.save();
-        log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
-        if (scheduledRun) {
-          await say(
-            `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
-          );
+    // Enable audits in the site's configuration ONLY for scheduled runs or protected
+    // (paid) profiles. Those are the profiles whose audits are meant to keep running
+    // on the shared scheduler after onboarding; enabling here is what puts them on
+    // that schedule. Free-trial, non-scheduled runs still get their audits *triggered*
+    // once via `triggerAuditForSite` below, but do not have handlers persisted in
+    // site config — so no task-processor disable step is needed for them either.
+    if (scheduledRun || profile.protected) {
+      const latestConfiguration = await Configuration.findLatest();
+      const auditsEnabled = [];
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+        if (!isEnabled) {
+          latestConfiguration.enableHandlerForSite(auditType, site);
+          auditsEnabled.push(auditType);
         }
-      } catch (error) {
-        log.error(`Failed to save configuration for site ${siteID}:`, error);
-        throw error;
       }
-    } else {
-      log.debug(`All the required audits for the given profile are already enabled for site ${siteID}`);
+
+      if (auditsEnabled.length > 0) {
+        try {
+          await latestConfiguration.save();
+          log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+          if (scheduledRun) {
+            await say(
+              `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
+            );
+          }
+        } catch (error) {
+          log.error(`Failed to save configuration for site ${siteID}:`, error);
+          throw error;
+        }
+      } else {
+        log.debug(`All the required audits for the given profile are already enabled for site ${siteID}`);
+      }
     }
 
     reportLine.audits = auditTypes.join(', ');
@@ -2000,7 +2005,10 @@ export const onboardSingleSite = async (
 
     // Prepare and start step function workflow with the necessary parameters.
     // Always send disableImportAndAuditJob so imports can be disabled (avoid exhausting Ahrefs).
-    // For non-paid, non-scheduled sites, audits that were enabled are also disabled after the wait.
+    // Audits are NOT disabled by the task processor: for scheduled / paid-profile runs
+    // they are intentionally left enabled so the shared scheduler picks them up, and
+    // for free-trial non-scheduled runs they were never enabled in site config in the
+    // first place — so no audit-disable step is required from either side.
     const workflowInput = {
       opportunityStatusJob,
       disableImportAndAuditJob: {
@@ -2011,7 +2019,6 @@ export const onboardSingleSite = async (
         organizationId,
         taskContext: {
           importTypes: importsEnabled || [],
-          auditTypes,
           scheduledRun,
           slackContext: {
             channelId: slackContext.channelId,
