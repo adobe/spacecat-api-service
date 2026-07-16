@@ -659,6 +659,15 @@ describe('llmo-referral-traffic', () => {
       expect(client.rpc.getCall(0).args[1].p_url_search).to.equal('blog');
     });
 
+    it('omits p_category_name from the by-url RPC even when categoryName is provided (LLMO-6026 hotfix)', async () => {
+      // prod rpc_referral_traffic_by_url does not yet accept p_category_name; sending
+      // it breaks PostgREST overload resolution and 500s. See controller hotfix comment.
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { categoryName: 'Footwear' } }));
+      expect(client.rpc.getCall(0).args[1]).to.not.have.property('p_category_name');
+    });
+
     it('clamps pageSize above the max', async () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);

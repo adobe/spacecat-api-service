@@ -530,6 +530,13 @@ export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
           p_sort_by: sortBy,
           p_sort_order: sortOrder,
         };
+        // HOTFIX (LLMO-6026): prod rpc_referral_traffic_by_url does not yet accept
+        // p_category_name — the data-service migration adding it (mysticat-data-service
+        // #786) has not been promoted to prod. Sending the param makes PostgREST fail
+        // overload resolution ("Could not find the function ... in the schema cache")
+        // and every by-url request 500s. Omit it here until the migration lands in prod,
+        // then revert this deletion to restore category filtering on by-url.
+        delete rpcParams.p_category_name;
         const { data, error } = await client.rpc('rpc_referral_traffic_by_url', rpcParams);
 
         if (error) {
