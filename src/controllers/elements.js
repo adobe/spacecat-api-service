@@ -23,6 +23,7 @@ import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
+import { addDaysToDate } from '../support/elements/week-utils.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -132,16 +133,14 @@ function isYmdDate(value) {
 /**
  * Default 28-day trailing date range for `/stats`, mirroring
  * `llmo-brand-presence.js#defaultDateRange`, used when the caller omits
- * startDate/endDate.
+ * startDate/endDate. Uses `addDaysToDate` (anchored to T12:00:00Z) rather than
+ * `Date#setDate`, which operates in local time before `toISOString()` converts
+ * to UTC — avoiding a DST-boundary date-shift bug.
  */
 function defaultStatsDateRange() {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - 28);
-  return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
-  };
+  const endDate = new Date().toISOString().slice(0, 10);
+  const startDate = addDaysToDate(endDate, -28);
+  return { startDate, endDate };
 }
 
 /**
@@ -162,8 +161,13 @@ function splitCsv(value) {
 /**
  * True when the `showTrends`/`show_trends` query param requests trend data,
  * mirroring `llmo-brand-presence.js#parseShowTrends`.
+ *
+ * Exported (unlike this file's other private helpers) because `extractQuery`
+ * always yields string values from `URLSearchParams`, so the boolean/number
+ * branch below is unreachable through the HTTP query-string path and can only
+ * be exercised via a direct unit test.
  */
-function parseShowTrends(q) {
+export function parseShowTrends(q) {
   const v = q?.showTrends ?? q?.show_trends;
   if (v === true || v === 1) {
     return true;
@@ -835,6 +839,12 @@ export default function ElementsController(context, log, env) {
         projectIds = brandSemrushProjects
           .map((p) => p.semrushProjectId)
           .filter(hasText);
+        // An empty list here must not silently fall through to an unscoped
+        // (workspace-wide) Semrush query — that would return data for every
+        // brand/project in the subworkspace, not just this one. Fail explicitly.
+        if (projectIds.length === 0) {
+          return notFound(`No Semrush projects configured for brand: ${brandId}`);
+        }
       }
 
       const result = await service.getBrandPresenceStats(workspaceId, {

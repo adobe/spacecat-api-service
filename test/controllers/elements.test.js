@@ -16,6 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { parseShowTrends } from '../../src/controllers/elements.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -879,8 +880,21 @@ describe('ElementsController', () => {
     const statsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
       + `/brands/${BRAND_ID}/serenity/brand-presence/stats${qs}`;
 
+    // Most aggregate-view (no regionCode) assertions need the brand to own at
+    // least one Semrush project, or getStats 404s (see the dedicated empty-
+    // projects test below) before ever reaching the service call.
+    const statsCtx = (overrides = {}) => {
+      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' });
+      return fakeContext({
+        url: statsUrl(),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: [project],
+        ...overrides,
+      });
+    };
+
     it('returns 200 with the service result by default (aggregate view, no trends)', async () => {
-      const ctx = fakeContext({ url: statsUrl() });
+      const ctx = statsCtx();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
@@ -890,14 +904,24 @@ describe('ElementsController', () => {
       expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
       expect(params.brandName).to.equal('Adobe Brand');
       expect(params.projectId).to.equal(undefined);
-      expect(params.projectIds).to.deep.equal([]);
+      expect(params.projectIds).to.deep.equal(['proj-1']);
       expect(params.showTrends).to.equal(false);
       expect(params.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
       expect(params.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
     });
 
+    it('returns 404 when the brand has no configured Semrush projects (empty aggregate view)', async () => {
+      const ctx = fakeContext({ url: statsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.message).to.match(/No Semrush projects configured for brand/);
+      expect(serviceStub.getBrandPresenceStats).to.not.have.been.called;
+    });
+
     it('passes showTrends=true through to the service', async () => {
-      const ctx = fakeContext({ url: statsUrl('?showTrends=true') });
+      const ctx = statsCtx({ url: statsUrl('?showTrends=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
@@ -906,7 +930,7 @@ describe('ElementsController', () => {
     });
 
     it('passes showTrends=true through when show_trends=1 (snake_case alias)', async () => {
-      const ctx = fakeContext({ url: statsUrl('?show_trends=1') });
+      const ctx = statsCtx({ url: statsUrl('?show_trends=1') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.getStats(ctx);
       const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
@@ -914,7 +938,7 @@ describe('ElementsController', () => {
     });
 
     it('passes showTrends=false through when showTrends=false', async () => {
-      const ctx = fakeContext({ url: statsUrl('?showTrends=false') });
+      const ctx = statsCtx({ url: statsUrl('?showTrends=false') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.getStats(ctx);
       const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
@@ -922,7 +946,7 @@ describe('ElementsController', () => {
     });
 
     it('passes explicit startDate/endDate/model/platform through to the service', async () => {
-      const ctx = fakeContext({
+      const ctx = statsCtx({
         url: statsUrl('?startDate=2026-07-01&endDate=2026-07-14&model=search-gpt&platform=chatgpt'),
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
@@ -991,9 +1015,7 @@ describe('ElementsController', () => {
     });
 
     it('resolves projectIds from the brand\'s BrandSemrushProject rows when no region is given', async () => {
-      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' });
-      const ctx = fakeContext({ withBrandSemrushProject: true, brandSemrushProjects: [project] });
-      ctx.dataAccess.BrandSemrushProject = { allByBrandId: sinon.stub().resolves([project]) };
+      const ctx = statsCtx();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
@@ -1031,7 +1053,7 @@ describe('ElementsController', () => {
 
     it('proceeds when siteId resolves to the same brand as :brandId', async () => {
       getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
-      const ctx = fakeContext({ url: statsUrl('?siteId=site-of-this-brand') });
+      const ctx = statsCtx({ url: statsUrl('?siteId=site-of-this-brand') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
@@ -1039,7 +1061,7 @@ describe('ElementsController', () => {
 
     it('accepts the site_id snake_case alias for siteId', async () => {
       getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
-      const ctx = fakeContext({ url: statsUrl('?site_id=site-of-this-brand') });
+      const ctx = statsCtx({ url: statsUrl('?site_id=site-of-this-brand') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
@@ -1066,7 +1088,7 @@ describe('ElementsController', () => {
 
     it('propagates upstream errors through mapError', async () => {
       serviceStub.getBrandPresenceStats.rejects(new MockElementsTransportError(503, 'upstream down'));
-      const ctx = fakeContext({ url: statsUrl() });
+      const ctx = statsCtx();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(502);
@@ -1101,6 +1123,51 @@ describe('ElementsController', () => {
       const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
       expect(params.model).to.equal('gpt-5');
       expect(params.foo).to.equal('bar');
+    });
+  });
+
+  // ─── parseShowTrends ──────────────────────────────────────────────────────
+  // Exercised directly (not just through getStats) because extractQuery only
+  // ever yields strings from URLSearchParams, so the boolean/number branch
+  // below is unreachable via the HTTP query-string path.
+
+  describe('parseShowTrends', () => {
+    it('returns true for the boolean true', () => {
+      expect(parseShowTrends({ showTrends: true })).to.equal(true);
+    });
+
+    it('returns true for the number 1', () => {
+      expect(parseShowTrends({ showTrends: 1 })).to.equal(true);
+    });
+
+    it('returns true for the string "true" (any case/whitespace)', () => {
+      expect(parseShowTrends({ showTrends: 'TRUE' })).to.equal(true);
+      expect(parseShowTrends({ showTrends: '  true  ' })).to.equal(true);
+    });
+
+    it('returns true for the string "1"', () => {
+      expect(parseShowTrends({ showTrends: '1' })).to.equal(true);
+    });
+
+    it('falls back to show_trends when showTrends is absent', () => {
+      expect(parseShowTrends({ show_trends: '1' })).to.equal(true);
+    });
+
+    it('returns false for the string "false"', () => {
+      expect(parseShowTrends({ showTrends: 'false' })).to.equal(false);
+    });
+
+    it('returns false for an unrelated string', () => {
+      expect(parseShowTrends({ showTrends: 'yes' })).to.equal(false);
+    });
+
+    it('returns false for the number 0', () => {
+      expect(parseShowTrends({ showTrends: 0 })).to.equal(false);
+    });
+
+    it('returns false when both keys are absent', () => {
+      expect(parseShowTrends({})).to.equal(false);
+      expect(parseShowTrends(undefined)).to.equal(false);
     });
   });
 });
