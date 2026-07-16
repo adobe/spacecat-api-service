@@ -63,6 +63,9 @@ const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, 
     hasAccess: async () => accessResult,
     hasAdminAccess: () => hasAdminAccessResult,
     isLLMOAdministrator: () => isLLMOAdministratorResult,
+    // FACS-hybrid gates mirror the legacy admin result so existing expectations hold.
+    hasLlmoCapabilityForSite: async () => isLLMOAdministratorResult,
+    hasLlmoAdminCapability: () => isLLMOAdministratorResult,
     isOwnerOfSite: async () => isOwnerOfSiteResult,
   }),
 });
@@ -291,6 +294,8 @@ describe('LlmoController', () => {
               isLLMOAdministrator() {
                 return true;
               },
+              hasLlmoCapabilityForSite: async () => true,
+              hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() {
                 return true;
               },
@@ -409,6 +414,8 @@ describe('LlmoController', () => {
               },
               hasAdminAccess() { return true; },
               isLLMOAdministrator() { return true; },
+              hasLlmoCapabilityForSite: async () => true,
+              hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() { return true; },
             };
           },
@@ -450,6 +457,8 @@ describe('LlmoController', () => {
               async hasAccess() { throw new Error('emailId is required'); },
               hasAdminAccess() { return true; },
               isLLMOAdministrator() { return true; },
+              hasLlmoCapabilityForSite: async () => true,
+              hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() { return true; },
             };
           },
@@ -4987,6 +4996,8 @@ describe('LlmoController', () => {
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
               isLLMOAdministrator: () => false,
+              hasLlmoCapabilityForSite: async () => false,
+              hasLlmoAdminCapability: () => false,
               isOwnerOfSite: isOwnerStub,
             }),
           },
@@ -5900,9 +5911,9 @@ describe('LlmoController', () => {
       });
     }); // end describe('CDN routing')
 
-    it('should call hasAccess before isLLMOAdministrator before isOwnerOfSite', async () => {
+    it('should call hasAccess before the FACS capability gate before isOwnerOfSite', async () => {
       const hasAccessStub = sinon.stub().resolves(true);
-      const isLLMOAdminStub = sinon.stub().returns(true);
+      const hasCapStub = sinon.stub().resolves(true);
       const isOwnerStub = sinon.stub().resolves(false);
 
       const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -5911,7 +5922,7 @@ describe('LlmoController', () => {
             fromContext: () => ({
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
-              isLLMOAdministrator: isLLMOAdminStub,
+              hasLlmoCapabilityForSite: hasCapStub,
               isOwnerOfSite: isOwnerStub,
             }),
           },
@@ -5924,8 +5935,8 @@ describe('LlmoController', () => {
         .createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(403);
-      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
-      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+      expect(hasAccessStub.calledBefore(hasCapStub), 'hasAccess must be called before the capability gate').to.be.true;
+      expect(hasCapStub.calledBefore(isOwnerStub), 'capability gate must be called before isOwnerOfSite').to.be.true;
     });
 
     it('should fire opt-in notification when site is newly opted', async () => {
@@ -6957,9 +6968,9 @@ describe('LlmoController', () => {
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
     });
 
-    it('should call hasAccess before isLLMOAdministrator', async () => {
+    it('should call hasAccess before the FACS capability gate', async () => {
       const hasAccessStub = sinon.stub().resolves(true);
-      const isLLMOAdminStub = sinon.stub().returns(false);
+      const hasCapStub = sinon.stub().resolves(false);
 
       const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': {
@@ -6967,7 +6978,7 @@ describe('LlmoController', () => {
             fromContext: () => ({
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
-              isLLMOAdministrator: isLLMOAdminStub,
+              hasLlmoCapabilityForSite: hasCapStub,
               isOwnerOfSite: sinon.stub().resolves(true),
             }),
           },
@@ -6980,7 +6991,7 @@ describe('LlmoController', () => {
         .createOrUpdateStageEdgeConfig(stageConfigContext);
 
       expect(result.status).to.equal(403);
-      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(hasAccessStub.calledBefore(hasCapStub), 'hasAccess must be called before the capability gate').to.be.true;
     });
   });
 

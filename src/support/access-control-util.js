@@ -21,6 +21,8 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { UnauthorizedProductError } from './errors.js';
 import { CUSTOMER_VISIBLE_TIERS } from './utils.js';
+import { listBrandIdsForSite } from './brands-storage.js';
+import { listResourceIdsWithCapability } from './state-access-mapping-utils.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -191,6 +193,102 @@ export default class AccessControlUtil {
    */
   isLLMOAdministrator() {
     return this.authInfo.isLLMOAdministrator() && !this._lastAccessWasDelegated;
+  }
+
+  /**
+   * Whether the caller may perform an LLMO admin-equivalent action on a specific
+   * site under the hybrid FACS model. Two signals decide it:
+   *   - the `facs_enabled` JWT claim (minted at login, present on every path) —
+   *     is the caller's org FACS-enrolled?
+   *   - `context.attributes.facs.enabled` (the wrapper's defer marker, set only
+   *     when the wrapper could not resolve a ReBAC resource) — did the wrapper
+   *     hand enforcement to the controller?
+   *
+   * Resolution:
+   *   - Not FACS-enrolled → fall back to the legacy `isLLMOAdministrator()` claim
+   *     (dual-running: legacy stays authoritative until the org migrates).
+   *   - Enrolled AND not deferred → the wrapper already confirmed the route's
+   *     capability upstream (JWT short-circuit or state-layer admit) → allow.
+   *   - Enrolled AND deferred → the wrapper could not map the site to its LLMO
+   *     ReBAC `brand`, so authorize here: the caller must hold `capability` via a
+   *     state-layer grant on any brand linked to the site. Fail closed if the
+   *     state layer is unreachable.
+   *
+   * MUST only be called on FACS-governed routes (the wrapper runs ahead of the
+   * controller); on a non-governed route the "not deferred" branch would admit
+   * any enrolled caller.
+   *
+   * @param {object} site - Site model (exposes getId + getOrganizationId).
+   * @param {string} capability - Fully-qualified `<product>/<capability>` the
+   *   route requires (e.g. `llmo/can_configure`).
+   * @returns {Promise<boolean>}
+   */
+  async hasLlmoCapabilityForSite(site, capability) {
+    const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
+    if (!facsEnabled) {
+      return this.isLLMOAdministrator();
+    }
+
+    const facs = this.context.attributes?.facs;
+    if (!facs?.enabled) {
+      // Enrolled and the wrapper already confirmed the capability upstream.
+      return true;
+    }
+
+    // Deferred: resolve the site's brand(s) and check the state-layer grant.
+    const postgrestClient = this.context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      this.log?.warn?.('[acl] FACS deferred but postgrestClient unavailable - denying');
+      return false;
+    }
+
+    const orgId = site.getOrganizationId();
+    const org = await this.context.dataAccess.Organization.findById(orgId);
+    const imsOrgId = org?.getImsOrgId?.();
+    if (!hasText(imsOrgId)) {
+      return false;
+    }
+
+    const brandIds = await listBrandIdsForSite(orgId, site.getId(), postgrestClient);
+    if (brandIds.size === 0) {
+      return false;
+    }
+
+    const capable = await listResourceIdsWithCapability(postgrestClient, {
+      imsOrgId,
+      product: facs.product,
+      resourceType: 'brand',
+      subjectId: facs.subjectId,
+      capability,
+    });
+    for (const id of brandIds) {
+      if (capable.has(id)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Org-level counterpart of {@link hasLlmoCapabilityForSite} for FACS-governed
+   * routes with no site (e.g. `POST /llmo/onboard`). The wrapper enforces the
+   * route's capability upstream, so once enrolled the only question is whether
+   * it confirmed:
+   *   - not enrolled           → legacy `isLLMOAdministrator()`
+   *   - enrolled, not deferred  → wrapper confirmed the org-wide capability → allow
+   *   - enrolled, deferred      → wrapper could not confirm (caller lacks the
+   *     org-wide grant and there is no resource to bind against) → deny
+   *
+   * MUST only be called on FACS-governed routes (see {@link hasLlmoCapabilityForSite}).
+   *
+   * @returns {boolean}
+   */
+  hasLlmoAdminCapability() {
+    const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
+    if (!facsEnabled) {
+      return this.isLLMOAdministrator();
+    }
+    return !this.context.attributes?.facs?.enabled;
   }
 
   canManageImsOrgAccess() {

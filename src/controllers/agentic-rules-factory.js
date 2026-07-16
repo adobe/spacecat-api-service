@@ -191,7 +191,7 @@ export function createRulesController({ tableName, dimensionLabel }) {
     if (!await ac.hasAccess(site)) {
       return { error: forbidden(`Only users belonging to the organization can manage ${dimensionLabel} rules`) };
     }
-    if (requireAdmin && !ac.isLLMOAdministrator()) {
+    if (requireAdmin && !await ac.hasLlmoCapabilityForSite(site, 'llmo/can_configure')) {
       return { error: forbidden(`Only LLMO administrators can modify ${dimensionLabel} rules`) };
     }
     return { siteId, client };

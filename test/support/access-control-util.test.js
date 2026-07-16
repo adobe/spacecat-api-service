@@ -20,6 +20,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -2254,6 +2255,100 @@ describe('Access Control Util', () => {
       expect(result).to.be.false;
       // _lastAccessWasDelegated was never set to true → JWT claim rules
       expect(util.isLLMOAdministrator()).to.be.true;
+    });
+  });
+
+  describe('hasLlmoCapabilityForSite', () => {
+    const site = { getId: () => 'site-1', getOrganizationId: () => 'org-uuid' };
+
+    function makeCtx({ profile = {}, facs, postgrest = true } = {}) {
+      return {
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile(profile),
+          ...(facs ? { facs } : {}),
+        },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+          Organization: { findById: sinon.stub().resolves({ getImsOrgId: () => 'ABC@AdobeOrg' }) },
+          ...(postgrest ? { services: { postgrestClient: { from: () => ({}) } } } : {}),
+        },
+      };
+    }
+
+    let listBrandIdsForSite;
+    let listResourceIdsWithCapability;
+    let ACU;
+    beforeEach(async () => {
+      listBrandIdsForSite = sinon.stub();
+      listResourceIdsWithCapability = sinon.stub();
+      ({ default: ACU } = await esmock('../../src/support/access-control-util.js', {
+        '../../src/support/brands-storage.js': { listBrandIdsForSite },
+        '../../src/support/state-access-mapping-utils.js': { listResourceIdsWithCapability },
+      }));
+    });
+
+    it('not enrolled → falls back to legacy claim (admin → true)', async () => {
+      const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: true } }));
+      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.true;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('not enrolled → falls back to legacy claim (non-admin → false)', async () => {
+      const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: false } }));
+      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+    });
+
+    it('enrolled and NOT deferred → wrapper already confirmed the capability → allow', async () => {
+      // facs_enabled but no facs defer marker → JWT short-circuit / state admit upstream.
+      const util = ACU.fromContext(makeCtx({ profile: { facs_enabled: true } }));
+      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.true;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('enrolled and deferred → allows when a linked brand holds the capability', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A', 'brand-B']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-B']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.true;
+      expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
+        product: 'LLMO', resourceType: 'brand', capability: 'llmo/can_configure',
+      });
+    });
+
+    it('enrolled and deferred → denies when no linked brand holds the capability', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-Z']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+    });
+
+    it('enrolled and deferred → denies (fail closed) when postgrest is unavailable', async () => {
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        postgrest: false,
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('enrolled and deferred → denies when the site has no linked brands', async () => {
+      listBrandIdsForSite.resolves(new Set());
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+      expect(listResourceIdsWithCapability).to.not.have.been.called;
     });
   });
 });
