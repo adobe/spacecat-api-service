@@ -76,7 +76,10 @@ audit-policy-revisions:
     - name: cursor
       in: query
       required: false
-      description: Opaque pagination cursor from a previous response's `cursor` field. Omit to fetch the first page.
+      description: >-
+        Opaque pagination cursor from a previous response's `cursor` field. Omit to fetch the
+        first page. Cursors encode a revision version number and are not valid indefinitely across
+        a very long revision history.
       schema:
         type: string
   get:
