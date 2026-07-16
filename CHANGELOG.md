@@ -1,3 +1,10 @@
+# [1.658.0](https://github.com/adobe/spacecat-api-service/compare/v1.657.0...v1.658.0) (2026-07-16)
+
+
+### Features
+
+* Serenity sentiment-overview endpoint | LLMO-6300 ([#2837](https://github.com/adobe/spacecat-api-service/issues/2837)) ([bd8b6c9](https://github.com/adobe/spacecat-api-service/commit/bd8b6c93ad92cfe0976b56c33b77c4ba270acb19))
+
 # [1.657.0](https://github.com/adobe/spacecat-api-service/compare/v1.656.0...v1.657.0) (2026-07-16)
 
 
