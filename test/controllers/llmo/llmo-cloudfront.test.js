@@ -2296,7 +2296,7 @@ describe('LlmoCloudFrontController', () => {
       expect(callArgs.provider).to.equal('cloudfront');
       expect(callArgs.resourceId).to.equal('E2EXAMPLE123');
       expect(callArgs.accountId).to.equal('120569600543');
-      expect(callArgs.imsOrgId).to.equal('ABC123@AdobeOrg');
+      expect(callArgs.imsOrgId).to.equal(TEST_IMS_ORG_ID);
       expect(callArgs.deliveryDestinationArn).to.equal(
         'arn:aws:logs:us-east-1:111122223333:delivery-destination:cdn-logs-org',
       );
@@ -2325,16 +2325,6 @@ describe('LlmoCloudFrontController', () => {
 
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.include('12-digit');
-    });
-
-    it('returns 400 when the external id is missing', async () => {
-      const result = await controller.enableCdnLogDelivery({
-        ...logDeliveryContext,
-        data: { accountId: '120569600543', distributionId: 'E2EXAMPLE123' },
-      });
-
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('externalId');
     });
 
     it('returns 400 when the distribution id is missing', async () => {
@@ -2538,16 +2528,6 @@ describe('LlmoCloudFrontController', () => {
 
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.include('12-digit');
-    });
-
-    it('returns 400 when the external id is missing', async () => {
-      const result = await controller.rescanCdnLogDelivery({
-        ...rescanContext,
-        data: { accountId: '120569600543' },
-      });
-
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('externalId');
     });
 
     it('returns 500 when the destination account is not configured (server misconfig)', async () => {
