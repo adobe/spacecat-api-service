@@ -329,6 +329,16 @@ describe('Opportunities Controller', () => {
     expect(Object.keys(opportunities[0]).sort()).to.deep.equal(['id', 'title']);
   });
 
+  it('returns 400 when ?fields= matches no known field on getByStatus', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      data: { fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('gets all opportunities for a site returns bad request if no site ID is passed', async () => {
     const response = await opportunitiesController.getAllForSite({ params: {} });
     expect(mockOpportunityDataAccess.Opportunity.allBySiteId.calledOnce).to.be.false;

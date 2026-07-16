@@ -1225,6 +1225,32 @@ describe('Sites Controller', () => {
   });
 
   describe('GET /sites - baseUrlContains substring search', () => {
+    it('projects the search results when ?fields= is passed', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { baseUrlContains: 'site', limit: '10', fields: 'baseURL' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(Object.keys(body.sites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+    });
+
+    it('returns 400 when ?fields= matches no known field', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { baseUrlContains: 'site', fields: 'nope' },
+      });
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Invalid fields: nope');
+    });
+
     it('queries Site.all with an ilike where clause, order asc, and limit N+1', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
@@ -1682,6 +1708,31 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can view all sites');
   });
 
+  it('projects sites by delivery type when ?fields= is passed', async () => {
+    mockDataAccess.Site.allByDeliveryType.resolves(sites);
+
+    const result = await sitesController.getAllByDeliveryType({
+      params: { deliveryType: 'aem_edge' },
+      data: { fields: 'baseURL' },
+    });
+    const resultSites = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(Object.keys(resultSites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+  });
+
+  it('returns 400 when ?fields= matches no known field on getAllByDeliveryType', async () => {
+    mockDataAccess.Site.allByDeliveryType.resolves(sites);
+
+    const result = await sitesController.getAllByDeliveryType({
+      params: { deliveryType: 'aem_edge' },
+      data: { fields: 'nope' },
+    });
+    expect(result.status).to.equal(400);
+    const error = await result.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('gets all sites with latest audit', async () => {
     const audit = {
       getAuditedAt: () => '2021-01-01T00:00:00.000Z',
@@ -1736,6 +1787,20 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.allWithLatestAudit).to.have.not.been.called;
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only admins can view all sites');
+  });
+
+  it('returns 400 when ?fields= matches no known field on getAllWithLatestAudit', async () => {
+    sites.forEach((site) => {
+      // eslint-disable-next-line no-param-reassign
+      site.getLatestAuditByAuditType = sandbox.stub().resolves(null);
+    });
+    const result = await sitesController.getAllWithLatestAudit({
+      params: { auditType: 'lhs-mobile' },
+      data: { fields: 'nope' },
+    });
+    expect(result.status).to.equal(400);
+    const error = await result.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
   });
 
   it('gets all sites with latest audit with ascending false', async () => {

@@ -1004,6 +1004,46 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Invalid locale format');
   });
 
+  it('returns 400 when ?fields= matches no known field on getAllForOpportunityPaged', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, limit: '10' },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
+  it('returns 400 when ?fields= matches no known field on getByStatus', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
+  it('returns 400 when ?fields= matches no known field on getByStatusPaged', async () => {
+    // getByStatusPaged reads the paginated { data, cursor } shape
+    mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.resolves({
+      data: [mockSuggestionEntity(suggs[0])],
+      cursor: null,
+    });
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW', limit: '10',
+      },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('returns 400 for malformed locale on getByID', async () => {
     const response = await suggestionsController.getByID({
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
