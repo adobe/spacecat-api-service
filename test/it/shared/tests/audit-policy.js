@@ -17,8 +17,9 @@ import { SITE_1_ID, SITE_3_ID } from '../seed-ids.js';
  * Shared Audit Policy contract tests (SITES-47306).
  *
  * GATED: exercises the real `wrpc_upsert_audit_policy` RPC — including the
- * `p_expected_version` optimistic-lock parameter and its `SQLSTATE 40001`
- * conflict path — against Postgres + PostgREST via the pinned data-service
+ * `p_expected_version` optimistic-lock parameter and its `SQLSTATE 40000`
+ * conflict path (40000, not 40001 — PostgREST v14.4 hangs on 40001, see
+ * PostgREST/postgrest#3673) — against Postgres + PostgREST via the pinned data-service
  * image. That parameter (and `audit_policy_revision.effective_at`) ship in
  * mysticat-data-service PR #755, a follow-up on top of the B2 `audit_policy`
  * table (PR #753, merged). Cannot pass until: (a) #755 merges, (b) a new

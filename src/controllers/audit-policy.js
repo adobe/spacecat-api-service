@@ -27,7 +27,12 @@ const MAX_MANUAL_URLS = 50000;
 const MAX_ELEMENT_LEN = 2048;
 const MAX_NOTE_LEN = 2000;
 const STRATEGIES = ['tiered'];
-const SQLSTATE_VERSION_CONFLICT = '40001';
+// 40000 (transaction_rollback), not 40001 (serialization_failure): PostgREST v14.4
+// (pinned by mysticat-data-service) hangs on 40001 due to hasql-transaction's
+// auto-retry on that specific code (PostgREST/postgrest#3673). 40000 is the
+// standard class-40 parent code, semantically correct for a version conflict,
+// and verified non-hanging.
+const SQLSTATE_VERSION_CONFLICT = '40000';
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
 // Cursor versions above this are rejected as malformed — guards against a tampered/garbage

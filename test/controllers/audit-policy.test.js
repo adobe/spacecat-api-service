@@ -194,11 +194,11 @@ describe('AuditPolicyController — E2 putPolicy', () => {
     expect(tooManyGlobsRes.status).to.equal(400);
   });
 
-  it('maps SQLSTATE 40001 to 409 with currentVersion from error.details', async () => {
+  it('maps SQLSTATE 40000 to 409 with currentVersion from error.details', async () => {
     const client = buildClient({
       rpcResult: {
         data: null,
-        error: { code: '40001', message: 'audit_policy_version_conflict', details: '7' },
+        error: { code: '40000', message: 'audit_policy_version_conflict', details: '7' },
       },
     });
     const controller = loadController();
