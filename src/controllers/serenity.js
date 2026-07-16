@@ -1443,8 +1443,8 @@ function SerenityController(context, log, env) {
               (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
           },
         );
-        // Disconnect the brand from the now-emptied (or, with the flag on, now-deleted)
-        // sub-workspace; clearing the pointer is what returns the brand to flat mode.
+        // Disconnect the brand from the now-emptied, floor-lowered sub-workspace (never
+        // deleted); clearing the pointer is what returns the brand to flat mode.
         // Invalidate the resolver cache HERE —
         // before the save — so that even if save() throws, the resolver can't
         // keep routing to the already-emptied sub-workspace for the full

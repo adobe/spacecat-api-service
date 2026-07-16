@@ -939,5 +939,19 @@ describe('workspace-lifecycle', () => {
         releaseFullAllocation(transport, SUB_WS, PARENT_WS, log),
       ).to.be.rejectedWith(SerenityTransportError);
     });
+
+    it('rejects a caller-supplied floor with a zero dimension (MysticatBot review, PR #2812)', async () => {
+      // A zero-dimension floor is exactly the payload this whole fix exists to eliminate — a
+      // transfer to zero is a proven silent no-op. Must throw before ever calling the transport.
+      const transport = makeTransport();
+      const zeroProjectsFloor = { floor: { projects: 0, prompts: 100 } };
+      const zeroPromptsFloor = { floor: { projects: 1, prompts: 0 } };
+
+      await expect(releaseFullAllocation(transport, SUB_WS, PARENT_WS, log, zeroProjectsFloor))
+        .to.be.rejectedWith(/floor must have both dimensions > 0/);
+      await expect(releaseFullAllocation(transport, SUB_WS, PARENT_WS, log, zeroPromptsFloor))
+        .to.be.rejectedWith(/floor must have both dimensions > 0/);
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+    });
   });
 });

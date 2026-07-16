@@ -288,6 +288,11 @@ export async function deleteAllProjects(transport, workspaceId) {
  * gateway bug; see the create-path comment on `assertNotParent`) must never have its allocation
  * touched.
  *
+ * A caller-supplied `floor` with either dimension `<= 0` is REJECTED (MysticatBot review, PR
+ * #2812): that is exactly the zero-transfer payload this whole fix exists to eliminate — no
+ * current caller passes a custom floor, but the option is exported/documented, so a future one
+ * could silently reintroduce the stranding bug this PR fixes. Fail loud instead.
+ *
  * @param {object} transport
  * @param {string} workspaceId - the (already project-emptied) sub-workspace to reclaim.
  * @param {string} [parentWorkspaceId] - the org parent workspace; assertNotParent guard.
@@ -296,7 +301,7 @@ export async function deleteAllProjects(transport, workspaceId) {
  * @param {{projects: number, prompts: number}} [options.floor] - the non-zero total to lower the
  *   workspace's AI allocation to. Defaults to {@link DEFAULT_RELEASE_FLOOR} (1 project, 1 prompt) —
  *   enough to keep the workspace immediately usable on its next re-activation without a fresh
- *   create, while returning everything above that to the shared pool.
+ *   create, while returning everything above that to the shared pool. Both dimensions must be > 0.
  * @returns {Promise<{ released: boolean, reason: 'lowered-to-floor' | 'no-workspace' }>}
  */
 export async function releaseFullAllocation(
@@ -308,6 +313,13 @@ export async function releaseFullAllocation(
 ) {
   if (!hasText(workspaceId)) {
     return { released: false, reason: 'no-workspace' };
+  }
+  if (!(floor?.projects > 0) || !(floor?.prompts > 0)) {
+    throw new ErrorWithStatusCode(
+      'releaseFullAllocation: floor must have both dimensions > 0 — a zero-dimension transfer is '
+      + 'a silent no-op against the Semrush gateway (the exact bug this function exists to fix)',
+      500,
+    );
   }
   assertNotParent(workspaceId, parentWorkspaceId);
 
@@ -501,9 +513,8 @@ export async function ensureSubworkspace(
  * idempotent. Steps:
  *   1. delete every project from the listing (404-as-success)
  *   2. reclaim the ai allocation back to the parent pool via
- *      {@link releaseFullAllocation} — genuinely reclaimed (workspace deleted) when
- *      lowered to a small non-zero floor, never deleted — production never deletes a sub-workspace
- *      (LLMO-6189).
+ *      {@link releaseFullAllocation} — lowered to a small non-zero floor, never deleted —
+ *      production never deletes a sub-workspace (LLMO-6189).
  *   3. (member removal is best-effort and currently deferred — parent admins
  *      inherit access regardless, workspace doc §7; enumerating members needs
  *      a listMembers transport method not added in this phase)

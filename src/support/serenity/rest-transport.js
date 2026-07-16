@@ -235,13 +235,12 @@ export function createSerenityTransport({ env, imsToken }) {
 
   // Fail-closed guard for the destructive workspace delete. Deleting a sub-workspace is
   // IMPOSSIBLE unless this exact flag is explicitly set — the default in every deployed
-  // environment (dev/stage/prod) today. Two distinct callers share this ONE capability gate
-  // (LLMO-6189): the net-zero live smoke / IT-harness teardown (original use), and the
-  // decommission/cleanup lifecycle paths in workspace-lifecycle.js / brand-provisioning.js, which
-  // fall back to a "log the stranding, don't delete" behavior when the flag is off rather than
-  // gating on a second flag name for the same underlying operation. Flipping it on in a real
-  // environment is a deliberate operator decision to let those paths genuinely reclaim allocations
-  // instead of leaving them stranded pending Semrush CS's manual deprovisioning (design §6).
+  // environment (dev/stage/prod) today. Test/smoke-cleanup-only (LLMO-6189): the net-zero live
+  // smoke / IT-harness teardown, and manual operator cleanup of throwaway canary workspaces. No
+  // production lifecycle path (workspace-lifecycle.js / brand-provisioning.js) calls this or
+  // branches on this flag — those paths reclaim an allocation by lowering it to a non-zero floor
+  // via releaseFullAllocation, never by deleting the workspace (production never deletes a
+  // sub-workspace; a shell is only ever deprovisioned manually by Semrush CS).
   const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
   // Shared IMS-bearer getter for both typed clients. Raises the transport's own
