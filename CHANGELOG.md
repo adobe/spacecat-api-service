@@ -1,3 +1,10 @@
+# [1.659.0](https://github.com/adobe/spacecat-api-service/compare/v1.658.0...v1.659.0) (2026-07-16)
+
+
+### Features
+
+* **elements:** add brand-presence market-tracking-trends endpoint ([#2827](https://github.com/adobe/spacecat-api-service/issues/2827)) ([6425368](https://github.com/adobe/spacecat-api-service/commit/642536897fa6a9ed3d61b44d242febb77bdf42b2)), closes [#2823](https://github.com/adobe/spacecat-api-service/issues/2823)
+
 # [1.658.0](https://github.com/adobe/spacecat-api-service/compare/v1.657.0...v1.658.0) (2026-07-16)
 
 
