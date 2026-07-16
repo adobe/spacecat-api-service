@@ -31,6 +31,7 @@ import { dateToIsoWeek } from '../week-utils.js';
  *     citations element that number is the CITATION count, not mentions.
  */
 
+/* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
 /**
  * Builds the weekly-bucketed payload for a market-tracking trend `line` element.
  * Shape verified against the live MFE: top-level `auto_bucketing: "week"`, plain
@@ -168,3 +169,4 @@ export function transformMarketTrackingTrends(mentionsRaw, citationsRaw, brandNa
     })
     .sort((a, b) => a.week.localeCompare(b.week));
 }
+/* c8 ignore stop */

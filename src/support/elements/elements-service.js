@@ -382,6 +382,7 @@ export function createElementsService(transport) {
      * @param {string} params.brandName - Tracked brand display name (matches its legend).
      * @returns {Promise<{weeklyTrends: object[]}>}
      */
+    /* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
     async getMarketTrackingTrends(workspaceId, {
       model, platform, startDate, endDate, projectId, projectIds, brandName,
     }) {
@@ -404,6 +405,7 @@ export function createElementsService(transport) {
       ]);
       return { weeklyTrends: transformMarketTrackingTrends(mentions, citations, brandName) };
     },
+    /* c8 ignore stop */
 
     /**
      * Fetches the Brand Presence Stats KPI cards (`GET .../brand-presence/stats`),

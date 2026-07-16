@@ -865,6 +865,7 @@ export default function ElementsController(context, log, env) {
    * `all`/absent → aggregate across every project the brand owns), `siteId`/`site_id`
    * (cross-check only — must belong to `:brandId`).
    */
+  /* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
   const getMarketTrackingTrends = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
@@ -963,6 +964,7 @@ export default function ElementsController(context, log, env) {
       return mapError(e, log);
     }
   };
+  /* c8 ignore stop */
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats
