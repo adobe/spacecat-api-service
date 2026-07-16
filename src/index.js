@@ -38,6 +38,7 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 import { traceIdResponseWrapper } from './support/trace-id-response-wrapper.js';
+import { ensureFetchResponseWrapper } from './support/ensure-fetch-response-wrapper.js';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -498,4 +499,11 @@ export const main = wrappedMain
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(vaultSecrets)
   .with(compressResponse)
-  .with(helixStatus);
+  .with(helixStatus)
+  // OUTERMOST wrapper (runs LAST on the response path, just before helix-universal's
+  // AWS Lambda adapter serializes the response). Guarantees the response reaching
+  // `aws-adapter.js:254` — `splitHeaders(response.headers.raw(), ...)` — is an
+  // `@adobe/fetch` Response whose Headers has `.raw()`, not a native Web-Fetch-API
+  // Response whose Headers doesn't. See the wrapper's module-level docstring for
+  // the full backstory (SITES-48140 EMF-instrumentation bundling interaction).
+  .with(ensureFetchResponseWrapper);

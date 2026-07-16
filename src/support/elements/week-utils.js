@@ -114,3 +114,56 @@ export function generateIsoWeekRange(minDate, maxDate) {
   return result.sort((a, b) => b.localeCompare(a));
 }
 /* c8 ignore stop */
+
+const TRENDS_MAX_WEEKS = 8;
+const TRENDS_WEEK_SIZE = 7;
+
+/**
+ * Adds days to a YYYY-MM-DD date string. Uses UTC noon to avoid DST edge cases.
+ * Copied verbatim from `llmo-brand-presence.js#addDaysToDate` (see file header note).
+ *
+ * @param {string} dateStr - YYYY-MM-DD
+ * @param {number} days - Number of days to add (negative to subtract)
+ * @returns {string} YYYY-MM-DD
+ */
+export function addDaysToDate(dateStr, days) {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Splits a date range into `weekSize`-day weeks, building backward from `endDate`.
+ * Returns at most `maxWeeks` weeks, ordered oldest-first (chronological). Copied
+ * verbatim from `llmo-brand-presence.js#splitDateRangeIntoWeeksBackward` (see file
+ * header note) so the Elements-backed `/stats` trends use identical week boundaries
+ * to the Postgres-backed handler it mirrors.
+ *
+ * @param {string} startDate - YYYY-MM-DD
+ * @param {string} endDate - YYYY-MM-DD
+ * @param {number} [weekSize] - Days per week (default 7)
+ * @param {number} [maxWeeks] - Max weeks to return (default 8)
+ * @returns {Array<{ startDate: string, endDate: string }>}
+ */
+export function splitDateRangeIntoWeeksBackward(
+  startDate,
+  endDate,
+  weekSize = TRENDS_WEEK_SIZE,
+  maxWeeks = TRENDS_MAX_WEEKS,
+) {
+  const weeks = [];
+  let weekEnd = endDate;
+  let weekStart = addDaysToDate(weekEnd, -weekSize + 1);
+
+  while (weekEnd >= startDate) {
+    const actualStart = weekStart < startDate ? startDate : weekStart;
+    if (actualStart <= weekEnd) {
+      weeks.push({ startDate: actualStart, endDate: weekEnd });
+    }
+    weekEnd = addDaysToDate(weekStart, -1);
+    weekStart = addDaysToDate(weekEnd, -weekSize + 1);
+  }
+
+  weeks.reverse();
+  return weeks.slice(-maxWeeks);
+}
