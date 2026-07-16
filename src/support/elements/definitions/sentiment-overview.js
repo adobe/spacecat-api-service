@@ -103,6 +103,16 @@ function parseIsoWeekParts(weekStr) {
 
 const SENTIMENT_BUCKETS = ['positive', 'neutral', 'negative'];
 
+// Guard against a non-date `bar` value (e.g. a metadata / "N/A" row from the upstream
+// element): an invalid day slices to junk that dateToIsoWeek turns into a "NaN-WNaN"
+// key, which would surface as a phantom weeklyTrends entry (weekNumber/year 0). Only a
+// real YYYY-MM-DD prefix is allowed through.
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isoDayOf(bar) {
+  const day = typeof bar === 'string' ? bar.slice(0, 10) : '';
+  return YMD_RE.test(day) ? day : null;
+}
+
 /**
  * Transforms the raw Sentiment element response into the legacy Brand Presence
  * `sentiment-overview` contract so the sentiment chart is drop-in compatible:
@@ -156,7 +166,7 @@ export function transformSentimentOverviewResponse(raw) {
   };
 
   rows.forEach((row) => {
-    const day = typeof row?.bar === 'string' ? row.bar.slice(0, 10) : null;
+    const day = isoDayOf(row?.bar);
     const bucket = typeof row?.legend === 'string' ? row.legend.toLowerCase().trim() : '';
     if (!day || !SENTIMENT_BUCKETS.includes(bucket)) {
       return;
@@ -168,7 +178,7 @@ export function transformSentimentOverviewResponse(raw) {
 
   // The total-prompts line is a separate per-day series; fold it into the same weeks.
   lineRows.forEach((row) => {
-    const day = typeof row?.bar === 'string' ? row.bar.slice(0, 10) : null;
+    const day = isoDayOf(row?.bar);
     if (!day) {
       return;
     }
