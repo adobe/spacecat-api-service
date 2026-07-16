@@ -32,14 +32,14 @@ brand access, resolves the brand's Semrush workspace). FACS `llmo/can_view`; S2S
 |---|---|---|---|
 | `startDate` | `start_date` | 28 days before today | Range start, `YYYY-MM-DD`. 400 if not a valid calendar date. |
 | `endDate` | `end_date` | today | Range end, `YYYY-MM-DD`. 400 if invalid, or before `startDate`. |
+| `model` | `platform` | `search-gpt` (via `resolveElementModel`) | AI model/platform filter. Unrecognized values fall back to the default. |
+| `regionCode` | `region_code`, `region` | — | One region+language code (e.g. `US`) → a single Semrush `projectId` via `resolveRegionProjectId`; 404 if it matches no market. `all`/absent → aggregate across **every** project the brand owns. |
+| `siteId` | `site_id` | — | Cross-check only: must resolve (via `getBrandBySite`) to the same brand as `:brandId`; 400 otherwise. Does not itself narrow the query. |
 
 **Both or neither** (mirrors the URL-inspector handlers): if only one of `startDate`/`endDate`
 is supplied, both are ignored and the full 28-day default range is used as a unit — a
 half-supplied bound never pairs with the default's other half. The resolved span is capped at
 **`MAX_RANGE_DAYS = 366`** (400 otherwise) to bound upstream fan-out.
-| `model` | `platform` | `search-gpt` (via `resolveElementModel`) | AI model/platform filter. Unrecognized values fall back to the default. |
-| `regionCode` | `region_code`, `region` | — | One region+language code (e.g. `US`) → a single Semrush `projectId` via `resolveRegionProjectId`; 404 if it matches no market. `all`/absent → aggregate across **every** project the brand owns. |
-| `siteId` | `site_id` | — | Cross-check only: must resolve (via `getBrandBySite`) to the same brand as `:brandId`; 400 otherwise. Does not itself narrow the query. |
 
 Bucketing is **weekly only** for now (`auto_bucketing: "week"` is hardcoded). Day/month is a
 trivial future extension via a `granularity` param.

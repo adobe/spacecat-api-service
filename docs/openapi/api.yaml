@@ -176,6 +176,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-deactivate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/filter-dimensions:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/market-tracking-trends:
+    $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
