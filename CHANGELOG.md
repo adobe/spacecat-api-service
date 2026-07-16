@@ -1,3 +1,10 @@
+## [1.659.1](https://github.com/adobe/spacecat-api-service/compare/v1.659.0...v1.659.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **aso-overlay:** rewrap native Response before aws-adapter (fix dev 500) ([#2839](https://github.com/adobe/spacecat-api-service/issues/2839)) ([3863015](https://github.com/adobe/spacecat-api-service/commit/3863015320688568d2795c40bf943b40ec9b3431)), closes [#2822](https://github.com/adobe/spacecat-api-service/issues/2822) [#2822](https://github.com/adobe/spacecat-api-service/issues/2822) [#2822](https://github.com/adobe/spacecat-api-service/issues/2822) [#2838](https://github.com/adobe/spacecat-api-service/issues/2838)
+
 # [1.659.0](https://github.com/adobe/spacecat-api-service/compare/v1.658.0...v1.659.0) (2026-07-16)
 
 
