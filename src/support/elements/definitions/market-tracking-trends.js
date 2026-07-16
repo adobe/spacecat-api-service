@@ -132,7 +132,14 @@ export function transformMarketTrackingTrends(mentionsRaw, citationsRaw, brandNa
         // eslint-disable-next-line no-continue
         continue;
       }
-      const bucket = ensureWeek(line.x.slice(0, 10));
+      const week = line.x.slice(0, 10);
+      // Only bucket well-formed `YYYY-MM-DD` week starts — a malformed upstream date
+      // can't derive a valid ISO week, so skip it rather than emit null weekNumber/year.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const bucket = ensureWeek(week);
       // `Number(x) || 0` (not `?? 0`) so a non-numeric value coerces to 0, not NaN.
       const value = Number(line.y__mentions) || 0;
       if (line.legend.trim().toLowerCase() === wantedBrand) {

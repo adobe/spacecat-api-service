@@ -167,6 +167,7 @@ describe('market-tracking-trends definitions', () => {
           lines: [
             { x: '2026-07-05T00:00:00Z', y__mentions: 1 }, // no legend
             { legend: 'Rival One', x: 20260705, y__mentions: 2 }, // non-string x
+            { legend: 'Rival Two', x: 'not-a-date', y__mentions: 3 }, // string x, not YYYY-MM-DD
             null,
           ],
         },

@@ -841,6 +841,14 @@ export default function ElementsController(context, log, env) {
         projectIds = brandSemrushProjects
           .map((p) => p.semrushProjectId)
           .filter(hasText);
+        // Guard the aggregate path: with no project ids the trend payload would carry
+        // no `CBF_project(s)` filter and Semrush would return the ENTIRE workspace —
+        // which, on the org-parent-workspace fallback (a brand with no sub-workspace),
+        // is other brands' data. A brand with zero Semrush projects has no trends, so
+        // return empty rather than issue an unscoped upstream query.
+        if (projectIds.length === 0) {
+          return cachedOk({ weeklyTrends: [] });
+        }
       }
 
       const result = await service.getMarketTrackingTrends(workspaceId, {

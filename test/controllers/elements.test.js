@@ -910,13 +910,21 @@ describe('ElementsController', () => {
     const mttUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
       + `/brands/${BRAND_ID}/serenity/brand-presence/market-tracking-trends${qs}`;
 
+    // The no-region (aggregate) happy path needs at least one Semrush project, else
+    // the zero-project guard short-circuits to an empty 200 before the service runs.
+    const ctxWithProject = (qs = '') => fakeContext({
+      url: mttUrl(qs),
+      withBrandSemrushProject: true,
+      brandSemrushProjects: [makeBrandSemrushProject()],
+    });
+
     beforeEach(() => {
       serviceStub.getMarketTrackingTrends = sinon.stub().resolves(MARKET_RESULT);
       serviceStub.resolveRegionProjectId = sinon.stub().resolves('proj-1');
     });
 
     it('returns 200 with the weeklyTrends result', async () => {
-      const ctx = fakeContext({ url: mttUrl() });
+      const ctx = ctxWithProject();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getMarketTrackingTrends(ctx);
       expect(res.status).to.equal(200);
@@ -970,7 +978,7 @@ describe('ElementsController', () => {
     });
 
     it('defaults to a 28-day trailing window when no dates are given', async () => {
-      const ctx = fakeContext({ url: mttUrl() });
+      const ctx = ctxWithProject();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.getMarketTrackingTrends(ctx);
       const [, params] = serviceStub.getMarketTrackingTrends.firstCall.args;
@@ -980,7 +988,7 @@ describe('ElementsController', () => {
     });
 
     it('passes through and validates supplied dates and model', async () => {
-      const ctx = fakeContext({ url: mttUrl('?startDate=2026-06-16&endDate=2026-07-15&model=perplexity') });
+      const ctx = ctxWithProject('?startDate=2026-06-16&endDate=2026-07-15&model=perplexity');
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.getMarketTrackingTrends(ctx);
       const [, params] = serviceStub.getMarketTrackingTrends.firstCall.args;
@@ -1012,7 +1020,7 @@ describe('ElementsController', () => {
     it('falls back to the default range as a unit when only one bound is supplied', async () => {
       // A valid startDate with no endDate must NOT pair with today's default end
       // (that would be an unbounded window) — both are replaced by the 28-day default.
-      const ctx = fakeContext({ url: mttUrl('?startDate=2020-01-01') });
+      const ctx = ctxWithProject('?startDate=2020-01-01');
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getMarketTrackingTrends(ctx);
       expect(res.status).to.equal(200);
@@ -1042,15 +1050,48 @@ describe('ElementsController', () => {
 
     it('proceeds when siteId resolves to the same brand', async () => {
       getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
-      const ctx = fakeContext({ url: mttUrl('?siteId=matching-site') });
+      const project = makeBrandSemrushProject();
+      const ctx = fakeContext({
+        url: mttUrl('?siteId=matching-site'), withBrandSemrushProject: true, brandSemrushProjects: [project],
+      });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getMarketTrackingTrends(ctx);
       expect(res.status).to.equal(200);
     });
 
+    it('accepts a span of exactly 366 days (boundary — cap is inclusive)', async () => {
+      // 2026 is not a leap year: 2026-01-01 → 2027-01-02 is exactly 366 days.
+      const ctx = ctxWithProject('?startDate=2026-01-01&endDate=2027-01-02');
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getMarketTrackingTrends).to.have.been.calledOnce;
+    });
+
+    it('rejects a span of 367 days (one past the cap)', async () => {
+      const ctx = ctxWithProject('?startDate=2026-01-01&endDate=2027-01-03');
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getMarketTrackingTrends).to.not.have.been.called;
+    });
+
+    it('returns an empty result (no upstream query) when the brand has zero Semrush projects', async () => {
+      // Aggregate path with no projects: guard against an unscoped workspace-wide query.
+      const ctx = fakeContext({
+        url: mttUrl(), withBrandSemrushProject: true, brandSemrushProjects: [],
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ weeklyTrends: [] });
+      expect(serviceStub.getMarketTrackingTrends).to.not.have.been.called;
+    });
+
     it('propagates service errors through mapError', async () => {
       serviceStub.getMarketTrackingTrends.rejects(new Error('boom'));
-      const ctx = fakeContext({ url: mttUrl() });
+      const ctx = ctxWithProject();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getMarketTrackingTrends(ctx);
       expect(res.status).to.equal(500);

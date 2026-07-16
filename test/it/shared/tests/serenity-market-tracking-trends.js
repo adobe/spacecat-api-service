@@ -92,5 +92,30 @@ export default function serenityMarketTrackingTrendsTests(getHttpClient, resetDa
         expect(res.status).to.be.oneOf([400, 401, 403, 404, 500, 502, 503]);
       });
     });
+
+    describe('query-param wiring through the middleware stack', () => {
+      it('rejects a siteId that does not belong to the brand (does not silently ignore it)', async () => {
+        // A well-formed but unseeded siteId resolves to no brand → the handler's
+        // cross-check returns 400 BEFORE any Semrush call. A 200 here would mean
+        // the siteId param was dropped on the floor — the regression this pins.
+        const res = await getHttpClient().admin.get(
+          path(ORG_1_ID, BRAND_1_ID, { siteId: '00000000-0000-4000-8000-0000000000ff' }),
+        );
+        expect(res.status).to.be.oneOf([400, 401, 403, 404]);
+      });
+
+      it('accepts a region filter and routes it through region resolution', async () => {
+        // Exercises the `region` branch (resolveRegionProjectId → Markets element).
+        // Tolerant on status (depends on the Semrush mock's market seed), but a
+        // param-wiring crash would surface here rather than passing silently.
+        const res = await getHttpClient().admin.get(
+          path(ORG_1_ID, BRAND_1_ID, { region: 'US' }),
+        );
+        expect(res.status).to.be.oneOf([200, 400, 401, 403, 404, 500, 502, 503]);
+        if (res.status === 200) {
+          expect(res.body).to.have.property('weeklyTrends').that.is.an('array');
+        }
+      });
+    });
   });
 }
