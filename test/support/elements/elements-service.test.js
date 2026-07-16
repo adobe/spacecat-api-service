@@ -279,6 +279,16 @@ describe('createElementsService', () => {
       expect(citationsCall.args[2].filters.advanced.filters[1].filters[0].col).to.equal('CBF_projects');
     });
 
+    it('sends no project filter block when neither projectId nor projectIds is given', async () => {
+      await service.getMarketTrackingTrends('ws-1', {
+        startDate: '2026-06-16', endDate: '2026-07-15', brandName: 'Acme',
+      });
+      const mentionsCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.TRENDS_MV);
+      // Only the CBF_model block — no project OR block.
+      expect(mentionsCall.args[2].filters.advanced.filters).to.have.length(1);
+    });
+
     it('prefers a single projectId over the projectIds list', async () => {
       await service.getMarketTrackingTrends('ws-1', {
         startDate: '2026-06-16',

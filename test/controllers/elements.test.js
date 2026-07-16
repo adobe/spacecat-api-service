@@ -924,6 +924,14 @@ describe('ElementsController', () => {
       expect(body).to.deep.equal(MARKET_RESULT);
     });
 
+    it('returns the auth error (and skips the service) when the org is not found', async () => {
+      const ctx = fakeContext({ url: mttUrl(), org: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getMarketTrackingTrends(ctx);
+      expect(res.status).to.equal(404);
+      expect(serviceStub.getMarketTrackingTrends).to.not.have.been.called;
+    });
+
     it('aggregates across every project the brand owns when no region is given', async () => {
       const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-9' });
       const ctx = fakeContext({

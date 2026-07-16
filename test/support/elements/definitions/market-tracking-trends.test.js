@@ -148,6 +148,13 @@ describe('market-tracking-trends definitions', () => {
       expect(week.competitors).to.deep.equal([]);
     });
 
+    it('treats every legend as a competitor when no brandName is given', () => {
+      const raw = { blocks: { lines: [{ legend: 'Acme', x: '2026-07-05T00:00:00Z', y__mentions: 5 }] } };
+      const [week] = transformMarketTrackingTrends(raw, { blocks: { lines: [] } }, undefined);
+      expect(week.mentions).to.equal(0);
+      expect(week.competitors).to.deep.equal([{ name: 'Acme', mentions: 5, citations: 0 }]);
+    });
+
     it('coerces a non-numeric value to 0 rather than NaN', () => {
       const raw = { blocks: { lines: [{ legend: 'Acme', x: '2026-07-05T00:00:00Z', y__mentions: 'oops' }] } };
       const [week] = transformMarketTrackingTrends(raw, { blocks: { lines: [] } }, 'Acme');
