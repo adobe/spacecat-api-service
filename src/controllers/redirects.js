@@ -141,7 +141,7 @@ function RedirectsController(ctx) {
     // Capture start time up front so every terminal branch reports duration.
     const startedAt = Date.now();
     const emitOpts = {
-      environment: resolveEnvironment(env),
+      environment: resolveEnvironment(env, { log }),
       namespace: ASO_OVERLAY_NAMESPACE,
     };
 
