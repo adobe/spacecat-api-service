@@ -20,11 +20,40 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
 import { getHeader } from '../support/http-headers.js';
+import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
+import {
+  ASO_OVERLAY_NAMESPACE, OUTCOME, S3_RESULT, INM_INVALID_REASON,
+} from '../support/aso-overlay-metrics.js';
 
 // Cloud Manager service identifier, e.g. cm-p154709-e1629980. Digit runs are
 // capped to a realistic length to avoid arbitrarily long lookups; the capture
 // groups yield the program id (pXXXX) and environment id (eYYYY).
-const SERVICE_RE = /^cm-p(\d{1,10})-e(\d{1,10})$/;
+//
+// The optional `-prev` suffix accepts the AEM Cloud Service preview publish
+// tier's AEM_SERVICE env var shape (e.g. `cm-p154709-e1629980-prev`). AEM CS
+// injects this suffix on preview pods for its own internal tier routing, but
+// it must not affect overlay resolution: Mystique writes exactly one overlay
+// per (program, environment) — publish and preview tiers share it. So we
+// accept the suffix at the API boundary, strip it before all downstream
+// lookups (Site lookup, S3 key, Surrogate-Key), and the preview pod gets the
+// same content as the publish pod for the same tenant. Without this the
+// preview tier polls a URL Fastly currently rejects with 401 (edge auth)
+// and would 400 at origin (SERVICE_RE mismatch) — verified from the
+// spacecat_oncall_aso_overlay Splunk board 2026-07-16 (~273/hr 401s at edge).
+const SERVICE_RE = /^cm-p(\d{1,10})-e(\d{1,10})(-prev)?$/;
+
+// Fastly caches on raw URL, so preview (`.../cm-p<N>-e<N>-prev/redirects.txt`)
+// and publish (`.../cm-p<N>-e<N>/redirects.txt`) create two separate cache
+// entries per tenant. We accept the small doubled-footprint cost because:
+//   1. Both entries share `Surrogate-Key: aso-overlay-<canonical>`, so
+//      mystique's purge-on-Deploy invalidates both in a single call.
+//   2. Both entries fetch the same S3 object (canonical), so upstream is not
+//      doubled beyond initial per-URL fills — subsequent polls are cache hits.
+//   3. At 10k tenants and ~20% preview coverage the extra entries are cheap
+//      relative to the doubled origin fetches we'd take without caching.
+// A future normalization at Fastly VCL (regsub in vcl_recv before cache key
+// derivation) would collapse to one entry per tenant, but that requires
+// Fastly-admin territory. Origin-side is the pragmatic bridge.
 // Aligns with the Fastly edge TTL for this path (fetch/100-aso-overlay-ttl.vcl).
 // Single source of truth so the 200 and 304 responses can't drift under future edits.
 const OVERLAY_TTL_SECONDS = 10;
@@ -134,17 +163,52 @@ function RedirectsController(ctx) {
    */
   async function getRedirects(context) {
     const { service } = context.params;
+    // Capture start time up front so every terminal branch reports duration.
+    const startedAt = Date.now();
+    const emitOpts = {
+      environment: resolveEnvironment(env),
+      namespace: ASO_OVERLAY_NAMESPACE,
+    };
+
+    // Single call-site helper: emits RequestTotal + RequestDurationMs together
+    // so on-call always has both a rate and a latency view for the same outcome.
+    // Note: no `Tier` dimension — the origin route is `/config/:service/...`
+    // (Fastly strips the public `/config/<tier>/...` prefix before proxying), so
+    // any tier extraction from the origin path would be either wrong or
+    // per-tenant, blowing up CloudWatch cardinality. Environment (auto-added by
+    // emitMetric from AWS_ENV) already carries dev-vs-prod.
+    const emitFinal = (outcome) => {
+      emitMetric(
+        { name: 'AsoOverlayRequestTotal', dimensions: { Outcome: outcome } },
+        emitOpts,
+      );
+      emitMetric(
+        {
+          name: 'AsoOverlayRequestDurationMs',
+          value: Date.now() - startedAt,
+          unit: 'Milliseconds',
+          dimensions: { Outcome: outcome },
+        },
+        emitOpts,
+      );
+    };
 
     const match = SERVICE_RE.exec(service);
     if (!match) {
+      emitFinal(OUTCOME.BAD_REQUEST_400);
       return badRequest('Invalid service identifier', NO_STORE_HEADERS);
     }
     if (!bucketName) {
       log.error('[aso-overlay] S3_ASO_OVERLAYS_BUCKET is not configured');
+      emitFinal(OUTCOME.BUCKET_NOT_CONFIGURED);
       return internalServerError('Overlay endpoint not configured', NO_STORE_HEADERS);
     }
 
+    // `match[3]` captures the optional `-prev` suffix; when preview pod hit us,
+    // strip it so every downstream lookup uses the canonical service ID. The
+    // preview tier reads the same overlay as publish (see SERVICE_RE comment).
     const [, programId, environmentId] = match;
+    const canonicalService = `cm-p${programId}-e${environmentId}`;
 
     // Resolve (program, env) -> Site via the indexed external-id accessor. The
     // p<programId>/e<environmentId> encoding matches Site.computeExternalIds for
@@ -155,6 +219,7 @@ function RedirectsController(ctx) {
     );
     if (!site) {
       log.info('[aso-overlay] no site resolves for service', { service });
+      emitFinal(OUTCOME.AUTHZ_NO_SITE);
       return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
 
@@ -166,20 +231,51 @@ function RedirectsController(ctx) {
     );
     if (!entitlement) {
       log.info('[aso-overlay] site org not ASO-entitled', { siteId: site.getId() });
+      emitFinal(OUTCOME.AUTHZ_NO_ENTITLEMENT);
       return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
     const enrollments = await SiteEnrollment.allBySiteId(site.getId());
     const enrolled = enrollments.some((se) => se.getEntitlementId() === entitlement.getId());
     if (!enrolled) {
       log.info('[aso-overlay] site not enrolled for ASO', { siteId: site.getId() });
+      emitFinal(OUTCOME.AUTHZ_NOT_ENROLLED);
       return notFound('No redirect overlay found', NO_STORE_HEADERS);
     }
 
     // Read the overlay with the Lambda's own execution role (no SigV4 from caller).
-    const key = `config/${service}/redirects.txt`;
+    const key = `config/${canonicalService}/redirects.txt`;
+    const s3StartedAt = Date.now();
+    // Emits AsoOverlayS3ReadDurationMs with the S3-scoped result. Kept separate
+    // from `emitFinal`'s request-level Outcome so dashboards don't ambiguously
+    // slice S3 latency by request-level codes (e.g. "S3 success on a 304").
+    // Guard against double-emission: on the 200 path we emit SUCCESS right
+    // after `s3Client.send()` resolves, but the body stream (`transformToString`
+    // below) can still throw with an SDK / network error that lands in the
+    // outer catch and would fire another `emitS3Duration(UNEXPECTED)` for the
+    // same request. Emitting two duration samples with contradictory S3Result
+    // dimensions skews the histogram — the caller-observable outcome (200 vs
+    // 500) is still correctly recorded by `emitFinal`, but the S3-tier chart
+    // would double-count.
+    let s3DurationEmitted = false;
+    const emitS3Duration = (s3Result) => {
+      if (s3DurationEmitted) {
+        return;
+      }
+      s3DurationEmitted = true;
+      emitMetric(
+        {
+          name: 'AsoOverlayS3ReadDurationMs',
+          value: Date.now() - s3StartedAt,
+          unit: 'Milliseconds',
+          dimensions: { S3Result: s3Result },
+        },
+        emitOpts,
+      );
+    };
     try {
       const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
       const response = await s3Client.send(command);
+      emitS3Duration(S3_RESULT.SUCCESS);
 
       // S3 returns the object's ETag already quoted (RFC 7232 opaque-tag form),
       // e.g. `"d41d8cd98f00b204e9800998ecf8427e"`. Passthrough gives the client
@@ -191,12 +287,26 @@ function RedirectsController(ctx) {
       // a plain 200 rather than breaking.
       const etag = response.ETag;
       const ifNoneMatch = getHeader(context, 'if-none-match');
-      if (ifNoneMatchMatches(ifNoneMatch, etag)) {
-        // Deliberately no per-request 304 log — this is the *expected* path at
-        // steady state and would dominate log volume across the dispatcher fleet.
-        // If 304-rate visibility becomes necessary, emit a metric rather than a
-        // log line.
-        //
+      const inmMatched = ifNoneMatchMatches(ifNoneMatch, etag);
+      // Track shell-stripped / malformed If-None-Match separately: a spike here
+      // means a specific sidecar rollout parses ETags wrong (RFC 7232 §2.3
+      // requires quoted opaque-tag; unquoted → rejected → falls through to 200).
+      if (ifNoneMatch !== null && !inmMatched) {
+        const trimmed = ifNoneMatch.trim();
+        // Every token failed the opaque-tag check — likely unquoted. Non-matching
+        // but well-formed validators (client's stale copy) are normal cache
+        // misses and don't warrant a metric.
+        if (trimmed !== '*'
+            && !trimmed.split(',').some((tok) => normalizeValidator(tok) !== null)) {
+          emitMetric(
+            { name: 'AsoOverlayIfNoneMatchInvalid', dimensions: { Reason: INM_INVALID_REASON.UNQUOTED } },
+            emitOpts,
+          );
+        }
+      }
+      if (inmMatched) {
+        emitMetric({ name: 'AsoOverlayConditionalGet304' }, emitOpts);
+        emitFinal(OUTCOME.NOT_MODIFIED_304);
         // 304 MUST NOT include a message body (RFC 7230 §3.3.3); MUST carry any
         // Cache-Control / ETag we would have sent on a 200 (RFC 7232 §4.1).
         // Content-type is set explicitly because createResponse would otherwise
@@ -210,11 +320,15 @@ function RedirectsController(ctx) {
           // old TTL can be purged by the same call. Fastly stores the header
           // for edge state; RFC 7232 requires we carry cache-control + etag,
           // and Surrogate-Key is an operationally-linked companion.
-          'surrogate-key': `aso-overlay-${service}`,
+          'surrogate-key': `aso-overlay-${canonicalService}`,
         });
       }
 
       const body = await response.Body.transformToString();
+      if (etag) {
+        emitMetric({ name: 'AsoOverlayEtagPresent' }, emitOpts);
+      }
+      emitFinal(OUTCOME.OK_200);
       return createResponse(body, 200, {
         'content-type': 'text/plain; charset=utf-8',
         // Cache-friendly for Fastly request-collapsing; edge TTL also set in VCL.
@@ -226,11 +340,13 @@ function RedirectsController(ctx) {
         // prefix so future overlays under different routes don't collide with
         // this key space. Fastly VCL strips the /config/<tier>/ prefix before
         // reaching origin, so we only need per-service uniqueness (not per-tier).
-        'surrogate-key': `aso-overlay-${service}`,
+        'surrogate-key': `aso-overlay-${canonicalService}`,
       });
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
       if (err.name === 'NoSuchKey' || code === 404) {
+        emitS3Duration(S3_RESULT.NO_SUCH_KEY);
+        emitFinal(OUTCOME.S3_NO_SUCH_KEY);
         return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
       // The reader role intentionally lacks s3:ListBucket (least privilege, no key
@@ -245,9 +361,13 @@ function RedirectsController(ctx) {
           + '— missing object or missing s3:GetObject grant',
           err,
         );
+        emitS3Duration(S3_RESULT.ACCESS_DENIED);
+        emitFinal(OUTCOME.S3_ACCESS_DENIED);
         return notFound('No redirect overlay found', NO_STORE_HEADERS);
       }
       log.error(`[aso-overlay] failed to read ${key} from ${bucketName}`, err);
+      emitS3Duration(S3_RESULT.UNEXPECTED);
+      emitFinal(OUTCOME.S3_UNEXPECTED);
       return internalServerError('Failed to retrieve redirect overlay', NO_STORE_HEADERS);
     }
   }

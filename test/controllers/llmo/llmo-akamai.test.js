@@ -78,13 +78,18 @@ describe('LlmoAkamaiController', () => {
         { propertyId: PROPERTY_ID, propertyName: 'example', matchedOn: ['hostname'] },
       ]),
       getLatestVersion: sandbox.stub().resolves(7),
-      getRuleTree: sandbox.stub().resolves({ ruleTree: RULE_TREE, ruleFormat: 'v2024-01-01' }),
+      getRuleTree: sandbox.stub().resolves({ ruleTree: RULE_TREE, ruleFormat: 'v2024-01-01', etag: 'etag-7' }),
       createVersion: sandbox.stub().resolves(8),
       updateRuleTree: sandbox.stub().resolves({ errors: [], warnings: [] }),
+      patchRuleTree: sandbox.stub().resolves({ errors: [], warnings: [] }),
       activate: sandbox.stub().resolves('/papi/v1/properties/prp_1253269/activations/atv_123'),
       getActivation: sandbox.stub().resolves({ activationId: 'atv_123', status: 'ACTIVE' }),
       latestActivation: sandbox.stub().resolves({ activationId: 'atv_999', status: 'PENDING' }),
     };
+    // Deploy fetches the NEW version (8); return a distinct etag so the deploy test proves it uses
+    // the freshly-fetched version's etag, not a stale one from the latest-version (v7) lookup.
+    mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 8)
+      .resolves({ ruleTree: RULE_TREE, ruleFormat: 'v2024-01-01', etag: 'etag-8' });
 
     mockTokowakaClient = {
       fetchMetaconfig: sandbox.stub().resolves({ apiKeys: [LLMO_API_KEY] }),
@@ -216,14 +221,37 @@ describe('LlmoAkamaiController', () => {
   });
 
   describe('plan', () => {
-    it('returns the before/after child rules and merged tree', async () => {
+    it('returns the before/after child rules and merged tree, dry-run validated', async () => {
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.latestVersion).to.equal(7);
       expect(body.currentChildRules).to.deep.equal(['Existing']);
       expect(body.mergedChildRules[0]).to.equal('Optimize at Edge');
+      // plan dry-runs the exact patch it would deploy, without creating a version.
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+      expect(mockAkamaiClient.patchRuleTree).to.have.been.calledOnce;
+      expect(mockAkamaiClient.patchRuleTree.firstCall.args[6]).to.deep.equal({ dryRun: true });
+      expect(body.validated).to.equal(true);
+      expect(body.errors).to.deep.equal([]);
+    });
+
+    it('surfaces dry-run validation errors and warnings from the patch deploy would apply', async () => {
+      mockAkamaiClient.patchRuleTree.resolves({ errors: [{ detail: 'bad' }], warnings: [{ detail: 'w' }] });
+      const res = await controller.plan(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.validated).to.equal(true);
+      expect(body.errors).to.have.length(1);
+      expect(body.warnings).to.have.length(1);
+    });
+
+    it('degrades to validated:false (200) when the dry-run itself cannot run', async () => {
+      mockAkamaiClient.patchRuleTree.rejects(new Error('PAPI PATCH /x -> 409: conflict'));
+      const res = await controller.plan(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.validated).to.equal(false);
     });
 
     it('redacts the LLMO API key from the previewed merged tree', async () => {
@@ -253,16 +281,23 @@ describe('LlmoAkamaiController', () => {
   });
 
   describe('deploy', () => {
-    it('creates a new version, applies the rules, and returns it', async () => {
+    it('creates a new version, applies the rules via a JSON patch, and returns it', async () => {
       const res = await controller.deploy(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.baseVersion).to.equal(7);
       expect(body.newVersion).to.equal(8);
-      expect(mockAkamaiClient.updateRuleTree).to.have.been.calledOnce;
-      // updateRuleTree receives the merged tree with the managed wrapper first.
-      const mergedArg = mockAkamaiClient.updateRuleTree.firstCall.args[4];
-      expect(mergedArg.rules.children[0].name).to.equal('Optimize at Edge');
+      // The patch is built against and applied to the NEW version, guarded by its etag; the old
+      // full-tree PUT is no longer used.
+      expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 8);
+      expect(mockAkamaiClient.patchRuleTree).to.have.been.calledOnce;
+      const [, version, , , ops, etag] = mockAkamaiClient.patchRuleTree.firstCall.args;
+      expect(version).to.equal(8);
+      // v8's etag (from the fresh getRuleTree(8)), not the latest-version (v7) etag.
+      expect(etag).to.equal('etag-8');
+      const addParent = ops.find((o) => o.op === 'add' && o.value?.name === 'Optimize at Edge');
+      expect(addParent).to.exist;
+      expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
     });
 
     it('blocks deploy when the property does not serve the site domain', async () => {
@@ -275,7 +310,7 @@ describe('LlmoAkamaiController', () => {
     });
 
     it('returns 422 when PAPI rejects the rule tree', async () => {
-      mockAkamaiClient.updateRuleTree.resolves({ errors: [{ title: 'bad' }], warnings: [] });
+      mockAkamaiClient.patchRuleTree.resolves({ errors: [{ title: 'bad' }], warnings: [] });
       const res = await controller.deploy(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(422);
@@ -286,6 +321,14 @@ describe('LlmoAkamaiController', () => {
       mockAkamaiClient.getLatestVersion.rejects(new Error('PAPI GET /x -> 403: locked'));
       const res = await controller.deploy(withData(propertyRef));
       expect(res.status).to.equal(403);
+    });
+
+    it('reports the created newVersion when patch throws after createVersion', async () => {
+      mockAkamaiClient.patchRuleTree.rejects(new Error('PAPI PATCH /x -> 500: boom'));
+      const res = await controller.deploy(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(502);
+      expect(body.newVersion).to.equal(8);
     });
   });
 
@@ -581,8 +624,8 @@ describe('LlmoAkamaiController', () => {
       expect(body.currentChildRules).to.deep.equal([]);
     });
 
-    it('deploy treats an empty updateRuleTree response as success', async () => {
-      mockAkamaiClient.updateRuleTree.resolves(undefined);
+    it('deploy treats an empty patchRuleTree response as success', async () => {
+      mockAkamaiClient.patchRuleTree.resolves(undefined);
       const res = await controller.deploy(withData(propertyRef));
       expect(res.status).to.equal(200);
     });
