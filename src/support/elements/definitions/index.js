@@ -29,3 +29,14 @@ export {
   transformOwnedUrlsResponse,
 } from './owned-urls.js';
 export { buildDomainUrlsPayload, transformDomainUrlsResponse } from './domain-urls.js';
+export {
+  transformStatsSimpleNumericResponse,
+  buildStatsTotalExecutionsPayload,
+  transformStatsTotalExecutionsResponse,
+  buildStatsMentionsPayload,
+  transformStatsMentionsResponse,
+  buildStatsVisibilityPayload,
+  transformStatsVisibilityResponse,
+  buildStatsCitationsPayload,
+  transformStatsCitationsResponse,
+} from './brand-presence-stats.js';
