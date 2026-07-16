@@ -26,13 +26,15 @@ const MAX_EXCLUSION_GLOBS = 1000;
 const MAX_MANUAL_URLS = 50000;
 const MAX_ELEMENT_LEN = 2048;
 const MAX_NOTE_LEN = 2000;
+const MAX_REASON_LEN = 2000;
+const MAX_BUDGET = 500_000;
+const MAX_JSON_FIELD_BYTES = 65536;
 const STRATEGIES = ['tiered'];
-// 40000 (transaction_rollback), not 40001 (serialization_failure): PostgREST v14.4
-// (pinned by mysticat-data-service) hangs on 40001 due to hasql-transaction's
-// auto-retry on that specific code (PostgREST/postgrest#3673). 40000 is the
-// standard class-40 parent code, semantically correct for a version conflict,
-// and verified non-hanging.
-const SQLSTATE_VERSION_CONFLICT = '40000';
+// 40000 (transaction_rollback) is the code this RPC actually raises today (PostgREST v14.4,
+// pinned by mysticat-data-service, hangs on 40001/serialization_failure due to hasql-transaction's
+// auto-retry on that specific code - PostgREST/postgrest#3673). 40001 is accepted too so this
+// mapping keeps working if a future PostgREST upgrade lets the RPC use the more conventional code.
+const SQLSTATE_VERSION_CONFLICT = ['40000', '40001'];
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
 // Cursor versions above this are rejected as malformed — guards against a tampered/garbage
@@ -59,8 +61,8 @@ function validatePolicyBody(b) {
   if (!isObject(b)) {
     return 'request body must be a JSON object';
   }
-  if (!Number.isInteger(b.budget) || b.budget <= 0) {
-    return 'budget must be an integer > 0';
+  if (!Number.isInteger(b.budget) || b.budget <= 0 || b.budget > MAX_BUDGET) {
+    return `budget must be an integer between 1 and ${MAX_BUDGET}`;
   }
   if (!STRATEGIES.includes(b.strategyName)) {
     return `strategyName must be one of: ${STRATEGIES.join(', ')}`;
@@ -85,18 +87,28 @@ function validatePolicyBody(b) {
   if (mu) {
     return mu;
   }
-  if (b.scopeConfig !== undefined && !isObject(b.scopeConfig)) {
-    return 'scopeConfig must be an object';
+  if (b.scopeConfig !== undefined) {
+    if (!isObject(b.scopeConfig)) {
+      return 'scopeConfig must be an object';
+    }
+    if (JSON.stringify(b.scopeConfig).length > MAX_JSON_FIELD_BYTES) {
+      return `scopeConfig exceeds the maximum size of ${MAX_JSON_FIELD_BYTES} bytes`;
+    }
   }
-  if (b.lifecycleOverrides !== undefined && !isObject(b.lifecycleOverrides)) {
-    return 'lifecycleOverrides must be an object';
+  if (b.lifecycleOverrides !== undefined) {
+    if (!isObject(b.lifecycleOverrides)) {
+      return 'lifecycleOverrides must be an object';
+    }
+    if (JSON.stringify(b.lifecycleOverrides).length > MAX_JSON_FIELD_BYTES) {
+      return `lifecycleOverrides exceeds the maximum size of ${MAX_JSON_FIELD_BYTES} bytes`;
+    }
   }
   if (b.note !== undefined && b.note !== null
     && (typeof b.note !== 'string' || b.note.length > MAX_NOTE_LEN)) {
     return `note must be a string <= ${MAX_NOTE_LEN} chars`;
   }
-  if (!hasText(b.reason)) {
-    return 'reason is required';
+  if (!hasText(b.reason) || b.reason.length > MAX_REASON_LEN) {
+    return `reason is required and must be <= ${MAX_REASON_LEN} chars`;
   }
   if (!Number.isInteger(b.expectedVersion) || b.expectedVersion < 0) {
     return 'expectedVersion is required and must be an integer >= 0';
@@ -104,10 +116,9 @@ function validatePolicyBody(b) {
   return null;
 }
 
+// Returns the decoded version, or null when `c` is malformed/out-of-range. Callers must
+// distinguish "no cursor supplied" from "invalid cursor supplied" themselves via hasText(c).
 function decodeCursor(c) {
-  if (!hasText(c)) {
-    return null;
-  }
   const v = Number.parseInt(Buffer.from(c, 'base64url').toString('utf8'), 10);
   return Number.isInteger(v) && v >= 0 && v <= MAX_CURSOR_VERSION ? v : null;
 }
@@ -206,7 +217,7 @@ export default function AuditPolicyController() {
     });
 
     if (error) {
-      if (error.code === SQLSTATE_VERSION_CONFLICT) {
+      if (SQLSTATE_VERSION_CONFLICT.includes(error.code)) {
         const currentVersion = Number.parseInt(error.details, 10);
         return createResponse(
           {
@@ -217,7 +228,8 @@ export default function AuditPolicyController() {
         );
       }
       if (error.code === 'P0001') {
-        return badRequest(error.message || 'audit policy rejected by validation');
+        context.log?.warn?.(`audit-policy putPolicy rejected by RPC validation (P0001): ${error.message}`);
+        return badRequest('audit policy rejected by validation');
       }
       context.log?.error?.(`audit-policy putPolicy failed: ${error.code} ${error.message}`);
       return internalServerError('Failed to write audit policy');
@@ -235,7 +247,14 @@ export default function AuditPolicyController() {
       Math.max(Number.parseInt(context.params?.limit, 10) || DEFAULT_PAGE, 1),
       MAX_PAGE,
     );
-    const cursor = decodeCursor(context.params?.cursor);
+    const rawCursor = context.params?.cursor;
+    let cursor = null;
+    if (hasText(rawCursor)) {
+      cursor = decodeCursor(rawCursor);
+      if (cursor === null) {
+        return badRequest('cursor is invalid or out of range');
+      }
+    }
 
     let q = client.from(REVISION_TABLE).select('*').eq('site_id', siteId);
     if (cursor !== null) {

@@ -213,6 +213,7 @@ describe('AuditPolicyController — E2 putPolicy', () => {
     ['reason is missing', () => ({ ...validBody, reason: undefined })],
     ['expectedVersion is missing', () => ({ ...validBody, expectedVersion: undefined })],
     ['budget is zero', () => ({ ...validBody, budget: 0 })],
+    ['budget exceeds the maximum', () => ({ ...validBody, budget: 500_001 })],
     ['strategyName is not a recognized strategy', () => ({ ...validBody, strategyName: 'bogus' })],
     ['exclusionGlobs is not an array', () => ({ ...validBody, exclusionGlobs: 'nope' })],
     ['an exclusionGlobs entry is not a string', () => ({ ...validBody, exclusionGlobs: [123] })],
@@ -221,8 +222,15 @@ describe('AuditPolicyController — E2 putPolicy', () => {
     })],
     ['manualUrls is not an array', () => ({ ...validBody, manualUrls: 'nope' })],
     ['scopeConfig is not an object', () => ({ ...validBody, scopeConfig: 'nope' })],
+    ['scopeConfig exceeds the maximum serialized size', () => ({
+      ...validBody, scopeConfig: { blob: 'x'.repeat(65536) },
+    })],
     ['lifecycleOverrides is not an object', () => ({ ...validBody, lifecycleOverrides: 'nope' })],
+    ['lifecycleOverrides exceeds the maximum serialized size', () => ({
+      ...validBody, lifecycleOverrides: { blob: 'x'.repeat(65536) },
+    })],
     ['note is too long', () => ({ ...validBody, note: 'x'.repeat(2001) })],
+    ['reason is too long', () => ({ ...validBody, reason: 'x'.repeat(2001) })],
   ].forEach(([label, makeBody]) => {
     it(`returns 400 when ${label}`, async () => {
       const client = buildClient();
@@ -318,13 +326,56 @@ describe('AuditPolicyController — E2 putPolicy', () => {
     expect(body.currentVersion).to.equal(7);
   });
 
-  it('maps a redaction/validation RPC raise (P0001) to 400', async () => {
+  it('maps SQLSTATE 40001 to 409 too, for forward-compat with a future PostgREST upgrade', async () => {
     const client = buildClient({
-      rpcResult: { data: null, error: { code: 'P0001', message: 'secret detected in note' } },
+      rpcResult: {
+        data: null,
+        error: { code: '40001', message: 'audit_policy_version_conflict', details: '9' },
+      },
     });
     const controller = loadController();
     const res = await controller.putPolicy(writeCtx(validBody, { client }));
+    expect(res.status).to.equal(409);
+    const body = await res.json();
+    expect(body.currentVersion).to.equal(9);
+  });
+
+  it('omits currentVersion from the 409 body when error.details is not parseable', async () => {
+    const client = buildClient({
+      rpcResult: {
+        data: null,
+        error: { code: '40000', message: 'audit_policy_version_conflict', details: null },
+      },
+    });
+    const controller = loadController();
+    const res = await controller.putPolicy(writeCtx(validBody, { client }));
+    expect(res.status).to.equal(409);
+    const body = await res.json();
+    expect(body).to.not.have.property('currentVersion');
+  });
+
+  it('maps a redaction/validation RPC raise (P0001) to 400 without leaking error.message', async () => {
+    const client = buildClient({
+      rpcResult: { data: null, error: { code: 'P0001', message: 'secret detected in note: sk-abc123' } },
+    });
+    const controller = loadController();
+    const ctx = writeCtx(validBody, { client });
+    const res = await controller.putPolicy(ctx);
     expect(res.status).to.equal(400);
+    const body = await res.json();
+    expect(body.message).to.not.include('sk-abc123');
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/P0001.*sk-abc123/));
+  });
+
+  it('returns a generic 500 for an unrecognized RPC error code', async () => {
+    const client = buildClient({
+      rpcResult: { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } },
+    });
+    const controller = loadController();
+    const ctx = writeCtx(validBody, { client });
+    const res = await controller.putPolicy(ctx);
+    expect(res.status).to.equal(500);
+    expect(ctx.log.error).to.have.been.calledWith(sinon.match(/23505/));
   });
 
   it('returns 403 when caller lacks both ASO and LLMO entitlement', async () => {
@@ -402,7 +453,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     expect(limitSpy).to.have.been.calledWith(1);
   });
 
-  it('ignores an out-of-range cursor and falls back to the first page (no .lt call)', async () => {
+  it('returns 400 for an out-of-range cursor instead of silently falling back to page 1', async () => {
     const limitSpy = sinon.stub().resolves({ data: [], error: null });
     const order = sinon.stub().returnsThis();
     const ltSpy = sinon.stub().returnsThis();
@@ -419,8 +470,18 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     const controller = loadController();
     // encodeCursor(Number.MAX_SAFE_INTEGER) — far beyond MAX_CURSOR_VERSION
     const tamperedCursor = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'utf8').toString('base64url');
-    await controller.listRevisions(buildContext({ client, params: { cursor: tamperedCursor } }));
+    const ctx = buildContext({ client, params: { cursor: tamperedCursor } });
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(400);
     expect(ltSpy).to.not.have.been.called;
+    expect(limitSpy).to.not.have.been.called;
+  });
+
+  it('returns 400 for a malformed (non-numeric) cursor', async () => {
+    const client = buildClient();
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client, params: { cursor: 'not-base64-number' } }));
+    expect(res.status).to.equal(400);
   });
 
   it('applies .lt(version, cursor) for a valid in-range cursor', async () => {

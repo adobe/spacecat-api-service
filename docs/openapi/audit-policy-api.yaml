@@ -64,6 +64,21 @@ audit-policy:
 audit-policy-revisions:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of revisions to return. Default 50, clamped to a maximum of 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    - name: cursor
+      in: query
+      required: false
+      description: Opaque pagination cursor from a previous response's `cursor` field. Omit to fetch the first page.
+      schema:
+        type: string
   get:
     tags:
       - site
@@ -77,6 +92,7 @@ audit-policy-revisions:
           application/json:
             schema:
               $ref: '#/AuditPolicyRevisionList'
+      '400': { $ref: './responses.yaml#/400' }
       '401': { $ref: './responses.yaml#/401' }
       '403': { $ref: './responses.yaml#/403' }
       '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
@@ -143,7 +159,7 @@ AuditPolicy:
   properties:
     siteId: { type: string, format: uuid }
     version: { type: integer }
-    budget: { type: integer, minimum: 1 }
+    budget: { type: integer, minimum: 1, maximum: 500000 }
     strategyName: { type: string, enum: [tiered] }
     exclusionGlobs: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 1000 }
     manualUrls: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 50000 }
@@ -160,13 +176,13 @@ AuditPolicyUpsertRequest:
   type: object
   required: [budget, strategyName, reason, expectedVersion]
   properties:
-    budget: { type: integer, minimum: 1 }
+    budget: { type: integer, minimum: 1, maximum: 500000 }
     strategyName: { type: string, enum: [tiered] }
     exclusionGlobs: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 1000 }
     manualUrls: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 50000 }
     scopeConfig: { type: object }
     lifecycleOverrides: { type: object }
-    reason: { type: string, minLength: 1 }
+    reason: { type: string, minLength: 1, maxLength: 2000 }
     note: { type: [string, 'null'], maxLength: 2000 }
     expectedVersion: { type: integer, minimum: 0 }
 
