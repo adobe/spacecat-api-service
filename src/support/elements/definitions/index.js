@@ -24,6 +24,10 @@ export { buildWeeksPayload, transformWeeksResponse } from './weeks.js';
 export { buildPromptsPayload, transformPromptsResponse } from './prompts.js';
 export { buildCitedDomainsPayload, transformCitedDomainsResponse } from './cited-domains.js';
 export {
+  buildSentimentOverviewPayload,
+  transformSentimentOverviewResponse,
+} from './sentiment-overview.js';
+export {
   buildOwnedUrlsStatsPayload,
   buildOwnedUrlsTrendPayload,
   transformOwnedUrlsResponse,

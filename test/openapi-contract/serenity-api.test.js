@@ -36,8 +36,13 @@ function fakeLog() {
 }
 
 function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
+  // Build a request.url from `query` so handlers that read params via extractQuery
+  // (the ElementsController endpoints) see them. Handlers that read ctx.query
+  // directly are unaffected (both are populated).
+  const search = new URLSearchParams(query).toString();
   return {
     env: {},
+    request: { url: `https://api.example.com/serenity${search ? `?${search}` : ''}` },
     pathInfo: { headers: { authorization: 'Bearer ims-token' } },
     attributes: { authInfo: { getType: () => 'ims' } },
     dataAccess: {
@@ -324,6 +329,7 @@ const FIXTURES = {
     expectedStatus: 200,
     usesElementsController: true,
     controllerMethod: 'listUrlInspectorFilterDimensions',
+    serviceMethod: 'getUrlInspectorFilterDimensions',
     handlerResult: {
       brands: [{ id: 'Test Brand', label: 'Test Brand', spacecat_brand_id: BRAND }],
       regions: [{
@@ -342,6 +348,7 @@ const FIXTURES = {
     expectedStatus: 200,
     usesElementsController: true,
     controllerMethod: 'getMarketTrackingTrends',
+    serviceMethod: 'getMarketTrackingTrends',
     handlerResult: {
       weeklyTrends: [{
         week: '2026-07-05',
@@ -353,12 +360,40 @@ const FIXTURES = {
       }],
     },
   },
+  listSerenityBrandPresenceSentimentOverview: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listSentimentOverview',
+    serviceMethod: 'getSentimentOverview',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listSentimentOverview) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    handlerResult: {
+      weeklyTrends: [{
+        week: '2026-W24',
+        weekNumber: 24,
+        year: 2026,
+        sentiment: [
+          { name: 'Positive', value: 53, color: '#047857' },
+          { name: 'Neutral', value: 39, color: '#4B5563' },
+          { name: 'Negative', value: 8, color: '#B91C1C' },
+        ],
+        totalPrompts: 5261,
+        promptsWithSentiment: 9181,
+        mentions: 0,
+        citations: 0,
+        visibilityScore: 0,
+        competitors: [],
+      }],
+    },
+  },
   // Also served by ElementsController — see the note on
   // listSerenityUrlInspectorFilterDimensions above.
   getSerenityBrandPresenceStats: {
     expectedStatus: 200,
     usesElementsController: true,
     controllerMethod: 'getStats',
+    serviceMethod: 'getBrandPresenceStats',
     handlerResult: {
       stats: {
         total_executions: 19528,
@@ -443,9 +478,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             },
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({
-                getUrlInspectorFilterDimensions: sinon.stub().resolves(fx.handlerResult),
-                getMarketTrackingTrends: sinon.stub().resolves(fx.handlerResult),
-                getBrandPresenceStats: sinon.stub().resolves(fx.handlerResult),
+                [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
                 resolveRegionProjectId: sinon.stub().resolves(null),
               }),
             },

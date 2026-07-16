@@ -30,6 +30,8 @@ import {
   transformPromptsResponse,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
+  buildSentimentOverviewPayload,
+  transformSentimentOverviewResponse,
   buildOwnedUrlsStatsPayload,
   buildOwnedUrlsTrendPayload,
   transformOwnedUrlsResponse,
@@ -163,6 +165,30 @@ export function createElementsService(transport) {
         buildCitedDomainsPayload(params),
       );
       return transformCitedDomainsResponse(raw, params);
+    },
+
+    /**
+     * Fetches per-week brand sentiment (positive/neutral/negative) from the Sentiment
+     * element (f4153af8…), transformed into the legacy Brand Presence
+     * `sentiment-overview` contract `{ weeklyTrends: [...] }`.
+     *
+     * Single call (like getCitedDomains, not a per-project fan-out): the element returns
+     * an aggregate daily sentiment breakdown that we roll up to ISO weeks. Region scoping,
+     * when requested, is a top-level `project_id` on the payload (resolved by the controller
+     * via resolveRegionProjectId); region=all/absent → the brand's whole sub-workspace.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate, category,
+     *   projectId).
+     * @returns {Promise<{ weeklyTrends: object[] }>} Legacy contract.
+     */
+    async getSentimentOverview(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.SENTIMENT,
+        buildSentimentOverviewPayload(params),
+      );
+      return transformSentimentOverviewResponse(raw);
     },
 
     /**
