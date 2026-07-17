@@ -1,3 +1,10 @@
+# [1.663.0](https://github.com/adobe/spacecat-api-service/compare/v1.662.0...v1.663.0) (2026-07-17)
+
+
+### Features
+
+* **llmo:** register recurring prompt-suggestion schedules only for paying sites; one-shot for trial ([#2847](https://github.com/adobe/spacecat-api-service/issues/2847)) ([8f43e8b](https://github.com/adobe/spacecat-api-service/commit/8f43e8b05fe4080f29e309a874903aa041513f21))
+
 # [1.662.0](https://github.com/adobe/spacecat-api-service/compare/v1.661.1...v1.662.0) (2026-07-17)
 
 
