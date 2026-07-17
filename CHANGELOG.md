@@ -1,3 +1,17 @@
+## [1.661.1](https://github.com/adobe/spacecat-api-service/compare/v1.661.0...v1.661.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* Prompt Research prompts count from real per-topic total ([#2843](https://github.com/adobe/spacecat-api-service/issues/2843)) ([5f7f4af](https://github.com/adobe/spacecat-api-service/commit/5f7f4af946e50a824ffc3a5785a494819e989e51))
+
+# [1.661.0](https://github.com/adobe/spacecat-api-service/compare/v1.660.0...v1.661.0) (2026-07-17)
+
+
+### Features
+
+* **serenity:** rollout hardening — rightsizing sweep, observability, cross-container lock ADR (LLMO-6191) ([#2811](https://github.com/adobe/spacecat-api-service/issues/2811)) ([1d54a1a](https://github.com/adobe/spacecat-api-service/commit/1d54a1a93347b07a90c179faa7b54b825b8a2fe5)), closes [#2764](https://github.com/adobe/spacecat-api-service/issues/2764) [#2764](https://github.com/adobe/spacecat-api-service/issues/2764)
+
 # [1.660.0](https://github.com/adobe/spacecat-api-service/compare/v1.659.1...v1.660.0) (2026-07-16)
 
 
