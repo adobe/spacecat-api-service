@@ -76,6 +76,15 @@ const OVERRIDE_DETECT_TIMEOUT_MS = 5000;
 // outcome is the server-side schedule row, so on timeout we stop waiting.
 const SCHEDULE_REGISTRATION_TIMEOUT_MS = 8000;
 
+// Cap for the best-effort paying-tier lookup (isPayingLlmoSite). It runs on the
+// synchronous onboarding path, before the schedule-registration step, and hits the
+// tier service — a slow/hung tier service would otherwise stall onboarding past
+// the CDN first-byte timeout even though isPayingLlmoSite's own try/catch already
+// handles rejections. On timeout we fall back to `false` (trial), consistent with
+// isPayingLlmoSite's fail-safe-to-trial intent: an indeterminate tier never gets a
+// recurring, fleet-wide Fargate schedule.
+const TIER_LOOKUP_TIMEOUT_MS = 5000;
+
 /**
  * Awaits `promise`, but resolves to `fallback` if it rejects or doesn't settle
  * within `timeoutMs`. The underlying promise is left running and any late
@@ -372,10 +381,14 @@ export async function registerPromptSuggestionSchedules({
         // brands.js (activateBrand). `status` is the upstream HTTP status when the
         // DRS client attaches one, else 'unknown'.
         const status = scheduleError.status ?? 'unknown';
-        log.error(`Failed to register DRS ${name} schedule provider_id=${providerId} `
-          + `site_id=${siteId} status=${status}: ${scheduleError.message}`);
-        say(`:warning: Failed to register DRS ${name} schedule for site ${siteId} `
-          + '(will need manual trigger)');
+        // Wording tracks the branch: paying → createSchedule (recurring schedule),
+        // trial/non-paying → submitJob (one-shot run). "schedule" alone would
+        // misdescribe the trial-path failure.
+        const mode = isPaying ? 'schedule' : 'one-shot run';
+        log.error(`Failed to run/register DRS ${name} prompt-suggestion (${mode}) `
+          + `provider_id=${providerId} site_id=${siteId} status=${status}: ${scheduleError.message}`);
+        say(`:warning: Failed to run/register DRS ${name} prompt-suggestion (${mode}) `
+          + `for site ${siteId} (will need manual trigger)`);
       }
     }),
   );
@@ -1662,7 +1675,16 @@ export async function activateBrandAndGeneratePrompts({
       // Brandalf→prompt-gen chain) and out of scope here.
       // TODO(LLMO-4258 follow-up): have DRS trigger these once base prompt
       // generation completes, instead of racing the Brandalf submit.
-      const isPaying = await isPayingLlmoSite(site, context);
+      // Bound by settleWithin: isPayingLlmoSite hits the tier service and is
+      // awaited on the synchronous response path. Its own try/catch handles
+      // rejections but NOT a hang, so cap it and fall back to `false` (trial) on
+      // timeout — same fail-safe-to-trial intent as isPayingLlmoSite itself, so an
+      // indeterminate tier never gets a recurring, fleet-wide schedule.
+      const isPaying = await settleWithin(
+        isPayingLlmoSite(site, context),
+        TIER_LOOKUP_TIMEOUT_MS,
+        false,
+      );
 
       // Bound by settleWithin: the per-pipeline createSchedule/submitJob calls are
       // awaited on the synchronous response path, so a slow/hung DRS could

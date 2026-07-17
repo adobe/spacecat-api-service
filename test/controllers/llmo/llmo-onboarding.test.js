@@ -1868,7 +1868,12 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Fake timers (not mockSetTimeoutImmediate) so the settleWithin-wrapped tier
+      // lookup resolves via its fast PAID promise before its 5s cap — an
+      // immediate-firing timer would defeat the race and mis-route to the trial
+      // (one-shot) path. Long best-effort timers (override detect, schedule
+      // registration) are still fast-forwarded by tickAsync below.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1910,7 +1915,16 @@ describe('LLMO Onboarding Functions', () => {
         imsOrgId: 'ABC123@AdobeOrg',
       };
 
-      const result = await performLlmoOnboardingWithMocks(params, context);
+      let result;
+      try {
+        const pending = performLlmoOnboardingWithMocks(params, context);
+        // Fast-forward every best-effort settleWithin timer, flushing microtasks
+        // between ticks so the fast-resolving stubs (tier, DRS) win their races.
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
       expect(mockDrsClient.createFrom().submitJob).to.have.been.calledWith(
         sinon.match({
@@ -6143,10 +6157,12 @@ describe('LLMO Onboarding Functions', () => {
       // All three providers are surfaced, none swallowed. Filter by the
       // schedule-failure message instead of asserting a bare calledThrice, so an
       // unrelated future ERROR log in V2 onboarding does not break this test.
-      const scheduleFailureLogs = errorLogs.filter((m) => m.includes('Failed to register DRS'));
+      const scheduleFailureLogs = errorLogs.filter((m) => m.includes('Failed to run/register DRS'));
       expect(scheduleFailureLogs).to.have.lengthOf(3);
+      // Paying path → the wording reads "(schedule)", the failing createSchedule branch.
+      expect(semrushLog).to.include('(schedule)');
       // Operator gets a Slack warning per failed schedule (manual-trigger signal).
-      expect(params.say).to.have.been.calledWithMatch(/Failed to register DRS .*schedule/);
+      expect(params.say).to.have.been.calledWithMatch(/Failed to run\/register DRS .*\(schedule\)/);
       // Brandalf still fired — the schedule failures did not abort onboarding.
       expect(mockDrsClient.createFrom().submitJob).to.have.been.calledOnce;
     });
@@ -6262,6 +6278,74 @@ describe('LLMO Onboarding Functions', () => {
       } finally {
         clock.restore();
       }
+    });
+
+    it('defaults to the trial (one-shot) path when the tier lookup times out', async () => {
+      // isPayingLlmoSite hits a hung tier service: the entitlement promise is
+      // pending (not rejected), so isPayingLlmoSite's internal try/catch never
+      // fires. The settleWithin(TIER_LOOKUP_TIMEOUT_MS) cap must fall back to
+      // false (trial) → one-shot submitJob per pipeline, no recurring schedules.
+      const clock = sandbox.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const mockDrsClient = createMockDrsClient(sandbox);
+        const hangingTierClient = {
+          createForSite: sandbox.stub().returns({
+            // never settles → forces the settleWithin timeout branch
+            checkValidEntitlement: sandbox.stub().returns(new Promise(() => {})),
+          }),
+        };
+        const { activateBrandAndGeneratePrompts } = await esmock(
+          '../../../src/controllers/llmo/llmo-onboarding.js',
+          createCommonEsmockDependencies({
+            mockDrsClient,
+            mockTierClient: hangingTierClient,
+            mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+          }),
+        );
+        const context = buildV2Context();
+        const params = buildV2Params(context);
+        const pending = activateBrandAndGeneratePrompts(params);
+        // Advance past the tier-lookup cap (and any sibling settleWithin timers),
+        // flushing microtasks between ticks.
+        await clock.tickAsync(60000);
+        await pending;
+
+        const instance = mockDrsClient.createFrom();
+        // Timed-out tier lookup → treated as trial: no recurring schedule, one-shot
+        // submitJob per pipeline (plus the Brandalf submit).
+        expect(instance.createSchedule).to.not.have.been.called;
+        expect(instance.submitJob.callCount).to.equal(4);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('logs a trial one-shot submit failure with "(one-shot run)" wording', async () => {
+      // Trial path: the per-pipeline failure is a submitJob (one-shot), not a
+      // createSchedule — the log/Slack wording must reflect that branch.
+      const err = new Error('DRS POST /jobs failed');
+      err.status = 502;
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        submitJob: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockTierClient: createMockTierClientForTier('FREE_TRIAL', sandbox),
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      await activateBrandAndGeneratePrompts(params);
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      const oneShotLogs = errorLogs.filter((m) => m.includes('Failed to run/register DRS') && m.includes('(one-shot run)'));
+      // All three trial pipelines surfaced the one-shot failure, none swallowed.
+      expect(oneShotLogs).to.have.lengthOf(3);
+      expect(params.say).to.have.been.calledWithMatch(/Failed to run\/register DRS .*\(one-shot run\)/);
     });
   });
 });
