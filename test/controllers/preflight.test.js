@@ -85,6 +85,14 @@ describe('Preflight Controller', () => {
     getId: () => 'test-site-123',
     getOrganizationId: () => 'org-123',
     getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+    // SITES-48309: the createPreflight hostname-membership check (ADR-002)
+    // reads these getters. Default the site's baseURL to match the
+    // canonical test URL (main--example-site.aem.page) so the majority of
+    // tests that submit that URL still resolve to a "URL belongs to this
+    // site" pass. Per-test AEM CS / EDS site fixtures override as needed.
+    getBaseURL: () => 'https://main--example-site.aem.page',
+    getDeliveryConfig: () => ({}),
+    getHlxConfig: () => ({}),
   };
 
   const preflightId = 'aabbccdd-1234-5678-abcd-111122223333';
@@ -1442,11 +1450,14 @@ describe('Preflight Controller', () => {
       expect(result.errorCode).to.equal('PREFLIGHT_ACCESS_DENIED');
     });
 
-    it('returns 400 when url does not belong to site', async () => {
-      mockDataAccess.Site.findByPreviewURL.resolves(null);
+    it('returns 400 when url hostname is not in the site\'s known-hosts set (SITES-48309)', async () => {
+      // Post-SITES-48309: URL→site validation is a hostname-membership check
+      // against site.getBaseURL() / site.getDeliveryConfig().authorURL / EDS
+      // hostnames derived from hlxConfig.rso — no DB lookup, no findByPreviewURL.
+      // A URL whose hostname isn't in that set → 400 PREFLIGHT_INVALID_REQUEST.
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://different-site.example.com/test.html' },
       });
       expect(response.status).to.equal(400);
       const result = await response.json();
@@ -1454,26 +1465,50 @@ describe('Preflight Controller', () => {
       expect(result.message).to.equal('URL does not belong to this site');
     });
 
-    it('returns 400 when url belongs to a different site', async () => {
-      mockDataAccess.Site.findByPreviewURL.resolves({ getId: () => 'different-site-id' });
+    it('accepts author-tier AEM CS URL when site\'s deliveryConfig.authorURL matches (SITES-48309)', async () => {
+      // ADR-002 §"POST /sites/:siteId/preflights" — hostname-membership set
+      // includes deliveryConfig.authorURL so both publish-tier (baseURL) and
+      // author-tier URLs for the same AEM CS site are accepted.
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+        getBaseURL: () => 'https://publish-p12345-e67890-cmstg.adobeaemcloud.com',
+        getDeliveryConfig: () => ({ authorURL: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com' }),
+        getHlxConfig: () => ({}),
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com/us/en.html' },
       });
-      expect(response.status).to.equal(400);
+      // Not asserting 202 here — downstream mysticat call isn't stubbed for
+      // this fixture. What matters is we DIDN'T get 400 at the hostname check.
       const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INVALID_REQUEST');
     });
 
-    it('returns 500 when Site.findByPreviewURL throws', async () => {
-      mockDataAccess.Site.findByPreviewURL.rejects(new Error('DB error'));
+    it('accepts publish-tier AEM CS URL when site\'s baseURL is the publish host (SITES-48309)', async () => {
+      // The immediate scenario that motivated SITES-48309 — a real onboarded
+      // AEM CS site with baseURL on the publish tier. Under the legacy
+      // findByPreviewURL check this returned a generic 500 (Unsupported preview
+      // URL) because the regex only matched `author-p<N>-e<M>`.
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+        getBaseURL: () => 'https://publish-p152454-e364278-cmstg.adobeaemcloud.com',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://publish-p152454-e364278-cmstg.adobeaemcloud.com/us/en.html' },
       });
-      expect(response.status).to.equal(500);
       const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INTERNAL_ERROR');
     });
 
     it('does not consult Configuration / TierClient (eligibility deferred to Mysticat per SITES-46202)', async () => {
@@ -1920,6 +1955,10 @@ describe('Preflight Controller', () => {
         getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
         getDeliveryType: () => 'aem_edge',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(cwSite);
       mockDataAccess.Site.findByPreviewURL.resolves(cwSite);
@@ -1974,6 +2013,10 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
@@ -2018,6 +2061,12 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => { throw new Error('authoring type lookup failed'); },
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs — need to be present so the
+        // hostname check runs before resolvePromiseToken (which is where the
+        // authoring-type throw fires and this test exercises).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(brokenSite);
       mockDataAccess.Site.findByPreviewURL.resolves(brokenSite);
@@ -2060,6 +2109,10 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
@@ -2126,6 +2179,10 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
         getDeliveryType: () => 'aem_edge',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(spSite);
       mockDataAccess.Site.findByPreviewURL.resolves(spSite);
@@ -2175,6 +2232,10 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
