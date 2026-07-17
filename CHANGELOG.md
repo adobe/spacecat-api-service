@@ -1,3 +1,18 @@
+# [1.660.0](https://github.com/adobe/spacecat-api-service/compare/v1.659.1...v1.660.0) (2026-07-16)
+
+
+### Features
+
+* **aso-overlay:** accept AEM CS preview-tier -prev service suffix ([#2832](https://github.com/adobe/spacecat-api-service/issues/2832)) ([4890495](https://github.com/adobe/spacecat-api-service/commit/4890495c042a5048f0bb666b8c7b43c4df97d5f8))
+* **referral-traffic:** plumb categoryName through controller | LLMO-6026 ([#2790](https://github.com/adobe/spacecat-api-service/issues/2790)) ([a77092f](https://github.com/adobe/spacecat-api-service/commit/a77092f96947324c0940e5ef9ed3fb457c3d00fd)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.659.1](https://github.com/adobe/spacecat-api-service/compare/v1.659.0...v1.659.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **aso-overlay:** rewrap native Response before aws-adapter (fix dev 500) ([#2839](https://github.com/adobe/spacecat-api-service/issues/2839)) ([3863015](https://github.com/adobe/spacecat-api-service/commit/3863015320688568d2795c40bf943b40ec9b3431)), closes [#2822](https://github.com/adobe/spacecat-api-service/issues/2822) [#2822](https://github.com/adobe/spacecat-api-service/issues/2822) [#2822](https://github.com/adobe/spacecat-api-service/issues/2822) [#2838](https://github.com/adobe/spacecat-api-service/issues/2838)
+
 # [1.659.0](https://github.com/adobe/spacecat-api-service/compare/v1.658.0...v1.659.0) (2026-07-16)
 
 

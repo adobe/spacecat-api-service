@@ -23,10 +23,16 @@ get-aso-redirects:
       - name: service
         in: path
         required: true
-        description: Cloud Manager service identifier.
+        description: |
+          Cloud Manager service identifier. Accepts the optional `-prev` suffix
+          AEM Cloud Service injects into the `AEM_SERVICE` env var on preview
+          publish pods (e.g. `cm-p154709-e1629980-prev`); the suffix is stripped
+          before all downstream lookups since preview and publish tiers share
+          the same overlay (Mystique writes exactly one overlay per program +
+          environment).
         schema:
           type: string
-          pattern: '^cm-p\d{1,10}-e\d{1,10}$'
+          pattern: '^cm-p\d{1,10}-e\d{1,10}(-prev)?$'
           example: cm-p154709-e1629980
       - name: If-None-Match
         in: header
@@ -67,6 +73,19 @@ get-aso-redirects:
             schema:
               type: string
               example: max-age=10
+          Surrogate-Key:
+            description: |
+              Fastly surrogate-key tag for targeted purging. Set to
+              `aso-overlay-<canonical-service>`, where `<canonical-service>`
+              is `cm-p<program>-e<env>` without any `-prev` suffix so publish
+              and preview cache entries share the tag and are invalidated
+              together. Mystique invokes Fastly's key-purge endpoint
+              (`POST /service/<sid>/purge/<key>`) with this value after
+              writing a new overlay so dispatchers see the change on their
+              next poll rather than waiting for TTL expiry.
+            schema:
+              type: string
+              example: aso-overlay-cm-p154709-e1629980
         content:
           text/plain:
             schema:
@@ -102,13 +121,21 @@ get-aso-redirects:
             schema:
               type: string
               example: max-age=10
+          Surrogate-Key:
+            description: |
+              Same value as the 200 response so any 304 stragglers still on
+              the old TTL are invalidated by the same targeted purge. See the
+              200 response Surrogate-Key description for the full contract.
+            schema:
+              type: string
+              example: aso-overlay-cm-p154709-e1629980
           Content-Length:
             description: Always `0` — RFC 7230 §3.3.3 forbids a body on 304.
             schema:
               type: integer
               example: 0
       '400':
-        description: Bad request. The service identifier does not match the Cloud Manager `cm-pXXX-eYYY` pattern.
+        description: Bad request. The service identifier does not match the Cloud Manager `cm-pXXX-eYYY` (or `cm-pXXX-eYYY-prev`) pattern.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
