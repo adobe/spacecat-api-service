@@ -34,11 +34,11 @@ export const AUDIT_STEP_SUGGEST = 'suggest';
 
 const ACCESSIBILITY_AUDIT_NAME = 'accessibility';
 
-// SITES-48309: EDS host TLDs we accept as preview/live hostnames when deriving
-// the site's known-hosts set from hlxConfig.rso. Current standard is aem.page
-// (preview) / aem.live (live); hlx.page / hlx.live are the legacy Helix TLDs
-// still in customer configs and worth accepting.
-const EDS_HOST_TLDS = ['aem.page', 'aem.live', 'hlx.page', 'hlx.live'];
+// SITES-48309: EDS host suffixes (second-level domains) we accept as preview /
+// live hostnames when deriving the site's known-hosts set from hlxConfig.rso.
+// Current standard is aem.page (preview) / aem.live (live); hlx.page / hlx.live
+// are the legacy Helix domains still in customer configs and worth accepting.
+const EDS_HOST_SUFFIXES = ['aem.page', 'aem.live', 'hlx.page', 'hlx.live'];
 
 /**
  * Collects the set of hostnames the site is registered under. Used by the v2
@@ -89,7 +89,7 @@ export function collectSiteKnownHostnames(site) {
     const owner = String(rso.owner).toLowerCase();
     const repoSite = String(rso.site).toLowerCase();
     const ref = hasText(rso.ref) ? String(rso.ref).toLowerCase() : 'main';
-    for (const tld of EDS_HOST_TLDS) {
+    for (const tld of EDS_HOST_SUFFIXES) {
       hostnames.add(`${ref}--${repoSite}--${owner}.${tld}`);
       hostnames.add(`${repoSite}--${owner}.${tld}`);
     }
@@ -633,6 +633,13 @@ function PreflightController(ctx, log, env) {
     const requestHost = new URL(url).hostname.toLowerCase();
     const knownHosts = collectSiteKnownHostnames(site);
     if (!knownHosts.has(requestHost)) {
+      // SITES-48309: log the mismatch context so operators debugging a
+      // customer-reported 400 can see the requested hostname vs the site's
+      // registered set without needing to re-derive it from the DB.
+      log.info(
+        `[Preflight] URL hostname mismatch for site ${siteId}: requestHost=${requestHost} `
+        + `knownHostsSize=${knownHosts.size} knownHosts=[${[...knownHosts].sort().join(', ')}]`,
+      );
       return preflightError('PREFLIGHT_INVALID_REQUEST', 'URL does not belong to this site', 400);
     }
 
