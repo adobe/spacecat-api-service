@@ -460,12 +460,37 @@ async function realPromptsCountForTopic(clients, country, llmEnum, topicId, fall
   } catch { return fallback; }
 }
 
-// Returns a copy of the topic rows with `promptsCount` replaced by the real per-topic total,
-// resolved in parallel. `llmEnum` mirrors the prompt-list path: the specific engine for a
-// single-llm request, `LLM_ENUM.ALL` otherwise.
+// Cap on concurrent per-topic prompt-count RPCs. A results page has no hard upper bound
+// (parseLimitOffset defaults to 100 with no max), so an uncapped Promise.all could burst
+// hundreds of parallel gRPC calls and saturate the upstream service under load.
+const PROMPTS_COUNT_FANOUT_CONCURRENCY = 10;
+
+// Bounded-concurrency map: runs `fn` over `items` with at most `concurrency` promises in
+// flight at once, preserving input order.
+async function mapWithConcurrency(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  // Recursive worker (not a while-loop) to pull the next index — mirrors the file's
+  // existing recursion pattern and keeps `await` out of a loop body.
+  const runner = async () => {
+    if (next >= items.length) { return; }
+    const i = next;
+    next += 1;
+    results[i] = await fn(items[i], i);
+    await runner();
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runner));
+  return results;
+}
+
+// Returns a copy of the topic rows with `promptsCount` replaced by the real per-topic total.
+// `llmEnum` mirrors the prompt-list path: the specific engine for a single-llm request,
+// `LLM_ENUM.ALL` otherwise. Fan-out is concurrency-capped (see above).
 async function withRealPromptsCount(clients, country, llmEnum, rows) {
-  const counts = await Promise.all(
-    rows.map((r) => realPromptsCountForTopic(clients, country, llmEnum, r.topicId, r.promptsCount)),
+  const counts = await mapWithConcurrency(
+    rows,
+    PROMPTS_COUNT_FANOUT_CONCURRENCY,
+    (r) => realPromptsCountForTopic(clients, country, llmEnum, r.topicId, r.promptsCount),
   );
   return rows.map((r, i) => ({ ...r, promptsCount: counts[i] }));
 }
