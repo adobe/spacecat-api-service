@@ -1,3 +1,31 @@
+# [1.663.0](https://github.com/adobe/spacecat-api-service/compare/v1.662.0...v1.663.0) (2026-07-17)
+
+
+### Features
+
+* **llmo:** register recurring prompt-suggestion schedules only for paying sites; one-shot for trial ([#2847](https://github.com/adobe/spacecat-api-service/issues/2847)) ([8f43e8b](https://github.com/adobe/spacecat-api-service/commit/8f43e8b05fe4080f29e309a874903aa041513f21))
+
+# [1.662.0](https://github.com/adobe/spacecat-api-service/compare/v1.661.1...v1.662.0) (2026-07-17)
+
+
+### Features
+
+* **llmo:** register recurring DRS prompt-suggestion schedules at onboarding ([#2824](https://github.com/adobe/spacecat-api-service/issues/2824)) ([8df07c6](https://github.com/adobe/spacecat-api-service/commit/8df07c6d19e49584aba0a2ba4b377d21a3db457e))
+
+## [1.661.1](https://github.com/adobe/spacecat-api-service/compare/v1.661.0...v1.661.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* Prompt Research prompts count from real per-topic total ([#2843](https://github.com/adobe/spacecat-api-service/issues/2843)) ([5f7f4af](https://github.com/adobe/spacecat-api-service/commit/5f7f4af946e50a824ffc3a5785a494819e989e51))
+
+# [1.661.0](https://github.com/adobe/spacecat-api-service/compare/v1.660.0...v1.661.0) (2026-07-17)
+
+
+### Features
+
+* **serenity:** rollout hardening — rightsizing sweep, observability, cross-container lock ADR (LLMO-6191) ([#2811](https://github.com/adobe/spacecat-api-service/issues/2811)) ([1d54a1a](https://github.com/adobe/spacecat-api-service/commit/1d54a1a93347b07a90c179faa7b54b825b8a2fe5)), closes [#2764](https://github.com/adobe/spacecat-api-service/issues/2764) [#2764](https://github.com/adobe/spacecat-api-service/issues/2764)
+
 # [1.660.0](https://github.com/adobe/spacecat-api-service/compare/v1.659.1...v1.660.0) (2026-07-16)
 
 

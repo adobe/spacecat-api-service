@@ -350,6 +350,75 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data[0].topicId).to.equal('1');
     });
 
+    it('single LLM backfills promptsCount from promptsByTopicIDsTotal', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: '1', name: 'T1', volume: 100, promptsCount: 5,
+          }],
+        });
+      });
+      clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 100 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      // Real total (100), not the FTS-row placeholder (5).
+      expect(res.body.data[0].promptsCount).to.equal(100);
+      const arg = clients.promptClient.promptsByTopicIDsTotal.lastCall.args[0];
+      expect(arg.topicIds).to.deep.equal([1n]);
+      expect(arg.llm).to.equal(LLM_ENUM.CHAT_GPT);
+    });
+
+    it('falls back to the row promptsCount when the total call fails', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: '1', name: 'T1', volume: 100, promptsCount: 5,
+          }],
+        });
+      });
+      clients.promptClient.promptsByTopicIDsTotal.rejects(new Error('totals down'));
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data[0].promptsCount).to.equal(5);
+    });
+
+    it('all LLMs backfills promptsCount via LLM_ENUM.ALL', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: '7', name: 'T', volume: 100, promptsCount: 5, relevanceScore: 10,
+          }],
+        });
+      });
+      clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 42 });
+      const sp = new URLSearchParams('searchQuery=test');
+      const res = await handleTopicsResearch(sp, clients);
+      expect(res.body.data[0].promptsCount).to.equal(42);
+      const arg = clients.promptClient.promptsByTopicIDsTotal.lastCall.args[0];
+      expect(arg.topicIds).to.deep.equal([7n]);
+      expect(arg.llm).to.equal(LLM_ENUM.ALL);
+    });
+
+    it('does not call promptsByTopicIDsTotal for a non-numeric topic id (BigInt fallback)', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: 'abc', name: 'T1', volume: 100, promptsCount: 9,
+          }],
+        });
+      });
+      clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 100 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      // BigInt('abc') throws before any RPC → fall back to the row placeholder (9).
+      expect(res.body.data[0].promptsCount).to.equal(9);
+      expect(clients.promptClient.promptsByTopicIDsTotal.called).to.equal(false);
+    });
+
     it('single LLM throws when topicsByFTS list rejects', async () => {
       clients.topicClient.topicsByFTS.callsFake(({ range }) => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
