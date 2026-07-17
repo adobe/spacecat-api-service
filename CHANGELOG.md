@@ -1,3 +1,10 @@
+## [1.661.1](https://github.com/adobe/spacecat-api-service/compare/v1.661.0...v1.661.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* Prompt Research prompts count from real per-topic total ([#2843](https://github.com/adobe/spacecat-api-service/issues/2843)) ([5f7f4af](https://github.com/adobe/spacecat-api-service/commit/5f7f4af946e50a824ffc3a5785a494819e989e51))
+
 # [1.661.0](https://github.com/adobe/spacecat-api-service/compare/v1.660.0...v1.661.0) (2026-07-17)
 
 
