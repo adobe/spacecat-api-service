@@ -116,6 +116,7 @@ function parseParams(context) {
     region: q.region || null,
     pageIntent: q.pageIntent || q.page_intent || null,
     deviceType: q.deviceType || q.device_type || q.device || null,
+    category: q.categoryName || q.category_name || null,
   };
 }
 
@@ -132,6 +133,7 @@ function commonRpcParams(siteId, parsed) {
     p_region: parsed.region,
     p_device: parsed.deviceType,
     p_page_intent: parsed.pageIntent,
+    p_category_name: parsed.category,
   };
 }
 
@@ -221,6 +223,7 @@ export function createReferralTrafficFilterDimensionsHandler(getSiteAndValidateA
           devices: row?.devices ?? [],
           pageIntents: row?.page_intents ?? [],
           availableSources: row?.available_sources ?? [],
+          categories: row?.categories ?? [],
         });
       },
     );

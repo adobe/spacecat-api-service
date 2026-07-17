@@ -219,6 +219,28 @@ describe('llmo-referral-traffic', () => {
       expect(rpcArgs.p_start_date).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}$/);
       expect(rpcArgs.p_end_date).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}$/);
     });
+
+    it('maps categoryName to p_category_name and defaults to null when absent', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { categoryName: 'Footwear' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_category_name).to.equal('Footwear');
+
+      const clientEmpty = makeRpcClient({ data: [] });
+      const ctxEmpty = makeContext({ client: clientEmpty });
+      ctxEmpty.data = {};
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctxEmpty);
+      expect(clientEmpty.rpc.getCall(0).args[1].p_category_name).to.equal(null);
+    });
+
+    it('accepts category_name snake_case alias', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { category_name: 'Apparel' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_category_name).to.equal('Apparel');
+    });
   });
 
   // ── /filter-dimensions ────────────────────────────────────────────────────
@@ -232,6 +254,7 @@ describe('llmo-referral-traffic', () => {
           devices: ['desktop', 'mobile'],
           page_intents: ['purchase'],
           available_sources: ['optel', 'cdn'],
+          categories: ['Apparel', 'Footwear'],
         }],
       });
       const handler = createReferralTrafficFilterDimensionsHandler(stubbedValidateAccess);
@@ -243,6 +266,7 @@ describe('llmo-referral-traffic', () => {
       expect(body.devices).to.deep.equal(['desktop', 'mobile']);
       expect(body.pageIntents).to.deep.equal(['purchase']);
       expect(body.availableSources).to.deep.equal(['optel', 'cdn']);
+      expect(body.categories).to.deep.equal(['Apparel', 'Footwear']);
     });
 
     it('returns empty arrays when RPC returns no rows', async () => {
@@ -252,6 +276,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.platforms).to.deep.equal([]);
       expect(body.availableSources).to.deep.equal([]);
+      expect(body.categories).to.deep.equal([]);
     });
 
     it('returns 500 on PostgREST error', async () => {
