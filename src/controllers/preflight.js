@@ -62,6 +62,45 @@ export function countIssuesForAudit(audit) {
 }
 
 /**
+ * Process identifiers tagged onto the preflight outcome logs so a single log
+ * line tells you which surface emitted it.
+ *  - PREFLIGHT_PROCESS_AUDW → audit-worker path: POST/GET /preflight/jobs (SQS)
+ *  - PREFLIGHT_PROCESS_MYST → Mystique path: /sites/:siteId/preflights
+ */
+export const PREFLIGHT_PROCESS_AUDW = 'audw';
+export const PREFLIGHT_PROCESS_MYST = 'myst';
+
+/**
+ * Emits the server-side observability log for a terminal AsyncJob when preflight is
+ * polled. Shared by both poll handlers — getPreflightJobStatusAndResult (audit-worker
+ * path) and getPreflightById (Mystique path) — so the two appear the same.
+ * @param {Object} log - The logger instance
+ * @param {string} processName - PREFLIGHT_PROCESS_AUDW | PREFLIGHT_PROCESS_MYST
+ * @param {Object} job - The AsyncJob entity (its getId() is the logged jobId)
+ */
+export function logPreflightOutcome(log, processName, job) {
+  const jobId = job.getId();
+  const status = job.getStatus();
+  const result = job.getResult();
+  if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
+    const summary = result.map((r) => ({
+      pageUrl: r?.pageUrl,
+      step: r?.step,
+      audits: (Array.isArray(r?.audits) ? r.audits : []).map((a) => ({
+        name: a?.name,
+        type: a?.type,
+        opportunities: Array.isArray(a?.opportunities) ? a.opportunities.length : 0,
+        issues: countIssuesForAudit(a),
+      })),
+    }));
+    log.info(`[Preflight] Run complete. jobId=${jobId} process=${processName} status=${status} results=${JSON.stringify(summary)}`);
+  } else if (status === AsyncJob.Status.FAILED) {
+    const err = job.getError();
+    log.warn(`[Preflight] Run failed. jobId=${jobId} process=${processName} status=${status} errorCode=${err?.code ?? 'none'} errorMessage=${err?.message ?? 'none'}`);
+  }
+}
+
+/**
  * Creates a preflight controller instance
  * @param {Object} ctx - The context object containing dataAccess and sqs
  * @param {Object} ctx.dataAccess - The data access layer for database operations
@@ -309,27 +348,12 @@ function PreflightController(ctx, log, env) {
 
       log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
 
-      const result = job.getResult();
-      const status = job.getStatus();
-
-      // Log a compact summary of the audit-worker results once the job is completed.
-      if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
-        const summary = result.map((r) => ({
-          pageUrl: r?.pageUrl,
-          step: r?.step,
-          audits: (Array.isArray(r?.audits) ? r.audits : []).map((a) => ({
-            name: a?.name,
-            type: a?.type,
-            opportunities: Array.isArray(a?.opportunities) ? a.opportunities.length : 0,
-            issues: countIssuesForAudit(a),
-          })),
-        }));
-        log.info(`[Preflight] Run complete. jobId=${jobId} status=${status} results=${JSON.stringify(summary)}`);
-      }
+      // Emit the terminal-state observability log (shared with the Mystique path).
+      logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, job);
 
       return ok({
         jobId: job.getId(),
-        status,
+        status: job.getStatus(),
         createdAt: job.getCreatedAt(),
         updatedAt: job.getUpdatedAt(),
         startedAt: job.getStartedAt(),
@@ -337,7 +361,7 @@ function PreflightController(ctx, log, env) {
         recordExpiresAt: job.getRecordExpiresAt(),
         resultLocation: job.getResultLocation(),
         resultType: job.getResultType(),
-        result,
+        result: job.getResult(),
         error: job.getError(),
         metadata: job.getMetadata(),
       });
@@ -391,6 +415,7 @@ function PreflightController(ctx, log, env) {
     url,
     pageAuthHeader,
     imsServiceToken,
+    imsOrgId,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -409,6 +434,10 @@ function PreflightController(ctx, log, env) {
           url,
           async_job_id: asyncJobId,
           persist: true,
+          // SITES-48037: mysticat requires this in the payload to bypass DRS's
+          // cross-org S2S auto-resolution. Caller (this controller) is the
+          // source of truth via site.getOrganizationId() → Organization.
+          ims_org_id: imsOrgId,
         }),
       });
     } finally {
@@ -491,6 +520,42 @@ function PreflightController(ctx, log, env) {
 
     if (!await accessControlUtil.hasAccess(site)) {
       return preflightError('PREFLIGHT_ACCESS_DENIED', 'Access denied', 403);
+    }
+
+    // SITES-48037: resolve the site's imsOrgId (the AdobeOrg-formatted string
+    // on the Organization) — required by mysticat's DRS submission to bypass
+    // DRS's cross-org S2S auto-resolution (SITES-47943 RCA). Spacecat is the
+    // source of truth for the site → organization mapping; mysticat requires
+    // us to supply it and does not fall back to any local projection.
+    //
+    // Three distinct failure modes, each with its own remediation path:
+    //   1. Organization.findById throws (DB unreachable / transient) → 500;
+    //      retryable, alerting-worthy.
+    //   2. Organization row not found (FK integrity issue — dangling
+    //      site.organization_id) → 500; not retryable, needs data cleanup.
+    //   3. Organization exists but imsOrgId is empty/missing (config gap —
+    //      site is registered but its parent org wasn't fully onboarded) →
+    //      400; not retryable by us, the caller's admin needs to populate the
+    //      org's imsOrgId before this site can preflight.
+    //
+    // Distinguishing (2) and (3) in the log message matters for triage —
+    // they surface different data-quality issues with different owners.
+    const orgId = site.getOrganizationId();
+    let organization;
+    try {
+      organization = await dataAccess.Organization.findById(orgId);
+    } catch (e) {
+      log.error(`[Preflight] Failed to load Organization ${orgId} for site ${siteId}: ${e.message}`);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to resolve site organization', 500);
+    }
+    if (!organization) {
+      log.error(`[Preflight] Organization ${orgId} not found for site ${siteId} — dangling FK, needs data cleanup.`);
+      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Site organization not found', 500);
+    }
+    const imsOrgId = organization.getImsOrgId();
+    if (!hasText(imsOrgId)) {
+      log.error(`[Preflight] Organization ${orgId} for site ${siteId} has no imsOrgId — org not fully onboarded; cannot proceed with preflight (mysticat requires it).`);
+      return preflightError('PREFLIGHT_INVALID_REQUEST', 'Site organization is missing imsOrgId', 400);
     }
 
     // Validate the URL belongs to this site
@@ -655,6 +720,7 @@ function PreflightController(ctx, log, env) {
         url,
         pageAuthHeader,
         imsServiceToken,
+        imsOrgId,
       );
     } catch (mysticatError) {
       log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
@@ -768,6 +834,10 @@ function PreflightController(ctx, log, env) {
         const msg = e?.message ?? String(e);
         log.warn(`Failed to fetch AsyncJob for preflight ${preflightId}: ${msg}`);
         return preflightError('PREFLIGHT_LIFECYCLE_UNAVAILABLE', 'Failed to load preflight lifecycle data', 503);
+      }
+
+      if (asyncJob) {
+        logPreflightOutcome(log, PREFLIGHT_PROCESS_MYST, asyncJob);
       }
 
       return ok(PreflightDto.toDetailJSON(preflight, asyncJob));

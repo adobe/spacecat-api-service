@@ -16,6 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { parseShowTrends } from '../../src/controllers/elements.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -27,7 +28,7 @@ const SUB_WORKSPACE_ID = 'sub-ws-uuid-456';
 const IMS_TOKEN = 'test-ims-token';
 const ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' };
 
-const BRANDS_RESULT = [{ id: null, label: 'Adobe', spacecat_brand_id: 'brand-1' }];
+const BRANDS_RESULT = [{ id: 'Adobe', label: 'Adobe', spacecat_brand_id: 'brand-1' }];
 const MARKETS_RESULT = [{ id: 'US', label: 'US-en', semrush_project_id: 'proj-1' }];
 const URL_INSPECTOR_RESULT = {
   brands: BRANDS_RESULT,
@@ -48,6 +49,14 @@ const PROMPTS_RESULT = {
 };
 const WEEKS_RESULT = {
   weeks: [{ week: '2026-W27', startDate: '2026-06-29', endDate: '2026-07-05' }],
+};
+const STATS_RESULT = {
+  stats: {
+    total_executions: 19528,
+    total_mentions: 14635,
+    average_visibility_score: 48.77,
+    total_citations: 158903,
+  },
 };
 
 function fakeLog() {
@@ -176,6 +185,8 @@ describe('ElementsController', () => {
       getUrlInspectorFilterDimensions: sinon.stub().resolves(URL_INSPECTOR_RESULT),
       getPrompts: sinon.stub().resolves(PROMPTS_RESULT),
       getWeeks: sinon.stub().resolves(WEEKS_RESULT),
+      getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
+      resolveRegionProjectId: sinon.stub().resolves(null),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -615,14 +626,14 @@ describe('ElementsController', () => {
 
     it('calls getPrompts with the brand SUB-workspace ID and parsed filters', async () => {
       const ctx = fakeContext({
-        url: promptsUrl('?model=perplexity&tag=type:branded,category:Brand&projectId=proj-a,proj-b'),
+        url: promptsUrl('?model=perplexity&tag=type__branded,category__Brand&projectId=proj-a,proj-b'),
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       expect(serviceStub.getPrompts).to.have.been.calledWith(SUB_WORKSPACE_ID, {
         model: 'perplexity',
         platform: undefined,
-        tags: ['type:branded', 'category:Brand'],
+        tags: ['type__branded', 'category__Brand'],
         projectIds: ['proj-a', 'proj-b'],
       });
     });
@@ -654,11 +665,11 @@ describe('ElementsController', () => {
     });
 
     it('trims blank CSV entries', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?tag=type:branded,%20,category:Brand') });
+      const ctx = fakeContext({ url: promptsUrl('?tag=type__branded,%20,category__Brand') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
-      expect(params.tags).to.deep.equal(['type:branded', 'category:Brand']);
+      expect(params.tags).to.deep.equal(['type__branded', 'category__Brand']);
     });
 
     // ── sub-workspace validation ──
@@ -863,6 +874,244 @@ describe('ElementsController', () => {
     });
   });
 
+  // ─── getStats ─────────────────────────────────────────────────────────────
+
+  describe('getStats', () => {
+    const statsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/stats${qs}`;
+
+    // Most aggregate-view (no regionCode) assertions need the brand to own at
+    // least one Semrush project, or getStats 404s (see the dedicated empty-
+    // projects test below) before ever reaching the service call.
+    const statsCtx = (overrides = {}) => {
+      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' });
+      return fakeContext({
+        url: statsUrl(),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: [project],
+        ...overrides,
+      });
+    };
+
+    it('returns 200 with the service result by default (aggregate view, no trends)', async () => {
+      const ctx = statsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal(STATS_RESULT);
+      const [workspaceId, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
+      expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.projectId).to.equal(undefined);
+      expect(params.projectIds).to.deep.equal(['proj-1']);
+      expect(params.showTrends).to.equal(false);
+      expect(params.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(params.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('returns 404 when the brand has no configured Semrush projects (empty aggregate view)', async () => {
+      const ctx = fakeContext({ url: statsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.message).to.match(/No Semrush projects configured for brand/);
+      expect(serviceStub.getBrandPresenceStats).to.not.have.been.called;
+    });
+
+    it('passes showTrends=true through to the service', async () => {
+      const ctx = statsCtx({ url: statsUrl('?showTrends=true') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.showTrends).to.equal(true);
+    });
+
+    it('passes showTrends=true through when show_trends=1 (snake_case alias)', async () => {
+      const ctx = statsCtx({ url: statsUrl('?show_trends=1') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getStats(ctx);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.showTrends).to.equal(true);
+    });
+
+    it('passes showTrends=false through when showTrends=false', async () => {
+      const ctx = statsCtx({ url: statsUrl('?showTrends=false') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getStats(ctx);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.showTrends).to.equal(false);
+    });
+
+    it('passes explicit startDate/endDate/model/platform through to the service', async () => {
+      const ctx = statsCtx({
+        url: statsUrl('?startDate=2026-07-01&endDate=2026-07-14&model=search-gpt&platform=chatgpt'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.startDate).to.equal('2026-07-01');
+      expect(params.endDate).to.equal('2026-07-14');
+      expect(params.model).to.equal('search-gpt');
+      expect(params.platform).to.equal('chatgpt');
+    });
+
+    it('returns 400 for a malformed startDate', async () => {
+      const ctx = fakeContext({ url: statsUrl('?startDate=not-a-date&endDate=2026-07-14') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for a malformed endDate', async () => {
+      const ctx = fakeContext({ url: statsUrl('?startDate=2026-07-01&endDate=not-a-date') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when startDate is after endDate', async () => {
+      const ctx = fakeContext({ url: statsUrl('?startDate=2026-07-14&endDate=2026-07-01') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the explicit date range exceeds 56 days (8 weeks)', async () => {
+      const ctx = statsCtx({ url: statsUrl('?startDate=2026-01-01&endDate=2026-12-31') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+      const body = await readBody(res);
+      expect(body.message).to.match(/Date range must not exceed 56 days/);
+      expect(serviceStub.getBrandPresenceStats).to.not.have.been.called;
+    });
+
+    it('allows an explicit date range of exactly 56 days', async () => {
+      const ctx = statsCtx({ url: statsUrl('?startDate=2026-01-01&endDate=2026-02-26') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('resolves regionCode to a single projectId via resolveRegionProjectId', async () => {
+      serviceStub.resolveRegionProjectId.resolves('proj-us');
+      const ctx = fakeContext({ url: statsUrl('?regionCode=US') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({ brandId: BRAND_ID, region: 'US' }),
+      );
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.projectId).to.equal('proj-us');
+      expect(params.projectIds).to.equal(undefined);
+    });
+
+    it('accepts region_code and region as aliases for regionCode', async () => {
+      serviceStub.resolveRegionProjectId.resolves('proj-us');
+      const ctx = fakeContext({ url: statsUrl('?region_code=US') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getStats(ctx);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({ region: 'US' }),
+      );
+    });
+
+    it('returns 404 when regionCode does not resolve to any Semrush market', async () => {
+      serviceStub.resolveRegionProjectId.resolves(null);
+      const ctx = fakeContext({ url: statsUrl('?regionCode=ZZ') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('resolves projectIds from the brand\'s BrandSemrushProject rows when no region is given', async () => {
+      const ctx = statsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-1']);
+      expect(params.projectId).to.equal(undefined);
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: statsUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+    });
+
+    it('returns 400 when siteId does not resolve to any brand', async () => {
+      getBrandBySiteStub.resolves(null);
+      const ctx = fakeContext({ url: statsUrl('?siteId=site-without-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when siteId resolves to a different brand than :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: 'some-other-brand-id', name: 'Other Brand' });
+      const ctx = fakeContext({ url: statsUrl('?siteId=site-of-other-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+      const body = await readBody(res);
+      expect(body.message).to.match(/siteId does not belong to the specified brand/);
+    });
+
+    it('proceeds when siteId resolves to the same brand as :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = statsCtx({ url: statsUrl('?siteId=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('accepts the site_id snake_case alias for siteId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = statsCtx({ url: statsUrl('?site_id=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(200);
+      expect(getBrandBySiteStub).to.have.been.calledWith(ORG_ID, 'site-of-this-brand');
+    });
+
+    it('returns the auth error when brandId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: statsUrl(), params: { brandId: 'not-a-uuid' } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when the organization is not found', async () => {
+      const ctx = fakeContext({
+        url: statsUrl(),
+        org: undefined,
+      });
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates upstream errors through mapError', async () => {
+      serviceStub.getBrandPresenceStats.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = statsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(502);
+    });
+  });
+
   // ─── extractQuery edge cases ──────────────────────────────────────────────
 
   describe('extractQuery', () => {
@@ -891,6 +1140,51 @@ describe('ElementsController', () => {
       const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
       expect(params.model).to.equal('gpt-5');
       expect(params.foo).to.equal('bar');
+    });
+  });
+
+  // ─── parseShowTrends ──────────────────────────────────────────────────────
+  // Exercised directly (not just through getStats) because extractQuery only
+  // ever yields strings from URLSearchParams, so the boolean/number branch
+  // below is unreachable via the HTTP query-string path.
+
+  describe('parseShowTrends', () => {
+    it('returns true for the boolean true', () => {
+      expect(parseShowTrends({ showTrends: true })).to.equal(true);
+    });
+
+    it('returns true for the number 1', () => {
+      expect(parseShowTrends({ showTrends: 1 })).to.equal(true);
+    });
+
+    it('returns true for the string "true" (any case/whitespace)', () => {
+      expect(parseShowTrends({ showTrends: 'TRUE' })).to.equal(true);
+      expect(parseShowTrends({ showTrends: '  true  ' })).to.equal(true);
+    });
+
+    it('returns true for the string "1"', () => {
+      expect(parseShowTrends({ showTrends: '1' })).to.equal(true);
+    });
+
+    it('falls back to show_trends when showTrends is absent', () => {
+      expect(parseShowTrends({ show_trends: '1' })).to.equal(true);
+    });
+
+    it('returns false for the string "false"', () => {
+      expect(parseShowTrends({ showTrends: 'false' })).to.equal(false);
+    });
+
+    it('returns false for an unrelated string', () => {
+      expect(parseShowTrends({ showTrends: 'yes' })).to.equal(false);
+    });
+
+    it('returns false for the number 0', () => {
+      expect(parseShowTrends({ showTrends: 0 })).to.equal(false);
+    });
+
+    it('returns false when both keys are absent', () => {
+      expect(parseShowTrends({})).to.equal(false);
+      expect(parseShowTrends(undefined)).to.equal(false);
     });
   });
 });

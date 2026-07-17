@@ -223,6 +223,16 @@ const routeFacsCapabilities = {
     // Monitoring / admin telemetry
     'GET /monitoring/drs-bp-pg-audit', // internal monitoring
 
+    // Task management (Jira OAuth 3LO) — org-scoped, JWT-authenticated; not a FACS surface in v1.
+    'GET /organizations/:organizationId/task-management/connections', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId', // JWT session
+    'GET /organizations/:organizationId/task-management/tickets', // JWT session
+    'GET /organizations/:organizationId/suggestions/:suggestionId/ticket', // JWT session
+    'GET /organizations/:organizationId/opportunities/:opportunityId/tickets', // JWT session
+    'POST /organizations/:organizationId/task-management/:provider/tickets', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/projects', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types', // JWT session
+
     // Ephemeral-run admin surface
     'POST /ephemeral-run/batch', // admin/internal
     'GET /ephemeral-run/batch/:batchId/status', // admin/internal
@@ -232,6 +242,7 @@ const routeFacsCapabilities = {
     'GET /configurations/latest', // admin
     'PATCH /configurations/latest', // admin
     'PATCH /configurations/latest/handlers/:handlerType', // admin
+    'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled', // admin (TEMPORARY, see SITES-40312)
     'PATCH /configurations/latest/jobs/:jobType', // admin
     'PATCH /configurations/sites/audits', // admin
     'POST /configurations/:version/restore', // admin
@@ -661,6 +672,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/brand-profile': 'llmo/can_view',
       'GET /sites/:siteId/experiments': 'llmo/can_view',
       'GET /sites/:siteId/files': 'llmo/can_view',
+      'GET /sites/:siteId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_view',
       'GET /sites/:siteId/ims-org-access': 'llmo/can_view',
@@ -801,6 +813,11 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)
       'GET /sites/:siteId/preflights': 'llmo/can_view',
@@ -972,6 +989,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_view',
@@ -1175,6 +1193,9 @@ const routeFacsCapabilities = {
     // agentic-categories and agentic-page-types routes. It is a label, not
     // a standalone FACS resource.
     'name',
+    // Task-management connection and provider — sub-resource ids, not
+    // independently ReBAC-controlled.
+    'connectionId', 'provider',
     'fixId', 'geoExperimentId', 'guidelineId', 'intentKey',
     'jobId', 'jobType', 'onboardingId', 'opportunityId', 'plgOnboardingId',
     'promptId', 'questionKey', 'reportId', 'suggestionId', 'tokenId',

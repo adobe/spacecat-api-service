@@ -63,14 +63,14 @@ import {
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
+import { isDynamicAllocationEnabled } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
-import { STANDARD_PROMPT_TAGS, PROJECT_STANDARD_TAGS } from '../support/serenity/prompt-tags.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
-  getBrandAliases, getBrandUrlSources, getBrandCompetitors,
+  getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
@@ -171,6 +171,17 @@ function mapError(e, log) {
       // message and keep the detail to the log.error above (matches the 502 branch).
       return createResponse(
         { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
+        e.status,
+      );
+    }
+    if (e.status === 409) {
+      // An upstream refusal of a conflicting write (e.g. a prompt rename onto a
+      // sibling prompt's exact text — serenity-docs#63) is the caller's to act
+      // on, not an upstream outage: surface the status and the `conflict` token
+      // instead of flattening it into the generic 502. Message stays redacted
+      // for the same reason as the 401/403 branch above.
+      return createResponse(
+        { error: errorTokenForStatus(e.status), message: 'Upstream rejected the request as a conflict' },
         e.status,
       );
     }
@@ -421,6 +432,11 @@ function SerenityController(context, log, env) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
 
+  // Global dynamic-allocation kill-switch for this request (env/Vault boolean, default OFF). Read
+  // per request off ctx.env, mirroring buildTransport's env resolution. When OFF the metered
+  // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
+  const dynamicAllocationEnabled = (ctx) => isDynamicAllocationEnabled(ctx?.env || env);
+
   /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
@@ -435,10 +451,10 @@ function SerenityController(context, log, env) {
   }
 
   /**
-   * Builds the server-side `type:branded`/`type:non-branded` classifier for the
+   * Builds the server-side `branded`/`non-branded` `type`-value classifier for the
    * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
    * name + aliases ONCE per request, then returns a pure
-   * `(text, geoTargetId) => TYPE_TAG` closure: each prompt's market is derived
+   * `(text, geoTargetId) => TYPE_VALUE` closure: each prompt's market is derived
    * from its geoTargetId and the alias needles are region-clamped to that market
    * (memoized per market). This is the SAME classifier the AI-generation and
    * onboarding paths use, so a prompt is classified identically no matter how it
@@ -502,6 +518,10 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
+          },
         )
         : await handleCreatePrompts(
           transport,
@@ -680,8 +700,6 @@ function SerenityController(context, log, env) {
           {
             generateTopics: genMarketTopics,
             topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
-            standardTags: genMarketTopics ? [...STANDARD_PROMPT_TAGS] : [],
-            projectTags: genMarketTopics ? [...PROJECT_STANDARD_TAGS] : [],
             brandAliases,
             brandUrlSources,
             competitors,
@@ -692,6 +710,9 @@ function SerenityController(context, log, env) {
             // in depth: this options bag flows into markets-subworkspace.js and
             // shouldn't carry access to unrelated tables).
             dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
+            // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -796,11 +817,14 @@ function SerenityController(context, log, env) {
   };
 
   /**
-   * POST /serenity/tags — register a `<type>:<NAME>` prompt tag on a single
-   * market (the (geoTargetId, languageCode) slice in the body). `type` is one of
-   * the open tag dimensions (CREATABLE_TAG_DIMENSIONS — `category` / `topic`);
-   * the closed taxonomies are not freely creatable. The UI's "Categories" view,
-   * for one, is derived from the `category:` tags across a brand's markets.
+   * POST /serenity/tags — register a bare-named prompt tag beneath a dimension
+   * root, on a single market (the (geoTargetId, languageCode) slice in the body).
+   * `type` names the dimension (one of ALL_DIMENSIONS). An open `category` value
+   * is customer-authored and may name a `parentId` inside its own dimension; a
+   * closed dimension's value comes from a fixed vocabulary and is resolved or
+   * created under its own root, never under a caller-chosen parent. The UI's
+   * "Categories" view, for one, is derived from the `category` root's descendants
+   * across a brand's markets.
    * Dispatches by workspace mode, mirroring the tags/markets handlers.
    */
   const createTag = async (ctx) => {
@@ -982,7 +1006,16 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const result = auth.mode === 'subworkspace'
-        ? await handleUpdateModelsSubworkspace(transport, auth.workspaceId, ctx.data || {}, log)
+        ? await handleUpdateModelsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
+          },
+        )
         : await handleUpdateModels(
           transport,
           ctx.dataAccess,
@@ -1061,6 +1094,14 @@ function SerenityController(context, log, env) {
         if (suppliedUrlOrDomain) {
           throw new ErrorWithStatusCode('brandDomain is required to provision a Semrush market', 400);
         }
+        // An ACTIVE brand must always be anchored by a primary site (brands.site_id);
+        // only a pending draft may be site-less. So a pending brand with no primary
+        // URL cannot be activated — reject and leave it pending until the user adds
+        // one. (An already-active brand re-supplying no URL is a no-op reactivation,
+        // handled by the flip-and-save below.)
+        if (wasPending) {
+          throw new ErrorWithStatusCode('A primary URL is required to activate a brand', 400);
+        }
         if (generatePrompts) {
           throw new ErrorWithStatusCode('A primary URL is required to generate prompts', 400);
         }
@@ -1072,6 +1113,7 @@ function SerenityController(context, log, env) {
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
+          { dynamicAllocation: dynamicAllocationEnabled(ctx) },
         );
         let bareSucceeded = true;
         if (typeof brand.setStatus === 'function') {
@@ -1166,6 +1208,7 @@ function SerenityController(context, log, env) {
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
+        { dynamicAllocation: dynamicAllocationEnabled(ctx) },
       );
       const results = [];
       for (const m of markets) {
@@ -1199,8 +1242,6 @@ function SerenityController(context, log, env) {
               // the project is published empty (no prompts) — today's default.
               generateTopics: generatePrompts,
               topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
-              standardTags: generatePrompts ? [...STANDARD_PROMPT_TAGS] : [],
-              projectTags: generatePrompts ? [...PROJECT_STANDARD_TAGS] : [],
               // A project with neither models nor generated prompts publishes
               // "empty units" → Semrush's disguised quota 405. Tolerate it
               // (best-effort, leaves a draft) rather than failing activation; a
@@ -1216,6 +1257,8 @@ function SerenityController(context, log, env) {
               // Narrowed to the one model the mapping-row helpers touch — see
               // the single-market create call site for the same rationale.
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+              // JIT units pool = the org parent passed positionally above; not duplicated here.
+              dynamicAllocation: dynamicAllocationEnabled(ctx),
             },
           );
         } catch (e) {
@@ -1270,8 +1313,9 @@ function SerenityController(context, log, env) {
       // them all. A null return (any failure: bad input, cross-org, write error)
       // keeps the brand pending below.
       let siteLinked = false;
+      let linkedSiteId = null;
       if (allMarketsLive) {
-        const linkedSiteId = await ensureMarketSite(ctx, {
+        linkedSiteId = await ensureMarketSite(ctx, {
           // Optional-chained so a missing/throwing accessor can't 500 the call.
           organizationId: brand.getOrganizationId?.(),
           brandId: auth.brandUuid,
@@ -1290,25 +1334,57 @@ function SerenityController(context, log, env) {
       let fullySucceeded = allMarketsLive && siteLinked;
 
       if (fullySucceeded) {
-        if (typeof brand.setStatus === 'function') {
-          brand.setStatus('active');
-        }
-        // Fully provisioned → clear the whole deferred-provisioning stash,
-        // saved atomically with the status flip.
-        if (hadPendingSemrushProvisioning
-          && typeof brand.setPendingSemrushProvisioning === 'function') {
-          brand.setPendingSemrushProvisioning(null);
-        }
         try {
-          await brand.save();
+          // Persist status + primary site + stash-clear in ONE atomic write via the
+          // storage helper (the Brand model exposes no site_id setter, so a
+          // model.save() can't set it — this is why Serenity historically never
+          // populated brands.site_id). baseSiteId is the primary domain's mirror
+          // Site (linkedSiteId): a NULL->value first set, allowed on the pending
+          // brand. updateBrand's own guard rejects activating without a base site,
+          // so this is where an active Serenity brand becomes site-anchored — same
+          // authoritative brands.site_id contract as the brandalf activate path.
+          await updateBrand({
+            organizationId: brand.getOrganizationId(),
+            brandId: brandUuid,
+            updates: {
+              status: 'active',
+              baseSiteId: linkedSiteId,
+              pendingSemrushProvisioning: null,
+            },
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+            updatedBy: 'serenity-activate',
+          });
         } catch (saveError) {
-          // Divergence seam: markets live + site linked upstream, but persisting
-          // the 'active' flip failed → the brand stays 'pending'. A re-activate
-          // converges (idempotent). Emit a DISTINCT, greppable token so the
-          // orphaned status is alertable, then fall through to the error response
-          // (do NOT collapse to a bare mapError 5xx — that discards the
-          // per-market results telling the caller what went live).
           fullySucceeded = false;
+          // TERMINAL: the primary domain is already another active brand's primary
+          // site (brands_base_site_unique -> 409). The markets are live upstream,
+          // but the brand CANNOT activate on this domain, so it stays pending. This
+          // is NOT the retryable divergence below — a retry re-collides forever — so
+          // surface a clean 409 naming the conflict; the operator must pick a
+          // different primary URL (mirrors the brandalf activate behavior).
+          if (saveError?.status === 409) {
+            log.info('serenity activate: SERENITY_ACTIVATE_SITE_CONFLICT — primary site already owned by another active brand; brand stays pending', {
+              brandId: auth.brandUuid,
+              semrushWorkspaceId: workspaceId,
+              siteId: linkedSiteId,
+            });
+            return createResponse(
+              {
+                brandId: auth.brandUuid,
+                status: 'pending',
+                error: 'serenityActivationSiteConflict',
+                message: 'This site is already the primary URL for another brand',
+                markets: results,
+              },
+              409,
+            );
+          }
+          // Divergence seam: markets live + site linked upstream, but persisting
+          // the 'active' flip failed transiently -> the brand stays 'pending'. A
+          // re-activate converges (idempotent). Emit a DISTINCT, greppable token so
+          // the orphaned status is alertable, then fall through to the error
+          // response (do NOT collapse to a bare mapError 5xx — that discards the
+          // per-market results telling the caller what went live).
           log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — markets live + site linked upstream but failed to persist active status', {
             brandId: auth.brandUuid,
             semrushWorkspaceId: workspaceId,
@@ -1331,7 +1407,12 @@ function SerenityController(context, log, env) {
 
       if (fullySucceeded) {
         return createResponse(
-          { brandId: auth.brandUuid, status: 'active', markets: results },
+          {
+            brandId: auth.brandUuid,
+            status: 'active',
+            baseSiteId: linkedSiteId,
+            markets: results,
+          },
           200,
         );
       }

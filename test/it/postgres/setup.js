@@ -153,6 +153,40 @@ export async function resetSemrushMocks() {
 }
 
 /**
+ * Sets a workspace's finite AI resources on the User Manager mock via its `POST /__quota` control
+ * route (makes it metered). Each dim is a bare `total` or `{ used, drafted, total }`. Used by the
+ * dynamic-allocation flag-ON IT to put BRAND_1's sub-workspace into a metered state so the JIT
+ * guard reads real `/resources` over the wire. TLS verification is already off process-wide.
+ *
+ * @param {string} workspaceId - the workspace to meter
+ * @param {{ projects?: number|object, prompts?: number|object }} dims - per-dimension resources
+ * @returns {Promise<void>}
+ */
+export async function setUmMockQuota(workspaceId, dims) {
+  const res = await fetch(`${UM_MOCK_BASE}/__quota`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId, ...dims }),
+  });
+  if (!res.ok) {
+    throw new Error(`UM mock __quota failed (${res.status}) for ${workspaceId}`);
+  }
+}
+
+/**
+ * Reads the User Manager mock's full store snapshot (`GET /__dump`) — to assert mock-side state
+ * (e.g. a workspace's resource `total` did/didn't change) after a flag-ON request.
+ * @returns {Promise<any>}
+ */
+export async function dumpUmMock() {
+  const res = await fetch(`${UM_MOCK_BASE}/__dump`);
+  if (!res.ok) {
+    throw new Error(`UM mock __dump failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * Creates the MinIO bucket used by IT tests if it does not already exist.
  * MinIO is S3-compatible so `NoSuchBucket` errors are replaced by `HeadBucket 404`.
  */

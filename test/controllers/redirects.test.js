@@ -19,6 +19,7 @@ const BUCKET = 'spacecat-dev-aso-overlays';
 const SERVICE = 'cm-p154709-e1629980';
 const ORG_ID = 'org-1';
 const ENTITLEMENT_ID = 'ent-aso-1';
+const ETAG = '"d41d8cd98f00b204e9800998ecf8427e"';
 
 /**
  * Authentication for this route is performed upstream by AsoOverlayKeyHandler
@@ -35,6 +36,14 @@ describe('RedirectsController', () => {
   let mockContext;
   let controller;
   let requestContext;
+
+  // Helper: set an `If-None-Match` header on the current request context.
+  // Tests mutate this map rather than replacing `pathInfo` wholesale so that
+  // if the controller starts reading other pathInfo fields, tests don't
+  // silently drop them.
+  const withIfNoneMatch = (value) => {
+    requestContext.pathInfo.headers['if-none-match'] = value;
+  };
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
@@ -65,7 +74,7 @@ describe('RedirectsController', () => {
     };
 
     controller = RedirectsController(mockContext);
-    requestContext = { params: { service: SERVICE } };
+    requestContext = { params: { service: SERVICE }, pathInfo: { headers: {} } };
   });
 
   afterEach(() => {
@@ -79,6 +88,7 @@ describe('RedirectsController', () => {
   it('returns 200 text/plain with the overlay body for an entitled, enrolled site', async () => {
     const overlay = 'example.com/old https://www.example.com/new\n';
     mockS3.s3Client.send.resolves({
+      ETag: ETAG,
       Body: { transformToString: sandbox.stub().resolves(overlay) },
     });
 
@@ -86,6 +96,12 @@ describe('RedirectsController', () => {
 
     expect(response.status).to.equal(200);
     expect(response.headers.get('content-type')).to.equal('text/plain; charset=utf-8');
+    expect(response.headers.get('cache-control')).to.equal('max-age=10');
+    expect(response.headers.get('etag')).to.equal(ETAG);
+    // Surrogate-Key enables Mystique to targeted-purge this tenant's overlay
+    // via Fastly's key-purge endpoint (POST /service/<sid>/purge/<key>) after
+    // a successful S3 write. See mystique#3381.
+    expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
     expect(await response.text()).to.equal(overlay);
     // Resolves the site by the p<program>/e<env> external ids parsed from the service.
     expect(mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId
@@ -97,17 +113,385 @@ describe('RedirectsController', () => {
     })).to.be.true;
   });
 
+  it('returns 200 without an ETag header when S3 does not surface one', async () => {
+    // Defensive: S3 always returns ETag for a successful GET, but a mock or
+    // future storage backend might not — the conditional-GET path degrades to
+    // a plain 200 rather than breaking.
+    const overlay = 'example.com/old https://www.example.com/new\n';
+    mockS3.s3Client.send.resolves({
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(200);
+    expect(response.headers.get('etag')).to.be.null;
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('serves 200 when the request context has no pathInfo (defensive)', async () => {
+    // getHeader tolerates a missing pathInfo — controller must not throw.
+    delete requestContext.pathInfo;
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('returns 304 with ETag + Cache-Control and no body when If-None-Match matches', async () => {
+    const overlay = 'example.com/old https://www.example.com/new\n';
+    const bodyStub = sandbox.stub().resolves(overlay);
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: bodyStub },
+    });
+    withIfNoneMatch(ETAG);
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(304);
+    expect(response.headers.get('etag')).to.equal(ETAG);
+    expect(response.headers.get('cache-control')).to.equal('max-age=10');
+    expect(response.headers.get('content-type')).to.equal('text/plain; charset=utf-8');
+    // Surrogate-Key echoed on 304 so purges hit both HIT and NOT_MODIFIED entries.
+    expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
+    expect(await response.text()).to.equal('');
+    // Body never deserialized when returning 304 — the transformToString cost is elided.
+    expect(bodyStub.called).to.be.false;
+  });
+
+  it('accepts a mixed-case if-none-match header (HTTP header names are case-insensitive)', async () => {
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    requestContext.pathInfo.headers['If-None-Match'] = ETAG;
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+  });
+
+  it('returns 304 when If-None-Match: * and the resource exists', async () => {
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch('*');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+  });
+
+  it('returns 304 on If-None-Match: * even when S3 omits ETag (RFC 7232 §3.2)', async () => {
+    // `*` matches any existing representation. The controller only reaches
+    // the conditional-GET branch after a successful S3 GET, so a rep exists.
+    mockS3.s3Client.send.resolves({
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch('*');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+    // No ETag was available to echo back, but 304 is still correct for `*`.
+    expect(response.headers.get('etag')).to.be.null;
+  });
+
+  it('returns 304 when If-None-Match is a multi-value list containing the current ETag', async () => {
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch(`"other", ${ETAG}, "another"`);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+  });
+
+  it('returns 304 for a mixed weak/strong list where a weak-tagged validator matches', async () => {
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch(`"other", W/${ETAG}, "another"`);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+  });
+
+  it('treats W/"tag" and "tag" as equivalent under RFC 7232 weak comparison', async () => {
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch(`W/${ETAG}`);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(304);
+  });
+
+  it('serves 200 when S3 returns a malformed (unquoted) ETag even if the client-sent validator would textually match', async () => {
+    // Defense in depth: if S3 (or a future backend) surfaces a validator that
+    // is not a proper quoted opaque-tag, we must not honor conditional GETs
+    // against it — serve the body so the client can rebuild derived state.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: 'malformed-no-quotes',
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch('"malformed-no-quotes"');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    // The malformed ETag is still passed through on the 200 (defensive — it's
+    // opaque to us; that's between the writer and the client's cache).
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('serves 200 when S3 omits ETag and client sends a specific (non-*) validator', async () => {
+    // Belt-and-braces: with no server ETag and a specific INM, the compare
+    // must yield "no match" — never a spurious 304 against undefined.
+    // Also exercises the `currentEtag || ''` fallback in ifNoneMatchMatches.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch(ETAG);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+    expect(response.headers.get('etag')).to.be.null;
+  });
+
+  it('rejects an unquoted validator (must be an RFC 7232 opaque-tag) and serves 200', async () => {
+    // `abc` without surrounding quotes is not a valid opaque-tag. Accepting
+    // it would silently 304 against a shell-stripped or otherwise corrupted
+    // validator instead of forcing a fresh fetch.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch('d41d8cd98f00b204e9800998ecf8427e'); // no quotes
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('rejects a lowercase weak prefix (RFC 7232 §2.3 W/ is case-sensitive) and serves 200', async () => {
+    // `w/"..."` is malformed. We deliberately do not normalize to lowercase.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch(`w/${ETAG}`);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('returns 200 with fresh body when If-None-Match does not match the current ETag', async () => {
+    const overlay = 'example.com/new https://www.example.com/x\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch('"stale-etag"');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(response.headers.get('etag')).to.equal(ETAG);
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('returns 200 when If-None-Match is empty/whitespace', async () => {
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch('   ');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(200);
+    expect(await response.text()).to.equal(overlay);
+  });
+
+  it('does not reflect CRLF / control chars from If-None-Match into response headers', async () => {
+    // Defense in depth: even though the header is never echoed, verify a
+    // malicious client with an injected `\r\n` cannot smuggle a header via
+    // If-None-Match. The value should be treated as opaque validator input.
+    const overlay = 'x y\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+    withIfNoneMatch(`${ETAG}\r\nX-Injected: evil`);
+
+    const response = await controller.getRedirects(requestContext);
+    // Injected token does not match the strong current ETag, so we serve 200.
+    expect(response.status).to.equal(200);
+    expect(response.headers.get('x-injected')).to.be.null;
+  });
+
+  it('still returns 404 (not 304) when the site does not resolve — no enumeration signal via If-None-Match', async () => {
+    // Guard: If-None-Match must not short-circuit authz. A non-entitled tenant
+    // sending a valid ETag for some *other* tenant's overlay must still 404.
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    withIfNoneMatch(ETAG);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
+    // Authz failed before S3 was touched.
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('still returns 404 (not 304) when If-None-Match: * is sent by a non-entitled tenant', async () => {
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
+    withIfNoneMatch('*');
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('still returns 404 (not 304) when an unenrolled site sends If-None-Match', async () => {
+    // Third authz gate: site + entitlement pass, enrollment fails.
+    mockDataAccess.SiteEnrollment.allBySiteId.resolves([
+      { getEntitlementId: () => 'some-other-entitlement' },
+    ]);
+    withIfNoneMatch(ETAG);
+
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('does not double-emit AsoOverlayS3ReadDurationMs when the body stream throws', async () => {
+    // Regression guard: `s3Client.send()` resolves (S3 GET succeeded, headers
+    // received) then `transformToString()` throws (stream/decode failure).
+    // Without the emitS3Duration guard, we'd get two duration samples with
+    // contradictory S3Result dimensions (SUCCESS + UNEXPECTED) for one request,
+    // skewing the S3-tier chart. The guard makes emitS3Duration idempotent
+    // per-request so only the first result sticks.
+    const streamErr = new Error('stream aborted');
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().rejects(streamErr) },
+    });
+
+    // Spy on the EMF sink (metrics-emf.js writes envelopes to stdout).
+    const stdoutWrite = sandbox.spy(process.stdout, 'write');
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(500);
+    // Count only the AsoOverlayS3ReadDurationMs envelopes — other metrics
+    // (RequestTotal, RequestDurationMs) legitimately emit on every request.
+    const durationEmissions = stdoutWrite.getCalls()
+      .map((c) => c.args[0])
+      .filter((s) => typeof s === 'string' && s.includes('AsoOverlayS3ReadDurationMs'));
+    expect(durationEmissions).to.have.lengthOf(
+      1,
+      `expected exactly one AsoOverlayS3ReadDurationMs emission, got ${durationEmissions.length}`,
+    );
+    // First-writer-wins: the SUCCESS from the initial send() resolution.
+    expect(durationEmissions[0]).to.include('"S3Result":"success"');
+  });
+
   it('returns 400 for a malformed service identifier', async () => {
     requestContext.params.service = 'not-a-cm-service';
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(400);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  // AEM CS injects a `-prev` suffix in `AEM_SERVICE` for preview-tier pods
+  // (e.g. `cm-p154709-e1629980-prev`). Mystique writes exactly one overlay per
+  // (program, environment) — publish and preview share it. So we accept the
+  // suffix at the API boundary and strip it before all downstream lookups.
+  describe('preview-tier suffix (-prev)', () => {
+    const PREVIEW_SERVICE = `${SERVICE}-prev`;
+
+    it('accepts -prev and reads the canonical (non-prev) S3 key', async () => {
+      const overlay = 'example.com/old https://www.example.com/new\n';
+      mockS3.s3Client.send.resolves({
+        ETag: ETAG,
+        Body: { transformToString: sandbox.stub().resolves(overlay) },
+      });
+      requestContext.params.service = PREVIEW_SERVICE;
+
+      const response = await controller.getRedirects(requestContext);
+
+      expect(response.status).to.equal(200);
+      expect(await response.text()).to.equal(overlay);
+      // Site lookup uses the canonical program/environment ids — the `-prev`
+      // suffix is not part of the site identity.
+      expect(mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId
+        .calledWith('p154709', 'e1629980')).to.be.true;
+      // S3 read hits the canonical object; preview never has its own key.
+      expect(mockS3.GetObjectCommand.calledWithMatch({
+        Bucket: BUCKET,
+        Key: `config/${SERVICE}/redirects.txt`,
+      })).to.be.true;
+      // Surrogate-Key uses the canonical service so a single mystique
+      // purge-on-Deploy call invalidates both the publish and preview Fastly
+      // cache entries (they differ by URL only, they share the tag).
+      expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
+    });
+
+    it('returns 304 on -prev when If-None-Match matches (canonical ETag)', async () => {
+      mockS3.s3Client.send.resolves({
+        ETag: ETAG,
+        Body: { transformToString: sandbox.stub().resolves('irrelevant') },
+      });
+      requestContext.params.service = PREVIEW_SERVICE;
+      withIfNoneMatch(ETAG);
+
+      const response = await controller.getRedirects(requestContext);
+
+      expect(response.status).to.equal(304);
+      expect(response.headers.get('etag')).to.equal(ETAG);
+      expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
+    });
+
+    it('rejects malformed -prev variants at the boundary', async () => {
+      // Trailing hyphen without `prev`, embedded `-prev-`, capitalized suffix
+      // must all still 400 — the regex only allows a single literal `-prev`
+      // at the very end. Otherwise a caller could exercise arbitrary shapes.
+      for (const bad of [
+        'cm-p154709-e1629980-',
+        'cm-p154709-e1629980-preview',
+        'cm-p154709-e1629980-PREV',
+        'cm-p154709-e1629980-prev-2',
+      ]) {
+        // eslint-disable-next-line no-await-in-loop
+        requestContext = { params: { service: bad }, pathInfo: { headers: {} } };
+        // eslint-disable-next-line no-await-in-loop
+        const response = await controller.getRedirects(requestContext);
+        expect(response.status, `expected 400 for ${bad}`).to.equal(400);
+      }
+      expect(mockS3.s3Client.send.called).to.be.false;
+    });
   });
 
   it('returns 404 (not 403) when no site resolves — no enumeration signal', async () => {
     mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -115,6 +499,7 @@ describe('RedirectsController', () => {
     mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -124,6 +509,7 @@ describe('RedirectsController', () => {
     ]);
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
@@ -134,6 +520,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
   });
 
   it('returns 404 when S3 surfaces a 404 via $metadata', async () => {
@@ -143,6 +530,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
   });
 
   it('maps AccessDenied (no ListBucket → 403 on missing key) to 404 and logs error', async () => {
@@ -153,6 +541,7 @@ describe('RedirectsController', () => {
 
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     // Logged at error so a missing IAM grant (every request 403) stays alertable.
     expect(mockContext.log.error.called).to.be.true;
   });
@@ -161,6 +550,7 @@ describe('RedirectsController', () => {
     mockS3.s3Client.send.rejects(new Error('boom'));
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(500);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockContext.log.error.called).to.be.true;
   });
 
@@ -168,6 +558,78 @@ describe('RedirectsController', () => {
     const ctl = RedirectsController({ ...mockContext, env: {} });
     const response = await ctl.getRedirects(requestContext);
     expect(response.status).to.equal(500);
+    expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  describe('negative-cache-control invariant', () => {
+    // Grouped invariant: every non-2xx/3xx response MUST advertise `no-store`
+    // so Fastly (and any downstream CDN) cannot cache negative responses.
+    // Without this, the aso-prod Fastly VCL default (10s TTL + 30s SWR + 86400s
+    // stale_if_error) pins a 404 for up to 24 h after any origin blip, causing
+    // the customer-provisioning race where dispatchers keep serving stale
+    // 404s long after ASO entitlement lands. See SITES-44966 / SITES-47966.
+    const scenarios = [
+      {
+        name: '400 (malformed service id)',
+        expectedStatus: 400,
+        setup: () => { requestContext.params.service = 'x'; },
+      },
+      {
+        name: '500 (bucket not configured)',
+        expectedStatus: 500,
+        setup: () => { controller = RedirectsController({ ...mockContext, env: {} }); },
+      },
+      {
+        name: '404 (site not found)',
+        expectedStatus: 404,
+        setup: () => mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null),
+      },
+      {
+        name: '404 (no ASO entitlement)',
+        expectedStatus: 404,
+        setup: () => mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null),
+      },
+      {
+        name: '404 (not enrolled)',
+        expectedStatus: 404,
+        setup: () => mockDataAccess.SiteEnrollment.allBySiteId.resolves([
+          { getEntitlementId: () => 'other' },
+        ]),
+      },
+      {
+        name: '404 (S3 NoSuchKey)',
+        expectedStatus: 404,
+        setup: () => {
+          const err = new Error('e');
+          err.name = 'NoSuchKey';
+          mockS3.s3Client.send.rejects(err);
+        },
+      },
+      {
+        name: '404 (S3 AccessDenied maps to 404)',
+        expectedStatus: 404,
+        setup: () => {
+          const err = new Error('e');
+          err.name = 'AccessDenied';
+          err.$metadata = { httpStatusCode: 403 };
+          mockS3.s3Client.send.rejects(err);
+        },
+      },
+      {
+        name: '500 (unexpected S3 error)',
+        expectedStatus: 500,
+        setup: () => mockS3.s3Client.send.rejects(new Error('boom')),
+      },
+    ];
+
+    scenarios.forEach(({ name, expectedStatus, setup }) => {
+      it(`emits Cache-Control: no-store on ${name}`, async () => {
+        setup();
+        const response = await controller.getRedirects(requestContext);
+        expect(response.status).to.equal(expectedStatus);
+        expect(response.headers.get('cache-control')).to.equal('no-store');
+      });
+    });
   });
 });

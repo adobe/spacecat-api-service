@@ -36,8 +36,13 @@ function fakeLog() {
 }
 
 function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
+  // Build a request.url from `query` so handlers that read params via extractQuery
+  // (the ElementsController endpoints) see them. Handlers that read ctx.query
+  // directly are unaffected (both are populated).
+  const search = new URLSearchParams(query).toString();
   return {
     env: {},
+    request: { url: `https://api.example.com/serenity${search ? `?${search}` : ''}` },
     pathInfo: { headers: { authorization: 'Bearer ims-token' } },
     attributes: { authInfo: { getType: () => 'ims' } },
     dataAccess: {
@@ -54,6 +59,17 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
         }),
       },
       services: { postgrestClient: { from: () => ({}) } },
+      // Only consumed by getSerenityBrandPresenceStats's aggregate (no-region)
+      // path — without at least one project, getStats 404s before ever
+      // reaching the service call.
+      BrandSemrushProject: {
+        allByBrandId: () => Promise.resolve([{
+          getBrandId: () => BRAND,
+          getSemrushProjectId: () => 'proj-1',
+          getGeoTargetId: () => 2840,
+          getLanguageCode: () => 'en',
+        }]),
+      },
     },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
     data,
@@ -126,15 +142,18 @@ const FIXTURES = {
     handlerName: 'handleUpdatePrompt',
     handlerResult: {
       status: 200,
+      // The edit is in place: the response echoes the UNCHANGED prompt id.
       body: {
-        semrushPromptId: 'sem-new',
+        semrushPromptId: 'sem-1',
         geoTargetId: 2840,
         languageCode: 'en',
         text: 'new text',
       },
     },
     params: { semrushPromptId: 'sem-1' },
-    data: { geoTargetId: 2840, languageCode: 'en', text: 'new text' },
+    data: {
+      geoTargetId: 2840, languageCode: 'en', text: 'new text', tagIds: ['t-1'],
+    },
   },
   bulkDeleteSerenityPrompts: {
     expectedStatus: 200,
@@ -301,6 +320,103 @@ const FIXTURES = {
       items: [{ id: 'lang-en', name: 'English' }],
     },
   },
+  // Unlike the rest of this file's fixtures, this operation is served by
+  // ElementsController (src/controllers/elements.js), not SerenityController —
+  // it wraps the Semrush Brands/Markets/Topics elements directly rather than
+  // going through the serenity handlers/*.js stack. `usesElementsController`
+  // routes it through a dedicated esmock load below instead of the shared one.
+  listSerenityUrlInspectorFilterDimensions: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listUrlInspectorFilterDimensions',
+    serviceMethod: 'getUrlInspectorFilterDimensions',
+    handlerResult: {
+      brands: [{ id: 'Test Brand', label: 'Test Brand', spacecat_brand_id: BRAND }],
+      regions: [{
+        id: 'US', semrush_project_id: 'proj-1', label: 'US-en',
+      }],
+      topics: [],
+      categories: [],
+      page_intents: [],
+      origins: [],
+      tags: [],
+    },
+  },
+  // Also served by ElementsController (see note above) — the Market Tracking
+  // Trends endpoint backed by the two Semrush trend elements.
+  listSerenityMarketTrackingTrends: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getMarketTrackingTrends',
+    serviceMethod: 'getMarketTrackingTrends',
+    handlerResult: {
+      weeklyTrends: [{
+        week: '2026-07-05',
+        weekNumber: 27,
+        year: 2026,
+        mentions: 900,
+        citations: 5000,
+        competitors: [{ name: 'Rival One', mentions: 150, citations: 300 }],
+      }],
+    },
+  },
+  listSerenityBrandPresenceSentimentOverview: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listSentimentOverview',
+    serviceMethod: 'getSentimentOverview',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listSentimentOverview) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    handlerResult: {
+      weeklyTrends: [{
+        week: '2026-W24',
+        weekNumber: 24,
+        year: 2026,
+        sentiment: [
+          { name: 'Positive', value: 53, color: '#047857' },
+          { name: 'Neutral', value: 39, color: '#4B5563' },
+          { name: 'Negative', value: 8, color: '#B91C1C' },
+        ],
+        totalPrompts: 5261,
+        promptsWithSentiment: 9181,
+        mentions: 0,
+        citations: 0,
+        visibilityScore: 0,
+        competitors: [],
+      }],
+    },
+  },
+  // Also served by ElementsController — see the note on
+  // listSerenityUrlInspectorFilterDimensions above.
+  getSerenityBrandPresenceStats: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getStats',
+    serviceMethod: 'getBrandPresenceStats',
+    handlerResult: {
+      stats: {
+        total_executions: 19528,
+        average_visibility_score: 48.77,
+        total_mentions: 14635,
+        total_citations: 158903,
+      },
+      trends: [
+        {
+          startDate: '2026-07-01',
+          endDate: '2026-07-07',
+          data: {
+            stats: {
+              total_executions: 9764,
+              average_visibility_score: 47.2,
+              total_mentions: 7318,
+              total_citations: 79451,
+            },
+          },
+        },
+      ],
+    },
+  },
 };
 
 function makeAjv() {
@@ -343,6 +459,56 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
     it(`${operationId} response conforms to OpenAPI schema`, async () => {
       const op = opsByOperationId.get(operationId);
       expect(op, `operation ${operationId} not found in spec`).to.exist;
+
+      if (fx.usesElementsController) {
+        const ElementsController = (await esmock(
+          '../../src/controllers/elements.js',
+          {
+            '../../src/support/brands-storage.js': {
+              getBrandIdentity: () => Promise.resolve({ id: BRAND, name: 'Test Brand' }),
+              getBrandBySite: sinon.stub(),
+            },
+            '../../src/support/serenity/workspace-resolver.js': {
+              resolveBrandWorkspace: () => Promise.resolve({
+                mode: 'subworkspace', workspaceId: WORKSPACE, parentWorkspaceId: 'parent-ws',
+              }),
+            },
+            '../../src/support/access-control-util.js': {
+              default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+            },
+            '../../src/support/elements/elements-service.js': {
+              createElementsService: () => ({
+                [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
+                resolveRegionProjectId: sinon.stub().resolves(null),
+              }),
+            },
+          },
+        )).default;
+
+        const ctx = fakeContext({
+          params: fx.params || {},
+          data: fx.data,
+          query: fx.query || {},
+        });
+        const controller = ElementsController(ctx, fakeLog(), { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' });
+        const response = await controller[fx.controllerMethod](ctx);
+
+        expect(response.status).to.equal(fx.expectedStatus);
+
+        const responseSchema = op.responseSchema(fx.expectedStatus);
+        expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;
+
+        const body = await readJsonBody(response);
+        const ajv = makeAjv();
+        const validate = ajv.compile(responseSchema);
+        const validBody = validate(body);
+        if (!validBody) {
+          const detail = validate.errors.map((e) => `${e.instancePath || '/'} ${e.message} (${JSON.stringify(e.params)})`).join('\n  ');
+          throw new Error(`AJV validation failed for ${operationId} ${fx.expectedStatus} response:\n  ${detail}\nbody: ${JSON.stringify(body, null, 2)}`);
+        }
+        expect(validBody).to.equal(true);
+        return;
+      }
 
       const handlerStubs = {
         handleListPrompts: sinon.stub(),
@@ -433,20 +599,25 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/serenity-active.js': {
             isSerenityActiveForOrg: () => Promise.resolve(true),
           },
-          // activate reads brand-level aliases/URLs/competitors once per batch;
-          // stub them so the contract test doesn't hit the fake postgrest client.
+          // activate reads brand-level aliases/URLs/competitors once per batch, and
+          // persists the active-flip + primary site (brands.site_id) via updateBrand;
+          // stub them so the contract test doesn't hit the fake postgrest client and
+          // exercises the documented 200 (full-success) shape.
           '../../src/support/brands-storage.js': {
             getBrandAliases: () => Promise.resolve([]),
             getBrandUrlSources: () => Promise.resolve({
               urls: [], socialAccounts: [], earnedContent: [],
             }),
             getBrandCompetitors: () => Promise.resolve([]),
+            updateBrand: () => Promise.resolve({ getId: () => 'brand-x' }),
           },
           // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
           // succeed; stub it to a site id so the documented 200 (full success)
-          // shape is exercised rather than the 207/502 partial-failure paths.
+          // shape is exercised rather than the 207/502 partial-failure paths. Must
+          // be a valid UUID — it is now also written as the brand's baseSiteId,
+          // which the response schema types as format: uuid.
           '../../src/support/serenity/site-linkage.js': {
-            ensureMarketSite: () => Promise.resolve('site-x'),
+            ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
           },
         },
       )).default;

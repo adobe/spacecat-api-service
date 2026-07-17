@@ -20,7 +20,12 @@ export const ELEMENT_IDS = Object.freeze({
   BRANDS: 'b178ce4e-6471-4430-9a32-8228ce72b2e6',
   MARKETS: '478968a7-8851-4daf-83f7-2e8fb6185ddc',
   TOPICS: 'ba3b19c1-22d4-460a-8dc3-1ff05c360852',
-  TOTAL_EXECUTIONS: 'a4defa1a-02f7-4443-b6ed-f2ca22b23402',
+  // Superseded by a new element with the same semantics but a shape aligned to
+  // Mentions/Visibility/Citations (CBF_ws_brand + CBF_model + optional
+  // CBF_project OR-list, all wrapped in their own `or` blocks) — see
+  // brand-presence-stats-plan.md §2. Old value (row 4, filter-dimensions
+  // "Total Executions", top-level `project_id` param): a4defa1a-02f7-4443-b6ed-f2ca22b23402.
+  TOTAL_EXECUTIONS: '601590e0-a4a1-462a-96a7-5ddae8993140',
   WEEKS: 'afa7458b-d34f-43d9-8cc5-e8794753551c',
 
   // Aggregated Stats
@@ -28,6 +33,20 @@ export const ELEMENT_IDS = Object.freeze({
   // `CBF_model` + `CBF_tags` (category) filters, and a top-level `project_id` (region/market).
   // Brand scoping is via the request's sub-workspace, not a filter (`CBF_ws_brand` is a no-op).
   CITED_DOMAINS: '98b91d00-9531-4120-b3b5-17cc27489fce',
+
+  // URL Inspector — Owned URLs ("Your cited URLs" table). Two elements, both
+  // scoped by a top-level `project_id` (region/market) + date + `CBF_model`;
+  // neither honors a server-side content-type filter, so `domain_type='Owned'`
+  // is applied client-side (verified). Brand scoping is via the sub-workspace.
+  //  - STATS_PER_URL (`table`): one row per cited URL —
+  //    { source(=url), citations, prompts_with_citation, domain_type, avg_position,
+  //      project_id, url_cbf }. Shared with domain-urls.
+  //  - URL_TRENDS (`line`): weekly per-URL trend — one row per (url, week):
+  //    { legend(=url), project_id, x(=ISO week), y__mentions, y__positions }.
+  //    Verified: returns ALL URLs in ONE call when scoped by project only (no
+  //    per-URL filter needed — the wiki's "one call per URL" claim is wrong).
+  STATS_PER_URL: '9af5ed83-049b-493a-85d7-99c7d4deddba',
+  URL_TRENDS: 'afb2e5d3-3955-4e0d-aeb1-7e28cdecd9f9',
 
   MENTIONS: 'e1a6811b-d0c9-4d6f-8a29-290a32db863f',
   VISIBILITY: '2724878e-e0e9-4217-ad21-d6bcb7887a09',
@@ -37,6 +56,15 @@ export const ELEMENT_IDS = Object.freeze({
   TRENDS_MV: 'b5281393-ee98-4c38-9ed5-3437b0c450c3',
   // Shared UUID: powers both rows 10 and 12 (Citation Trends).
   TRENDS_CITATIONS: 'b81af644-a8db-462b-a001-ecc1eedc0552',
+  // Market Tracking Trends — Citations, the element behind the Brand Presence MFE's
+  // "Citations" tab. Distinct
+  // from TRENDS_CITATIONS (b81af644, the wiki's domain-level citation trend): this one
+  // is a `line` element returning one series per market participant, keyed by
+  // `legend` = brand/competitor NAME. Its primary numeric field is `y__mentions`, but
+  // in this element that value is the CITATION count (not mentions) — Semrush reuses
+  // the generic key. Scoped by `CBF_projects` (plural, unlike TRENDS_MV's `CBF_project`).
+  // Backs the competitor-comparison chart's Citations view (see market-tracking-trends).
+  MARKET_CITATIONS_TREND: '2e5a6f4e-f287-4951-a7e2-7e29981c86d8',
   // Shared UUID: powers rows 13 (daily) and 14 (weekly) Sentiment.
   SENTIMENT: 'f4153af8-6ce9-4058-8872-8a3cf11b9907',
 

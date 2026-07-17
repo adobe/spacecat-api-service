@@ -27,6 +27,10 @@ use(sinonChai);
 const IMS = 'ims-bearer-test-token';
 const WORKSPACE_ID = '11111111-2222-3333-4444-555555555555';
 const PROJECT_ID = 'proj-xyz';
+// Sub-workspace lifecycle (serenity dual-mode, subworkspace path) parent id —
+// used both by the createSubworkspace/listWorkspaceFamily describe blocks below
+// and by the retry-behaviour suite's real create-call-shape tests.
+const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 
 // Strict mode: rest-transport now requires SEMRUSH_PROJECTS_BASE_URL to be
 // supplied via env (Vault-backed in dev/stage/prod). Tests inject a
@@ -322,6 +326,274 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  // ── Retry / backoff (LLMO reliability gap-fix) ──────────────────────────
+  //
+  // Both typed clients underlying this transport (Project Engine, User
+  // Manager) ship a bounded-backoff retry layer (createRetryingFetch in
+  // spacecat-shared-project-engine-client / -user-manager-client's
+  // internal.js). It used to be pinned off here (`maxRetries: 0`) to preserve
+  // the pre-migration hand-rolled transport's one-shot behaviour; this suite
+  // covers it now that the pin is removed and the library defaults
+  // (maxRetries: 2, retryBaseDelayMs: 200 -> 3 attempts total) apply.
+  //
+  // Every test that drives a retryable outcome fakes `setTimeout`/`clearTimeout`
+  // so the jittered exponential backoff (and the per-attempt 15s timeout) never
+  // costs real wall-clock time; `tickAsync` (not `tick`) is required throughout
+  // because the typed client's auth middleware and openapi-fetch both interleave
+  // microtasks before each attempt's timer is registered.
+  describe('retry behaviour', () => {
+    const FAKE_NOW = 1_700_000_000_000;
+
+    function withFakeTimers(fn) {
+      return async () => {
+        const clock = sinon.useFakeTimers({ now: FAKE_NOW, toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+          await fn(clock);
+        } finally {
+          clock.restore();
+        }
+      };
+    }
+
+    it('retries a retryable GET (503) and returns the eventual success', withFakeTimers(async (clock) => {
+      fetchStub.onCall(0).resolves(fetchFail(503, { code: 'unavailable' }));
+      fetchStub.onCall(1).resolves(fetchOk({ status: 'created' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.getWorkspaceStatus(WORKSPACE_ID);
+      await clock.tickAsync(60_000);
+      const result = await promise;
+
+      expect(result.status).to.equal('created');
+      expect(fetchStub.callCount).to.equal(2);
+    }));
+
+    it('retries a retryable DELETE (503) and returns the eventual success', withFakeTimers(async (clock) => {
+      // GET is the only idempotent method exercised for retryable 5xx above.
+      // The idempotency gate treats GET/HEAD/PUT/DELETE/OPTIONS alike, so this
+      // locks in that DELETE gets the same guarantee, using deleteProject (a
+      // real transport method) rather than a synthetic call.
+      fetchStub.onCall(0).resolves(fetchFail(503, { code: 'unavailable' }));
+      fetchStub.onCall(1).resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.deleteProject(WORKSPACE_ID, PROJECT_ID);
+      await clock.tickAsync(60_000);
+      await promise;
+
+      expect(fetchStub.callCount).to.equal(2);
+      expect((await callOf(fetchStub, 1)).method).to.equal('DELETE');
+    }));
+
+    it('retries a 429 even on a POST create (createSubworkspace) and returns the eventual success', withFakeTimers(async (clock) => {
+      // createSubworkspace is the real brand-provisioning create-call shape
+      // (brand-provisioning.js -> workspace-lifecycle.js#ensureSubworkspace ->
+      // transport.createSubworkspace). A 429 means the Semrush gateway rejected
+      // the request at the edge before the handler ran, so the create never
+      // happened -- safe to retry for ANY method, including this POST.
+      fetchStub.onCall(0).resolves(fetchFail(429, { code: 'rate_limited' }));
+      fetchStub.onCall(1).resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const resources = { ai: { projects: 3, prompts: 1500 } };
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+      await clock.tickAsync(60_000);
+      const result = await promise;
+
+      expect(result.id).to.equal('subworkspace-ws-1');
+      expect(fetchStub.callCount).to.equal(2);
+      const retryCall = await callOf(fetchStub, 1);
+      expect(retryCall.method).to.equal('POST');
+      expect(JSON.parse(retryCall.body)).to.deep.equal({ title: 'Adobe Express', resources });
+    }));
+
+    it('does NOT retry a 500 on a POST create (createSubworkspace) -- avoids double-provisioning', withFakeTimers(async (clock) => {
+      // The critical guardrail: a create is a POST, and a 5xx is retried ONLY
+      // for idempotent methods. Retrying a POST on 500 could double-fire the
+      // sub-workspace/resource create upstream, so it must surface the 500
+      // immediately, in a single attempt.
+      fetchStub.resolves(fetchFail(500, { code: 'internal_error' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const resources = { ai: { projects: 3, prompts: 1500 } };
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources)
+        .catch((e) => e);
+      await clock.tickAsync(60_000);
+      const err = await promise;
+
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.status).to.equal(500);
+      expect(fetchStub.callCount).to.equal(1);
+    }));
+
+    it('does NOT retry a 500 on the createProject POST either (same idempotency rule)', withFakeTimers(async (clock) => {
+      fetchStub.resolves(fetchFail(500, { code: 'internal_error' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.createProject(WORKSPACE_ID, {
+        name: 'US - EN',
+        type: 'ai',
+        brand_name_display: 'Acme',
+        brand_names: ['Acme'],
+        domain: 'acme.com',
+        country_code: 'us',
+        location_id: 2840,
+        location_name: 'United States',
+        language_id: 'lang-uuid-en',
+      }).catch((e) => e);
+      await clock.tickAsync(60_000);
+      const err = await promise;
+
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.status).to.equal(500);
+      expect(fetchStub.callCount).to.equal(1);
+    }));
+
+    it('retries a 429 on createProject (POST) and eventually succeeds', withFakeTimers(async (clock) => {
+      fetchStub.onCall(0).resolves(fetchFail(429, { code: 'rate_limited' }));
+      fetchStub.onCall(1).resolves(fetchOk({ id: 'new-project-uuid' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.createProject(WORKSPACE_ID, { name: 'US - EN' });
+      await clock.tickAsync(60_000);
+      const result = await promise;
+
+      expect(result.id).to.equal('new-project-uuid');
+      expect(fetchStub.callCount).to.equal(2);
+    }));
+
+    it('honours Retry-After (delta-seconds) as a floor on the backoff wait', withFakeTimers(async (clock) => {
+      fetchStub.onCall(0).resolves(new Response(JSON.stringify({ code: 'rate_limited' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': '1' },
+      }));
+      fetchStub.onCall(1).resolves(fetchOk({ status: 'created' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      // Retry-After: 1 is a 1s FLOOR on the wait. Advancing to just under it
+      // must not dispatch the retry yet -- proving the header is what's gating
+      // the delay, not backoff jitter alone (which defaults to ~100-200ms and
+      // would otherwise let this pass for the wrong reason).
+      await clock.tickAsync(900);
+      expect(fetchStub.callCount).to.equal(1);
+
+      await clock.tickAsync(200);
+      const result = await promise;
+
+      expect(result.status).to.equal('created');
+      expect(fetchStub.callCount).to.equal(2);
+    }));
+
+    it('returns the last retryable response after exhausting all retries (does not swallow into an exception)', withFakeTimers(async (clock) => {
+      fetchStub.resolves(fetchFail(503, { code: 'still_unavailable' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.getWorkspaceStatus(WORKSPACE_ID).catch((e) => e);
+      await clock.tickAsync(60_000);
+      const err = await promise;
+
+      // Default maxRetries: 2 -> 3 attempts total.
+      expect(fetchStub.callCount).to.equal(3);
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.status).to.equal(503);
+    }));
+
+    it('exhausts all retries on a POST create under sustained 429 (createProject)', withFakeTimers(async (clock) => {
+      // The other exhaustion test above only covers GET+503. POST retries via a
+      // different branch of the idempotency gate (429-only, never 5xx), so
+      // exhaustion needs its own coverage in case that branch's retry-count/
+      // last-response behavior ever drifts from the idempotent-method path.
+      fetchStub.resolves(fetchFail(429, { code: 'rate_limited' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.createProject(WORKSPACE_ID, { name: 'US - EN' }).catch((e) => e);
+      await clock.tickAsync(60_000);
+      const err = await promise;
+
+      expect(fetchStub.callCount).to.equal(3);
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.status).to.equal(429);
+    }));
+
+    it('rethrows the last network error after exhausting all retries on an idempotent method', withFakeTimers(async (clock) => {
+      const netErr = Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' });
+      fetchStub.rejects(netErr);
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.getWorkspaceStatus(WORKSPACE_ID).catch((e) => e);
+      await clock.tickAsync(60_000);
+      const err = await promise;
+
+      expect(fetchStub.callCount).to.equal(3);
+      expect(err.message).to.equal('ECONNRESET');
+    }));
+
+    it('gives each retry attempt its OWN fresh per-attempt timeout (not one budget for the whole retry loop)', withFakeTimers(async (clock) => {
+      // Simulate: attempt 1 times out (never resolves until aborted), attempt 2
+      // succeeds immediately. If the timeout were shared across the whole retry
+      // loop (a single 15s AbortController for every attempt, rather than a new
+      // one per attempt), the clock advance below -- 15s for attempt 1's abort,
+      // then a further tick for backoff -- would either abort the already-
+      // succeeded second attempt or never let it run at all. Getting a clean
+      // 200 after exactly 2 calls proves attempt 2 got its own untouched budget.
+      let call = 0;
+      fetchStub.callsFake((_input, init) => {
+        call += 1;
+        if (call === 1) {
+          return new Promise((resolve, reject) => {
+            init.signal.addEventListener('abort', () => {
+              const e = new Error('aborted');
+              e.name = 'AbortError';
+              reject(e);
+            });
+          });
+        }
+        return Promise.resolve(fetchOk({ status: 'created' }));
+      });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.getWorkspaceStatus(WORKSPACE_ID);
+      await clock.tickAsync(60_000);
+      const result = await promise;
+
+      expect(result.status).to.equal('created');
+      expect(fetchStub.callCount).to.equal(2);
+    }));
+
+    it('does NOT retry a per-attempt timeout on a non-idempotent method (POST)', withFakeTimers(async (clock) => {
+      fetchStub.callsFake((_input, init) => new Promise((resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const e = new Error('aborted');
+          e.name = 'AbortError';
+          reject(e);
+        });
+      }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.publishProject(WORKSPACE_ID, PROJECT_ID).catch((e) => e);
+      await clock.tickAsync(20_000); // past the 15s per-attempt timeout, once
+      const err = await promise;
+
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.status).to.equal(504);
+      expect(fetchStub.callCount).to.equal(1);
+    }));
+
+    it('does not retry a non-retryable 4xx (e.g. 404) regardless of method', withFakeTimers(async (clock) => {
+      fetchStub.resolves(fetchFail(404, { message: 'not found' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const promise = transport.getWorkspaceStatus(WORKSPACE_ID).catch((e) => e);
+      await clock.tickAsync(60_000);
+      const err = await promise;
+
+      expect(err.status).to.equal(404);
+      expect(fetchStub.callCount).to.equal(1);
+    }));
+  });
+
   describe('non-2xx upstream', () => {
     it('throws SerenityTransportError carrying status and parsed body', async () => {
       fetchStub.resolves(fetchFail(502, { code: 'gateway_timeout' }));
@@ -430,21 +702,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('createTaggedPrompts', () => {
-    it('POSTs to /v2/.../aio/prompts/tagged with grouped prompts', async () => {
-      fetchStub.resolves(fetchOk({ ids: ['p1', 'p2'], existing_count: 0 }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const promptsByTag = { 'topic:acrobat': ['What is Acrobat?'] };
-      await transport.createTaggedPrompts(WORKSPACE_ID, PROJECT_ID, promptsByTag);
-
-      const call = await callOf(fetchStub);
-      expect(call.method).to.equal('POST');
-      expect(call.url).to.include('/aio/prompts/tagged');
-      expect(JSON.parse(call.body)).to.deep.equal({ prompts: promptsByTag });
-    });
-  });
-
   describe('createPromptsByIds', () => {
     it('POSTs to /v2/.../aio/prompts with { items, tag_ids } and returns the list wrapper', async () => {
       fetchStub.resolves(fetchOk({
@@ -486,6 +743,50 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('renamePrompt', () => {
+    it('POSTs /v2/.../aio/prompts/{prompt_id}/rename with { new_name } and returns the id-stable result', async () => {
+      fetchStub.resolves(fetchOk({ id: 'p1', name: 'Next text', is_updated: true }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.renamePrompt(WORKSPACE_ID, PROJECT_ID, 'p1', 'Next text');
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('POST');
+      expect(call.url).to.match(/\/aio\/prompts\/p1\/rename$/);
+      expect(JSON.parse(call.body)).to.deep.equal({ new_name: 'Next text' });
+      expect(result).to.deep.equal({ id: 'p1', name: 'Next text', is_updated: true });
+    });
+
+    it('surfaces the upstream 409 (text collision) as a SerenityTransportError(409)', async () => {
+      fetchStub.resolves(fetchFail(409, { message: 'conflict' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.renamePrompt(WORKSPACE_ID, PROJECT_ID, 'p1', 'A sibling\'s text'))
+        .to.be.rejected.then((err) => {
+          expect(err).to.be.instanceOf(SerenityTransportError);
+          expect(err.status).to.equal(409);
+        });
+    });
+  });
+
+  describe('updatePromptTagsByIds', () => {
+    it('PUTs /v2/.../aio/prompts/tags with { items } (id + references + replace)', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.updatePromptTagsByIds(WORKSPACE_ID, PROJECT_ID, [
+        { id: 'p1', references: ['tag-1', 'tag-2'], replace: true },
+      ]);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('PUT');
+      expect(call.url).to.match(/\/aio\/prompts\/tags$/);
+      expect(JSON.parse(call.body)).to.deep.equal({
+        items: [{ id: 'p1', references: ['tag-1', 'tag-2'], replace: true }],
+      });
+    });
+  });
+
   describe('brand URLs', () => {
     const BENCHMARK_ID = 'bench-9';
 
@@ -501,7 +802,7 @@ describe('Semrush REST transport', () => {
       expect(call.body).to.equal(undefined);
     });
 
-    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls', async () => {
+    it('listBrandUrls GETs /v2/.../benchmarks/{bid}/brand_urls (published view by default)', async () => {
       fetchStub.resolves(fetchOk({ brand_urls: [] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -509,7 +810,19 @@ describe('Semrush REST transport', () => {
 
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
+      // No `draft` query → the default (published) view.
       expect(call.url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls$/);
+    });
+
+    it('listBrandUrls sends ?draft=true when the draft view is requested', async () => {
+      fetchStub.resolves(fetchOk({ brand_urls: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listBrandUrls(WORKSPACE_ID, PROJECT_ID, BENCHMARK_ID, { draft: true });
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.match(/\/aio\/benchmarks\/bench-9\/brand_urls\?draft=true$/);
     });
 
     it('createBrandUrls POSTs the entries array as the body', async () => {
@@ -795,24 +1108,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('resolveUrl', () => {
-    it('GETs /v1/url/resolve with the primary_url query param and returns the body', async () => {
-      fetchStub.resolves(fetchOk({ domain: 'lovesac.com', primary_url: 'lovesac.com', is_valid: true }));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const result = await transport.resolveUrl('https://www.lovesac.com');
-
-      const call = await callOf(fetchStub);
-      expect(call.method).to.equal('GET');
-      const url = new URL(call.url);
-      expect(url.pathname).to.equal('/enterprise/projects/api/v1/url/resolve');
-      // The raw URL is passed verbatim as the query value (decoded here to stay
-      // robust to the client's query-encoding).
-      expect(url.searchParams.get('primary_url')).to.equal('https://www.lovesac.com');
-      expect(result).to.deep.equal({ domain: 'lovesac.com', primary_url: 'lovesac.com', is_valid: true });
-    });
-  });
-
   describe('createProjectTags', () => {
     it('POSTs { names } to /v2/workspaces/{ws}/projects/{pid}/aio/tags', async () => {
       fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'source:ai' }));
@@ -898,14 +1193,16 @@ describe('Semrush REST transport', () => {
       expect(result).to.deep.equal({ id: 'tag-1', name: 'category:Renamed', parent_id: 'parent-1' });
     });
 
-    it('omits parent_id when only renaming', async () => {
-      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'category:Renamed' }));
+    it('re-sends the current parent_id when only renaming (omitting it would promote)', async () => {
+      fetchStub.resolves(fetchOk({ id: 'tag-1', name: 'Renamed', parent_id: 'root-1' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', { name: 'category:Renamed' });
+      await transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', {
+        name: 'Renamed', parentId: 'root-1',
+      });
 
       const call = await callOf(fetchStub);
-      expect(JSON.parse(call.body)).to.deep.equal({ name: 'category:Renamed' });
+      expect(JSON.parse(call.body)).to.deep.equal({ name: 'Renamed', parent_id: 'root-1' });
     });
 
     it('sends a literal null parent_id to promote a child to root (gate 1)', async () => {
@@ -920,11 +1217,25 @@ describe('Semrush REST transport', () => {
       expect(JSON.parse(call.body)).to.deep.equal({ name: 'Sneakers', parent_id: null });
     });
 
+    // Upstream has no "leave the parent alone" body: a PATCH without `parent_id`
+    // PROMOTES the tag to a root (verified live). Refuse to build such a body.
+    it('throws rather than omitting parent_id (omission promotes the tag to a root)', async () => {
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      for (const parentId of [undefined, '']) {
+        // eslint-disable-next-line no-await-in-loop
+        await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'tag-1', {
+          name: 'Renamed', parentId,
+        })).to.be.rejectedWith(TypeError, /parentId is required/);
+      }
+      expect(fetchStub.called).to.equal(false);
+    });
+
     it('surfaces an upstream 404 as a SerenityTransportError', async () => {
       fetchStub.resolves(fetchFail(404, { message: 'not found' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'ghost', { name: 'category:X' }))
+      await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'ghost', { name: 'X', parentId: 'root-1' }))
         .to.be.rejected.then((err) => {
           expect(err.status).to.equal(404);
           expect(err.body).to.deep.equal({ message: 'not found' });
@@ -951,8 +1262,6 @@ describe('Semrush REST transport', () => {
   });
 
   // ── Sub-workspace lifecycle (serenity dual-mode, subworkspace path) ──────────────
-  const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
-
   describe('createSubworkspace', () => {
     it('POSTs { title, resources } to /v2/workspaces/{parent}/child (no X-Upload-Receipt)', async () => {
       fetchStub.resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
@@ -985,6 +1294,24 @@ describe('Semrush REST transport', () => {
         `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`,
       );
       expect(result.status).to.equal('created');
+    });
+  });
+
+  describe('getWorkspaceResources', () => {
+    it('GETs /v1/workspaces/{ws}/resources', async () => {
+      fetchStub.resolves(fetchOk({
+        product_resources: { ai: { resources: { projects: { used: 0, drafted: 0, total: 13 } } } },
+      }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.getWorkspaceResources(WORKSPACE_ID);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.equal(
+        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/resources`,
+      );
+      expect(result.product_resources.ai.resources.projects.total).to.equal(13);
     });
   });
 
@@ -1106,41 +1433,67 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.called).to.equal(false);
     });
 
-    it('throws SerenityTransportError carrying upstream status + parsed body on non-2xx', async () => {
+    it('throws SerenityTransportError carrying upstream status + parsed body on non-2xx (after exhausting GET retries)', async () => {
+      // getWorkspaceStatus is a GET (idempotent) — a persistent 503 is now
+      // retried (default maxRetries: 2 -> 3 attempts total) before the last
+      // response is surfaced. Fake timers keep the jittered backoff sleeps from
+      // costing real wall-clock time in the test run.
       fetchStub.resolves(fetchFail(503, { code: 'unavailable' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+      const clock = sinon.useFakeTimers({ now: 1_700_000_000_000, toFake: ['setTimeout', 'clearTimeout'] });
       try {
-        await transport.getWorkspaceStatus(WORKSPACE_ID);
-        expect.fail('should have thrown');
-      } catch (err) {
+        const promise = transport.getWorkspaceStatus(WORKSPACE_ID).catch((e) => e);
+        await clock.tickAsync(60_000);
+        const err = await promise;
         expect(err).to.be.instanceOf(SerenityTransportError);
         expect(err.status).to.equal(503);
         expect(err.body).to.deep.equal({ code: 'unavailable' });
+        expect(fetchStub.callCount).to.equal(3);
+      } finally {
+        clock.restore();
       }
     });
 
-    it('falls back to raw text when the upstream body is not JSON', async () => {
+    it('falls back to raw text when the upstream body is not JSON (after exhausting GET retries)', async () => {
       fetchStub.resolves(new Response('gateway exploded', {
         status: 500,
         headers: { 'content-type': 'text/plain' },
       }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+      const clock = sinon.useFakeTimers({ now: 1_700_000_000_000, toFake: ['setTimeout', 'clearTimeout'] });
       try {
-        await transport.getWorkspaceStatus(WORKSPACE_ID);
-        expect.fail('should have thrown');
-      } catch (err) {
+        const promise = transport.getWorkspaceStatus(WORKSPACE_ID).catch((e) => e);
+        await clock.tickAsync(60_000);
+        const err = await promise;
         expect(err.body).to.equal('gateway exploded');
+        expect(fetchStub.callCount).to.equal(3);
+      } finally {
+        clock.restore();
       }
     });
 
-    it('re-throws a non-abort network error verbatim', async () => {
+    it('retries a network error on GET, then rethrows it verbatim once retries are exhausted', async () => {
       const netErr = Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' });
       fetchStub.rejects(netErr);
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-      await expect(transport.getWorkspaceStatus(WORKSPACE_ID)).to.be.rejectedWith(/ENOTFOUND/);
+      const clock = sinon.useFakeTimers({ now: 1_700_000_000_000, toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const promise = transport.getWorkspaceStatus(WORKSPACE_ID).catch((e) => e);
+        await clock.tickAsync(60_000);
+        const err = await promise;
+        expect(err.message).to.equal('ENOTFOUND');
+        expect(fetchStub.callCount).to.equal(3);
+      } finally {
+        clock.restore();
+      }
     });
 
-    it('aborts with SerenityTransportError(504) on timeout', async () => {
+    it('aborts with SerenityTransportError(504) on timeout, retried on GET (idempotent) then exhausted', async () => {
+      // getWorkspaceStatus is a GET (idempotent) — every attempt times out here,
+      // so the retry layer treats each timeout as a network-error-equivalent
+      // retryable failure, retries up to the default 3 attempts total, and
+      // surfaces the last one as the 504 once exhausted. Needs a longer tick
+      // than a single attempt's 15s ceiling: 3 attempts x 15s + 2 backoff waits.
       fetchStub.callsFake((_url, init) => new Promise((resolve, reject) => {
         init.signal.addEventListener('abort', () => {
           const e = new Error('aborted');
@@ -1152,14 +1505,15 @@ describe('Semrush REST transport', () => {
       const clock = sinon.useFakeTimers({ now: 1_700_000_000_000, toFake: ['setTimeout', 'clearTimeout'] });
       try {
         const promise = transport.getWorkspaceStatus(WORKSPACE_ID);
-        await clock.tickAsync(20_000);
+        await clock.tickAsync(90_000);
         const err = await promise.catch((e) => e);
         expect(err).to.be.instanceOf(SerenityTransportError);
         expect(err.status).to.equal(504);
+        expect(fetchStub.callCount).to.equal(3);
       } finally {
         clock.restore();
       }
-    });
+    }).timeout(15000);
   });
 
   describe('defensive branch coverage', () => {

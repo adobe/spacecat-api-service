@@ -10,13 +10,22 @@
  * governing permissions and limitations under the License.
  */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   isUpstreamGone,
   ERROR_CODES,
+  isPoolExhausted,
+  isWorkspaceNotReady,
+  isMeteredQuota,
+  isRateLimited,
 } from '../../../src/support/serenity/errors.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
+
+use(sinonChai);
 
 describe('serenity error classification', () => {
   describe('isUpstreamGone', () => {
@@ -35,7 +44,74 @@ describe('serenity error classification', () => {
       expect(ERROR_CODES.MARKET_NOT_FOUND).to.equal('marketNotFound');
       expect(ERROR_CODES.AMBIGUOUS_WORKSPACE).to.equal('ambiguousWorkspace');
       expect(ERROR_CODES.LINKED_SUBWORKSPACES).to.equal('linkedSubworkspaces');
+      expect(ERROR_CODES.ORG_POOL_EXHAUSTED).to.equal('orgPoolExhausted');
+      expect(ERROR_CODES.BRAND_AI_LIMIT).to.equal('brandAiLimit');
       expect(Object.isFrozen(ERROR_CODES)).to.be.true;
+    });
+  });
+
+  describe('dynamic-allocation classifiers (body/message, not status alone)', () => {
+    const err = (status, body) => new SerenityTransportError(status, 'upstream', body);
+
+    it('isPoolExhausted: only a 422 whose message says insufficient units', () => {
+      expect(isPoolExhausted(err(422, { message: 'insufficient available units in subscription' }))).to.be.true;
+      expect(isPoolExhausted(err(422, { message: 'workspace not ready' }))).to.be.false; // transient, not exhaustion
+      expect(isPoolExhausted(err(422, {}))).to.be.false; // object without a message → no match
+      expect(isPoolExhausted(err(500, { message: 'insufficient available units' }))).to.be.false;
+      expect(isPoolExhausted(new Error('x'))).to.be.false;
+    });
+
+    it('isWorkspaceNotReady: only the transient 422 lock', () => {
+      expect(isWorkspaceNotReady(err(422, { message: 'workspace not ready' }))).to.be.true;
+      expect(isWorkspaceNotReady(err(422, { message: 'insufficient available units' }))).to.be.false;
+    });
+
+    it('isMeteredQuota: only a 405 with an explicit quota signal — never a bare Method-Not-Allowed', () => {
+      expect(isMeteredQuota(err(405, { message: 'Quota exceeded' }))).to.be.true;
+      expect(isMeteredQuota(err(405, 'quota exceeded'))).to.be.true; // string body
+      expect(isMeteredQuota(err(405, '<html>prompt allocation exhausted</html>'))).to.be.true;
+      expect(isMeteredQuota(err(405, { message: 'Method Not Allowed' }))).to.be.false; // legitimate 405
+      expect(isMeteredQuota(err(405, 'method not allowed'))).to.be.false;
+      expect(isMeteredQuota(err(405, null))).to.be.false; // no body signal → not quota
+      expect(isMeteredQuota(err(404, null))).to.be.false;
+    });
+
+    describe('isMeteredQuota — MeteredQuotaClassifier metric only fires for actual 405s', () => {
+      let sandbox;
+      let recordMeteredQuotaClassifier;
+      let isMeteredQuotaMocked;
+
+      beforeEach(async () => {
+        sandbox = sinon.createSandbox();
+        recordMeteredQuotaClassifier = sandbox.stub();
+        ({ isMeteredQuota: isMeteredQuotaMocked } = await esmock(
+          '../../../src/support/serenity/errors.js',
+          { '../../../src/support/serenity/allocation-metrics.js': { recordMeteredQuotaClassifier } },
+        ));
+      });
+
+      afterEach(() => sandbox.restore());
+
+      it('does NOT emit the metric for a non-405 (would drown the 405 ratio otherwise)', () => {
+        isMeteredQuotaMocked(err(404, null));
+        isMeteredQuotaMocked(new TypeError('boom'));
+        expect(recordMeteredQuotaClassifier).to.not.have.been.called;
+      });
+
+      it('emits Matched=true for an actual quota-signalling 405', () => {
+        isMeteredQuotaMocked(err(405, { message: 'Quota exceeded' }));
+        expect(recordMeteredQuotaClassifier).to.have.been.calledOnceWith(true);
+      });
+
+      it('emits Matched=false for a legitimate (non-quota) 405', () => {
+        isMeteredQuotaMocked(err(405, { message: 'Method Not Allowed' }));
+        expect(recordMeteredQuotaClassifier).to.have.been.calledOnceWith(false);
+      });
+    });
+
+    it('isRateLimited: a 429', () => {
+      expect(isRateLimited(err(429, null))).to.be.true;
+      expect(isRateLimited(err(503, null))).to.be.false;
     });
   });
 });

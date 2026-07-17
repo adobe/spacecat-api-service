@@ -21,7 +21,11 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import esmock from 'esmock';
 
 import * as utils from '../../src/support/utils.js';
-import PreflightController, { countIssuesForAudit } from '../../src/controllers/preflight.js';
+import PreflightController, {
+  countIssuesForAudit,
+  PREFLIGHT_PROCESS_AUDW,
+  PREFLIGHT_PROCESS_MYST,
+} from '../../src/controllers/preflight.js';
 
 // Make fetch available globally
 global.fetch = fetch;
@@ -134,7 +138,13 @@ describe('Preflight Controller', () => {
       findLatest: sandbox.stub().resolves(mockConfiguration),
     },
     Organization: {
-      findById: sandbox.stub().resolves({ getId: () => 'org-123' }),
+      findById: sandbox.stub().resolves({
+        getId: () => 'org-123',
+        // SITES-48037: createPreflight threads imsOrgId to mysticat and rejects
+        // when it's missing/empty (500). Default the stub to a valid value; per-test
+        // overrides in the "missing imsOrgId" cases stub it to '' / null.
+        getImsOrgId: () => 'TEST123456@AdobeOrg',
+      }),
     },
     Preflight: {
       create: sandbox.stub().resolves(mockPreflight),
@@ -1137,6 +1147,13 @@ describe('Preflight Controller', () => {
       mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
       mockDataAccess.Site.findByPreviewURL = sandbox.stub().resolves(mockSite);
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
+      // SITES-48037: createPreflight resolves imsOrgId via Organization.findById.
+      // Re-stub per test to keep the fail-closed cases (null org / null imsOrgId)
+      // from leaking into subsequent tests via a shared sandbox.
+      mockDataAccess.Organization.findById = sandbox.stub().resolves({
+        getId: () => 'org-123',
+        getImsOrgId: () => 'TEST123456@AdobeOrg',
+      });
       hasAccessStub = sandbox.stub().resolves(true);
 
       // SITES-43236 / SITES-46699: createPreflight constructs a custom-env
@@ -1615,6 +1632,80 @@ describe('Preflight Controller', () => {
       expect(preflightBody.preflightId).to.be.a('string');
     });
 
+    // -- SITES-48037: ims_org_id threading & fail-closed contract --
+
+    it('threads ims_org_id into the mysticat analyze body (SITES-48037)', async () => {
+      // Mysticat requires this in the payload to bypass DRS's cross-org S2S
+      // auto-resolution (SITES-47943 RCA). Spacecat is the source of truth
+      // and threads the value verbatim from Organization.getImsOrgId().
+      await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.ims_org_id).to.equal('TEST123456@AdobeOrg');
+      expect(mockDataAccess.Organization.findById).to.have.been.calledWith('org-123');
+    });
+
+    it('returns 400 when the Organization has no imsOrgId (SITES-48037 fail-closed)', async () => {
+      // Empty imsOrgId is a config gap — the site is registered but its parent
+      // org wasn't fully onboarded. 400 (not 500) because this isn't a
+      // retryable server error; the caller's admin needs to populate the org's
+      // imsOrgId before this site can preflight.
+      mockDataAccess.Organization.findById.resolves({
+        getId: () => 'org-123',
+        getImsOrgId: () => '',
+      });
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.equal('Site organization is missing imsOrgId');
+      // Fail-closed happens after hasAccess but BEFORE the HEAD probe (which
+      // is fetch call 1) and the mysticat call (fetch call 2). Assert fetch
+      // was never invoked — cleaner than `secondCall.to.be.null` and order-
+      // independent of any future HEAD-probe placement changes.
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('returns 500 when Organization.findById throws (SITES-48037)', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('db down'));
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Failed to resolve site organization');
+    });
+
+    it('returns 500 when Organization.findById returns null — dangling FK (SITES-48037)', async () => {
+      // Distinct from the empty-imsOrgId case: null org = data-integrity issue
+      // at the FK level (site.organization_id points to a row that doesn't
+      // exist — needs cleanup). Empty imsOrgId = config gap at the field
+      // level (needs org onboarding). Different remediation paths → different
+      // error messages, and 500 (not 400) because it's genuinely broken data
+      // in our tables that no client action can fix.
+      mockDataAccess.Organization.findById.resolves(null);
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Site organization not found');
+    });
+
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
@@ -1882,6 +1973,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
@@ -1925,6 +2017,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => { throw new Error('authoring type lookup failed'); },
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(brokenSite);
       mockDataAccess.Site.findByPreviewURL.resolves(brokenSite);
@@ -1966,6 +2059,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
@@ -2031,6 +2125,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
         getDeliveryType: () => 'aem_edge',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(spSite);
       mockDataAccess.Site.findByPreviewURL.resolves(spSite);
@@ -2079,6 +2174,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
       };
       mockDataAccess.Site.findById.resolves(csSite);
       mockDataAccess.Site.findByPreviewURL.resolves(csSite);
@@ -2276,7 +2372,9 @@ describe('Preflight Controller', () => {
 
       const infoCall = loggerStub.info.getCalls()
         .find((c) => typeof c.args[0] === 'string'
-          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=COMPLETED'));
       expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
       const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
@@ -2326,7 +2424,9 @@ describe('Preflight Controller', () => {
 
       const infoCall = loggerStub.info.getCalls()
         .find((c) => typeof c.args[0] === 'string'
-          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=COMPLETED'));
       expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
       const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
@@ -2362,8 +2462,114 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(200);
 
       const infoCall = loggerStub.info.getCalls()
-        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`));
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run complete.'));
       expect(infoCall, 'expected no [Preflight] jobId info log while IN_PROGRESS').to.be.undefined;
+    });
+
+    it('warns with code + message (not the full error object) when the job is FAILED', async () => {
+      loggerStub.warn.resetHistory();
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => failedError,
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      // details must NOT be logged (never log secrets / freeform worker content)
+      expect(warnCall.args[0]).to.not.include('details');
+      expect(warnCall.args[0]).to.not.include('tok');
+    });
+
+    it('warns with errorCode=none when the job is FAILED without a structured error', async () => {
+      loggerStub.warn.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => null,
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=none');
+      expect(warnCall.args[0]).to.include('errorMessage=none');
+    });
+
+    it('logs FAILED at warn level, not error', async () => {
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      await preflightController.getPreflightJobStatusAndResult({ params: { jobId } });
+
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
+    });
+
+    it('re-logs the terminal outcome on every poll (stateless — one warn per poll)', async () => {
+      loggerStub.warn.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+
+      const runFailedWarns = loggerStub.warn.getCalls()
+        .filter((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(runFailedWarns).to.have.lengthOf(3);
+    });
+
+    it('does not log a failure for a COMPLETED job', async () => {
+      loggerStub.warn.resetHistory();
+      const completedJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(completedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(warnCall, 'expected no [Preflight] Run failed warn log for a COMPLETED job').to.be.undefined;
     });
 
     it('returns 400 Bad Request for invalid job ID', async () => {
@@ -2715,6 +2921,85 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(500);
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+    });
+
+    it('logs a run-complete summary tagged with the myst process', async () => {
+      loggerStub.info.resetHistory();
+      const completedJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'suggest',
+            audits: [{ name: 'metatags', type: 'seo', opportunities: [{ issue: 'Title too short' }] }],
+          },
+        ],
+      };
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(completedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_MYST}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a myst-process [Preflight] Run complete info log').to.not.be.undefined;
+    });
+
+    it('warns (not errors) with code + message tagged with the myst process when FAILED', async () => {
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => failedError,
+      };
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(failedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_MYST}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a myst-process [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      expect(warnCall.args[0]).to.not.include('tok');
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
+    });
+
+    it('does not emit an outcome log when no AsyncJob is linked yet (null job)', async () => {
+      loggerStub.info.resetHistory();
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(null);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const outcomeLog = [
+        ...loggerStub.info.getCalls(),
+        ...loggerStub.warn.getCalls(),
+        ...loggerStub.error.getCalls(),
+      ].find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run'));
+      expect(outcomeLog, 'expected no outcome log when AsyncJob is null').to.be.undefined;
     });
   });
 });

@@ -198,12 +198,14 @@ describe('LLMO Onboarding Functions', () => {
       isConfigured = true,
       submitJob = sandbox.stub().resolves({ job_id: 'test-brandalf-job-123' }),
       submitPromptGenerationJob = sandbox.stub().resolves({ job_id: 'test-drs-job-123' }),
+      createSchedule = sandbox.stub().resolves({ scheduleId: 'test-schedule-123', alreadyExisted: false }),
     } = options;
 
     const instance = {
       isConfigured: sandbox.stub().returns(isConfigured),
       submitJob,
       submitPromptGenerationJob,
+      createSchedule,
     };
 
     return {
@@ -5754,6 +5756,357 @@ describe('LLMO Onboarding Functions', () => {
         },
       };
       expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
+    });
+  });
+
+  describe('prompt-suggestion schedule registration (Phase 3)', () => {
+    let onboardingModule;
+    let sandbox;
+
+    before(async function loadOnboardingModule() {
+      // Cold esmock load of the onboarding module (which pulls in many deps) can
+      // exceed the 2000ms default on a first, un-warmed run.
+      this.timeout(30000);
+      onboardingModule = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    });
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    const buildDrsClient = (createScheduleImpl) => ({
+      isConfigured: sandbox.stub().returns(true),
+      createSchedule: createScheduleImpl
+        || sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
+    });
+
+    const buildLog = () => ({
+      info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
+    });
+
+    // providerId+cadence live in ONE place (PROMPT_SUGGESTION_PIPELINES). This
+    // literal mirrors it; the first test asserts the module table matches, so a
+    // drift is caught here rather than silently changing behavior.
+    const PIPELINES = [
+      ['prompt_generation_semrush', 'twice_monthly'],
+      ['prompt_generation_agentic_traffic', 'twice_monthly'],
+      ['prompt_generation_synthetic_personas', 'quarterly'],
+    ];
+
+    it('declares each provider+cadence exactly once in PROMPT_SUGGESTION_PIPELINES', () => {
+      expect(onboardingModule.PROMPT_SUGGESTION_PIPELINES.map(
+        ({ providerId, cadence }) => [providerId, cadence],
+      )).to.deep.equal(PIPELINES);
+    });
+
+    PIPELINES.forEach(([providerId, cadence]) => {
+      it(`registerPromptSuggestionSchedule registers a ${cadence} schedule for ${providerId} with an immediate first run`, async () => {
+        const drsClient = buildDrsClient();
+        const result = await onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', log: buildLog(), say: sandbox.stub(),
+        });
+
+        expect(drsClient.createSchedule).to.have.been.calledOnce;
+        const arg = drsClient.createSchedule.firstCall.args[0];
+        expect(arg).to.deep.include({
+          siteId: 'site-123',
+          cadence,
+          enableBrandPresence: false,
+          triggerImmediately: true,
+        });
+        expect(arg.providerIds).to.deep.equal([providerId]);
+        // DRS derives the tenant key from siteId and rejects caller imsOrgId — never thread it.
+        expect(arg).to.not.have.property('imsOrgId');
+        expect(arg).to.not.have.property('orgId');
+        expect(result).to.deep.equal({ scheduleId: 'sched-1', alreadyExisted: false });
+      });
+
+      it(`registerPromptSuggestionSchedule skips (no createSchedule) for ${providerId} when the DRS client is not configured`, async () => {
+        const drsClient = buildDrsClient();
+        drsClient.isConfigured.returns(false);
+        const log = buildLog();
+
+        const result = await onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', log, say: sandbox.stub(),
+        });
+
+        expect(drsClient.createSchedule).to.not.have.been.called;
+        expect(result).to.equal(null);
+        expect(log.debug).to.have.been.calledWithMatch(providerId);
+      });
+
+      it(`registerPromptSuggestionSchedule propagates a schedule-registration failure for ${providerId} (not swallowed)`, async () => {
+        const err = new Error('DRS POST /schedules failed: 500');
+        const drsClient = buildDrsClient(sandbox.stub().rejects(err));
+
+        await expect(onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', log: buildLog(), say: sandbox.stub(),
+        })).to.be.rejectedWith('DRS POST /schedules failed: 500');
+      });
+    });
+
+    it('registerPromptSuggestionSchedule logs the alreadyExisted branch', async () => {
+      const drsClient = buildDrsClient(
+        sandbox.stub().resolves({ scheduleId: 'sched-9', alreadyExisted: true }),
+      );
+      const log = buildLog();
+
+      await onboardingModule.registerPromptSuggestionSchedule({
+        drsClient,
+        providerId: 'prompt_generation_semrush',
+        cadence: 'twice_monthly',
+        siteId: 'site-123',
+        log,
+        say: sandbox.stub(),
+      });
+
+      // Assert the full context is logged, not just the 'already existed' suffix,
+      // so a silent degradation of the log line (dropping scheduleId/providerId)
+      // is caught.
+      expect(log.info).to.have.been.calledWithMatch(/already existed/);
+      expect(log.info).to.have.been.calledWithMatch(/sched-9/);
+      expect(log.info).to.have.been.calledWithMatch(/prompt_generation_semrush/);
+    });
+
+    it('registerPromptSuggestionSchedules resolves to a completion sentinel on success', async () => {
+      // The caller distinguishes "finished" from a settleWithin timeout by this
+      // sentinel (timeout resolves to the null fallback instead).
+      const result = await onboardingModule.registerPromptSuggestionSchedules({
+        drsClient: buildDrsClient(
+          sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
+        ),
+        siteId: 'site-123',
+        log: buildLog(),
+        say: sandbox.stub(),
+      });
+      expect(result).to.deep.equal({ completed: true });
+    });
+
+    it('registerPromptSuggestionSchedules resolves to the sentinel when DRS is not configured', async () => {
+      const drsClient = buildDrsClient(sandbox.stub());
+      drsClient.isConfigured = sandbox.stub().returns(false);
+      const result = await onboardingModule.registerPromptSuggestionSchedules({
+        drsClient, siteId: 'site-123', log: buildLog(), say: sandbox.stub(),
+      });
+      expect(result).to.deep.equal({ completed: true });
+      expect(drsClient.createSchedule).to.not.have.been.called;
+    });
+  });
+
+  describe('activateBrandAndGeneratePrompts — V2 prompt-suggestion schedules', () => {
+    let sandbox;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    const buildV2Context = () => {
+      const brandsMaybeSingle = sandbox.stub().resolves({ data: null, error: null });
+      const eqName = sandbox.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const eqOrg = sandbox.stub().returns({ eq: eqName });
+      const select = sandbox.stub().returns({ eq: eqOrg });
+      const postgrestClient = { from: sandbox.stub().returns({ select }) };
+      const log = {
+        info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
+      };
+      return {
+        log,
+        dataAccess: { services: { postgrestClient } },
+      };
+    };
+
+    const buildV2Params = (context) => ({
+      onboardingMode: 'v2',
+      organization: { getId: sandbox.stub().returns('org-123') },
+      site: { getId: sandbox.stub().returns('site-123') },
+      siteConfig: { getFetchConfig: sandbox.stub().returns({}) },
+      brandName: 'Test Brand',
+      imsOrgId: 'ABC123@AdobeOrg',
+      baseURL: 'https://example.com',
+      context,
+      say: sandbox.stub(),
+    });
+
+    it('registers all three prompt-suggestion schedules after the Brandalf trigger', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const instance = mockDrsClient.createFrom();
+      expect(instance.submitJob).to.have.been.calledOnce; // Brandalf fired first
+      expect(instance.createSchedule).to.have.been.calledThrice;
+      // Schedules register AFTER the Brandalf submit (not in parallel before it).
+      expect(instance.createSchedule).to.have.been.calledAfter(instance.submitJob);
+      const providerIds = instance.createSchedule.getCalls().map((c) => c.args[0].providerIds[0]);
+      expect(providerIds).to.have.members([
+        'prompt_generation_semrush',
+        'prompt_generation_agentic_traffic',
+        'prompt_generation_synthetic_personas',
+      ]);
+    });
+
+    it('logs a schedule-registration failure at ERROR with context but still completes onboarding', async () => {
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 500;
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        createSchedule: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      // Must resolve (onboarding succeeds) despite every schedule registration failing.
+      await activateBrandAndGeneratePrompts(params);
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      const semrushLog = errorLogs.find((m) => m.includes('prompt_generation_semrush'));
+      expect(semrushLog, 'expected an ERROR log for the failed semrush schedule').to.be.a('string');
+      expect(semrushLog).to.include('site_id=site-123');
+      expect(semrushLog).to.include('status=500');
+      // All three providers are surfaced, none swallowed. Filter by the
+      // schedule-failure message instead of asserting a bare calledThrice, so an
+      // unrelated future ERROR log in V2 onboarding does not break this test.
+      const scheduleFailureLogs = errorLogs.filter((m) => m.includes('Failed to register DRS'));
+      expect(scheduleFailureLogs).to.have.lengthOf(3);
+      // Operator gets a Slack warning per failed schedule (manual-trigger signal).
+      expect(params.say).to.have.been.calledWithMatch(/Failed to register DRS .*schedule/);
+      // Brandalf still fired — the schedule failures did not abort onboarding.
+      expect(mockDrsClient.createFrom().submitJob).to.have.been.calledOnce;
+    });
+
+    it('logs status=unknown when a schedule-registration failure carries no HTTP status', async () => {
+      const err = new Error('network down'); // no .status attached
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        createSchedule: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('status=unknown'))).to.be.true;
+    });
+
+    it('isolates a single pipeline failure: the other two register, exactly one ERROR, onboarding completes', async () => {
+      // One provider's createSchedule rejects; the other two resolve. The
+      // per-item try/catch must isolate the failure — 2 schedules registered,
+      // exactly 1 ERROR log, and onboarding still completes.
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 503;
+      const createSchedule = sandbox.stub();
+      createSchedule
+        .withArgs(sinon.match((a) => a.providerIds[0] === 'prompt_generation_agentic_traffic'))
+        .rejects(err);
+      createSchedule.resolves({ scheduleId: 'sched-ok', alreadyExisted: false });
+
+      const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      await activateBrandAndGeneratePrompts(params);
+
+      const instance = mockDrsClient.createFrom();
+      // All three were attempted; two resolved, one rejected.
+      expect(instance.createSchedule).to.have.been.calledThrice;
+      // Exactly one ERROR — the failing agentic-traffic pipeline, not the others.
+      expect(context.log.error).to.have.been.calledOnce;
+      const errorLog = context.log.error.firstCall.args[0];
+      expect(errorLog).to.include('prompt_generation_agentic_traffic');
+      expect(errorLog).to.include('status=503');
+      // Onboarding still completed (Brandalf fired, resolve did not throw).
+      expect(instance.submitJob).to.have.been.calledOnce;
+    });
+
+    it('does not abort onboarding when DrsClient.createFrom throws (best-effort contract)', async () => {
+      // A malformed context / SDK regression must not 500 onboarding: createFrom
+      // throwing is treated as "DRS unavailable" — no Brandalf, no schedules, but
+      // onboarding resolves.
+      const createFromErr = new Error('DRS client init boom');
+      const mockDrsClient = { createFrom: sandbox.stub().throws(createFromErr) };
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      // Resolves (does not reject) despite createFrom throwing.
+      await activateBrandAndGeneratePrompts(params);
+
+      expect(mockDrsClient.createFrom).to.have.been.calledOnce;
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('DRS client creation failed'))).to.be.true;
+      expect(params.say).to.have.been.calledWithMatch(/DRS client unavailable/);
+    });
+
+    it('warns when schedule registration times out (settleWithin fallback)', async () => {
+      // createSchedule never settles → settleWithin resolves to its null fallback
+      // after the timeout; the caller must surface a WARN + Slack signal so a hung
+      // DRS is visible (the per-pipeline catch blocks never fire on a pending call).
+      const clock = sandbox.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const createSchedule = sandbox.stub().returns(new Promise(() => {})); // never settles
+        const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+        const { activateBrandAndGeneratePrompts } = await esmock(
+          '../../../src/controllers/llmo/llmo-onboarding.js',
+          createCommonEsmockDependencies({
+            mockDrsClient,
+            mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+          }),
+        );
+        const context = buildV2Context();
+        const params = buildV2Params(context);
+        const pending = activateBrandAndGeneratePrompts(params);
+        // Advance past every pending timer (schedule-registration + any sibling
+        // settleWithin), flushing microtasks between ticks.
+        await clock.tickAsync(60000);
+        await pending;
+
+        const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
+        expect(warnLogs.some((m) => m.includes('schedule registration timed out'))).to.be.true;
+        expect(params.say).to.have.been.calledWithMatch(/schedule registration timed out/);
+      } finally {
+        clock.restore();
+      }
     });
   });
 });

@@ -19,8 +19,7 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeTagInjection } from './tags.js';
-import { TAG_DIMENSION } from '../prompt-tags.js';
+import { resolveTypeValueInjection } from '../tag-tree.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -49,25 +48,78 @@ export const BULK_CREATE_CONCURRENCY = 8;
 // of them. Defense-in-depth, not a correctness gate.
 export const BULK_PROMPTS_MAX_ITEMS = 500;
 
-// Builds { tagName → semrushTagId } from the upstream prompt item.
-// Object-form tags (the normal Semrush shape) carry both name and id.
-// String-form tags (defensive fallback) are included with an empty id so
-// callers can still read the name via Object.keys() — they are excluded
-// from tag_ids filtering because filter(Boolean) drops empty strings.
-function buildTagMapOf(item) {
+/**
+ * Builds the prompt's tag list from the upstream item: one entry per tag,
+ * carrying its id, bare name, parent id and root-first ancestry breadcrumb.
+ *
+ * This is the authoritative shape. Tag names are NOT unique — upstream scopes
+ * uniqueness to `(project, parent)` — so a prompt can legitimately carry two
+ * different tags with the same bare name (a sub-category `human` and the
+ * `source` value `human`). A list keyed by id preserves both; anything keyed by
+ * name silently drops one.
+ *
+ * Parentage comes straight off the prompt payload. Upstream serializes a tag
+ * identically wherever it appears — embedded on a prompt or listed by
+ * `GET /aio/tags` — and the two objects compare equal for the same id (verified
+ * live 2026-07-10). What varies is DEPTH, not endpoint: a ROOT tag omits
+ * `parent_id` and `path` entirely, while a descendant carries both. So a tag
+ * with no `path` is a root, and its own name is its dimension.
+ *
+ * String-form tags (a defensive upstream fallback) carry a name but no id, and
+ * are surfaced with an empty id rather than dropped.
+ *
+ * @param {any} item - the upstream prompt item.
+ * @returns {Array<{ id: string, name: string, parentId: string | null,
+ *   path: Array<{ id: string, name: string }> | null }>}
+ */
+function buildTagsOf(item) {
   if (!Array.isArray(item?.tags)) {
-    return {};
+    return [];
   }
   return item.tags.reduce((acc, t) => {
     if (typeof t === 'string' && t) {
-      acc[t] = '';
+      acc.push({
+        id: '', name: t, parentId: null, path: null,
+      });
     } else if (typeof t === 'object' && t?.name) {
-      acc[t.name] = t.id ? String(t.id) : '';
+      acc.push({
+        id: t.id ? String(t.id) : '',
+        name: String(t.name),
+        parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
+        path: Array.isArray(t.path)
+          ? t.path.map((p) => ({
+            id: typeof p?.id === 'string' ? p.id : '',
+            name: typeof p?.name === 'string' ? p.name : '',
+          }))
+          : null,
+      });
     }
     return acc;
-  }, {});
+  }, []);
 }
 
+/**
+ * DEPRECATED — `{ tagName → semrushTagId }`, kept only so existing consumers
+ * keep working while they migrate to {@link buildTagsOf}'s `tags` list. Being
+ * name-keyed, it CANNOT represent a prompt carrying two same-named tags from
+ * different dimensions: the later one overwrites the earlier, and which survives
+ * depends on upstream ordering. Remove once every consumer reads `tags`.
+ *
+ * @param {any} item - the upstream prompt item.
+ * @returns {Record<string, string>}
+ */
+function buildTagMapOf(item) {
+  return buildTagsOf(item).reduce((acc, t) => {
+    acc[t.name] = t.id;
+    return acc;
+  }, /** @type {Record<string, string>} */({}));
+}
+
+/**
+ * @param {number} geoTargetId
+ * @param {string} languageCode
+ * @param {any} item - the upstream prompt item.
+ */
 export function buildPromptDto(geoTargetId, languageCode, item) {
   const text = item?.name || '';
   if (!text) {
@@ -78,6 +130,7 @@ export function buildPromptDto(geoTargetId, languageCode, item) {
     geoTargetId,
     languageCode,
     text,
+    tags: buildTagsOf(item),
     tagMap: buildTagMapOf(item),
   };
 }
@@ -88,10 +141,11 @@ export function buildPromptDto(geoTargetId, languageCode, item) {
  * Pagination is real upstream pagination — one slice = one project = one
  * upstream call set per page.
  *
- * tagIds (repeatable): Semrush tag UUIDs from SerenityPrompt.tagMap. Passed
+ * tagIds (repeatable): Semrush tag UUIDs from `SerenityPrompt.tags[].id`. Passed
  * as tag_ids to the by_tags endpoint. Semrush applies OR semantics — prompts
- * carrying any of the supplied tag IDs are returned. AND semantics must be
- * enforced by the caller if needed.
+ * carrying any of the supplied tag IDs are returned, and each id is expanded
+ * downward through the tag hierarchy. AND semantics must be enforced by the
+ * caller if needed.
  */
 export async function handleListPrompts(
   transport,
@@ -142,9 +196,12 @@ export async function handleListPrompts(
     throw err;
   }
 
+  const projectId = row.getSemrushProjectId();
+  // Each prompt's tags already carry their own parentage (see buildTagsOf), so
+  // one upstream call answers the whole page — no tag-tree walk to join against.
   const resp = await transport.listPromptsByTags(
     semrushWorkspaceId,
-    row.getSemrushProjectId(),
+    projectId,
     {
       tag_ids: tagIds,
       page,
@@ -210,184 +267,186 @@ function sanitizeTagIds(raw) {
 }
 
 /**
- * Normalizes one bulk-create/update prompt input. `tags` (names, the legacy
- * write path via `aio/prompts/tagged`) and `tagIds` (upstream tag ids, the
- * id-based write path via `aio/prompts`) are MUTUALLY EXCLUSIVE — at most one
- * of the two BODY KEYS may be present (presence-based, matching
- * {@link parseUpdatePromptBody}'s PATCH contract so the same input shape is
- * accepted/rejected identically on create and update), and `tagIds` when
- * present must resolve to a non-empty array. `tagIds` stays `undefined` when
- * absent so the handler can branch on `input.tagIds !== undefined` to pick
- * the write path; `tags` always defaults to `[]` (unused, not `undefined`)
- * to keep the name-based path's existing contract unchanged.
+ * Normalizes one bulk-create/update prompt input. Tags are addressed by
+ * UPSTREAM ID (`tagIds`), never by name: the name-keyed upstream write
+ * (`aio/prompts/tagged`) can only ever reach ROOT tags — its request shape has
+ * no field for a parent, so a name absent from the root level mints a NEW ROOT.
+ * Under the dimension-root model every tag value is a descendant of a dimension
+ * root, so a name cannot identify one. `tagIds` is therefore required and must
+ * resolve to a non-empty array; a `tags` key is rejected outright rather than
+ * silently ignored, so a stale caller fails loudly instead of writing
+ * phantom root tags.
+ *
+ * Returns the rejection REASON alongside the value. The three ways an input can
+ * be refused are not interchangeable, and a caller told its `geoTargetId` was
+ * missing when it actually sent a retired `tags` key has been misinformed, not
+ * informed.
+ *
+ * @param {object} input - one raw row of the bulk-create request.
+ * @returns {{ value: { text: string, languageCode: string, geoTargetId: number,
+ *   tagIds: string[] } | null, reason: string | null }}
  */
 export function normalizePromptInput(input) {
   const text = String(input?.text || '').trim();
   const languageCode = normalizeLanguageCode(input?.languageCode);
   const geoTargetId = normalizeGeoTargetId(Number(input?.geoTargetId));
   if (!text || languageCode === null || geoTargetId === null) {
-    return null;
+    return { value: null, reason: 'text, languageCode, and geoTargetId are required' };
   }
-  const hasTagsField = input?.tags !== undefined;
-  const hasTagIdsField = input?.tagIds !== undefined;
-  if (hasTagsField && hasTagIdsField) {
-    return null;
-  }
-  if (hasTagIdsField) {
-    const tagIds = sanitizeTagIds(input.tagIds);
-    if (tagIds.length === 0) {
-      return null;
-    }
+  if (input?.tags !== undefined) {
     return {
-      text, languageCode, geoTargetId, tags: [], tagIds,
+      value: null,
+      reason: 'tags is retired: address tags by upstream id via tagIds',
     };
   }
-  const tags = Array.isArray(input?.tags)
-    ? input.tags.map((t) => String(t || '').trim()).filter(Boolean)
-    : [];
+  const tagIds = sanitizeTagIds(input?.tagIds);
+  if (tagIds.length === 0) {
+    return {
+      value: null,
+      reason: 'tagIds must be a non-empty array of upstream tag ids',
+    };
+  }
   return {
-    text, languageCode, geoTargetId, tags, tagIds: undefined,
+    value: {
+      text, languageCode, geoTargetId, tagIds,
+    },
+    reason: null,
   };
 }
 
 /**
- * Creates ONE prompt via whichever upstream write path `input` requests --
- * id-based (`POST aio/prompts`, when `input.tagIds` is set -- serenity-docs#24)
- * or the legacy name-based path (`POST aio/prompts/tagged`, when `input.tags`
- * is used). Both {@link handleCreatePrompts}'s per-item fan-out and
- * {@link handleUpdatePrompt}'s post-delete recreate call this, so the two
- * upstream shapes are never duplicated across create and update.
+ * Creates ONE prompt through the id-based upstream write (`POST aio/prompts`).
+ * Called per item by {@link handleCreatePrompts}'s bulk fan-out (and its
+ * subworkspace twin), so the upstream shape lives in one place.
+ *
+ * The write is ATOMIC on an unresolvable tag id — live 500s and creates nothing
+ * — so every id must already be a known-good upstream tag id, resolved by the
+ * caller and never guessed.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {{ text: string, tags: string[], tagIds: string[] | undefined }} input
+ * @param {{ text: string, tagIds: string[] }} input
  * @returns {Promise<string>} the new upstream prompt id, or '' if the
  *   response carried none.
  */
 export async function createOnePrompt(transport, semrushWorkspaceId, projectId, input) {
-  if (input.tagIds !== undefined) {
-    const resp = await transport.createPromptsByIds(
-      semrushWorkspaceId,
-      projectId,
-      [input.text],
-      input.tagIds,
-    );
-    return Array.isArray(resp?.items) && resp.items.length > 0
-      ? String(resp.items[0].id ?? '')
-      : '';
-  }
-  const resp = await transport.createTaggedPrompts(
+  const resp = await transport.createPromptsByIds(
     semrushWorkspaceId,
     projectId,
-    { [input.text]: input.tags },
+    [input.text],
+    input.tagIds,
   );
-  return Array.isArray(resp?.ids) && resp.ids.length > 0 ? String(resp.ids[0]) : '';
+  return Array.isArray(resp?.items) && resp.items.length > 0
+    ? String(resp.items[0].id ?? '')
+    : '';
 }
 
 /**
- * Builds the per-request `type:*` injector — the UNIFIED classification layer
+ * Builds the per-request `type` injector — the UNIFIED classification layer
  * (serenity-docs#31). Given a pure `classifyPromptType(text, geoTargetId)`
  * closure (built by the controller from the brand name + region-clamped
- * aliases), it returns `injectComputedType(projectId, input)` which:
- *   - STRIPS any caller-supplied `type:*` tag (the client may never set it), and
- *   - APPENDS the server-computed one — as a tag NAME on the name-based path, or
- *     as a pre-resolved upstream tag ID on the id-based path (the atomic
- *     `createPromptsByIds` 500s on an unresolved id, so it must be resolved
- *     BEFORE the write).
- * The returned input carries the rewritten `tags`/`tagIds`, so the caller's
- * response echo reflects the computed type without a refetch (decision 5).
+ * aliases) that yields a BARE `type` value (`branded` / `non-branded`), it
+ * returns `injectComputedType(projectId, input)` which:
+ *   - STRIPS every caller-supplied tag id that lives under the `type` root (the
+ *     client may never set the value), and
+ *   - APPENDS the pre-resolved upstream id of the server-computed value. The
+ *     atomic `createPromptsByIds` 500s on an unresolved id, so it is resolved
+ *     BEFORE the write.
+ * The returned input carries the rewritten `tagIds`, so the caller's response
+ * echo reflects the computed type without a refetch (decision 5).
  *
- * Id-based resolution ({@link resolveTypeTagInjection}, one tag-tree read per
- * distinct `type:` value per project) is memoized for the request, so a bulk
- * create fans out at most two tag-tree reads per project regardless of item
- * count. A non-function `classifyPromptType` (defensive) is a pass-through.
+ * The strip set is every id under the `type` root, not a name prefix: a tag's
+ * dimension is its root, and a sub-category could legitimately be named
+ * `branded` without being a `type` value.
+ *
+ * Resolution ({@link resolveTypeValueInjection}, two tag-tree reads per distinct
+ * `type` value per project — the root level plus the `type` root's children) is
+ * memoized for the request, so a bulk create fans out over the distinct computed
+ * values rather than over the items. A non-function `classifyPromptType`
+ * (defensive) is a pass-through.
+ *
+ * `resolveTypeValueInjection` resolves or throws, so the computed tag is always
+ * attached. It must never be dropped: `type` is the one dimension a client may
+ * not set, so a prompt written without it stays unclassified forever, and the
+ * caller sees a 2xx. Failing the write instead is free — the upstream bulk create
+ * is atomic and has not run yet.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
  * @param {object} [log]
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
- *   tags: string[], tagIds: string[] | undefined }) =>
- *   Promise<{ text: string, geoTargetId: number, tags: string[], tagIds: string[] | undefined }>}
+ *   tagIds: string[] }) =>
+ *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
  */
 export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptType, log) {
-  /** @type {Map<string, Promise<{ computedId: string | undefined, typeTagIds: string[] }>>} */
+  /** @type {Map<string, Promise<{ computedId: string, typeTagIds: string[] }>>} */
   const cache = new Map();
   return async function injectComputedType(projectId, input) {
     if (typeof classifyPromptType !== 'function') {
       return input;
     }
-    const typeTag = classifyPromptType(input.text, input.geoTargetId);
-    if (input.tagIds === undefined) {
-      const stripped = (Array.isArray(input.tags) ? input.tags : [])
-        .filter((t) => !String(t).startsWith(`${TAG_DIMENSION.TYPE}:`));
-      return { ...input, tags: [...stripped, typeTag] };
-    }
-    const key = `${projectId} ${typeTag}`;
+    const typeValue = classifyPromptType(input.text, input.geoTargetId);
+    const key = `${projectId} ${typeValue}`;
     let pending = cache.get(key);
     if (!pending) {
-      pending = resolveTypeTagInjection(transport, semrushWorkspaceId, projectId, typeTag, log);
+      pending = resolveTypeValueInjection(transport, semrushWorkspaceId, projectId, typeValue, log);
       cache.set(key, pending);
     }
     const { computedId, typeTagIds } = await pending;
     const stripped = input.tagIds.filter((id) => !typeTagIds.includes(id));
-    return { ...input, tagIds: computedId ? [...stripped, computedId] : stripped };
+    return { ...input, tagIds: [...stripped, computedId] };
   };
 }
 
 /**
- * Validates + normalizes a PATCH prompt body's `text`/`tags`/`tagIds`, shared
- * by {@link handleUpdatePrompt} and its subworkspace twin. `tags` (names) and
- * `tagIds` (upstream ids) are mutually exclusive, mirroring
- * {@link normalizePromptInput}; exactly one must be present. Returns either
- * `{ ok: true, text, tags, tagIds }` or `{ ok: false, status, body }` (the
- * caller returns the latter directly as the handler's 400 response).
+ * Validates + normalizes a PATCH prompt body's `text` + `tagIds`, shared by
+ * {@link handleUpdatePrompt} and its subworkspace twin. Tags are addressed by
+ * upstream id only, mirroring {@link normalizePromptInput} — a name cannot
+ * identify a nested tag. Returns either `{ ok: true, text, tagIds }` or
+ * `{ ok: false, status, body }` (the caller returns the latter directly as the
+ * handler's 400 response).
  *
  * @param {object} body - the PATCH request body.
- * @returns {{ ok: true, text: string, tags: string[], tagIds: string[] | undefined }
+ * @returns {{ ok: true, text: string, tagIds: string[] }
  *   | { ok: false, status: number, body: object }}
  */
 export function parseUpdatePromptBody(body) {
-  const hasTagsField = body?.tags !== undefined;
-  const hasTagIdsField = body?.tagIds !== undefined;
-  if (!body || body.text === undefined || (!hasTagsField && !hasTagIdsField)) {
+  // Before the missing-field check: a caller still sending the retired `tags` key
+  // has no `tagIds`, so testing for the absent field first would answer
+  // `missingFields` and never name the key that is actually wrong. Same ordering,
+  // and same reason, as {@link normalizePromptInput}.
+  if (body?.tags !== undefined) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: 'tags is not supported; address tags by upstream id via tagIds',
+      },
+    };
+  }
+  if (!body || body.text === undefined || body.tagIds === undefined) {
     return {
       ok: false,
       status: 400,
       body: {
         error: 'missingFields',
-        message: 'PATCH body must include text and either tags or tagIds',
+        message: 'PATCH body must include text and tagIds',
       },
     };
   }
-  if (hasTagsField && hasTagIdsField) {
+  const text = String(body.text);
+  const tagIds = sanitizeTagIds(body.tagIds);
+  if (tagIds.length === 0) {
     return {
       ok: false,
       status: 400,
-      body: { error: 'invalidRequest', message: 'tags and tagIds are mutually exclusive' },
+      body: { error: 'invalidRequest', message: 'tagIds must be a non-empty array' },
     };
   }
-  const text = String(body.text);
-  if (hasTagIdsField) {
-    const tagIds = sanitizeTagIds(body.tagIds);
-    if (tagIds.length === 0) {
-      return {
-        ok: false,
-        status: 400,
-        body: { error: 'invalidRequest', message: 'tagIds must be a non-empty array' },
-      };
-    }
-    return {
-      ok: true, text, tags: [], tagIds,
-    };
-  }
-  const tags = Array.isArray(body.tags)
-    ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
-    : [];
-  return {
-    ok: true, text, tags, tagIds: undefined,
-  };
+  return { ok: true, text, tagIds };
 }
 
 export async function mapLimit(items, limit, mapper) {
@@ -451,12 +510,12 @@ export async function handleCreatePrompts(
   );
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const input = normalizePromptInput(raw);
+    const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
       return {
         skipped: {
           text: String(raw?.text || ''),
-          reason: 'text, languageCode, and geoTargetId are required',
+          reason: /** @type {string} */ (reason),
         },
       };
     }
@@ -485,8 +544,7 @@ export async function handleCreatePrompts(
           geoTargetId: typed.geoTargetId,
           languageCode: input.languageCode,
           text: typed.text,
-          tags: typed.tags,
-          ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
+          tagIds: typed.tagIds,
         },
         affectedProjectId: projectId,
       };
@@ -546,33 +604,42 @@ export async function handleCreatePrompts(
 }
 
 /**
- * PATCH /serenity/prompts/:semrushPromptId — replace.
+ * PATCH /serenity/prompts/:semrushPromptId — in-place edit.
  *
- * Body carries `{geoTargetId, languageCode, text, tags}` (name-based) or
- * `{geoTargetId, languageCode, text, tagIds}` (id-based, mutually exclusive
- * with `tags` -- see {@link parseUpdatePromptBody}). All are required: the
- * upstream provider has no in-place update (no GET-by-id either), so the
- * implementation is DELETE-then-CREATE and we treat the payload as the full
- * next state. Clients always have the existing text/tags(-ids) available
- * locally (they were returned by the preceding list call that rendered the
- * edit form), so requiring both keeps the server side a single straight line
- * and removes the per-request pagination that "preserve-on-omit" semantics
- * would force.
+ * Body carries `{geoTargetId, languageCode, text, tagIds}` (id-based; a
+ * `tags` key is rejected -- see {@link parseUpdatePromptBody}). All are
+ * required — the payload is the full next state. Clients always have the
+ * existing text/tagIds available locally (they were returned by the preceding
+ * list call that rendered the edit form), so requiring both keeps the server
+ * side a single straight line and removes the per-request pagination that
+ * "preserve-on-omit" semantics would force.
+ *
+ * The edit is IN PLACE (serenity-docs#63): `rename` writes the text and the
+ * batch tag-reference write replaces the tag set, both preserving the prompt
+ * id — the response echoes the UNCHANGED semrushPromptId, and everything keyed
+ * to that id survives the edit. Nothing is deleted on this path, so there is
+ * no data-loss window. Both writes run unconditionally: upstream has no
+ * GET-by-id, so the handler cannot know what changed — and does not need to
+ * (an unchanged-text rename is a documented `is_updated: false` no-op, and the
+ * replace-mode tag write is idempotent). Rename runs FIRST because it is the
+ * one operation that can refuse (409): a collision aborts the edit before any
+ * mutation. A tag-write failure after a successful rename leaves a
+ * half-applied edit (text updated, tags not) — retryable, nothing lost.
  *
  * Contract:
- *   - body missing text, or missing both tags and tagIds, or both present
+ *   - body missing text or tagIds, or carrying the retired `tags` key
  *     → 400 (missingFields / invalidRequest).
  *   - slice missing on the brand → 404 (marketNotFound).
- *   - upstream DELETE returns 404 → 404 (promptNotFound).
- *   - upstream DELETE returns any other error → throw (handler-level
- *     500 / 502 mapping by the controller). We never CREATE after a
- *     failed DELETE: a previous warn-and-create behaviour produced
- *     duplicate prompts whenever DELETE flaked (5xx / timeout).
+ *   - upstream rename returns 404 → 404 (promptNotFound).
+ *   - upstream rename returns 409 — the new text collides with a SIBLING
+ *     prompt's — → throw; the controller's mapError answers 409 `conflict`
+ *     with a redacted message. Nothing has mutated upstream.
+ *   - any other upstream error → throw (controller 502 mapping).
  *
- * After a successful CREATE the per-project tag cache is invalidated on
- * this container (a PATCH can introduce a new tag or drop the last
- * carrier of an old tag), then `publishProject` is fired to push the
- * new upstream prompt id live.
+ * After the writes the per-project tag cache is invalidated on this container
+ * (a PATCH can introduce a new tag or drop the last carrier of an old tag),
+ * then `publishProject` is fired — edits land in the draft layer, publish
+ * moves them live (same publish contract as the create path).
  */
 export async function handleUpdatePrompt(
   transport,
@@ -591,7 +658,7 @@ export async function handleUpdatePrompt(
   if (!parsedBody.ok) {
     return { status: parsedBody.status, body: parsedBody.body };
   }
-  const { text: nextText, tags: nextTags, tagIds: nextTagIds } = parsedBody;
+  const { text: nextText, tagIds: nextTagIds } = parsedBody;
   const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
   const languageCode = normalizeLanguageCode(body.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -620,9 +687,10 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
-  // Recompute the type tag from the NEW text BEFORE the delete: the unified layer
-  // (tree read / on-demand tag create) must not run between delete and create,
-  // so a classification failure aborts cleanly with the old prompt still present.
+  // Recompute the type tag from the NEW text BEFORE any upstream write: the
+  // unified layer (tree read / on-demand tag create) resolves the computed
+  // value's id first, so a classification failure aborts cleanly with the
+  // prompt completely untouched.
   const injectComputedType = makeTypeInjector(
     transport,
     semrushWorkspaceId,
@@ -630,11 +698,11 @@ export async function handleUpdatePrompt(
     log,
   );
   const typed = await injectComputedType(projectId, {
-    text: nextText, geoTargetId, tags: nextTags, tagIds: nextTagIds,
+    text: nextText, geoTargetId, tagIds: nextTagIds,
   });
 
   try {
-    await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [semrushPromptId]);
+    await transport.renamePrompt(semrushWorkspaceId, projectId, semrushPromptId, nextText);
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -645,27 +713,26 @@ export async function handleUpdatePrompt(
         },
       };
     }
-    log?.error?.('handleUpdatePrompt: deletePromptsByIds failed; aborting before create to avoid duplicate', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
-    });
+    // A 409 (the new text collides with a sibling prompt's) and every other
+    // upstream error propagate to the controller's mapError; nothing has
+    // mutated upstream — the tag write below has not run.
     throw e;
   }
 
-  let newSemrushPromptId;
+  // Full replace with the injector's output: the caller's tagIds minus any
+  // caller-supplied type value, plus the server-computed one. An unknown
+  // prompt id would be skipped silently (204) — the rename above has already
+  // established existence.
   try {
-    newSemrushPromptId = await createOnePrompt(transport, semrushWorkspaceId, projectId, typed);
+    await transport.updatePromptTagsByIds(semrushWorkspaceId, projectId, [
+      { id: semrushPromptId, references: typed.tagIds, replace: true },
+    ]);
   } catch (e) {
-    // The DELETE above already succeeded, so the old prompt is gone upstream —
-    // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
-    // create) is a genuine data-loss event, not a retryable no-op. Log it
-    // distinctly from the pre-delete failure above so on-call can tell "nothing
-    // happened" apart from "the prompt is gone and must be recreated manually".
-    log?.error?.('handleUpdatePrompt: createOnePrompt failed AFTER a successful delete; the prompt is now lost upstream and must be recreated manually', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
+    // The rename above already landed: the prompt's text has moved while its
+    // tags are stale. Record the partial mutation before propagating, so the
+    // generic upstream error the caller sees is attributable on-call.
+    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+      semrushPromptId, projectId, error: e.message,
     });
     throw e;
   }
@@ -677,12 +744,11 @@ export async function handleUpdatePrompt(
   return {
     status: 200,
     body: {
-      semrushPromptId: newSemrushPromptId,
+      semrushPromptId,
       geoTargetId,
       languageCode,
       text: nextText,
-      tags: typed.tags,
-      ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
+      tagIds: typed.tagIds,
     },
   };
 }

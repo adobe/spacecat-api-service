@@ -137,15 +137,15 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
 | GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. tagIds is repeatable (OR semantics, max 50). | `listSerenityPrompts` |
-| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries at most one of `tags` (names) or `tagIds` (upstream ids, id-based write path) | `createSerenityPrompts` |
-| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + exactly one of `tags`/`tagIds` | `updateSerenityPrompt` |
+| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries a non-empty `tagIds` (upstream ids, id-based write path). A `tags` (name-based) key is rejected with 400. | `createSerenityPrompts` |
+| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + a non-empty `tagIds`. A `tags` (name-based) key is rejected with 400. | `updateSerenityPrompt` |
 | POST | `/serenity/prompts/bulk-delete` | Delete prompts; body is `{ prompts: [{semrushPromptId, geoTargetId, languageCode}] }` | `bulkDeleteSerenityPrompts` |
 | GET | `/serenity/markets` | List markets configured for the brand (incl. live `status`) | `listSerenityMarkets` |
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
 | GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice. Add `parentId` (present, even empty) to switch to the nested-tree read instead: `parentId=''` returns root categories with `childrenCount`, `parentId=<tagId>` returns that root's children with a `path` breadcrumb. | `listSerenityTags` |
-| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `type` is `category`/`topic` (open — customer-authored, `parentId` nests a 1-level bare-named child) or `source`/`intent`/`type` (closed — `name` must match the fixed enum; resolve-before-create, idempotent, `parentId` not allowed; response is `200 { ..., created }` not `201`). | `createSerenityTag` |
-| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is the full `<dimension>:<value>` string for a root, or a bare value for a child. `parentId`: an id RE-PARENTS, explicit `null` PROMOTES a child to root, omitted preserves the current parent (the proxy re-sends a child's current parent itself — omission is only safe for a root). | `updateSerenityTag` |
+| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `name` is always BARE — a `:` is rejected, as is a reserved dimension-root name. `type` names the dimension the value belongs to: `category` (open — customer-authored at any depth; `parentId` must be the `category` root or one of its descendants, and defaults to the root) or `intent`/`source`/`type` (closed — `name` must match the fixed enum, `parentId` is not allowed, resolve-before-create is idempotent, and the response is `200 { ..., created }` not `201`). | `createSerenityTag` |
+| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is a bare value. `parentId`: an id RE-PARENTS within the tag's own dimension, omitted preserves the current parent, and an explicit `null` is rejected — the root level is reserved for the four dimension roots. The new parent may be neither the tag itself nor one of its descendants (400): upstream stores a parent pointer rather than a tree and would accept the edge, leaving the tag's subtree reachable from no root, and so unreachable and unrepairable through this API. The proxy always re-sends a parent upstream, because a PATCH that omits one promotes the tag to a root. A dimension root (400), a closed dimension's value (400), and an unknown id (404 `tagNotFound`) are all refused. | `updateSerenityTag` |
 | GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
 | PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
 | POST | `/serenity/activate` | Activate the brand into sub-workspace mode (ensure sub-workspace + publish supplied markets) | `activateSerenityBrand` |
@@ -299,6 +299,30 @@ Expected fields in the structured log payload:
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
 
+## Dynamic AI resource allocation — operations (LLMO-6191)
+
+The JIT top-up allocator (`SERENITY_DYNAMIC_ALLOCATION`, default OFF — see
+`src/support/serenity/dynamic-allocation-active.js`) has its own operational surface, separate from
+the request-path proxy documented above:
+
+- **Metrics/SLIs:** `src/support/serenity/allocation-metrics.js` emits CloudWatch EMF metrics
+  (namespace `Mysticat/SerenityAllocation`) — pool-free ratio, top-up latency, rejection/retry/
+  release-outcome counters, and the hot-path (topped-up vs not) ratio. See that file's module doc
+  for the full catalog and the pager-worthy/dashboard-only split.
+- **Zombie-workspace recovery:** see
+  [`docs/runbooks/serenity-zombie-workspace-recovery.md`](./runbooks/serenity-zombie-workspace-recovery.md)
+  for diagnosing and recovering a sub-workspace stuck `workspaceBusy` after a partially-applied
+  transfer, and for the alerting/paging guidance.
+- **Rightsizing sweep:** `scripts/serenity-rightsizing-sweep.mjs` is a one-time backfill that
+  lowers already-carved sub-workspaces (brands onboarded before the JIT allocator shipped) down to
+  their actual usage, using `releaseAiSurplus` as the reclaim primitive. Run `--dry-run` first —
+  see the script's own header comment for full usage and the auth caveat (requires an operator
+  IMS token; there is no service-account path to Semrush in this repo).
+- **Cross-container serialization:** `src/support/serenity/resource-lock.js` only serializes
+  same-container contention. The cross-container gap and the options considered for closing it are
+  recorded in
+  [`docs/decisions/007-cross-container-resource-lock.md`](./decisions/007-cross-container-resource-lock.md).
+
 ## Dev environment smoke tests
 
 After the api-service feature branch deploys to dev, exercise the surface against `https://spacecat.experiencecloud.live/api/ci`.
@@ -322,10 +346,16 @@ curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/markets" \
   -d '{ "market": "US", "languageCode": "en", "brandDomain": "adobe.com", "brandNames": ["Adobe"] }' | jq .
 
-# 3) Bulk-create prompts in that slice
+# 3) Bulk-create prompts in that slice. Prompts carry tags by UPSTREAM ID
+#    (`tagIds`); a name-based `tags` key is rejected with 400. Resolve an id from
+#    a POST /serenity/tags first (a category hangs off the `category` root).
+TAG_ID=$(curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
+  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/tags" \
+  -d '{ "type": "category", "name": "Product", "geoTargetId": 2840, "languageCode": "en" }' | jq -r .id)
+
 curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/prompts" \
-  -d '{ "prompts": [ { "text": "What is Adobe Photoshop?", "geoTargetId": 2840, "languageCode": "en", "tags": ["product"] } ] }' | jq .
+  -d "{ \"prompts\": [ { \"text\": \"What is Adobe Photoshop?\", \"geoTargetId\": 2840, \"languageCode\": \"en\", \"tagIds\": [\"${TAG_ID}\"] } ] }" | jq .
 
 # 4) List prompts (filters are REQUIRED — 400 without them)
 curl -s -H "Authorization: Bearer ${IMS}" \
