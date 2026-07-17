@@ -430,71 +430,6 @@ export async function handleTopicsResearchStats(sp, clients) {
   return { status: 200, body: attachRelatedTopicsAiVolume(body, metricsVol) };
 }
 
-/**
- * @param {{ sortByKey: string, dirMult: 1 | -1 }} sort
- */
-function topicsResearchComparator(sort) {
-  const { sortByKey, dirMult } = sort;
-  // Tiebreak by topic name ASC to keep ordering deterministic and to preserve the
-  // pre-existing default behaviour on the RELEVANCE_SCORE + DESC path.
-  if (sortByKey === 'VOLUME') {
-    return (a, b) => cmpNum(a.topicVolume, b.topicVolume) * dirMult || cmpStr(a.topic, b.topic);
-  }
-  return (a, b) => cmpNum(a.relevanceScore, b.relevanceScore) * dirMult || cmpStr(a.topic, b.topic);
-}
-
-/**
- * Real prompt count for a single topic, sourced from the SAME gRPC total the expanded
- * prompt list uses (`promptsByTopicIDsTotal` via `promptsByTopicIdsPage`), so the topic
- * card's "Prompts count" and the prompt list's "of N" stay consistent by construction.
- * The `topicsByFTS` row's own `promptsCount` is an FTS-scoped placeholder that understates
- * the real total, which is the bug this backfills. Falls back to the passed value if the
- * id is unparseable or the call fails.
- */
-async function realPromptsCountForTopic(clients, country, llmEnum, topicId, fallback) {
-  let idBig;
-  try { idBig = BigInt(topicId); } catch { return fallback; }
-  try {
-    const res = await clients.promptClient.promptsByTopicIDsTotal({ country, llm: llmEnum, topicIds: [idBig] });
-    return num(res.total);
-  } catch { return fallback; }
-}
-
-// Cap on concurrent per-topic prompt-count RPCs. A results page has no hard upper bound
-// (parseLimitOffset defaults to 100 with no max), so an uncapped Promise.all could burst
-// hundreds of parallel gRPC calls and saturate the upstream service under load.
-const PROMPTS_COUNT_FANOUT_CONCURRENCY = 10;
-
-// Bounded-concurrency map: runs `fn` over `items` with at most `concurrency` promises in
-// flight at once, preserving input order.
-async function mapWithConcurrency(items, concurrency, fn) {
-  const results = new Array(items.length);
-  let next = 0;
-  // Recursive worker (not a while-loop) to pull the next index — mirrors the file's
-  // existing recursion pattern and keeps `await` out of a loop body.
-  const runner = async () => {
-    if (next >= items.length) { return; }
-    const i = next;
-    next += 1;
-    results[i] = await fn(items[i], i);
-    await runner();
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runner));
-  return results;
-}
-
-// Returns a copy of the topic rows with `promptsCount` replaced by the real per-topic total.
-// `llmEnum` mirrors the prompt-list path: the specific engine for a single-llm request,
-// `LLM_ENUM.ALL` otherwise. Fan-out is concurrency-capped (see above).
-async function withRealPromptsCount(clients, country, llmEnum, rows) {
-  const counts = await mapWithConcurrency(
-    rows,
-    PROMPTS_COUNT_FANOUT_CONCURRENCY,
-    (r) => realPromptsCountForTopic(clients, country, llmEnum, r.topicId, r.promptsCount),
-  );
-  return rows.map((r, i) => ({ ...r, promptsCount: counts[i] }));
-}
-
 export async function handleTopicsResearch(sp, clients) {
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -519,14 +454,14 @@ export async function handleTopicsResearch(sp, clients) {
       throw pair[1].reason;
     }
     const raw = pair[1].value;
-    const rows = (raw.topics || []).map((t) => ({
+    // Single-engine view: the row already carries this engine's volume/promptsCount.
+    const data = (raw.topics || []).map((t) => ({
       topic: t.name,
       topicId: String(t.id),
       topicVolume: num(t.volume),
       promptsCount: num(t.promptsCount),
       relevanceScore: num(t.relevanceScore),
     }));
-    const data = await withRealPromptsCount(clients, country, llm, rows);
     return {
       status: 200,
       body: {
@@ -534,38 +469,33 @@ export async function handleTopicsResearch(sp, clients) {
       },
     };
   }
-  const pairAll = await Promise.all([
-    countDistinctTopicIdsAcrossFtsLlms(country, q, clients, { dimensionFilterQl }),
-    Promise.all(FTS_LLMS.map((l) => clients.topicClient.topicsByFTS({
-      country, llm: l, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
-    }).catch(() => ({ topics: [] })))),
+  // All-models view: source rows from a single topicsByFTS(ALL) call — each row already
+  // carries the correct aggregate volume/promptsCount/relevanceScore. The old per-engine
+  // fan-out + dedup kept the *first engine's* per-topic values, surfacing a per-engine
+  // volume/count (e.g. 999) instead of the ALL-level total (199,302) — LLMO-6323.
+  const pairAll = await Promise.allSettled([
+    clients.topicClient.topicsByFTSTotals({
+      country, llm: LLM_ENUM.ALL, query: q, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
+    }),
+    clients.topicClient.topicsByFTS({
+      country, llm: LLM_ENUM.ALL, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
+    }),
   ]);
-  const topicsTotalDistinct = pairAll[0];
-  const listResults = pairAll[1];
-  const seen = new Map();
-  for (const raw of listResults) {
-    for (const t of (raw.topics || [])) {
-      const id = String(t.id);
-      if (!seen.has(id)) {
-        seen.set(id, {
-          topic: t.name,
-          topicId: id,
-          topicVolume: num(t.volume),
-          promptsCount: num(t.promptsCount),
-          relevanceScore: num(t.relevanceScore),
-        });
-      } else {
-        const prev = seen.get(id);
-        prev.relevanceScore = Math.max(prev.relevanceScore, num(t.relevanceScore));
-      }
-    }
+  if (pairAll[1].status !== 'fulfilled') {
+    throw pairAll[1].reason;
   }
-  const merged = Array.from(seen.values()).sort(topicsResearchComparator(sort));
-  const data = await withRealPromptsCount(clients, country, LLM_ENUM.ALL, merged.slice(0, limit));
+  const total = num(settledValueOrElse(pairAll[0], { total: 0 }).total);
+  const data = (pairAll[1].value.topics || []).map((t) => ({
+    topic: t.name,
+    topicId: String(t.id),
+    topicVolume: num(t.volume),
+    promptsCount: num(t.promptsCount),
+    relevanceScore: num(t.relevanceScore),
+  }));
   return {
     status: 200,
     body: {
-      data, total: topicsTotalDistinct, offset, limit,
+      data, total, offset, limit,
     },
   };
 }
