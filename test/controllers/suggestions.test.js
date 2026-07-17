@@ -9990,6 +9990,7 @@ describe('Suggestions Controller', () => {
         s3Client: { send: sandbox.stub() },
         s3Bucket: 'test-bucket',
         GetObjectCommand: StubGetObjectCommand,
+        getSignedUrl: sandbox.stub().resolves('https://presigned.example/blob'),
       };
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
 
@@ -10163,6 +10164,42 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.insights).to.deep.equal(insightsPayload);
+    });
+
+    it('presigns each analysis rawDataUrl when includeInsights=true', async () => {
+      const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      const insightsPayload = {
+        analyses: [
+          { kind: 'cited_text', rawDataUrl: 's3://mystique-bucket/geo-experiments/x/cited_text.json' },
+          { kind: 'url_presence' }, // no rawDataUrl → left untouched
+        ],
+      };
+      mockGeoExperiment.getInsightsLocation = () => insightsKey;
+      context.s3.getSignedUrl = sandbox.stub().resolves('https://signed.example/cited_text.json');
+      context.s3.s3Client.send.callsFake((command) => {
+        const payload = command.Key === insightsKey ? insightsPayload : [];
+        return Promise.resolve({
+          Body: { transformToString: sandbox.stub().resolves(JSON.stringify(payload)) },
+        });
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      const [cited, urlPresence] = body.insights.analyses;
+      // rawDataUrl presigned into an HTTPS URL; the raw s3:// URI is dropped from the response.
+      expect(cited.rawDataPresignedUrl).to.equal('https://signed.example/cited_text.json');
+      expect(cited.rawDataPresignedUrlExpiresAt).to.be.a('string');
+      expect(cited).to.not.have.property('rawDataUrl');
+      // analysis without rawDataUrl is untouched.
+      expect(urlPresence).to.not.have.property('rawDataPresignedUrl');
+      // presigned against the URL's OWN bucket/key (Mystique bucket), not the api-service bucket.
+      const signedCommand = context.s3.getSignedUrl.firstCall.args[1];
+      expect(signedCommand.Bucket).to.equal('mystique-bucket');
+      expect(signedCommand.Key).to.equal('geo-experiments/x/cited_text.json');
     });
 
     it('returns null insights and logs when insights S3 fetch fails', async () => {
