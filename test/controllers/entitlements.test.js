@@ -17,6 +17,7 @@ import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 
 import EntitlementsController from '../../src/controllers/entitlements.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
@@ -660,6 +661,9 @@ describe('Entitlements Controller', () => {
         entitlement: mockCreatedEntitlement,
         siteEnrollment: mockCreatedSiteEnrollment,
       });
+      // Prior-tier read used to detect a trial→paid transition. Default: no prior
+      // entitlement, and mockCreatedEntitlement is FREE_TRIAL, so no reaction fires.
+      mockTierClient.checkValidEntitlement = sandbox.stub().resolves({ entitlement: null });
     });
 
     it('should ensure entitlement + site enrollment for admin user with ASO product', async () => {
@@ -954,6 +958,95 @@ describe('Entitlements Controller', () => {
       expect(context.log.error).to.have.been.calledWith(
         `Error ensuring entitlement for site ${siteId}: ${siteErr.message}`,
       );
+    });
+
+    describe('LLMO trial→paid prompt-suggestion reaction', () => {
+      const buildEntitlement = (tier) => ({
+        getId: () => 'entitlement-site-123',
+        getOrganizationId: () => organizationId,
+        getProductCode: () => 'LLMO',
+        getTier: () => tier,
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'admin@example.com',
+      });
+
+      let fakeDrsClient;
+
+      beforeEach(() => {
+        fakeDrsClient = {
+          isConfigured: sandbox.stub().returns(true),
+          createSchedule: sandbox.stub().resolves({ scheduleId: 's', alreadyExisted: false }),
+          submitJob: sandbox.stub().resolves({ job_id: 'j' }),
+        };
+        sandbox.stub(DrsClient, 'createFrom').returns(fakeDrsClient);
+      });
+
+      const buildContext = () => ({
+        params: { siteId },
+        data: { productCode: 'LLMO', tier: 'PAID' },
+        log: {
+          info: sinon.stub(), debug: sinon.stub(), warn: sinon.stub(), error: sinon.stub(),
+        },
+      });
+
+      it('fires recurring-schedule provisioning on a trial→paid transition', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('FREE_TRIAL') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: buildEntitlement('PAID'),
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+
+        const result = await entitlementController.createSiteEntitlement(buildContext());
+
+        expect(result.status).to.equal(201);
+        // One recurring schedule per prompt-suggestion pipeline.
+        expect(fakeDrsClient.createSchedule).to.have.been.calledThrice;
+        expect(fakeDrsClient.submitJob).to.not.have.been.called;
+      });
+
+      it('does not fire on a paid→paid no-op', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('PAID') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: buildEntitlement('PAID'),
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+
+        const result = await entitlementController.createSiteEntitlement(buildContext());
+
+        expect(result.status).to.equal(201);
+        expect(fakeDrsClient.createSchedule).to.not.have.been.called;
+      });
+
+      it('does not fire for a non-LLMO product even on trial→paid', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('FREE_TRIAL') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: { ...buildEntitlement('PAID'), getProductCode: () => 'ASO' },
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+        const context = buildContext();
+        context.data = { productCode: 'ASO', tier: 'PAID' };
+
+        const result = await entitlementController.createSiteEntitlement(context);
+
+        expect(result.status).to.equal(201);
+        expect(fakeDrsClient.createSchedule).to.not.have.been.called;
+      });
+
+      it('never fails the entitlement op when the reaction throws', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('FREE_TRIAL') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: buildEntitlement('PAID'),
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+        // DRS client creation throws — reaction helper must swallow it.
+        DrsClient.createFrom.throws(new Error('DRS unavailable'));
+
+        const result = await entitlementController.createSiteEntitlement(buildContext());
+
+        expect(result.status).to.equal(201);
+      });
     });
   });
 });

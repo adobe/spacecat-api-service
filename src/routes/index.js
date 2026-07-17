@@ -111,6 +111,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -179,6 +180,7 @@ export default function getRouteHandlers(
   proxyController,
   taskManagementController,
   redirectsController,
+  promptSuggestionSchedulesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -542,6 +544,7 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site': llmoController.onboardSiteOnly,
     'POST /llmo/onboard/update-query-index': llmoController.updateQueryIndex,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
+    'POST /sites/:siteId/prompt-suggestion-schedules': promptSuggestionSchedulesController.createSchedules,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
