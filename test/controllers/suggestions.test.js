@@ -10201,6 +10201,51 @@ describe('Suggestions Controller', () => {
       expect(signedCommand.Key).to.equal('geo-experiments/x/cited_text.json');
     });
 
+    it('returns insights unchanged when it has no analyses array', async () => {
+      const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      const insightsPayload = { version: '1' }; // no analyses -> presign is a no-op
+      mockGeoExperiment.getInsightsLocation = () => insightsKey;
+      context.s3.s3Client.send.callsFake((command) => {
+        const payload = command.Key === insightsKey ? insightsPayload : [];
+        return Promise.resolve({
+          Body: { transformToString: sandbox.stub().resolves(JSON.stringify(payload)) },
+        });
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.insights).to.deep.equal(insightsPayload);
+      expect(context.s3.getSignedUrl.called).to.equal(false);
+    });
+
+    it('leaves rawDataUrl unchanged and logs when presigning fails', async () => {
+      const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      const rawUri = 's3://mystique-bucket/geo-experiments/x/cited_text.json';
+      const insightsPayload = { analyses: [{ kind: 'cited_text', rawDataUrl: rawUri }] };
+      mockGeoExperiment.getInsightsLocation = () => insightsKey;
+      context.s3.getSignedUrl = sandbox.stub().rejects(new Error('presign boom'));
+      context.s3.s3Client.send.callsFake((command) => {
+        const payload = command.Key === insightsKey ? insightsPayload : [];
+        return Promise.resolve({
+          Body: { transformToString: sandbox.stub().resolves(JSON.stringify(payload)) },
+        });
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // presign failed → original s3:// rawDataUrl left untouched, and the failure is logged.
+      expect(body.insights.analyses[0].rawDataUrl).to.equal(rawUri);
+      expect(context.log.info.calledWithMatch(/Could not presign rawDataUrl/)).to.equal(true);
+    });
+
     it('returns null insights and logs when insights S3 fetch fails', async () => {
       const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
       mockGeoExperiment.getInsightsLocation = () => insightsKey;
