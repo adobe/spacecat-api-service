@@ -10166,7 +10166,7 @@ describe('Suggestions Controller', () => {
       expect(body.insights).to.deep.equal(insightsPayload);
     });
 
-    it('presigns each analysis rawDataUrl when includeInsights=true', async () => {
+    it('replaces each analysis rawDataUrl with a presigned URL when includeInsights=true', async () => {
       const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
       const insightsPayload = {
         analyses: [
@@ -10190,12 +10190,11 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       const [cited, urlPresence] = body.insights.analyses;
-      // rawDataUrl presigned into an HTTPS URL; the raw s3:// URI is dropped from the response.
-      expect(cited.rawDataPresignedUrl).to.equal('https://signed.example/cited_text.json');
-      expect(cited.rawDataPresignedUrlExpiresAt).to.be.a('string');
-      expect(cited).to.not.have.property('rawDataUrl');
+      // rawDataUrl is replaced in place with the presigned HTTPS URL (no new fields, no s3://).
+      expect(cited.rawDataUrl).to.equal('https://signed.example/cited_text.json');
+      expect(cited).to.not.have.property('rawDataPresignedUrl');
       // analysis without rawDataUrl is untouched.
-      expect(urlPresence).to.not.have.property('rawDataPresignedUrl');
+      expect(urlPresence).to.not.have.property('rawDataUrl');
       // presigned against the URL's OWN bucket/key (Mystique bucket), not the api-service bucket.
       const signedCommand = context.s3.getSignedUrl.firstCall.args[1];
       expect(signedCommand.Bucket).to.equal('mystique-bucket');

@@ -186,16 +186,15 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
 const INSIGHTS_PRESIGN_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 /**
- * Replace each analysis's `rawDataUrl` (an `s3://bucket/key` URI) with a presigned HTTPS URL so the
- * UI can download the per-analysis detail blobs. The raw `s3://` URI is dropped from the response
- * (not exposed); a presigned analysis carries `rawDataPresignedUrl` + expiry.
- * Best-effort per analysis — on a presign failure the `s3://` URI is still dropped and the analysis
- * simply has no download URL.
+ * Replace each analysis's `rawDataUrl` (an `s3://bucket/key` URI) in place with a presigned HTTPS URL
+ * so the UI can download the per-analysis detail blobs. Same field name — the `s3://` value is simply
+ * swapped for the presigned URL. Best-effort per analysis — on a presign failure the original
+ * `rawDataUrl` is left as-is. Analyses without a `rawDataUrl` are untouched.
  *
  * @param {object} insights - ExperimentInsights object.
  * @param {object} s3Ctx - context.s3 ({ s3Client, getSignedUrl, GetObjectCommand }).
  * @param {object} log - logger.
- * @returns {Promise<object>} a new insights object with presigned analyses.
+ * @returns {Promise<object>} a new insights object with presigned rawDataUrls.
  */
 async function presignInsightsRawData(insights, s3Ctx, log) {
   const analyses = insights?.analyses;
@@ -203,26 +202,24 @@ async function presignInsightsRawData(insights, s3Ctx, log) {
     return insights;
   }
   const { s3Client, getSignedUrl, GetObjectCommand } = s3Ctx;
-  const expiresAt = new Date(Date.now() + (INSIGHTS_PRESIGN_TTL_SECONDS * 1000)).toISOString();
   const presignedAnalyses = await Promise.all(analyses.map(async (analysis) => {
     const match = /^s3:\/\/([^/]+)\/(.+)$/.exec(analysis?.rawDataUrl || '');
     if (!match) {
       return analysis;
     }
     const [, bucket, key] = match;
-    const result = { ...analysis };
-    delete result.rawDataUrl; // never expose the raw s3:// URI
     try {
-      result.rawDataPresignedUrl = await getSignedUrl(
+      // Replace the s3:// rawDataUrl in place with a presigned HTTPS URL the browser can fetch.
+      const rawDataUrl = await getSignedUrl(
         s3Client,
         new GetObjectCommand({ Bucket: bucket, Key: key }),
         { expiresIn: INSIGHTS_PRESIGN_TTL_SECONDS },
       );
-      result.rawDataPresignedUrlExpiresAt = expiresAt;
+      return { ...analysis, rawDataUrl };
     } catch (e) {
       log.info(`[geo-experiment] Could not presign rawDataUrl ${analysis.rawDataUrl}: ${e.message}`);
+      return analysis;
     }
-    return result;
   }));
   return { ...insights, analyses: presignedAnalyses };
 }
