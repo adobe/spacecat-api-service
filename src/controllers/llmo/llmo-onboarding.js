@@ -216,15 +216,57 @@ export const PROMPT_SUGGESTION_PIPELINES = [
 ];
 
 /**
- * Registers a recurring DRS schedule for one prompt-suggestion provider, with an
- * immediate first run. Shared body for {@link registerPromptSuggestionSchedules}.
+ * Reports whether a site is on the paying (PAID) LLMO tier, which decides the
+ * prompt-suggestion behavior at onboarding: PAID → a recurring schedule;
+ * anything else (FREE_TRIAL, or an entitlement that cannot be read) → a single
+ * on-demand run.
+ *
+ * Fails safe to trial: if the current LLMO entitlement is absent or the lookup
+ * throws, this returns `false` (and logs a WARN) rather than assuming PAID, so a
+ * site whose paying status is unknown never gets a recurring, fleet-wide Fargate
+ * schedule.
+ *
+ * @param {object} site - The SpaceCat site model.
+ * @param {object} context - The request context (passed to TierClient).
+ * @returns {Promise<boolean>} True only when the current LLMO tier is PAID.
+ */
+export async function isPayingLlmoSite(site, context) {
+  const { log } = context;
+  try {
+    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
+    const { entitlement } = await tierClient.checkValidEntitlement();
+    if (!entitlement) {
+      log.warn(`Could not determine LLMO tier for site ${site.getId()} `
+        + '(no entitlement found); defaulting to one-time (trial) prompt-suggestion runs');
+      return false;
+    }
+    return entitlement.getTier() === EntitlementModel.TIERS.PAID;
+  } catch (error) {
+    log.warn(`Failed to read LLMO tier for site ${site.getId()}; `
+      + `defaulting to one-time (trial) prompt-suggestion runs: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Runs one prompt-suggestion provider for a newly onboarded site, tier-gated.
+ * Shared body for {@link registerPromptSuggestionSchedules}.
+ *
+ * - **Paying (`isPaying === true`)**: registers a recurring DRS schedule
+ *   (`createSchedule`) with an immediate first run.
+ * - **Trial / non-paying (any other value)**: submits a single on-demand run
+ *   (`submitJob`) with NO recurring schedule. These three providers are
+ *   on-demand-capable, so a one-shot job is valid and gives a trial site its
+ *   first suggestions without committing recurring Fargate load.
  *
  * Split error semantics (see the V2 caller): the immediate first run is
  * best-effort — if it produces nothing (e.g. brand/base-prompt data not present
- * yet) the next scheduled run self-heals. A `createSchedule` (schedule
+ * yet) the next scheduled run (paying) self-heals. A `createSchedule` (schedule
  * REGISTRATION) failure is NOT best-effort: the site would never get a recurring
  * schedule and nothing self-heals, so it propagates to the caller which logs it
- * at ERROR. This helper therefore does not swallow the failure itself.
+ * at ERROR. This helper therefore does not swallow the failure itself. The
+ * one-shot `submitJob` failure is handled the same way (propagated, logged by the
+ * caller) so both paths share one per-pipeline try/catch.
  *
  * NOTE: `createSchedule` derives the tenant-isolation key from `siteId`
  * server-side and REJECTS any caller-supplied imsOrgId, so we deliberately do not
@@ -232,21 +274,39 @@ export const PROMPT_SUGGESTION_PIPELINES = [
  *
  * @param {object} params
  * @param {object} params.drsClient - Configured DRS client.
- * @param {string} params.providerId - DRS provider id to schedule.
- * @param {string} params.cadence - One of DRS_CADENCE_* labels.
+ * @param {string} params.providerId - DRS provider id to schedule/run.
+ * @param {string} params.cadence - One of DRS_CADENCE_* labels (paying path only).
  * @param {string} params.siteId - SpaceCat site UUID.
+ * @param {boolean} params.isPaying - True → recurring schedule; else one-shot run.
  * @param {object} params.log - Logger.
  * @param {Function} [params.say] - Optional Slack say callback.
- * @returns {Promise<object|null>} The createSchedule result, or null when DRS is not configured.
+ * @returns {Promise<object|null>} The createSchedule/submitJob result, or null when
+ *   DRS is not configured.
  */
 export async function registerPromptSuggestionSchedule({
-  drsClient, providerId, cadence, siteId, log, say = () => {},
+  drsClient, providerId, cadence, siteId, isPaying, log, say = () => {},
 }) {
   if (!drsClient.isConfigured()) {
     log.debug(`DRS client not configured, skipping ${providerId} schedule for site ${siteId}`);
     return null;
   }
 
+  // Trial / non-paying (or indeterminate tier): run the pipeline ONCE via an
+  // on-demand submitJob, with no recurring schedule.
+  if (!isPaying) {
+    const job = await drsClient.submitJob({
+      provider_id: providerId,
+      source: 'onboarding',
+      priority: 'HIGH',
+      parameters: { siteId },
+    });
+    log.info(`Submitted one-time DRS ${providerId} run (trial site) `
+      + `job=${job?.job_id ?? 'unknown'} for site ${siteId}`);
+    say(`:zap: Submitted one-time DRS ${providerId} run (trial site) for site ${siteId}`);
+    return job;
+  }
+
+  // Paying (PAID): register the recurring schedule with an immediate first run.
   // Default enable_brand_presence off (plan Phase 0.4): these prompt-suggestion
   // pipelines must not push unexpected load into the brand-presence pipeline / SNS
   // allowlist unless a site is explicitly BP-enabled. `providerIds` is an array
@@ -267,25 +327,28 @@ export async function registerPromptSuggestionSchedule({
 }
 
 /**
- * Registers every recurring prompt-suggestion schedule (see
- * {@link PROMPT_SUGGESTION_PIPELINES}) for a newly onboarded v2 site, each with
- * an immediate first run.
+ * Runs every prompt-suggestion pipeline (see {@link PROMPT_SUGGESTION_PIPELINES})
+ * for a newly onboarded v2 site, tier-gated: paying sites get a recurring
+ * schedule (immediate first run), trial/non-paying sites get a single on-demand
+ * run per pipeline (no recurring schedule). See {@link registerPromptSuggestionSchedule}.
  *
  * Error ownership is single-layer: each pipeline is wrapped in its own try/catch
  * that owns the failure (logs at ERROR + emits an operator Slack signal) and
- * never rethrows, so one pipeline's schedule-REGISTRATION failure neither aborts
- * onboarding nor masks the other pipelines. Because no callback rejects, the
- * pipelines run under `Promise.all` (not `allSettled`).
+ * never rethrows, so one pipeline's failure (schedule REGISTRATION on the paying
+ * path, or the one-shot submit on the trial path) neither aborts onboarding nor
+ * masks the other pipelines. Because no callback rejects, the pipelines run under
+ * `Promise.all` (not `allSettled`).
  *
  * @param {object} params
  * @param {object} params.drsClient - Configured DRS client.
  * @param {string} params.siteId - SpaceCat site UUID.
+ * @param {boolean} params.isPaying - True → recurring schedules; else one-shot runs.
  * @param {object} params.log - Logger.
  * @param {Function} [params.say] - Optional Slack say callback.
  * @returns {Promise<void>}
  */
 export async function registerPromptSuggestionSchedules({
-  drsClient, siteId, log, say = () => {},
+  drsClient, siteId, isPaying, log, say = () => {},
 }) {
   // Short-circuit once for an unconfigured client instead of letting each
   // per-pipeline registerPromptSuggestionSchedule log "not configured" N times.
@@ -298,13 +361,14 @@ export async function registerPromptSuggestionSchedules({
     PROMPT_SUGGESTION_PIPELINES.map(async ({ name, providerId, cadence }) => {
       try {
         await registerPromptSuggestionSchedule({
-          drsClient, providerId, cadence, siteId, log, say,
+          drsClient, providerId, cadence, siteId, isPaying, log, say,
         });
       } catch (scheduleError) {
-        // Schedule-REGISTRATION failure (distinct from the best-effort immediate
-        // run): the site would never get a recurring schedule and nothing
-        // self-heals, so surface it loudly with full context. Onboarding still
-        // succeeds, mirroring the brand-activation side-effect handling in
+        // Pipeline REGISTRATION/SUBMIT failure (distinct from the best-effort
+        // immediate run): on the paying path the site would never get a recurring
+        // schedule and nothing self-heals; on the trial path the one-shot run
+        // never fires. Either way, surface it loudly with full context. Onboarding
+        // still succeeds, mirroring the brand-activation side-effect handling in
         // brands.js (activateBrand). `status` is the upstream HTTP status when the
         // DRS client attaches one, else 'unknown'.
         const status = scheduleError.status ?? 'unknown';
@@ -1582,28 +1646,35 @@ export async function activateBrandAndGeneratePrompts({
         say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
       }
 
-      // Register the recurring "prompt suggestion" schedules, each with an
-      // immediate first run. These fire right after we SUBMIT the async Brandalf
-      // job above (submit, not completion), so they race Brandalf: for a genuinely
-      // new site the immediate first run typically no-ops because base-prompt/brand
-      // data does not exist yet. That is acceptable — the durable outcome is the
-      // recurring schedule row, and the next scheduled run self-heals once brand
-      // data exists. Cold-start latency is worst for synthetic_personas (quarterly):
-      // if its immediate run no-ops, the first real output can be up to a quarter
-      // out. Chaining registration off base-prompt-generation completion is
-      // cross-repo (DRS owns the Brandalf→prompt-gen chain) and out of scope here.
-      // TODO(LLMO-4258 follow-up): have DRS trigger these schedules once base prompt
+      // Run the "prompt suggestion" pipelines, tier-gated (LLMO prompt-suggestion
+      // tier gate): PAYING sites get a recurring schedule with an immediate first
+      // run; TRIAL / non-paying (or an indeterminate tier — isPayingLlmoSite fails
+      // safe to trial) get a single on-demand run per pipeline, no recurring
+      // schedule. These fire right after we SUBMIT the async Brandalf job above
+      // (submit, not completion), so they race Brandalf: for a genuinely new site
+      // the immediate first run typically no-ops because base-prompt/brand data
+      // does not exist yet. For a paying site that is acceptable — the durable
+      // outcome is the recurring schedule row, and the next scheduled run
+      // self-heals once brand data exists. Cold-start latency is worst for
+      // synthetic_personas (quarterly): if its immediate run no-ops, the first real
+      // output can be up to a quarter out. Chaining registration off
+      // base-prompt-generation completion is cross-repo (DRS owns the
+      // Brandalf→prompt-gen chain) and out of scope here.
+      // TODO(LLMO-4258 follow-up): have DRS trigger these once base prompt
       // generation completes, instead of racing the Brandalf submit.
-      //
-      // Bound by settleWithin: the three createSchedule calls are awaited on the
-      // synchronous response path, so a slow/hung DRS could otherwise stall
-      // onboarding. On timeout we stop waiting — createSchedule is idempotent, the
-      // durable outcome is the server-side schedule row, and per-pipeline ERROR
-      // logging inside registerPromptSuggestionSchedules stays deterministic.
+      const isPaying = await isPayingLlmoSite(site, context);
+
+      // Bound by settleWithin: the per-pipeline createSchedule/submitJob calls are
+      // awaited on the synchronous response path, so a slow/hung DRS could
+      // otherwise stall onboarding. On timeout we stop waiting — createSchedule is
+      // idempotent, the durable outcome is the server-side schedule row (paying)
+      // or a submitted job (trial), and per-pipeline ERROR logging inside
+      // registerPromptSuggestionSchedules stays deterministic.
       const scheduleResult = await settleWithin(
         registerPromptSuggestionSchedules({
           drsClient,
           siteId: site.getId(),
+          isPaying,
           log,
           say,
         }),
