@@ -231,6 +231,13 @@ sites:
                   deprecated: true
                 - $ref: './schemas.yaml#/SitePagedResponse'
                 - $ref: './schemas.yaml#/SiteSearchResponse'
+            examples:
+              SiteList:
+                $ref: './examples.yaml#/site-list'
+              SitePagedResponse:
+                $ref: './examples.yaml#/site-paged-response'
+              SiteSearchResponse:
+                $ref: './examples.yaml#/site-search-response'
       '400':
         $ref: './responses.yaml#/400'
       '401':
