@@ -443,6 +443,33 @@ function topicsResearchComparator(sort) {
   return (a, b) => cmpNum(a.relevanceScore, b.relevanceScore) * dirMult || cmpStr(a.topic, b.topic);
 }
 
+/**
+ * Real prompt count for a single topic, sourced from the SAME gRPC total the expanded
+ * prompt list uses (`promptsByTopicIDsTotal` via `promptsByTopicIdsPage`), so the topic
+ * card's "Prompts count" and the prompt list's "of N" stay consistent by construction.
+ * The `topicsByFTS` row's own `promptsCount` is an FTS-scoped placeholder that understates
+ * the real total, which is the bug this backfills. Falls back to the passed value if the
+ * id is unparseable or the call fails.
+ */
+async function realPromptsCountForTopic(clients, country, llmEnum, topicId, fallback) {
+  let idBig;
+  try { idBig = BigInt(topicId); } catch { return fallback; }
+  try {
+    const res = await clients.promptClient.promptsByTopicIDsTotal({ country, llm: llmEnum, topicIds: [idBig] });
+    return num(res.total);
+  } catch { return fallback; }
+}
+
+// Returns a copy of the topic rows with `promptsCount` replaced by the real per-topic total,
+// resolved in parallel. `llmEnum` mirrors the prompt-list path: the specific engine for a
+// single-llm request, `LLM_ENUM.ALL` otherwise.
+async function withRealPromptsCount(clients, country, llmEnum, rows) {
+  const counts = await Promise.all(
+    rows.map((r) => realPromptsCountForTopic(clients, country, llmEnum, r.topicId, r.promptsCount)),
+  );
+  return rows.map((r, i) => ({ ...r, promptsCount: counts[i] }));
+}
+
 export async function handleTopicsResearch(sp, clients) {
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -467,13 +494,14 @@ export async function handleTopicsResearch(sp, clients) {
       throw pair[1].reason;
     }
     const raw = pair[1].value;
-    const data = (raw.topics || []).map((t) => ({
+    const rows = (raw.topics || []).map((t) => ({
       topic: t.name,
       topicId: String(t.id),
       topicVolume: num(t.volume),
       promptsCount: num(t.promptsCount),
       relevanceScore: num(t.relevanceScore),
     }));
+    const data = await withRealPromptsCount(clients, country, llm, rows);
     return {
       status: 200,
       body: {
@@ -508,7 +536,7 @@ export async function handleTopicsResearch(sp, clients) {
     }
   }
   const merged = Array.from(seen.values()).sort(topicsResearchComparator(sort));
-  const data = merged.slice(0, limit);
+  const data = await withRealPromptsCount(clients, country, LLM_ENUM.ALL, merged.slice(0, limit));
   return {
     status: 200,
     body: {
