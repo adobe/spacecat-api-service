@@ -1,3 +1,71 @@
+site-list:
+  description: Legacy flat-array response (no query params supplied)
+  value:
+    - id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+      organizationId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901'
+      baseURL: 'https://www.example.com'
+      name: 'Example Site'
+      deliveryType: 'aem_edge'
+      gitHubURL: 'https://github.com/example/repo'
+      isLive: true
+      isSandbox: false
+      createdAt: '2024-01-15T10:00:00.000Z'
+      updatedAt: '2024-06-01T12:30:00.000Z'
+      region: null
+      config: null
+site-paged-response:
+  description: Cursor-paginated response (limit or cursor query param supplied)
+  value:
+    sites:
+      - id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+        organizationId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901'
+        baseURL: 'https://www.example.com'
+        name: 'Example Site'
+        deliveryType: 'aem_edge'
+        gitHubURL: 'https://github.com/example/repo'
+        isLive: true
+        isSandbox: false
+        createdAt: '2024-01-15T10:00:00.000Z'
+        updatedAt: '2024-06-01T12:30:00.000Z'
+        region: null
+        config: null
+    pagination:
+      limit: 100
+      cursor: 'eyJzayI6IjIwMjQtMDYtMDFUMTI6MzA6MDBaIiwiaWQiOiJhMWIyYzNkNC1lNWY2LTc4OTAtYWJjZC1lZjEyMzQ1Njc4OTAifQ=='
+      hasMore: true
+site-search-response:
+  description: Substring-search response (baseUrlContains query param supplied)
+  value:
+    sites:
+      - id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+        organizationId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901'
+        baseURL: 'https://www.adobe.com'
+        name: 'Adobe'
+        deliveryType: 'aem_edge'
+        gitHubURL: 'https://github.com/adobe/repo'
+        isLive: true
+        isSandbox: false
+        createdAt: '2024-01-15T10:00:00.000Z'
+        updatedAt: '2024-06-01T12:30:00.000Z'
+        region: null
+        config: null
+      - id: 'c3d4e5f6-a7b8-9012-cdef-123456789012'
+        organizationId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901'
+        baseURL: 'https://business.adobe.com'
+        name: 'Adobe Business'
+        deliveryType: 'aem_edge'
+        gitHubURL: null
+        isLive: true
+        isSandbox: false
+        createdAt: '2024-03-10T08:00:00.000Z'
+        updatedAt: '2024-06-05T09:15:00.000Z'
+        region: null
+        config: null
+    pagination:
+      limit: 50
+      offset: 0
+      hasMore: false
+      baseUrlContains: 'adobe'
 BotBlockerResultBlocked:
   description: Example for a site that is bot blocked
   value:
