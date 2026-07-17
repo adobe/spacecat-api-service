@@ -366,6 +366,7 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data[0].promptsCount).to.equal(100);
       const arg = clients.promptClient.promptsByTopicIDsTotal.lastCall.args[0];
       expect(arg.topicIds).to.deep.equal([1n]);
+      expect(arg.llm).to.equal(LLM_ENUM.CHAT_GPT);
     });
 
     it('falls back to the row promptsCount when the total call fails', async () => {
@@ -396,7 +397,26 @@ describe('AI Visibility – topics handlers', () => {
       const sp = new URLSearchParams('searchQuery=test');
       const res = await handleTopicsResearch(sp, clients);
       expect(res.body.data[0].promptsCount).to.equal(42);
-      expect(clients.promptClient.promptsByTopicIDsTotal.lastCall.args[0].topicIds).to.deep.equal([7n]);
+      const arg = clients.promptClient.promptsByTopicIDsTotal.lastCall.args[0];
+      expect(arg.topicIds).to.deep.equal([7n]);
+      expect(arg.llm).to.equal(LLM_ENUM.ALL);
+    });
+
+    it('does not call promptsByTopicIDsTotal for a non-numeric topic id (BigInt fallback)', async () => {
+      clients.topicClient.topicsByFTS.callsFake(({ range }) => {
+        if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
+        return Promise.resolve({
+          topics: [{
+            id: 'abc', name: 'T1', volume: 100, promptsCount: 9,
+          }],
+        });
+      });
+      clients.promptClient.promptsByTopicIDsTotal.resolves({ total: 100 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      // BigInt('abc') throws before any RPC → fall back to the row placeholder (9).
+      expect(res.body.data[0].promptsCount).to.equal(9);
+      expect(clients.promptClient.promptsByTopicIDsTotal.called).to.equal(false);
     });
 
     it('single LLM throws when topicsByFTS list rejects', async () => {
