@@ -529,19 +529,23 @@ describe('LlmoAkamaiController', () => {
         .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING');
     });
 
-    it('does NOT recover a stale activation (submitDate older than the recency window)', async () => {
+    it('recovers an already-active version regardless of age (422 already-activated)', async () => {
+      // Re-activating an already-ACTIVE version returns 422 already-activated; the version is live
+      // on the network (the goal), so we report success even though it was submitted long ago.
       mockAkamaiClient.activate.rejects(
-        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 500: boom'),
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 422: already-activated'),
       );
-      // Same version+network but submitted an hour ago (e.g. a manual activation) — not ours.
       mockAkamaiClient.latestActivation.resolves({
-        activationId: 'atv_777',
-        status: 'PENDING',
+        activationId: 'atv_20135944',
+        status: 'ACTIVE',
         propertyVersion: 7,
         submitDate: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       });
       const res = await controller.activate(withData(propertyRef));
-      expect(res.status).to.equal(502);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.recovered).to.equal(true);
+      expect(body.activationId).to.equal('atv_20135944');
     });
 
     it('recovers with a null activationId when Akamai has not yet assigned one (placeholder)', async () => {

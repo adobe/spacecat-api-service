@@ -50,16 +50,6 @@ const IN_FLIGHT_ACTIVATION_STATUSES = new Set([
   'NEW', 'PENDING', 'ZONE_1', 'ZONE_2', 'ZONE_3', 'ACTIVE',
 ]);
 
-// Recovery only adopts a listed activation if it was submitted very recently — otherwise a failed
-// activate (e.g. 403/429 that never queued anything) could match an unrelated older activation for
-// the same version+network (e.g. one triggered manually in Property Manager) and falsely report
-// success. The activation we just submitted has a submitDate within seconds.
-const RECOVERY_RECENCY_MS = 5 * 60 * 1000;
-const isRecentlySubmitted = (activation) => {
-  const ts = Date.parse(activation?.submitDate || activation?.updateDate || '');
-  return Number.isFinite(ts) && (Date.now() - ts) < RECOVERY_RECENCY_MS;
-};
-
 // Akamai PAPI identifiers. Boundary validation (defense-in-depth): the shared client also encodes
 // these into the path, but rejecting a malformed id here gives the caller a clean 400 instead of a
 // 502 from PAPI.
@@ -787,10 +777,14 @@ function LlmoAkamaiController(ctx) {
       if (version !== undefined) {
         try {
           const recovered = await client.latestActivation(propertyId, contractId, groupId, network);
+          // A matching in-flight/active activation for this EXACT version+network means the
+          // version is (being) activated on that network — the desired end state — so report
+          // success regardless of age. We intentionally do NOT gate on submit recency: that made
+          // re-activating an already-active version (Akamai 422 already-activated) surface as a
+          // false "activation failed". The version match is the correct guard.
           if (recovered
             && Number(recovered.propertyVersion) === Number(version)
-            && IN_FLIGHT_ACTIVATION_STATUSES.has(String(recovered.status || '').toUpperCase())
-            && isRecentlySubmitted(recovered)) {
+            && IN_FLIGHT_ACTIVATION_STATUSES.has(String(recovered.status || '').toUpperCase())) {
             // Only hand back a real (numeric) id; a just-queued activation can still be a
             // placeholder ("atv_null") — return null so the UI polls by network for it.
             const recoveredId = REAL_ACTIVATION_ID_RE.test(recovered.activationId || '')
