@@ -369,7 +369,7 @@ function LlmoAkamaiController(ctx) {
    *
    * @returns {{ cfg: object } | { error: Response }}
    */
-  const buildCfgFromTree = (host, apiKey, ruleTree) => {
+  const buildCfgFromTree = (host, apiKey, ruleTree, edgeDomain) => {
     const ssl = getDefaultOriginSsl(ruleTree);
     if (!ssl || ssl.verificationMode !== 'CUSTOM') {
       const mode = ssl?.verificationMode || 'an unknown mode';
@@ -381,7 +381,13 @@ function LlmoAkamaiController(ctx) {
       };
     }
     const addCaching = !defaultRuleHasCaching(ruleTree);
-    return { cfg: buildRuleConfig({ hostname: host, apiKey, addCaching }) };
+    // originHostname routes AI-bot traffic to the env-appropriate Edge Optimize worker
+    // (dev/stage/live.edgeoptimize.net) via EDGE_OPTIMIZE_EDGE_DOMAIN; falls back to prod default.
+    return {
+      cfg: buildRuleConfig({
+        hostname: host, apiKey, addCaching, originHostname: edgeDomain,
+      }),
+    };
   };
 
   /**
@@ -479,7 +485,8 @@ function LlmoAkamaiController(ctx) {
       } = await client.getRuleTree(propertyId, version, contractId, groupId);
 
       // Enforce the CUSTOM-default scope gate and decide the caching behavior from the actual tree.
-      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree);
+      const edgeDomain = context.env?.EDGE_OPTIMIZE_EDGE_DOMAIN;
+      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree, edgeDomain);
       if (gateError) {
         return gateError;
       }
@@ -613,7 +620,8 @@ function LlmoAkamaiController(ctx) {
         contractId,
         groupId,
       );
-      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree);
+      const edgeDomain = context.env?.EDGE_OPTIMIZE_EDGE_DOMAIN;
+      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree, edgeDomain);
       if (gateError) {
         return gateError;
       }

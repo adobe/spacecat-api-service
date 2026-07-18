@@ -42,6 +42,20 @@ describe('llmo-akamai-utils', () => {
       expect(cfg.origin.hostname).to.equal('live.edgeoptimize.net');
     });
 
+    it('routes to the given originHostname (env EDGE_OPTIMIZE_EDGE_DOMAIN) over the default', () => {
+      const cfg = buildRuleConfig({
+        hostname: HOSTNAME, apiKey: API_KEY, originHostname: 'dev.edgeoptimize.net',
+      });
+      expect(cfg.origin.hostname).to.equal('dev.edgeoptimize.net');
+      // matchSan still covers all envs, so CUSTOM cert validation works for dev/stage/live.
+      expect(cfg.origin.matchSan).to.equal('*.edgeoptimize.net');
+    });
+
+    it('falls back to the default origin for a blank/whitespace originHostname', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, originHostname: '   ' });
+      expect(cfg.origin.hostname).to.equal('live.edgeoptimize.net');
+    });
+
     it('does not mutate the frozen defaults', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       cfg.match.userAgents.push('EvilBot');
@@ -127,7 +141,11 @@ describe('llmo-akamai-utils', () => {
       expect(findBehavior(rule, 'advanced')).to.equal(undefined);
       const failAction = findBehavior(rule, 'failAction');
       expect(failAction.options.contentHostname).to.equal(HOSTNAME);
-      expect(rule.behaviors).to.have.length(1);
+      // A setVariable flips the failover observability flag TRUE, then the GA failAction runs.
+      expect(rule.behaviors).to.have.length(2);
+      const setVar = findBehavior(rule, 'setVariable');
+      expect(setVar.options.variableName).to.equal('PMUSER_EDGE_OPTIMIZE_FAILOVER');
+      expect(setVar.options.variableValue).to.equal('TRUE');
     });
   });
 
@@ -260,7 +278,11 @@ describe('llmo-akamai-utils', () => {
     it('creates a variables array when the tree has none', () => {
       const treeNoVars = { rules: { name: 'default', children: [] } };
       const merged = mergeIntoTree(treeNoVars, cfg);
-      expect(merged.rules.variables).to.be.an('array').with.length(1);
+      // Declares both managed PMUSER vars: the cache key and the failover flag.
+      expect(merged.rules.variables).to.be.an('array').with.length(2);
+      const names = merged.rules.variables.map((v) => v.name);
+      expect(names).to.include(cfg.cacheKeyVariable.name);
+      expect(names).to.include('PMUSER_EDGE_OPTIMIZE_FAILOVER');
     });
 
     it('throws when the tree has no top-level rules object', () => {
@@ -296,11 +318,14 @@ describe('llmo-akamai-utils', () => {
         rules: {
           name: 'default',
           children: [{ name: 'Existing' }, { name: 'Optimize at Edge ' }],
-          variables: [{ name: cfg.cacheKeyVariable.name, value: '' }],
+          variables: [
+            { name: cfg.cacheKeyVariable.name, value: '' },
+            { name: 'PMUSER_EDGE_OPTIMIZE_FAILOVER', value: 'FALSE' },
+          ],
         },
       };
       const ops = buildRuleTreePatch(tree, cfg);
-      // The trailing-space rule is at index 1 and must be removed; no variable op (already there).
+      // Trailing-space rule at index 1 is removed; no variable op (both vars already present).
       expect(removeOps(ops).map((o) => o.path)).to.deep.equal(['/rules/children/1']);
       expect(ops.some((o) => o.path.startsWith('/rules/variables'))).to.equal(false);
       expect(addChildOps(ops)[0].value.name).to.equal(cfg.ruleNames.parent);
@@ -347,7 +372,9 @@ describe('llmo-akamai-utils', () => {
     it('creates the variables array when the tree has none', () => {
       const ops = buildRuleTreePatch({ rules: { name: 'default', children: [] } }, cfg);
       const varOp = ops.find((o) => o.path === '/rules/variables');
-      expect(varOp.value).to.be.an('array').with.length(1);
+      // Both managed PMUSER vars: cache key + failover flag.
+      expect(varOp.value).to.be.an('array').with.length(2);
+      expect(varOp.value.map((v) => v.name)).to.include('PMUSER_EDGE_OPTIMIZE_FAILOVER');
     });
 
     it('appends via `-` for a non-numeric insertIndex (falls back to the default)', () => {

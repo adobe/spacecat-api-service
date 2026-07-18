@@ -37,6 +37,11 @@ const LOOP_GUARD_HEADER = 'x-edgeoptimize-api-key';
 // same header name.
 const FAILOVER_MARKER_HEADER = 'x-edgeoptimize-request';
 
+// PMUSER flag flipped TRUE when the Site Failover rule fires (worker 4xx/5xx or origin timeout).
+// It does not affect routing or caching — it's an observability marker so a failover event is
+// identifiable in Akamai logs / DataStream. Mirrors the POC's v38 rule tree for parity.
+const FAILOVER_FLAG_VARIABLE = 'PMUSER_EDGE_OPTIMIZE_FAILOVER';
+
 // Stable defaults for the managed rule config. These mirror the doc 1:1 and are service-owned
 // (not caller-supplied); only the per-site hostname and the LLMO API key are injected at runtime
 // via buildRuleConfig.
@@ -252,7 +257,11 @@ export function buildSiteFailoverRule(cfg) {
     name: 'Site Failover Behavior',
     criteria: [criterionMatchResponseCode(400, 599), criterionOriginTimeout()],
     criteriaMustSatisfy: 'any',
-    behaviors: [behaviorFailActionAlternateHostname(cfg.failover.alternateHostname)],
+    behaviors: [
+      // Flag the failover for observability (Akamai logs), then fail over. Mirrors POC v38.
+      behaviorSetVariable(FAILOVER_FLAG_VARIABLE, 'TRUE'),
+      behaviorFailActionAlternateHostname(cfg.failover.alternateHostname),
+    ],
     children: [],
     comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). On origin failure, fails over '
       + "to the property's normal origin so the end user still gets a response.",
@@ -405,13 +414,24 @@ function managedCacheKeyVariable(varName) {
   };
 }
 
+// The failover flag PMUSER_* declaration (default FALSE; flipped TRUE by the Site Failover rule).
+function managedFailoverVariable() {
+  return {
+    name: FAILOVER_FLAG_VARIABLE,
+    value: 'FALSE',
+    description: 'Edge Optimize failover flag (managed by Adobe LLM Optimizer)',
+    hidden: false,
+    sensitive: false,
+  };
+}
+
 // PMUSER_* variables must be declared in the rule tree's `variables` list. Mutates the given
 // variables array in place (the caller owns a freshly-cloned tree), returning it for convenience.
-function ensureVariableDeclared(variables, varName) {
-  if (variables.some((v) => v?.name === varName)) {
+function ensureVariableDeclared(variables, variable) {
+  if (variables.some((v) => v?.name === variable.name)) {
     return variables;
   }
-  variables.push(managedCacheKeyVariable(varName));
+  variables.push(variable);
   return variables;
 }
 
@@ -443,7 +463,8 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   if (!Array.isArray(root.variables)) {
     root.variables = [];
   }
-  ensureVariableDeclared(root.variables, cfg.cacheKeyVariable.name);
+  ensureVariableDeclared(root.variables, managedCacheKeyVariable(cfg.cacheKeyVariable.name));
+  ensureVariableDeclared(root.variables, managedFailoverVariable());
 
   const managedNames = new Set([
     cfg.ruleNames.parent,
@@ -540,13 +561,21 @@ export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
     });
   }
 
-  // 2. Declare the PMUSER cache-key variable if the tree doesn't already have it. `add` to a
-  //    missing `/rules/variables` would fail, so create the array when absent.
-  const varName = cfg.cacheKeyVariable.name;
+  // 2. Declare the PMUSER variables the managed rules depend on (cache key + failover flag) if the
+  //    tree doesn't already have them. `add` to a missing `/rules/variables` would fail, so create
+  //    the array when absent.
+  const managedVars = [
+    managedCacheKeyVariable(cfg.cacheKeyVariable.name),
+    managedFailoverVariable(),
+  ];
   if (!Array.isArray(root.variables)) {
-    ops.push({ op: 'add', path: '/rules/variables', value: [managedCacheKeyVariable(varName)] });
-  } else if (!root.variables.some((v) => v?.name === varName)) {
-    ops.push({ op: 'add', path: '/rules/variables/-', value: managedCacheKeyVariable(varName) });
+    ops.push({ op: 'add', path: '/rules/variables', value: managedVars });
+  } else {
+    managedVars.forEach((v) => {
+      if (!root.variables.some((existing) => existing?.name === v.name)) {
+        ops.push({ op: 'add', path: '/rules/variables/-', value: v });
+      }
+    });
   }
 
   return ops;
@@ -599,17 +628,25 @@ export function redactApiKey(tree) {
  *   `!defaultRuleHasCaching(ruleTree)`: only add Caching when the property's default rule has none
  *   (so Cache ID Modification validates). When the default already caches, leave it OFF so the OAE
  *   rule inherits the property's HTML no-store instead of overriding it.
+ * @param {string} [params.originHostname] - the Edge Optimize worker host to route AI-bot traffic
+ *   to. Defaults to the prod worker; pass `env.EDGE_OPTIMIZE_EDGE_DOMAIN` so a dev/stage deployment
+ *   routes to dev/stage.edgeoptimize.net. The `matchSan` (`*.edgeoptimize.net`) covers all three.
  * @returns {object} config consumable by buildParentRule/mergeIntoTree
  */
-export function buildRuleConfig({ hostname, apiKey, addCaching = false }) {
+export function buildRuleConfig({
+  hostname, apiKey, addCaching = false, originHostname,
+}) {
   const d = EDGE_OPTIMIZE_DEFAULTS;
+  const resolvedOriginHost = (typeof originHostname === 'string' && originHostname.trim())
+    ? originHostname.trim()
+    : d.origin.hostname;
   return {
     match: {
       userAgents: [...d.userAgents],
       fileExtensions: [...d.fileExtensions],
       hostnames: [hostname],
     },
-    origin: { ...d.origin },
+    origin: { ...d.origin, hostname: resolvedOriginHost },
     cacheKeyVariable: { ...d.cacheKeyVariable },
     incomingRequestHeaders: {
       ...d.incomingRequestHeaders,
