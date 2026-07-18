@@ -533,7 +533,12 @@ fields:
     returned (fully backwards compatible). `id` is always included even if not
     listed. Unknown field names are ignored; if none of the requested names match
     a returned item, the request returns 400. Use this to reduce response payload
-    size for size-constrained consumers.
+    size for size-constrained consumers. Max 50 fields, max 1000 characters.
+
+    Note: `fields` is applied against the response shape produced by any `view`
+    parameter, not the full representation. If a requested field is absent from
+    the selected view (e.g. `view=minimal&fields=data` where `data` is excluded
+    from the minimal view), the request returns 400.
   schema:
     type: string
     example: 'id,baseURL,name'

@@ -24,6 +24,11 @@ import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 // caller forgets to request it.
 const ALWAYS_INCLUDED_FIELD = 'id';
 
+// Bounds on the raw `fields` param to prevent unbounded parsing/iteration work
+// and unbounded error-message echo from a maliciously large query param.
+const MAX_FIELDS_PARAM_LENGTH = 1000;
+const MAX_FIELDS_COUNT = 50;
+
 /**
  * Parses the `fields` query param into a normalized list of field names.
  * @param {string} [fieldsParam] - Raw comma-separated query param value.
@@ -52,11 +57,11 @@ export function projectFields(obj, fields) {
     return obj;
   }
   const projected = {};
-  if (ALWAYS_INCLUDED_FIELD in obj) {
+  if (Object.hasOwn(obj, ALWAYS_INCLUDED_FIELD)) {
     projected[ALWAYS_INCLUDED_FIELD] = obj[ALWAYS_INCLUDED_FIELD];
   }
   for (const field of fields) {
-    if (field in obj) {
+    if (Object.hasOwn(obj, field)) {
       projected[field] = obj[field];
     }
   }
@@ -66,7 +71,14 @@ export function projectFields(obj, fields) {
 /**
  * Returns true when at least one requested field exists on any of the items.
  * Used to reject a `fields` param that matches nothing (surfaces caller typos).
- * An empty list is treated as valid — there is nothing to validate against.
+ *
+ * Contract: an empty item list is always treated as valid, regardless of the
+ * requested fields — there is nothing to validate against, so `?fields=typo`
+ * against an empty collection returns 200 with an empty list rather than 400.
+ * This is deliberate (not a workaround): validating against an allowlist of
+ * known fields would make this deterministic, but at the cost of maintaining
+ * a per-endpoint allowlist. Callers that need to detect typos on empty
+ * collections cannot rely on this endpoint alone.
  * @param {object[]} items - Array of objects that would be projected.
  * @param {string[]} fields - Requested field names.
  * @returns {boolean}
@@ -95,12 +107,26 @@ export function hasMatchingFields(items, fields) {
  * @returns {{ list: object[]|null, error: string|null }} Projected list, or an error message.
  */
 export function applyFieldProjection(items, fieldsParam) {
+  if (hasText(fieldsParam) && fieldsParam.length > MAX_FIELDS_PARAM_LENGTH) {
+    return {
+      list: null,
+      error: `fields parameter exceeds maximum length of ${MAX_FIELDS_PARAM_LENGTH} characters`,
+    };
+  }
   const fields = parseFields(fieldsParam);
   if (!fields) {
     return { list: items, error: null };
   }
+  if (fields.length > MAX_FIELDS_COUNT) {
+    return {
+      list: null,
+      error: `Too many fields requested: ${fields.length} (max ${MAX_FIELDS_COUNT})`,
+    };
+  }
   if (!hasMatchingFields(items, fields)) {
-    return { list: null, error: `Invalid fields: ${fields.join(', ')}` };
+    const shown = fields.slice(0, 5).join(', ');
+    const suffix = fields.length > 5 ? ', ...' : '';
+    return { list: null, error: `Invalid fields: ${shown}${suffix}` };
   }
   const list = Array.isArray(items)
     ? items.map((item) => projectFields(item, fields))

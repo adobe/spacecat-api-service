@@ -112,6 +112,40 @@ describe('field-projection', () => {
       expect(error).to.equal('Invalid fields: nope, missing');
     });
 
+    it('truncates the echoed field list when many fields are invalid', () => {
+      const manyFields = Array.from({ length: 8 }, (_, i) => `nope${i}`).join(',');
+      const { list, error } = applyFieldProjection(items, manyFields);
+      expect(list).to.be.null;
+      expect(error).to.equal('Invalid fields: nope0, nope1, nope2, nope3, nope4, ...');
+    });
+
+    it('returns an empty list, not an error, when items is empty regardless of fields', () => {
+      const { list, error } = applyFieldProjection([], 'nope');
+      expect(error).to.be.null;
+      expect(list).to.deep.equal([]);
+    });
+
+    it('rejects a fields param exceeding the max length', () => {
+      const longParam = `id${','.repeat(1000)}`;
+      const { list, error } = applyFieldProjection(items, longParam);
+      expect(list).to.be.null;
+      expect(error).to.equal('fields parameter exceeds maximum length of 1000 characters');
+    });
+
+    it('rejects more than the max number of fields', () => {
+      const tooManyFields = Array.from({ length: 51 }, (_, i) => `f${i}`).join(',');
+      const { list, error } = applyFieldProjection(items, tooManyFields);
+      expect(list).to.be.null;
+      expect(error).to.equal('Too many fields requested: 51 (max 50)');
+    });
+
+    it('accepts exactly the max number of fields', () => {
+      const maxFields = Array(50).fill('id').join(',');
+      const { list, error } = applyFieldProjection(items, maxFields);
+      expect(error).to.be.null;
+      expect(list).to.deep.equal([{ id: '1' }, { id: '2' }]);
+    });
+
     it('handles a non-array input gracefully', () => {
       const { list, error } = applyFieldProjection(null, 'id');
       expect(error).to.be.null;
