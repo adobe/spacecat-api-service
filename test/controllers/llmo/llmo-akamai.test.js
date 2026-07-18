@@ -239,7 +239,9 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(200);
       expect(body.latestVersion).to.equal(7);
       expect(body.currentChildRules).to.deep.equal(['Existing']);
-      expect(body.mergedChildRules[0]).to.equal('Optimize at Edge');
+      // The OAE wrapper is appended LAST so its origin + cacheId win (Akamai is last-match-wins).
+      expect(body.mergedChildRules).to.deep.equal(['Existing', 'Optimize at Edge']);
+      expect(body.mergedChildRules[body.mergedChildRules.length - 1]).to.equal('Optimize at Edge');
       // plan dry-runs the exact full-tree PUT it would deploy, without creating a version.
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
       expect(mockAkamaiClient.updateRuleTree).to.have.been.calledOnce;

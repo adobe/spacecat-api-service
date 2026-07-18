@@ -423,7 +423,10 @@ function ensureVariableDeclared(variables, varName) {
  * flat (non-wrapped) layout, so upgrading is clean.
  *
  * `insertIndex` positions the wrapper among the *existing* (non-managed) children:
- * 0 = before everything (default), length = after everything.
+ * 0 = before everything, length = after everything. The default (no/blank/garbage index) is
+ * AFTER everything: the wrapper's `origin` + `cacheId` are last-match-wins on Akamai, so it must
+ * sit below the stock delivery rules (Offload origin, Increase availability, …) — otherwise a
+ * later sibling clobbers the OAE origin override and cache isolation and bots never get routed.
  *
  * @param {object} ruleTree - the property's current rule tree ({ rules: {...} })
  * @param {object} cfg
@@ -452,9 +455,11 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   const children = (root.children || []).filter((c) => !managedNames.has((c?.name ?? '').trim()));
 
   const n = Math.trunc(Number(insertIndex));
-  // Non-numeric / NaN (e.g. a direct caller passing garbage) clamps to 0 rather than corrupting
-  // the slice; the controller already rejects malformed values with a 400 before reaching here.
-  const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, children.length)) : 0;
+  // Default to LAST (children.length): only a finite, in-range index moves the wrapper earlier; a
+  // missing/blank/garbage value (the wizard sends none) appends after all existing children so the
+  // OAE origin + cacheId win on Akamai (siblings evaluate top-down, last match wins). The
+  // controller already rejects malformed values with a 400 before reaching here.
+  const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, children.length)) : children.length;
   root.children = [...children.slice(0, idx), buildParentRule(cfg), ...children.slice(idx)];
   return tree;
 }
@@ -522,10 +527,11 @@ export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
       .forEach((i) => ops.push({ op: 'remove', path: `/rules/children/${i}` }));
 
     // After those removals run, the array is exactly the non-managed children in their original
-    // order, so clamp insertIndex against that length (mirrors mergeIntoTree). NaN/garbage -> 0.
+    // order, so clamp insertIndex against that length (mirrors mergeIntoTree). Default (no/blank/
+    // garbage index) appends last so the OAE origin + cacheId win (Akamai is last-match-wins).
     const nonManagedCount = children.length - managedIndexes.length;
     const n = Math.trunc(Number(insertIndex));
-    const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, nonManagedCount)) : 0;
+    const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, nonManagedCount)) : nonManagedCount;
     ops.push({
       op: 'add',
       // `-` appends; a numeric index inserts before it. Append when idx lands at/after the end.
