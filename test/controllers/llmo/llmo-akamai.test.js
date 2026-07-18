@@ -541,6 +541,16 @@ describe('LlmoAkamaiController', () => {
       const res = await controller.activate(withData(propertyRef));
       expect(res.status).to.equal(502);
     });
+
+    it('surfaces the original error when the recovery lookup itself fails', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations request failed: '
+          + 'Request timeout after 10000ms'),
+      );
+      mockAkamaiClient.latestActivation.rejects(new Error('listActivations failed'));
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
   });
 
   describe('activationStatus', () => {
