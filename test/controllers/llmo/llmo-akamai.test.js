@@ -362,6 +362,13 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(400);
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
     });
+
+    it('rejects baseVersion 0 (PAPI versions start at 1)', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, baseVersion: 0 }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.getRuleTree).to.not.have.been.called;
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
   });
 
   describe('CUSTOM scope gate + caching decision', () => {
@@ -511,7 +518,7 @@ describe('LlmoAkamaiController', () => {
           + 'Request timeout after 10000ms'),
       );
       mockAkamaiClient.latestActivation.resolves({
-        activationId: 'atv_777', status: 'PENDING', propertyVersion: 7,
+        activationId: 'atv_777', status: 'PENDING', propertyVersion: 7, submitDate: new Date().toISOString(),
       });
       const res = await controller.activate(withData(propertyRef));
       const body = await res.json();
@@ -522,6 +529,21 @@ describe('LlmoAkamaiController', () => {
         .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING');
     });
 
+    it('does NOT recover a stale activation (submitDate older than the recency window)', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 500: boom'),
+      );
+      // Same version+network but submitted an hour ago (e.g. a manual activation) — not ours.
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_777',
+        status: 'PENDING',
+        propertyVersion: 7,
+        submitDate: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      });
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
+
     it('recovers with a null activationId when Akamai has not yet assigned one (placeholder)', async () => {
       mockAkamaiClient.activate.rejects(
         new Error('PAPI POST /papi/v1/properties/prp_1253269/activations request failed: '
@@ -529,7 +551,7 @@ describe('LlmoAkamaiController', () => {
       );
       // A just-queued activation appears in the list as "atv_null" before the id is assigned.
       mockAkamaiClient.latestActivation.resolves({
-        activationId: 'atv_null', status: 'PENDING', propertyVersion: 7,
+        activationId: 'atv_null', status: 'PENDING', propertyVersion: 7, submitDate: new Date().toISOString(),
       });
       const res = await controller.activate(withData(propertyRef));
       const body = await res.json();

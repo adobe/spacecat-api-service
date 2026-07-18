@@ -6486,7 +6486,9 @@ akamai-property-ref:
       minimum: 0
       description: >-
         Optional position among the existing (non-managed) top-level rules to insert the managed
-        wrapper at. Defaults to 0 (before everything); clamped to the number of existing children.
+        wrapper at. Defaults to appending AFTER all existing children (so the Optimize-at-Edge
+        origin/cacheId win, since Akamai is last-match-wins); an explicit value is clamped to the
+        number of existing children.
     baseVersion:
       type: integer
       minimum: 1

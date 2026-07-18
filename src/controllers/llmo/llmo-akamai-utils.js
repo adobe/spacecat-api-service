@@ -204,6 +204,9 @@ const behaviorCaching = () => ({
   options: {
     behavior: 'CACHE_CONTROL_AND_EXPIRES',
     mustRevalidate: false,
+    // Fallback TTL used ONLY when the origin response omits Cache-Control/Expires (the doc's
+    // Honor-origin config). AI-bot responses normally carry the worker's no-store, so this is a
+    // safety net, not the common path — bounded to 1 day to avoid indefinitely caching a bad reply.
     defaultTtl: '1d',
     honorPrivate: false,
     honorMustRevalidate: false,

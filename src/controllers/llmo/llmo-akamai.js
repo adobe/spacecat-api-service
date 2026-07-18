@@ -50,6 +50,16 @@ const IN_FLIGHT_ACTIVATION_STATUSES = new Set([
   'NEW', 'PENDING', 'ZONE_1', 'ZONE_2', 'ZONE_3', 'ACTIVE',
 ]);
 
+// Recovery only adopts a listed activation if it was submitted very recently — otherwise a failed
+// activate (e.g. 403/429 that never queued anything) could match an unrelated older activation for
+// the same version+network (e.g. one triggered manually in Property Manager) and falsely report
+// success. The activation we just submitted has a submitDate within seconds.
+const RECOVERY_RECENCY_MS = 5 * 60 * 1000;
+const isRecentlySubmitted = (activation) => {
+  const ts = Date.parse(activation?.submitDate || activation?.updateDate || '');
+  return Number.isFinite(ts) && (Date.now() - ts) < RECOVERY_RECENCY_MS;
+};
+
 // Akamai PAPI identifiers. Boundary validation (defense-in-depth): the shared client also encodes
 // these into the path, but rejecting a malformed id here gives the caller a clean 400 instead of a
 // 502 from PAPI.
@@ -587,9 +597,11 @@ function LlmoAkamaiController(ctx) {
     if (insertIndexError) {
       return insertIndexError;
     }
-    // Optional: copy from a specific version instead of the latest.
+    // Optional: copy from a specific version instead of the latest. PAPI versions start at 1, so
+    // reject 0 here (it passes DECIMAL_INT_RE) for a clean 400 instead of an opaque PAPI 404/500 —
+    // mirrors the version check in activate.
     if (rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== ''
-      && !DECIMAL_INT_RE.test(String(rawBaseVersion))) {
+      && (!DECIMAL_INT_RE.test(String(rawBaseVersion)) || Number(rawBaseVersion) < 1)) {
       return badRequest('baseVersion must be a positive integer');
     }
     const siteId = site.getId();
@@ -777,7 +789,8 @@ function LlmoAkamaiController(ctx) {
           const recovered = await client.latestActivation(propertyId, contractId, groupId, network);
           if (recovered
             && Number(recovered.propertyVersion) === Number(version)
-            && IN_FLIGHT_ACTIVATION_STATUSES.has(String(recovered.status || '').toUpperCase())) {
+            && IN_FLIGHT_ACTIVATION_STATUSES.has(String(recovered.status || '').toUpperCase())
+            && isRecentlySubmitted(recovered)) {
             // Only hand back a real (numeric) id; a just-queued activation can still be a
             // placeholder ("atv_null") — return null so the UI polls by network for it.
             const recoveredId = REAL_ACTIVATION_ID_RE.test(recovered.activationId || '')
@@ -801,7 +814,9 @@ function LlmoAkamaiController(ctx) {
             });
           }
         } catch (recoverErr) {
-          log.warn(auditLine(context, 'activate', 'recover-failed', {
+          // Double failure (activate POST AND the recovery probe both failed) — log at error level
+          // for alerting visibility; the caller still gets the sanitized activation error below.
+          log.error(auditLine(context, 'activate', 'recover-failed', {
             siteId, propertyId, version, network, error: recoverErr?.message,
           }));
         }
