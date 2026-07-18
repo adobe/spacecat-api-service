@@ -1,3 +1,10 @@
+# [1.664.0](https://github.com/adobe/spacecat-api-service/compare/v1.663.0...v1.664.0) (2026-07-18)
+
+
+### Features
+
+* **preflight:** hostname-membership URL validation per ADR-002 (SITES-48309) ([#2849](https://github.com/adobe/spacecat-api-service/issues/2849)) ([9195c29](https://github.com/adobe/spacecat-api-service/commit/9195c298df42c2761c436b8fe7fd62df759b1e38)), closes [src/controllers/preflight.js#L562-L571](https://github.com/src/controllers/preflight.js/issues/L562-L571) [docs/decisions/002-preflight-api-rest-redesign.md#L69-L72](https://github.com/docs/decisions/002-preflight-api-rest-redesign.md/issues/L69-L72)
+
 # [1.663.0](https://github.com/adobe/spacecat-api-service/compare/v1.662.0...v1.663.0) (2026-07-17)
 
 
