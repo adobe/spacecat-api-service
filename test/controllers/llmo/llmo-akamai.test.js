@@ -504,6 +504,43 @@ describe('LlmoAkamaiController', () => {
       expect(capturedClientConfig.clientToken).to.equal('ctok');
       expect(capturedClientConfig.accessToken).to.equal('atok');
     });
+
+    it('recovers to 200 when the POST errors (timeout/422) but Akamai queued the activation', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations request failed: '
+          + 'Request timeout after 10000ms'),
+      );
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_777', status: 'PENDING', propertyVersion: 7,
+      });
+      const res = await controller.activate(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.activationId).to.equal('atv_777');
+      expect(body.recovered).to.equal(true);
+      expect(mockAkamaiClient.latestActivation)
+        .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING');
+    });
+
+    it('surfaces the error when the POST fails and no matching activation is in flight', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 500: boom'),
+      );
+      mockAkamaiClient.latestActivation.resolves(undefined);
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
+
+    it('does not recover when the in-flight activation is for a different version', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 422: already-activated'),
+      );
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_x', status: 'PENDING', propertyVersion: 999,
+      });
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
   });
 
   describe('activationStatus', () => {

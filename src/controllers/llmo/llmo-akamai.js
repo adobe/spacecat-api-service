@@ -41,6 +41,15 @@ const REQUIRED_CRED_KEYS = ['host', 'clientToken', 'clientSecret', 'accessToken'
 
 const NETWORKS = ['STAGING', 'PRODUCTION'];
 
+// Akamai activation statuses that mean the submit actually succeeded (in flight or already live).
+// Used to recover from an activate POST that errored client-side — the PAPI activation call
+// regularly exceeds the client request timeout on large rule trees (Akamai re-validates the whole
+// tree), and a retry then returns `422 already-activated`; in BOTH cases Akamai has already QUEUED
+// the activation, so we report success and let the UI poll instead of showing a false failure.
+const IN_FLIGHT_ACTIVATION_STATUSES = new Set([
+  'NEW', 'PENDING', 'ZONE_1', 'ZONE_2', 'ZONE_3', 'ACTIVE',
+]);
+
 // Akamai PAPI identifiers. Boundary validation (defense-in-depth): the shared client also encodes
 // these into the path, but rejecting a malformed id here gives the caller a clean 400 instead of a
 // 502 from PAPI.
@@ -744,6 +753,40 @@ function LlmoAkamaiController(ctx) {
       // surface a caller error rather than a PAPI failure.
       if (/notifyEmails/.test(e?.message || '')) {
         return badRequest('notifyEmails is required to activate');
+      }
+      // The activation POST regularly errors client-side even though Akamai queued the activation:
+      // a large rule tree makes PAPI exceed the client request timeout, and any retry then returns
+      // `422 already-activated`. Before surfacing a failure, look for an in-flight (or freshly
+      // active) activation for this exact version+network and, if found, report success so the UI
+      // polls it. Genuine failures (no matching activation) still fall through to the error.
+      if (version !== undefined) {
+        try {
+          const recovered = await client.latestActivation(propertyId, contractId, groupId, network);
+          if (recovered
+            && Number(recovered.propertyVersion) === Number(version)
+            && IN_FLIGHT_ACTIVATION_STATUSES.has(String(recovered.status || '').toUpperCase())) {
+            log.info(auditLine(context, 'activate', 'recovered', {
+              siteId,
+              propertyId,
+              version,
+              network,
+              activationId: recovered.activationId,
+              status: recovered.status,
+            }));
+            return ok({
+              propertyId,
+              version,
+              network,
+              activationId: recovered.activationId,
+              activationLink: null,
+              recovered: true,
+            });
+          }
+        } catch (recoverErr) {
+          log.warn(auditLine(context, 'activate', 'recover-failed', {
+            siteId, propertyId, version, network, error: recoverErr?.message,
+          }));
+        }
       }
       return papiErrorResponse(e, 'activation', context, { siteId, propertyId });
     }
