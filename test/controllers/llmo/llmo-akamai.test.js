@@ -522,6 +522,23 @@ describe('LlmoAkamaiController', () => {
         .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING');
     });
 
+    it('recovers with a null activationId when Akamai has not yet assigned one (placeholder)', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations request failed: '
+          + 'Request timeout after 10000ms'),
+      );
+      // A just-queued activation appears in the list as "atv_null" before the id is assigned.
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_null', status: 'PENDING', propertyVersion: 7,
+      });
+      const res = await controller.activate(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.recovered).to.equal(true);
+      // Placeholder id is not pollable — return null so the UI polls by network instead.
+      expect(body.activationId).to.equal(null);
+    });
+
     it('surfaces the error when the POST fails and no matching activation is in flight', async () => {
       mockAkamaiClient.activate.rejects(
         new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 500: boom'),

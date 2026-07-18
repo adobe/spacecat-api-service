@@ -57,6 +57,11 @@ const PROPERTY_ID_RE = /^prp_[A-Za-z0-9]+$/;
 const CONTRACT_ID_RE = /^ctr_[A-Za-z0-9-]+$/;
 const GROUP_ID_RE = /^grp_[A-Za-z0-9]+$/;
 const ACTIVATION_ID_RE = /^atv_[A-Za-z0-9]+$/;
+// A *real* Akamai activation id is numeric (atv_20135679). A just-queued activation can appear in
+// the activations list before Akamai assigns its id — the placeholder serializes as "atv_null",
+// which passes ACTIVATION_ID_RE but is not pollable. Use this stricter check when recovering an id
+// so we never hand the UI an unpollable placeholder (it polls by network until a real id appears).
+const REAL_ACTIVATION_ID_RE = /^atv_[0-9]+$/;
 // SSRF guard: the client builds `https://${host}/...` from x-akamai-host, so restrict it to Akamai
 // EdgeGrid hosts. The `.akamaiapis.net` suffix + this charset reject IP literals, ports (no ':'),
 // and paths (no '/'), so a caller cannot point server-side requests at an arbitrary host.
@@ -773,19 +778,24 @@ function LlmoAkamaiController(ctx) {
           if (recovered
             && Number(recovered.propertyVersion) === Number(version)
             && IN_FLIGHT_ACTIVATION_STATUSES.has(String(recovered.status || '').toUpperCase())) {
+            // Only hand back a real (numeric) id; a just-queued activation can still be a
+            // placeholder ("atv_null") — return null so the UI polls by network for it.
+            const recoveredId = REAL_ACTIVATION_ID_RE.test(recovered.activationId || '')
+              ? recovered.activationId
+              : null;
             log.info(auditLine(context, 'activate', 'recovered', {
               siteId,
               propertyId,
               version,
               network,
-              activationId: recovered.activationId,
+              activationId: recoveredId,
               status: recovered.status,
             }));
             return ok({
               propertyId,
               version,
               network,
-              activationId: recovered.activationId,
+              activationId: recoveredId,
               activationLink: null,
               recovered: true,
             });
