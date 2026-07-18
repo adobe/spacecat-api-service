@@ -15,11 +15,13 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
-import AkamaiClient, { normalizeDomain } from '@adobe/spacecat-shared-akamai-client';
+import AkamaiClient, {
+  normalizeDomain, defaultRuleHasCaching, getDefaultOriginSsl,
+} from '@adobe/spacecat-shared-akamai-client';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, redactApiKey,
+  buildRuleConfig, mergeIntoTree, managedRuleNames, redactApiKey,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -198,7 +200,7 @@ function LlmoAkamaiController(ctx) {
     // "-> 404" and mis-map a genuine 5xx. Take the FIRST such token, which is the real status.
     const status = Number(message.match(/-> (\d{3}):/)?.[1]);
     // Surface a version the operation may have already created before a later call threw (e.g.
-    // deploy created a new version, then patchRuleTree failed) so the caller can find/clean it up.
+    // deploy created a new version, then updateRuleTree failed) so the caller can find/clean it up.
     const extra = fields.newVersion !== undefined ? { newVersion: fields.newVersion } : {};
     if (status === 401) {
       return unauthorized('Akamai authentication failed');
@@ -319,9 +321,10 @@ function LlmoAkamaiController(ctx) {
   };
 
   /**
-   * Resolves the merged rule config for a site (defaults + site hostname + LLMO API key), or a
-   * response when the API key is unavailable.
-   * @returns {Promise<{ cfg: object } | { error: Response }>}
+   * Resolves the site's onboarding inputs (normalized hostname + LLMO API key), or a response when
+   * either is unavailable. The final rule config is built later (buildCfgFromTree) — it depends on
+   * the property's rule tree (SSL scope gate + whether to add a Caching behavior).
+   * @returns {Promise<{ host: string, apiKey: string } | { error: Response }>}
    */
   const resolveRuleConfig = async (site, context) => {
     const host = siteHostname(site);
@@ -340,7 +343,36 @@ function LlmoAkamaiController(ctx) {
     if (!hasText(apiKey)) {
       return { error: internalServerError('LLMO API key not configured for this site') };
     }
-    return { cfg: buildRuleConfig({ hostname: host, apiKey }) };
+    return { host, apiKey };
+  };
+
+  /**
+   * Builds the managed rule config from the property's rule tree, enforcing the CUSTOM-default
+   * scope gate and deciding whether the OAE rule needs its own Caching behavior.
+   *
+   * - Scope gate: Optimize at Edge currently supports only properties whose default origin uses
+   *   "Choose Your Own" (CUSTOM) SSL verification. The OAE origin uses CUSTOM (Match SAN), which
+   *   PAPI rejects as incompatible when the default rule is on "Use Platform Settings".
+   * - Caching: Cache ID Modification requires a Caching behavior in scope. Add one to the OAE rule
+   *   ONLY when the default rule has none — otherwise (the common case) inherit the default's
+   *   caching, because adding a Caching behavior to the OAE rule overrides the property's HTML
+   *   no-store and makes the optimized path cacheable (serving stale/passthrough content to bots).
+   *
+   * @returns {{ cfg: object } | { error: Response }}
+   */
+  const buildCfgFromTree = (host, apiKey, ruleTree) => {
+    const ssl = getDefaultOriginSsl(ruleTree);
+    if (!ssl || ssl.verificationMode !== 'CUSTOM') {
+      const mode = ssl?.verificationMode || 'an unknown mode';
+      return {
+        error: badRequest(
+          'Optimize at Edge onboarding requires the property\'s default origin to use '
+          + `"Choose Your Own" (CUSTOM) SSL verification; this property uses ${mode}.`,
+        ),
+      };
+    }
+    const addCaching = !defaultRuleHasCaching(ruleTree);
+    return { cfg: buildRuleConfig({ hostname: host, apiKey, addCaching }) };
   };
 
   /**
@@ -419,7 +451,7 @@ function LlmoAkamaiController(ctx) {
       return refError;
     }
 
-    const { cfg, error: cfgError } = await resolveRuleConfig(site, context);
+    const { host, apiKey, error: cfgError } = await resolveRuleConfig(site, context);
     if (cfgError) {
       return cfgError;
     }
@@ -434,26 +466,31 @@ function LlmoAkamaiController(ctx) {
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);
       const {
-        ruleTree, ruleFormat, etag,
+        ruleTree, ruleFormat,
       } = await client.getRuleTree(propertyId, version, contractId, groupId);
+
+      // Enforce the CUSTOM-default scope gate and decide the caching behavior from the actual tree.
+      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree);
+      if (gateError) {
+        return gateError;
+      }
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
 
-      // Validate the exact change deploy will make: dry-run the same JSON Patch. PAPI applies it to
-      // the STORED tree and returns errors/warnings without saving, so Review reflects the real
-      // deploy outcome. (mergeIntoTree alone only echoes the base version's GET-time warnings — a
-      // merged tree can look clean here yet be rejected at deploy.)
-      const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
+      // Validate the exact change deploy will make: dry-run the full-tree PUT. PAPI validates the
+      // submitted tree and returns errors/warnings without persisting. A dry-run PUT still needs an
+      // EDITABLE version, so if `version` is activated it 403s — fall back to the base tree's
+      // warnings and flag the preview unvalidated (deploy validates on its own new version anyway).
       let errors = [];
       let warnings = [];
       let validated = true;
       try {
-        const dryRun = await client.patchRuleTree(
+        const dryRun = await client.updateRuleTree(
           propertyId,
           version,
           contractId,
           groupId,
-          ops,
-          etag,
+          merged,
+          ruleFormat,
           { dryRun: true },
         );
         errors = dryRun?.errors || [];
@@ -498,12 +535,13 @@ function LlmoAkamaiController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy
-   * Body: { propertyId, contractId, groupId, insertIndex? }
-   * Creates a NEW property version from the latest and applies the managed rules to it via a JSON
-   * Patch (PAPI-side validation) — a delta so existing behaviors are never re-serialized. Does NOT
-   * activate (that is a separate, explicit step). Guarded so the target property must serve the
-   * site's own domain. Idempotent by rule name (trimmed): re-running replaces any previously
-   * managed rules rather than duplicating them.
+   * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion? }
+   * Creates a NEW property version from `baseVersion` (default: latest) and applies the managed
+   * rules via a full-tree PUT with PAPI-side validation, pinning the base version's ruleFormat.
+   * Supported only for properties whose default origin uses CUSTOM SSL verification (scope gate).
+   * Does NOT activate (a separate, explicit step). Guarded so the target property must serve the
+   * site's own domain. Idempotent by rule name (trimmed): re-running replaces prior managed rules
+   * rather than duplicating them.
    */
   const deploy = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -523,10 +561,15 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex } = context.data;
+    const { insertIndex, baseVersion: rawBaseVersion } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
+    }
+    // Optional: copy from a specific version instead of the latest.
+    if (rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== ''
+      && !DECIMAL_INT_RE.test(String(rawBaseVersion))) {
+      return badRequest('baseVersion must be a positive integer');
     }
     const siteId = site.getId();
 
@@ -537,7 +580,7 @@ function LlmoAkamaiController(ctx) {
       return guard;
     }
 
-    const { cfg, error: cfgError } = await resolveRuleConfig(site, context);
+    const { host, apiKey, error: cfgError } = await resolveRuleConfig(site, context);
     if (cfgError) {
       return cfgError;
     }
@@ -547,29 +590,38 @@ function LlmoAkamaiController(ctx) {
     // Hoisted so the catch can report it: createVersion may succeed before a later call throws.
     let newVersion;
     try {
-      const baseVersion = await client.getLatestVersion(propertyId, contractId, groupId);
-      newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
-      // Build the patch against the NEW version's own tree (a clone of baseVersion): stable
-      // indices, no concurrent editors, and its etag guards the PATCH via If-Match. Applying only
-      // these deltas leaves every existing behavior as PAPI stored it — no full-tree re-write.
-      const { ruleTree, etag } = await client.getRuleTree(
+      const baseVersion = (rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== '')
+        ? Number(rawBaseVersion)
+        : await client.getLatestVersion(propertyId, contractId, groupId);
+
+      // Read the base version's tree first so we can enforce the CUSTOM-default scope gate and
+      // decide caching BEFORE creating a version — a rejected onboarding then leaves no orphan
+      // version behind. The new version is a clone of baseVersion, so merging the base tree and
+      // PUTting it into the new version is equivalent, and pins the base version's ruleFormat.
+      const { ruleTree, ruleFormat } = await client.getRuleTree(
         propertyId,
-        newVersion,
+        baseVersion,
         contractId,
         groupId,
       );
-      const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
-      const patchResult = await client.patchRuleTree(
+      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree);
+      if (gateError) {
+        return gateError;
+      }
+      const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
+
+      newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
+      const putResult = await client.updateRuleTree(
         propertyId,
         newVersion,
         contractId,
         groupId,
-        ops,
-        etag,
+        merged,
+        ruleFormat,
       );
 
-      const papiErrors = patchResult?.errors || [];
-      const warnings = patchResult?.warnings || [];
+      const papiErrors = putResult?.errors || [];
+      const warnings = putResult?.warnings || [];
       if (papiErrors.length > 0) {
         log.error(auditLine(context, 'deploy', 'papi-rejected', {
           siteId, propertyId, newVersion, errorCount: papiErrors.length,
@@ -668,6 +720,9 @@ function LlmoAkamaiController(ctx) {
         contractId,
         groupId,
         network,
+        // Akamai's version author is the API credential; attribute the human operator in the
+        // activation note so it shows in Property Manager's Activation History.
+        `Optimize at Edge — onboarded by ${notifyEmail} via Adobe LLM Optimizer`,
       );
       const activationId = AkamaiClient.activationIdFromLink(activationLink);
       if (!hasText(activationId)) {

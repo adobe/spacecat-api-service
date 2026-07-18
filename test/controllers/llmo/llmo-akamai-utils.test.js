@@ -65,7 +65,11 @@ describe('llmo-akamai-utils', () => {
     });
 
     it('matches AI-bot user agents and HTML/extensionless files', () => {
-      expect(findCriterion(routing, 'userAgent').options.matchWildcard).to.equal(true);
+      const ua = findCriterion(routing, 'userAgent');
+      expect(ua.options.matchWildcard).to.equal(true);
+      // Values are wildcarded (*GPTBot*) so they match real UA strings, not only an exact "GPTBot".
+      expect(ua.options.values).to.include('*GPTBot*');
+      expect(ua.options.values.every((v) => v.startsWith('*') && v.endsWith('*'))).to.equal(true);
       const ext = findCriterion(routing, 'fileExtension');
       expect(ext.options.values).to.include('EMPTY_STRING');
       expect(ext.options.values).to.include('html');

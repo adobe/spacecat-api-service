@@ -6201,8 +6201,10 @@ site-llmo-akamai-deploy:
     operationId: deployLlmoAkamai
     summary: Create a new property version with the Edge Optimize rules
     description: |
-      Creates a NEW property version from the latest, merges the managed Edge Optimize rules into
-      it, and PUTs the rule tree with Akamai-side validation. Does NOT activate — activation is a
+      Creates a NEW property version from `baseVersion` (default: latest), merges the managed Edge
+      Optimize rules into it, and PUTs the rule tree with Akamai-side validation. Only supported for
+      properties whose default origin uses "Choose Your Own" (CUSTOM) SSL verification; a property on
+      "Use Platform Settings" is rejected with `400`. Does NOT activate — activation is a
       separate, explicit step. Guarded so the target property must serve the site's own domain on an
       active hostname. Idempotent by rule name: the merge replaces any previously-managed rules
       rather than duplicating them.
@@ -6485,6 +6487,12 @@ akamai-property-ref:
       description: >-
         Optional position among the existing (non-managed) top-level rules to insert the managed
         wrapper at. Defaults to 0 (before everything); clamped to the number of existing children.
+    baseVersion:
+      type: integer
+      minimum: 1
+      description: >-
+        (deploy only) Optional property version to copy the new version from. Defaults to the
+        property's latest version.
 
 akamai-property:
   type: object

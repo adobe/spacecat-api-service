@@ -96,7 +96,10 @@ const criterionUserAgent = (userAgents) => ({
   name: 'userAgent',
   options: {
     matchOperator: 'IS_ONE_OF',
-    values: [...userAgents],
+    // Wildcard each value (*GPTBot* etc.) so it matches real-world agent strings like
+    // "Mozilla/5.0 ... GPTBot/1.2", not only an exact "GPTBot". matchWildcard treats a value with
+    // no '*' as an exact match, which would miss almost every real bot request.
+    values: userAgents.map((ua) => (String(ua).includes('*') ? ua : `*${ua}*`)),
     matchCaseSensitive: false,
     matchWildcard: true,
   },
@@ -186,6 +189,24 @@ const behaviorCacheId = (variableName) => ({
   options: { rule: 'INCLUDE_VARIABLE', variableName },
 });
 
+// "Caching Rules" -> Honor origin Cache-Control and Expires (the doc's step-4 config). Cache ID
+// Modification requires a Caching behavior in scope. Added to the OAE rule ONLY when the property's
+// DEFAULT rule has none (see cfg.addCaching): if the default already provides one, adding it here
+// overrides the property's HTML no-store and makes the optimized path cacheable — serving a stale
+// passthrough copy to bots.
+const behaviorCaching = () => ({
+  name: 'caching',
+  options: {
+    behavior: 'CACHE_CONTROL_AND_EXPIRES',
+    mustRevalidate: false,
+    defaultTtl: '1d',
+    honorPrivate: false,
+    honorMustRevalidate: false,
+    enhancedRfcSupport: false,
+    cacheControlDirectives: '',
+  },
+});
+
 // Every request-header criterion we emit is a presence check (EXISTS / DOES_NOT_EXIST): PAPI
 // ignores value/match flags for those, and including them wouldn't match what PAPI itself emits.
 const criterionRequestHeader = (header, matchOperator) => ({
@@ -257,6 +278,12 @@ export function buildRoutingRule(cfg) {
   (cfg.removeIncomingResponseHeaders || []).forEach((header) => {
     behaviors.push(behaviorRemoveIncomingResponseHeader(header));
   });
+  // Caching goes BEFORE cacheId. Only add it when the property's default rule has no Caching of its
+  // own (cfg.addCaching) — cacheId needs a Caching behavior in scope, but adding one when the
+  // default already provides it overrides the property's HTML no-store and breaks bot delivery.
+  if (cfg.addCaching) {
+    behaviors.push(behaviorCaching());
+  }
   behaviors.push(behaviorCacheId(cfg.cacheKeyVariable.name));
 
   if (cfg.wafBypass?.enabled) {
@@ -562,9 +589,13 @@ export function redactApiKey(tree) {
  * @param {object} params
  * @param {string} params.hostname - the site's (normalized) hostname
  * @param {string} params.apiKey - the site's LLMO API key
+ * @param {boolean} [params.addCaching=false] - add a Caching behavior to the OAE rule. Set this to
+ *   `!defaultRuleHasCaching(ruleTree)`: only add Caching when the property's default rule has none
+ *   (so Cache ID Modification validates). When the default already caches, leave it OFF so the OAE
+ *   rule inherits the property's HTML no-store instead of overriding it.
  * @returns {object} config consumable by buildParentRule/mergeIntoTree
  */
-export function buildRuleConfig({ hostname, apiKey }) {
+export function buildRuleConfig({ hostname, apiKey, addCaching = false }) {
   const d = EDGE_OPTIMIZE_DEFAULTS;
   return {
     match: {
@@ -582,5 +613,6 @@ export function buildRuleConfig({ hostname, apiKey }) {
     removeIncomingResponseHeaders: [...d.removeIncomingResponseHeaders],
     ruleNames: { ...d.ruleNames },
     failover: { alternateHostname: hostname },
+    addCaching,
   };
 }
