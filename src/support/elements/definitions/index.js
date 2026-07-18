@@ -24,11 +24,20 @@ export { buildWeeksPayload, transformWeeksResponse } from './weeks.js';
 export { buildPromptsPayload, transformPromptsResponse } from './prompts.js';
 export { buildCitedDomainsPayload, transformCitedDomainsResponse } from './cited-domains.js';
 export {
+  buildSentimentOverviewPayload,
+  transformSentimentOverviewResponse,
+} from './sentiment-overview.js';
+export {
   buildOwnedUrlsStatsPayload,
   buildOwnedUrlsTrendPayload,
   transformOwnedUrlsResponse,
 } from './owned-urls.js';
 export { buildDomainUrlsPayload, transformDomainUrlsResponse } from './domain-urls.js';
+export {
+  buildMarketMentionsTrendPayload,
+  buildMarketCitationsTrendPayload,
+  transformMarketTrackingTrends,
+} from './market-tracking-trends.js';
 export {
   transformStatsSimpleNumericResponse,
   buildStatsTotalExecutionsPayload,
