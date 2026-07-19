@@ -2261,9 +2261,13 @@ describe('Access Control Util', () => {
   describe('hasLlmoCapabilityForSite', () => {
     const site = { getId: () => 'site-1', getOrganizationId: () => 'org-uuid' };
 
-    function makeCtx({ profile = {}, facs, postgrest = true } = {}) {
+    function makeCtx({
+      profile = {}, facs, postgrest = true, suffix = '/sites/site-1/llmo/config', method = 'POST',
+    } = {}) {
       return {
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        // Real FACS-governed route so the derived capability comes from the route
+        // map (POST /sites/:siteId/llmo/config → llmo/can_configure), not a hardcode.
+        pathInfo: { method, suffix, headers: { 'x-product': 'llmo' } },
         attributes: {
           authInfo: new AuthInfo().withType('jwt').withProfile(profile),
           ...(facs ? { facs } : {}),
@@ -2292,19 +2296,19 @@ describe('Access Control Util', () => {
 
     it('not enrolled → falls back to legacy claim (admin → true)', async () => {
       const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: true } }));
-      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.true;
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
       expect(listBrandIdsForSite).to.not.have.been.called;
     });
 
     it('not enrolled → falls back to legacy claim (non-admin → false)', async () => {
       const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: false } }));
-      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
     });
 
     it('enrolled and NOT deferred → wrapper already confirmed the capability → allow', async () => {
       // facs_enabled but no facs defer marker → JWT short-circuit / state admit upstream.
       const util = ACU.fromContext(makeCtx({ profile: { facs_enabled: true } }));
-      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.true;
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
       expect(listBrandIdsForSite).to.not.have.been.called;
     });
 
@@ -2315,7 +2319,7 @@ describe('Access Control Util', () => {
         profile: { facs_enabled: true },
         facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
       }));
-      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.true;
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
       expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
         product: 'LLMO', resourceType: 'brand', capability: 'llmo/can_configure',
       });
@@ -2328,7 +2332,7 @@ describe('Access Control Util', () => {
         profile: { facs_enabled: true },
         facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
       }));
-      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
     });
 
     it('enrolled and deferred → denies (fail closed) when postgrest is unavailable', async () => {
@@ -2337,7 +2341,7 @@ describe('Access Control Util', () => {
         facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
         postgrest: false,
       }));
-      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
       expect(listBrandIdsForSite).to.not.have.been.called;
     });
 
@@ -2347,8 +2351,34 @@ describe('Access Control Util', () => {
         profile: { facs_enabled: true },
         facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
       }));
-      expect(await util.hasLlmoCapabilityForSite(site, 'llmo/can_configure')).to.be.false;
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
       expect(listResourceIdsWithCapability).to.not.have.been.called;
+    });
+
+    it('derives the capability from the route (edge-optimize → can_deploy)', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-A']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'POST',
+        suffix: '/sites/site-1/llmo/edge-optimize-config',
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
+        capability: 'llmo/can_deploy',
+      });
+    });
+
+    it('enrolled and deferred → denies (fail closed) when the route has no capability', async () => {
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'GET',
+        suffix: '/not/a/facs/route',
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+      expect(listBrandIdsForSite).to.not.have.been.called;
     });
   });
 });

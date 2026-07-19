@@ -19,10 +19,12 @@ import {
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { resolveRouteCapability } from '@adobe/spacecat-shared-http-utils/src/auth/route-utils.js';
 import { UnauthorizedProductError } from './errors.js';
 import { CUSTOMER_VISIBLE_TIERS } from './utils.js';
 import { listBrandIdsForSite } from './brands-storage.js';
 import { listResourceIdsWithCapability } from './state-access-mapping-utils.js';
+import routeFacsCapabilities from '../routes/facs-capabilities.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -210,20 +212,23 @@ export default class AccessControlUtil {
    *   - Enrolled AND not deferred → the wrapper already confirmed the route's
    *     capability upstream (JWT short-circuit or state-layer admit) → allow.
    *   - Enrolled AND deferred → the wrapper could not map the site to its LLMO
-   *     ReBAC `brand`, so authorize here: the caller must hold `capability` via a
-   *     state-layer grant on any brand linked to the site. Fail closed if the
-   *     state layer is unreachable.
+   *     ReBAC `brand`, so authorize here: the caller must hold the route's
+   *     required capability via a state-layer grant on any brand linked to the
+   *     site. Fail closed if the state layer is unreachable.
+   *
+   * The required capability is NOT passed in — it is derived from the same
+   * `routeFacsCapabilities.PRODUCTS_ROUTES` map the wrapper enforced (via
+   * `resolveRouteCapability` on the current request), so the controller and the
+   * wrapper can never disagree and there is no hardcoded capability to drift.
    *
    * MUST only be called on FACS-governed routes (the wrapper runs ahead of the
    * controller); on a non-governed route the "not deferred" branch would admit
    * any enrolled caller.
    *
    * @param {object} site - Site model (exposes getId + getOrganizationId).
-   * @param {string} capability - Fully-qualified `<product>/<capability>` the
-   *   route requires (e.g. `llmo/can_configure`).
    * @returns {Promise<boolean>}
    */
-  async hasLlmoCapabilityForSite(site, capability) {
+  async hasLlmoCapabilityForSite(site) {
     const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
     if (!facsEnabled) {
       return this.isLLMOAdministrator();
@@ -233,6 +238,14 @@ export default class AccessControlUtil {
     if (!facs?.enabled) {
       // Enrolled and the wrapper already confirmed the capability upstream.
       return true;
+    }
+
+    // Derive the route's required capability from the same map the wrapper used.
+    const routeMap = routeFacsCapabilities.PRODUCTS_ROUTES?.[facs.product?.toUpperCase?.()];
+    const capability = routeMap ? resolveRouteCapability(this.context, routeMap) : null;
+    if (!capability) {
+      this.log?.warn?.('[acl] FACS deferred but no route capability resolved - denying');
+      return false;
     }
 
     // Deferred: resolve the site's brand(s) and check the state-layer grant.
