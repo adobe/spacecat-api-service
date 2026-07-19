@@ -72,7 +72,7 @@ function expectMappingDto(m) {
  *
  * Exercises the full PostgREST round-trip for the hybrid-model state layer:
  * create / list / patch (including empty-to-remove-access) / history, plus
- * validation and the active-duplicate → 409 semantics. The `admin` persona is
+ * validation and the active-duplicate → upsert (overwrite) semantics. The `admin` persona is
  * used throughout because it is an
  * internal identity that bypasses `facsWrapper` — the controller logic and
  * the real `facs_access_mappings` table are what's under test here, not the
@@ -131,17 +131,22 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items[0].id).to.equal(created.id);
       });
 
-      it('POST a duplicate active binding returns 409 with the existing id', async () => {
+      it('POST a duplicate active binding upserts: overwrites capabilities (200)', async () => {
         const http = getHttpClient();
         const res = await http.admin.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
           resourceId: BRAND_RESOURCE_ID,
-          grantedCapabilities: ['llmo/can_view'],
+          // A distinct set from the original create (LLMO_CAPS). The upsert
+          // replaces the stored capabilities on the SAME row (same id); the
+          // baseline can_view is auto-injected.
+          grantedCapabilities: ['llmo/can_configure'],
         });
-        expect(res.status).to.equal(409);
+        expect(res.status).to.equal(200);
         expect(res.body.id).to.equal(created.id);
+        expect(res.body.grantedCapabilities)
+          .to.have.members(['llmo/can_configure', 'llmo/can_view']);
       });
 
       it('PATCH replaces the granted capabilities (200)', async () => {
