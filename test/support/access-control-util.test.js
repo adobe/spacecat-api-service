@@ -2381,4 +2381,51 @@ describe('Access Control Util', () => {
       expect(listBrandIdsForSite).to.not.have.been.called;
     });
   });
+
+  describe('llmoForbiddenMessage', () => {
+    function makeCtx({
+      profile = {}, facs, suffix = '/sites/site-1/llmo/config', method = 'POST',
+    } = {}) {
+      return {
+        pathInfo: { method, suffix, headers: { 'x-product': 'llmo' } },
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile(profile),
+          ...(facs ? { facs } : {}),
+        },
+        dataAccess: {
+          Entitlement: {}, TrialUser: {}, OrganizationIdentityProvider: {},
+        },
+      };
+    }
+
+    const LEGACY = 'Only LLMO administrators can update the LLMO config';
+
+    it('not FACS-enrolled → returns the legacy wording unchanged', () => {
+      const util = AccessControlUtil.fromContext(makeCtx({ profile: {} }));
+      expect(util.llmoForbiddenMessage(LEGACY)).to.equal(LEGACY);
+    });
+
+    it('FACS-enrolled → returns a capability-oriented message naming the route capability', () => {
+      // POST /sites/:siteId/llmo/config → llmo/can_configure
+      const util = AccessControlUtil.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      const msg = util.llmoForbiddenMessage(LEGACY);
+      expect(msg).to.not.equal(LEGACY);
+      expect(msg).to.contain('llmo/can_configure');
+    });
+
+    it('FACS-enrolled but route capability unresolvable → generic LLMO permission message', () => {
+      const util = AccessControlUtil.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'GET',
+        suffix: '/not/a/facs/route',
+      }));
+      const msg = util.llmoForbiddenMessage(LEGACY);
+      expect(msg).to.not.equal(LEGACY);
+      expect(msg).to.contain('LLMO permission');
+    });
+  });
 });

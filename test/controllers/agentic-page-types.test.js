@@ -76,6 +76,7 @@ function loadController(mockHasAccess = sinon.stub().resolves(true)) {
     hasAdminAccess: sinon.stub().returns(false),
     isLLMOAdministrator: sinon.stub().returns(true),
     hasLlmoCapabilityForSite: async () => true,
+    llmoForbiddenMessage: (msg) => msg,
   });
   return AgenticPageTypesController();
 }

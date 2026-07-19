@@ -65,6 +65,7 @@ const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, 
     isLLMOAdministrator: () => isLLMOAdministratorResult,
     // FACS-hybrid gates mirror the legacy admin result so existing expectations hold.
     hasLlmoCapabilityForSite: async () => isLLMOAdministratorResult,
+    llmoForbiddenMessage: (msg) => msg,
     hasLlmoAdminCapability: () => isLLMOAdministratorResult,
     isOwnerOfSite: async () => isOwnerOfSiteResult,
   }),
@@ -295,6 +296,7 @@ describe('LlmoController', () => {
                 return true;
               },
               hasLlmoCapabilityForSite: async () => true,
+              llmoForbiddenMessage: (msg) => msg,
               hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() {
                 return true;
@@ -415,6 +417,7 @@ describe('LlmoController', () => {
               hasAdminAccess() { return true; },
               isLLMOAdministrator() { return true; },
               hasLlmoCapabilityForSite: async () => true,
+              llmoForbiddenMessage: (msg) => msg,
               hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() { return true; },
             };
@@ -458,6 +461,7 @@ describe('LlmoController', () => {
               hasAdminAccess() { return true; },
               isLLMOAdministrator() { return true; },
               hasLlmoCapabilityForSite: async () => true,
+              llmoForbiddenMessage: (msg) => msg,
               hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() { return true; },
             };
@@ -4997,6 +5001,7 @@ describe('LlmoController', () => {
               hasAdminAccess: () => false,
               isLLMOAdministrator: () => false,
               hasLlmoCapabilityForSite: async () => false,
+              llmoForbiddenMessage: (msg) => msg,
               hasLlmoAdminCapability: () => false,
               isOwnerOfSite: isOwnerStub,
             }),
@@ -5923,6 +5928,7 @@ describe('LlmoController', () => {
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
               hasLlmoCapabilityForSite: hasCapStub,
+              llmoForbiddenMessage: (msg) => msg,
               isOwnerOfSite: isOwnerStub,
             }),
           },
@@ -6979,6 +6985,7 @@ describe('LlmoController', () => {
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
               hasLlmoCapabilityForSite: hasCapStub,
+              llmoForbiddenMessage: (msg) => msg,
               isOwnerOfSite: sinon.stub().resolves(true),
             }),
           },

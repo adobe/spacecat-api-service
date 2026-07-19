@@ -304,6 +304,37 @@ export default class AccessControlUtil {
     return !this.context.attributes?.facs?.enabled;
   }
 
+  /**
+   * Chooses the 403 message for an LLMO capability denial based on which layer
+   * rejected the caller, so the response is not misleading:
+   *   - org NOT FACS-enrolled → the legacy `isLLMOAdministrator()` claim denied;
+   *     keep the caller-supplied legacy wording ("Only LLMO administrators …").
+   *   - org FACS-enrolled → the denial came from the hybrid FACS/ReBAC layer
+   *     (the caller lacks the route's required capability on the resource), so
+   *     "administrator" is misleading — return a capability-oriented message
+   *     naming the capability derived from the same route map the wrapper used.
+   *
+   * Pair with {@link hasLlmoCapabilityForSite} / {@link hasLlmoAdminCapability}:
+   *   if (!await ac.hasLlmoCapabilityForSite(site)) {
+   *     return forbidden(ac.llmoForbiddenMessage('Only LLMO administrators can …'));
+   *   }
+   *
+   * @param {string} legacyMessage - wording used on the legacy (non-FACS) path.
+   * @returns {string}
+   */
+  llmoForbiddenMessage(legacyMessage) {
+    const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
+    if (!facsEnabled) {
+      return legacyMessage;
+    }
+    const product = this.context.attributes?.facs?.product;
+    const routeMap = routeFacsCapabilities.PRODUCTS_ROUTES?.[product?.toUpperCase?.()];
+    const capability = routeMap ? resolveRouteCapability(this.context, routeMap) : null;
+    return capability
+      ? `Access denied: you do not hold the required '${capability}' permission for this resource`
+      : 'Access denied: you do not have the required LLMO permission for this resource';
+  }
+
   canManageImsOrgAccess() {
     if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) {
       return false;

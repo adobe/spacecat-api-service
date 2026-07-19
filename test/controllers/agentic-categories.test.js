@@ -100,6 +100,7 @@ function loadController(
     // The factory's admin gate is now hasLlmoCapabilityForSite; delegate to the
     // same stub so existing mockIsAdmin expectations (allow/deny) carry over.
     hasLlmoCapabilityForSite: async () => mockIsAdmin(),
+    llmoForbiddenMessage: (msg) => msg,
   });
   return { controller: AgenticCategoriesController(), mockHasAccess };
 }
