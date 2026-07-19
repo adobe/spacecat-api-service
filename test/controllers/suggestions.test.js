@@ -12917,6 +12917,7 @@ describe('Suggestions Controller', () => {
             fromContext: () => ({
               hasAccess: sandbox.stub().resolves(true),
               isLLMOAdministrator: sandbox.stub().returns(true),
+              hasLlmoCapabilityForSite: sandbox.stub().resolves(true),
               isOwnerOfSite: sandbox.stub().resolves(true),
             }),
           },
