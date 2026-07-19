@@ -848,6 +848,27 @@ describe('SerenityController', () => {
       expect(JSON.stringify(body)).not.to.match(/leak/);
     });
 
+    // An upstream 409 (e.g. a prompt rename onto a sibling prompt's exact text
+    // — serenity-docs#63) is the caller's to act on, not an outage: it keeps
+    // its status and the `conflict` token instead of flattening into the
+    // generic 502. Message stays redacted like every transport-error branch.
+    it('upstream SerenityTransportError 409 propagates as 409 conflict with a redacted message', async () => {
+      handlers.handleUpdatePrompt.rejects(new MockTransportError(409, 'gateway-url-with-uuids', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updatePrompt(fakeContext({
+        params: { semrushPromptId: 'sem-1' },
+        data: {
+          geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['t1'],
+        },
+      }));
+      expect(response.status).to.equal(409);
+      const body = await readBody(response);
+      expect(body.error).to.equal('conflict');
+      expect(body.message).to.equal('Upstream rejected the request as a conflict');
+      expect(body.message).to.not.match(/gateway-url-with-uuids/);
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
     // mapError's final fallback: anything that isn't ErrorWithStatusCode and
     // isn't SerenityTransportError lands on the generic 500 path. No upstream
     // body, no status code leakage — the message is always the constant

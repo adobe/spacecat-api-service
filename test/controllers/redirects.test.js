@@ -378,12 +378,113 @@ describe('RedirectsController', () => {
     expect(mockS3.s3Client.send.called).to.be.false;
   });
 
+  it('does not double-emit AsoOverlayS3ReadDurationMs when the body stream throws', async () => {
+    // Regression guard: `s3Client.send()` resolves (S3 GET succeeded, headers
+    // received) then `transformToString()` throws (stream/decode failure).
+    // Without the emitS3Duration guard, we'd get two duration samples with
+    // contradictory S3Result dimensions (SUCCESS + UNEXPECTED) for one request,
+    // skewing the S3-tier chart. The guard makes emitS3Duration idempotent
+    // per-request so only the first result sticks.
+    const streamErr = new Error('stream aborted');
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().rejects(streamErr) },
+    });
+
+    // Spy on the EMF sink (metrics-emf.js writes envelopes to stdout).
+    const stdoutWrite = sandbox.spy(process.stdout, 'write');
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(500);
+    // Count only the AsoOverlayS3ReadDurationMs envelopes — other metrics
+    // (RequestTotal, RequestDurationMs) legitimately emit on every request.
+    const durationEmissions = stdoutWrite.getCalls()
+      .map((c) => c.args[0])
+      .filter((s) => typeof s === 'string' && s.includes('AsoOverlayS3ReadDurationMs'));
+    expect(durationEmissions).to.have.lengthOf(
+      1,
+      `expected exactly one AsoOverlayS3ReadDurationMs emission, got ${durationEmissions.length}`,
+    );
+    // First-writer-wins: the SUCCESS from the initial send() resolution.
+    expect(durationEmissions[0]).to.include('"S3Result":"success"');
+  });
+
   it('returns 400 for a malformed service identifier', async () => {
     requestContext.params.service = 'not-a-cm-service';
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(400);
     expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  // AEM CS injects a `-prev` suffix in `AEM_SERVICE` for preview-tier pods
+  // (e.g. `cm-p154709-e1629980-prev`). Mystique writes exactly one overlay per
+  // (program, environment) — publish and preview share it. So we accept the
+  // suffix at the API boundary and strip it before all downstream lookups.
+  describe('preview-tier suffix (-prev)', () => {
+    const PREVIEW_SERVICE = `${SERVICE}-prev`;
+
+    it('accepts -prev and reads the canonical (non-prev) S3 key', async () => {
+      const overlay = 'example.com/old https://www.example.com/new\n';
+      mockS3.s3Client.send.resolves({
+        ETag: ETAG,
+        Body: { transformToString: sandbox.stub().resolves(overlay) },
+      });
+      requestContext.params.service = PREVIEW_SERVICE;
+
+      const response = await controller.getRedirects(requestContext);
+
+      expect(response.status).to.equal(200);
+      expect(await response.text()).to.equal(overlay);
+      // Site lookup uses the canonical program/environment ids — the `-prev`
+      // suffix is not part of the site identity.
+      expect(mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId
+        .calledWith('p154709', 'e1629980')).to.be.true;
+      // S3 read hits the canonical object; preview never has its own key.
+      expect(mockS3.GetObjectCommand.calledWithMatch({
+        Bucket: BUCKET,
+        Key: `config/${SERVICE}/redirects.txt`,
+      })).to.be.true;
+      // Surrogate-Key uses the canonical service so a single mystique
+      // purge-on-Deploy call invalidates both the publish and preview Fastly
+      // cache entries (they differ by URL only, they share the tag).
+      expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
+    });
+
+    it('returns 304 on -prev when If-None-Match matches (canonical ETag)', async () => {
+      mockS3.s3Client.send.resolves({
+        ETag: ETAG,
+        Body: { transformToString: sandbox.stub().resolves('irrelevant') },
+      });
+      requestContext.params.service = PREVIEW_SERVICE;
+      withIfNoneMatch(ETAG);
+
+      const response = await controller.getRedirects(requestContext);
+
+      expect(response.status).to.equal(304);
+      expect(response.headers.get('etag')).to.equal(ETAG);
+      expect(response.headers.get('surrogate-key')).to.equal(`aso-overlay-${SERVICE}`);
+    });
+
+    it('rejects malformed -prev variants at the boundary', async () => {
+      // Trailing hyphen without `prev`, embedded `-prev-`, capitalized suffix
+      // must all still 400 — the regex only allows a single literal `-prev`
+      // at the very end. Otherwise a caller could exercise arbitrary shapes.
+      for (const bad of [
+        'cm-p154709-e1629980-',
+        'cm-p154709-e1629980-preview',
+        'cm-p154709-e1629980-PREV',
+        'cm-p154709-e1629980-prev-2',
+      ]) {
+        // eslint-disable-next-line no-await-in-loop
+        requestContext = { params: { service: bad }, pathInfo: { headers: {} } };
+        // eslint-disable-next-line no-await-in-loop
+        const response = await controller.getRedirects(requestContext);
+        expect(response.status, `expected 400 for ${bad}`).to.equal(400);
+      }
+      expect(mockS3.s3Client.send.called).to.be.false;
+    });
   });
 
   it('returns 404 (not 403) when no site resolves — no enumeration signal', async () => {
