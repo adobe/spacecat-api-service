@@ -27,12 +27,18 @@ const ELEMENT_ID = 'el-uuid-456';
 const EXPECTED_URL = `${BASE_URL}/enterprise/pages/api/v3/workspaces/${WORKSPACE_ID}/products/ai/elements/${ELEMENT_ID}/data`;
 const ENV = { SEMRUSH_PROJECTS_BASE_URL: BASE_URL };
 
-function makeResponse(status, body) {
+function makeResponse(status, body, headers = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
+  const lowerHeaders = Object.fromEntries(
+    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
+  );
   return {
     ok: status >= 200 && status < 300,
     status,
     text: sinon.stub().resolves(text),
+    headers: {
+      get: (name) => lowerHeaders[String(name).toLowerCase()] ?? null,
+    },
   };
 }
 
@@ -240,6 +246,199 @@ describe('createElementsTransport', () => {
       await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
       const [, init] = fetchStub.firstCall.args;
       expect(init.signal).to.be.instanceOf(AbortSignal);
+    });
+  });
+
+  describe('retry on 429', () => {
+    // All retry tests use a zero base delay so the backoff sleep is instant unless a fake clock
+    // is installed; pass overrides (e.g. maxRetries) as needed.
+    const fastTransport = (extra = {}) => createElementsTransport({
+      env: ENV, imsToken: IMS_TOKEN, retryBaseDelayMs: 0, ...extra,
+    });
+
+    it('retries a 429 then succeeds on the next attempt', async () => {
+      const successBody = { blocks: { value: [{ value: 'Adobe' }] } };
+      fetchStub.onCall(0).resolves(makeResponse(429, { error: 'rate limited' }));
+      fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+      const transport = fastTransport();
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      expect(fetchStub.callCount).to.equal(2);
+      expect(result).to.deep.equal(successBody);
+    });
+
+    it('throws 429 after exhausting retries (maxRetries: 2 ⇒ 3 attempts)', async () => {
+      fetchStub.resolves(makeResponse(429, { error: 'rate limited' }));
+      const transport = createElementsTransport({
+        env: ENV, imsToken: IMS_TOKEN, maxRetries: 2, retryBaseDelayMs: 0,
+      });
+      let err;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.be.instanceOf(ElementsTransportError);
+      expect(err.status).to.equal(429);
+      expect(err.body).to.deep.equal({ error: 'rate limited' });
+      expect(fetchStub.callCount).to.equal(3);
+    });
+
+    it('maxRetries: 0 ⇒ single attempt on a 429 (throws, no retry)', async () => {
+      fetchStub.resolves(makeResponse(429, { error: 'rate limited' }));
+      const transport = fastTransport({ maxRetries: 0 });
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}))
+        .to.be.rejectedWith(ElementsTransportError);
+      expect(fetchStub.callCount).to.equal(1);
+    });
+
+    it('negative maxRetries ⇒ single attempt on a 429', async () => {
+      fetchStub.resolves(makeResponse(429, { error: 'rate limited' }));
+      const transport = fastTransport({ maxRetries: -5 });
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}))
+        .to.be.rejectedWith(ElementsTransportError);
+      expect(fetchStub.callCount).to.equal(1);
+    });
+
+    it('does NOT retry a 5xx (single attempt, throws)', async () => {
+      fetchStub.resolves(makeResponse(503, 'service unavailable'));
+      const transport = fastTransport();
+      let err;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.be.instanceOf(ElementsTransportError);
+      expect(err.status).to.equal(503);
+      expect(fetchStub.callCount).to.equal(1);
+    });
+
+    it('does NOT retry a network error (single attempt)', async () => {
+      fetchStub.rejects(new Error('ECONNREFUSED'));
+      const transport = fastTransport();
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}))
+        .to.be.rejectedWith('ECONNREFUSED');
+      expect(fetchStub.callCount).to.equal(1);
+    });
+
+    it('does NOT retry an AbortError/timeout (single attempt, 504)', async () => {
+      fetchStub.rejects(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+      const transport = fastTransport();
+      let err;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.be.instanceOf(ElementsTransportError);
+      expect(err.status).to.equal(504);
+      expect(fetchStub.callCount).to.equal(1);
+    });
+
+    it('honors the Retry-After header when deciding how long to wait', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        const successBody = { ok: true };
+        // Retry-After: 1s, with retryBaseDelayMs 0 so backoff alone would be ~0 — the wait must
+        // come from the header. capped-to-header wait means the retry fires only after >= 1000ms.
+        fetchStub.onCall(0).resolves(makeResponse(429, { error: 'slow down' }, { 'Retry-After': '1' }));
+        fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+        const transport = fastTransport();
+        const promise = transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+
+        // Let the first fetch + parseBody microtasks settle, then assert we are still waiting.
+        await clock.tickAsync(0);
+        expect(fetchStub.callCount).to.equal(1);
+        // Just before the Retry-After deadline: still no second attempt.
+        await clock.tickAsync(999);
+        expect(fetchStub.callCount).to.equal(1);
+        // Crossing 1000ms triggers the retry.
+        await clock.tickAsync(1);
+        const result = await promise;
+        expect(fetchStub.callCount).to.equal(2);
+        expect(result).to.deep.equal(successBody);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('falls back to backoff when Retry-After is unparseable', async () => {
+      const successBody = { ok: true };
+      fetchStub.onCall(0).resolves(makeResponse(429, {}, { 'Retry-After': 'not-a-date' }));
+      fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+      const transport = fastTransport();
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      expect(fetchStub.callCount).to.equal(2);
+      expect(result).to.deep.equal(successBody);
+    });
+
+    it('honors an HTTP-date Retry-After header', async () => {
+      const successBody = { ok: true };
+      const future = new Date(Date.now() + 1000).toUTCString();
+      fetchStub.onCall(0).resolves(makeResponse(429, {}, { 'Retry-After': future }));
+      fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+      const transport = fastTransport();
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      expect(fetchStub.callCount).to.equal(2);
+      expect(result).to.deep.equal(successBody);
+    });
+
+    it('caps the wait at MAX_RETRY_DELAY_MS even for an oversized Retry-After', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        const successBody = { ok: true };
+        // Retry-After far above the 20s ceiling — the wait must be clamped to 20000ms.
+        fetchStub.onCall(0).resolves(makeResponse(429, {}, { 'Retry-After': '99999' }));
+        fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+        const transport = fastTransport();
+        const promise = transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+        await clock.tickAsync(0);
+        expect(fetchStub.callCount).to.equal(1);
+        await clock.tickAsync(20_000);
+        const result = await promise;
+        expect(fetchStub.callCount).to.equal(2);
+        expect(result).to.deep.equal(successBody);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('treats a negative Retry-After (non-conforming) as absent → falls back to backoff', async () => {
+      const successBody = { ok: true };
+      // With retryBaseDelayMs 0, a null Retry-After ⇒ instant retry. A negative header value must
+      // be ignored (parseRetryAfterMs returns null), never read as "retry immediately" or worse.
+      fetchStub.onCall(0).resolves(makeResponse(429, {}, { 'Retry-After': '-5' }));
+      fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+      const transport = fastTransport();
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      expect(fetchStub.callCount).to.equal(2);
+      expect(result).to.deep.equal(successBody);
+    });
+
+    it('applies jittered backoff (baseDelayMs > 0) using the [0.5, 1) multiplier', async () => {
+      const clock = sinon.useFakeTimers();
+      const randStub = sinon.stub(Math, 'random').returns(0); // multiplier = 0.5 + 0*0.5 = 0.5
+      try {
+        const successBody = { ok: true };
+        // base 200ms, attempt 0, no Retry-After → 200 * 2**0 * 0.5 = 100ms.
+        fetchStub.onCall(0).resolves(makeResponse(429, { error: 'rate limited' }));
+        fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+        const transport = createElementsTransport({
+          env: ENV, imsToken: IMS_TOKEN, maxRetries: 1, retryBaseDelayMs: 200,
+        });
+        const promise = transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+        await clock.tickAsync(0);
+        expect(fetchStub.callCount).to.equal(1);
+        await clock.tickAsync(99); // not yet — the jittered wait is 100ms
+        expect(fetchStub.callCount).to.equal(1);
+        await clock.tickAsync(1); // 100ms reached → retry fires
+        const result = await promise;
+        expect(fetchStub.callCount).to.equal(2);
+        expect(result).to.deep.equal(successBody);
+      } finally {
+        randStub.restore();
+        clock.restore();
+      }
     });
   });
 });
