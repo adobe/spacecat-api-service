@@ -27,6 +27,7 @@ import {
 } from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -473,6 +474,37 @@ describe('markets-subworkspace handlers', () => {
         publishProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
       await expect(handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' })).to.be.rejectedWith(/boom/);
+    });
+
+    // serenity-docs#72 §2/§4.1 — case 1 (brand carve exhausted, allocator OFF): a quota 405 on a
+    // REQUIRED publish must surface as the stable `quotaExceeded` 409 token, not the raw upstream
+    // 405 (which mapError would otherwise flatten into the generic 502 serenityUpstreamError).
+    it('require-mode publish maps a quota 405 to the quotaExceeded 409 token', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(405, 'quota')),
+      });
+      const err = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { publishMode: 'require' },
+      ).then(() => null, (e) => e);
+      expect(err).to.not.equal(null);
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+    });
+
+    it('require-mode publish re-throws a non-405 upstream error unchanged', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      await expect(
+        handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'require' }),
+      ).to.be.rejectedWith(/boom/);
     });
 
     it('attaches selected AI models and generated prompts by tag id before publish', async () => {
