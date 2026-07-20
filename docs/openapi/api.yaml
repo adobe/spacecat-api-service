@@ -714,6 +714,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/logpush:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-logpush'
   /sites/{siteId}/llmo/cdn-onboard/akamai/config:
     $ref: './llmo-api.yaml#/site-llmo-akamai-config'
   /sites/{siteId}/llmo/cdn-onboard/akamai/properties:

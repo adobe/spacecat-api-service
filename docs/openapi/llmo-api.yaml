@@ -5984,6 +5984,95 @@ site-llmo-cloudflare-routes:
     security:
       - ims_key: [ ]
 
+site-llmo-cloudflare-logpush:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: x-cloudflare-token
+      in: header
+      required: true
+      description: Cloudflare API token obtained from the browser PKCE flow.
+      schema:
+        type: string
+  post:
+    operationId: createLlmoCloudflareLogpush
+    summary: Enable Cloudflare Logpush forwarding for a zone into Adobe's cdn-logs S3 bucket
+    description: |
+      Creates the Cloudflare Logpush job that forwards the zone's HTTP request logs into Adobe's
+      cdn-logs S3 bucket, completing the Cloudflare log-forwarding onboarding flow (LLMO-5869).
+
+      Verifies the zone's registrable domain matches the site's own domain before acting on it,
+      rejecting a zoneId that belongs to an unrelated domain with `400`.
+
+      Requires the site to already be provisioned for Cloudflare log forwarding (bucket, path,
+      and region recorded on the site's CDN bucket config by the earlier provisioning step) —
+      returns `409` with an actionable message otherwise.
+
+      Idempotency: the service lists the zone's existing Logpush jobs on the `http_requests`
+      dataset and matches on the computed `destination_conf`; if a match already exists, no new
+      job is created and the response reports `alreadyExisted: true`. Re-running this endpoint is
+      always safe.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - zoneId
+            properties:
+              zoneId:
+                type: string
+                description: >-
+                  Cloudflare zone ID (32-character lowercase hex). zoneId is a Cloudflare
+                  identifier, not a SpaceCat entity, so it is supplied in the body rather than
+                  the path — matching this API's addRoute convention.
+                pattern: '^[0-9a-f]{32}$'
+                example: '0123456789abcdef0123456789abcdef'
+    responses:
+      '200':
+        description: >-
+          Logpush job created, or — when `alreadyExisted` is `true` — a job forwarding to the
+          same destination already existed and was left unchanged.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                created:
+                  type: boolean
+                alreadyExisted:
+                  type: boolean
+                jobId:
+                  type: string
+                  description: Cloudflare Logpush job ID
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: >-
+          The site has not yet been provisioned for Cloudflare log forwarding (missing bucket
+          name, path prefix, or region on the site's CDN bucket config).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
 site-llmo-akamai-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'

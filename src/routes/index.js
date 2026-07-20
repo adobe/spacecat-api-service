@@ -573,6 +573,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': llmoCloudflareController.addRoute,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/logpush': llmoCloudflareController.createLogpush,
 
     // LLMO Akamai Onboarding Routes
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': llmoAkamaiController.getConfig,

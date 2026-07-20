@@ -165,6 +165,7 @@ const routeFacsCapabilities = {
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/logpush',
     // LLMO Akamai onboarding — LLMO-admin manual provisioning, gated by
     // isLLMOAdministrator() with caller-supplied x-akamai-* credentials; not a FACS surface.
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',

@@ -77,6 +77,10 @@ describe('LlmoCloudflareController', () => {
       deployWorkerScript: sandbox.stub(),
       setWorkerSecret: sandbox.stub(),
       addRoute: sandbox.stub(),
+      listLogpushJobs: sandbox.stub(),
+      requestLogpushOwnership: sandbox.stub(),
+      createLogpushJob: sandbox.stub(),
+      getZone: sandbox.stub(),
     };
 
     mockTokowakaClient = {
@@ -90,9 +94,15 @@ describe('LlmoCloudflareController', () => {
       text: sandbox.stub().resolves(WORKER_SCRIPT_TEXT),
     });
 
+    const mockCdnBucketConfig = {
+      bucketName: 'cdn-logs-adobe-dev',
+      allowedPaths: ['9E1005A551ED61CA0A490D45AdobeOrg/raw/byocdn-cloudflare/'],
+      region: 'us-east-1',
+    };
     mockSite = {
       getId: () => SITE_ID,
       getBaseURL: () => 'https://www.example.com',
+      getConfig: () => ({ getLlmoCdnBucketConfig: () => mockCdnBucketConfig }),
     };
 
     mockAccessControlUtil = {
@@ -112,10 +122,12 @@ describe('LlmoCloudflareController', () => {
       },
       env: {
         CLOUDFLARE_CLIENT_ID: CF_CLIENT_ID,
+        AUTH_SERVICE_BASE_URL: 'https://auth.example.com',
+        CF_OWNERSHIP_TOKEN_RETRY_DELAY_MS: '0',
       },
-      params: { siteId: SITE_ID },
+      params: { siteId: SITE_ID, zoneId: ZONE_ID },
       pathInfo: {
-        headers: { 'x-cloudflare-token': CF_TOKEN },
+        headers: { 'x-cloudflare-token': CF_TOKEN, authorization: 'Bearer caller-token' },
       },
       dataAccess: {
         Site: mockSiteModel,
@@ -797,6 +809,337 @@ describe('LlmoCloudflareController', () => {
     it('returns 502 when route creation fails', async () => {
       mockCfClient.addRoute.rejects(new Error('Cloudflare API returned 500 on /routes: boom'));
       const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(502);
+    });
+  });
+
+  // ── createLogpush ────────────────────────────────────────────────────────
+
+  describe('createLogpush', () => {
+    const DESTINATION_CONF = 's3://cdn-logs-adobe-dev/9E1005A551ED61CA0A490D45AdobeOrg/raw/byocdn-cloudflare/{DATE}?region=us-east-1';
+    const JOB_ID = 'logpush-job-123';
+    const FILENAME = '9E1005A551ED61CA0A490D45AdobeOrg/raw/byocdn-cloudflare/20260709/ownership-challenge-abc.txt';
+
+    const okOwnershipTokenFetch = (token = 'ownership-token-xyz') => sandbox.stub().resolves({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: sandbox.stub().resolves({ ownershipToken: token }),
+    });
+
+    beforeEach(() => {
+      mockContext.data = { zoneId: ZONE_ID };
+      mockCfClient.listLogpushJobs.resolves([]);
+      mockCfClient.requestLogpushOwnership.resolves({ filename: FILENAME, valid: true });
+      mockCfClient.createLogpushJob.resolves({ id: JOB_ID });
+      // Matches mockSite.getBaseURL() ('https://www.example.com') so the domain-match check
+      // passes by default; individual tests override to exercise a mismatch.
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: 'www.example.com' });
+      mockFetch = okOwnershipTokenFetch();
+    });
+
+    it('creates a Logpush job and returns created:true', async () => {
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ created: true, alreadyExisted: false, jobId: JOB_ID });
+
+      expect(mockCfClient.listLogpushJobs).to.have.been.calledWith(ZONE_ID, 'http_requests');
+      expect(mockCfClient.requestLogpushOwnership)
+        .to.have.been.calledWith(ZONE_ID, DESTINATION_CONF);
+      expect(mockCfClient.createLogpushJob).to.have.been.calledWith(ZONE_ID, sinon.match({
+        dataset: 'http_requests',
+        destination_conf: DESTINATION_CONF,
+        ownership_challenge: 'ownership-token-xyz',
+        enabled: true,
+        output_options: sinon.match({
+          timestamp_format: 'rfc3339',
+          field_names: sinon.match.array.deepEquals([
+            'EdgeStartTimestamp',
+            'ClientRequestHost',
+            'ClientRequestURI',
+            'ClientRequestMethod',
+            'ClientRequestUserAgent',
+            'EdgeResponseStatus',
+            'ClientRequestReferer',
+            'EdgeResponseContentType',
+            'EdgeTimeToFirstByteMs',
+          ]),
+        }),
+      }));
+
+      // The auth-service call forwards the caller's own Authorization header + x-product, and
+      // never has api-service touch S3 directly. POST with a body, not GET with a query string
+      // — the endpoint has real side effects (deletes the S3 file, writes Secrets Manager).
+      const [fetchUrl, fetchOptions] = mockFetch.getCall(0).args;
+      expect(fetchUrl).to.equal(
+        'https://auth.example.com/auth/cdn-logs-infrastructure/cloudflare-ownership-token',
+      );
+      expect(fetchOptions.method).to.equal('POST');
+      expect(JSON.parse(fetchOptions.body)).to.deep.equal({ siteId: SITE_ID, filename: FILENAME });
+      expect(fetchOptions.headers.Authorization).to.equal('Bearer caller-token');
+      expect(fetchOptions.headers['x-product']).to.equal('LLMO');
+    });
+
+    it('omits the Authorization header when the caller request had none', async () => {
+      delete mockContext.pathInfo.headers.authorization;
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const [, fetchOptions] = mockFetch.getCall(0).args;
+      expect(fetchOptions.headers).to.not.have.property('Authorization');
+    });
+
+    it('omits filename from the auth-service request body when Cloudflare returns none', async () => {
+      mockCfClient.requestLogpushOwnership.resolves({ valid: true });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const [, fetchOptions] = mockFetch.getCall(0).args;
+      expect(JSON.parse(fetchOptions.body)).to.deep.equal({ siteId: SITE_ID });
+    });
+
+    it('treats a null Logpush job list as empty and creates a new job', async () => {
+      mockCfClient.listLogpushJobs.resolves(null);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.createLogpushJob).to.have.been.called;
+    });
+
+    it('returns 400 when the site host has no registrable domain (domain-match guard, not reached)', async () => {
+      // The domain-match guard computes registrableDomain from the same site.getBaseURL()
+      // used for the job name, so a site with no registrable domain is rejected before job
+      // creation is ever attempted — there is no siteId fallback to fall back to.
+      mockSite.getBaseURL = () => 'https://localhost';
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('uses the site\'s registrable domain as the Logpush job name', async () => {
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.createLogpushJob).to.have.been.calledWith(
+        ZONE_ID,
+        sinon.match({ name: 'example.com' }),
+      );
+    });
+
+    it('is idempotent (does not create) when a job with the same destination already exists', async () => {
+      const existing = { id: 'existing-job', destination_conf: DESTINATION_CONF };
+      mockCfClient.listLogpushJobs.resolves([null, existing]);
+
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ created: false, alreadyExisted: true, jobId: 'existing-job' });
+      expect(mockCfClient.requestLogpushOwnership).to.not.have.been.called;
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('ignores a job with a different destination_conf and creates a new one', async () => {
+      mockCfClient.listLogpushJobs.resolves([{ id: 'other-job', destination_conf: 's3://other/x' }]);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.createLogpushJob).to.have.been.called;
+    });
+
+    it('matches an existing job whose destination_conf Cloudflare normalized (reordered/extra query params)', async () => {
+      // Same bucket + path prefix + region, but query params reordered and an extra param added,
+      // and {DATE} resolved to a concrete date — must still be recognized as ours (idempotent).
+      const normalized = 's3://cdn-logs-adobe-dev/9E1005A551ED61CA0A490D45AdobeOrg/raw/byocdn-cloudflare/20260713?foo=bar&region=us-east-1';
+      mockCfClient.listLogpushJobs.resolves([{ id: 'existing-job', destination_conf: normalized }]);
+
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ created: false, alreadyExisted: true, jobId: 'existing-job' });
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('does NOT match a job in a different region (same bucket/prefix)', async () => {
+      const otherRegion = 's3://cdn-logs-adobe-dev/9E1005A551ED61CA0A490D45AdobeOrg/raw/byocdn-cloudflare/{DATE}?region=eu-west-1';
+      mockCfClient.listLogpushJobs.resolves([{ id: 'eu-job', destination_conf: otherRegion }]);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.createLogpushJob).to.have.been.called;
+    });
+
+    it('treats a malformed destination_conf (no bucket/key separator) as a non-match', async () => {
+      mockCfClient.listLogpushJobs.resolves([{ id: 'bad-job', destination_conf: 's3://no-slash-here' }]);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.createLogpushJob).to.have.been.called;
+    });
+
+    it('falls back to the default retry delay when the env override is unset (token ready first try, no wait)', async () => {
+      delete mockContext.env.CF_OWNERSHIP_TOKEN_RETRY_DELAY_MS;
+      // Token is available on the first read, so no setTimeout fires — the default-delay branch is
+      // computed but never awaited, keeping this test instant.
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.created).to.equal(true);
+      expect(mockFetch).to.have.been.calledOnce;
+    });
+
+    it('returns 409 when the site is missing bucketName in its CDN bucket config', async () => {
+      mockSite.getConfig = () => ({ getLlmoCdnBucketConfig: () => ({ allowedPaths: ['x/'], region: 'us-east-1' }) });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(409);
+      expect(mockCfClient.listLogpushJobs).to.not.have.been.called;
+    });
+
+    it('returns 409 when the site has no CDN bucket config at all', async () => {
+      mockSite.getConfig = () => ({ getLlmoCdnBucketConfig: () => null });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(409);
+    });
+
+    it('returns 400 when zoneId is missing from the request body', async () => {
+      mockContext.data = {};
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the request body is missing entirely', async () => {
+      mockContext.data = undefined;
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when zoneId is not a 32-char hex id', async () => {
+      mockContext.data = { zoneId: 'not-hex' };
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it("returns 400 when the zone's domain does not match the site's domain", async () => {
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: 'unrelated-domain.com' });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.include("does not belong to the site's domain");
+      expect(mockCfClient.listLogpushJobs).to.not.have.been.called;
+    });
+
+    it('accepts a zone whose domain is a subdomain of the site domain', async () => {
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: 'www.example.com' });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 400 when the zone has no resolvable domain', async () => {
+      mockCfClient.getZone.resolves({ id: ZONE_ID, name: '' });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 502 when the zone lookup fails', async () => {
+      mockCfClient.getZone.rejects(new Error('Cloudflare API returned 500 on /zones: boom'));
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.listLogpushJobs).to.not.have.been.called;
+    });
+
+    it('returns 400 when CF token is missing', async () => {
+      mockContext.pathInfo.headers = {};
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when site is not found', async () => {
+      mockContext.dataAccess.Site.findById.resolves(null);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(404);
+      expect(mockCfClient.listLogpushJobs).to.not.have.been.called;
+    });
+
+    it('returns 502 when the Logpush job listing fails', async () => {
+      mockCfClient.listLogpushJobs.rejects(new Error('Cloudflare API returned 500 on /jobs: boom'));
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.requestLogpushOwnership).to.not.have.been.called;
+    });
+
+    it('returns 502 when the ownership challenge request fails', async () => {
+      mockCfClient.requestLogpushOwnership.rejects(new Error('Cloudflare API returned 500 on /ownership: boom'));
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockFetch).to.not.have.been.called;
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('returns 502 when AUTH_SERVICE_BASE_URL is not configured', async () => {
+      delete mockContext.env.AUTH_SERVICE_BASE_URL;
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockFetch).to.not.have.been.called;
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('returns 502 when the auth-service ownership-token call fails (non-ok response)', async () => {
+      mockFetch = sandbox.stub().resolves({ ok: false, status: 500, statusText: 'Internal Server Error' });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('returns 502 when the auth-service response has no ownershipToken', async () => {
+      mockFetch = sandbox.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: sandbox.stub().resolves({}),
+      });
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.createLogpushJob).to.not.have.been.called;
+    });
+
+    it('retries the token read once and succeeds when the challenge file lands on the second attempt', async () => {
+      // First read-back returns no token (challenge file not yet written by Cloudflare); the
+      // bounded retry re-reads the SAME filename (no new ownership challenge) and gets it.
+      mockFetch = sandbox.stub();
+      mockFetch.onFirstCall().resolves({
+        ok: true, status: 200, statusText: 'OK', json: sandbox.stub().resolves({}),
+      });
+      mockFetch.onSecondCall().resolves({
+        ok: true, status: 200, statusText: 'OK', json: sandbox.stub().resolves({ ownershipToken: 'late-token' }),
+      });
+
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ created: true, alreadyExisted: false, jobId: JOB_ID });
+      expect(mockFetch).to.have.been.calledTwice;
+      // The retry must NOT re-trigger the ownership challenge (would orphan challenge files).
+      expect(mockCfClient.requestLogpushOwnership).to.have.been.calledOnce;
+      expect(mockCfClient.createLogpushJob)
+        .to.have.been.calledWith(ZONE_ID, sinon.match({ ownership_challenge: 'late-token' }));
+    });
+
+    it('recovers from a create-time race by re-listing and returning alreadyExisted:true', async () => {
+      mockCfClient.createLogpushJob.rejects(new Error('Cloudflare API returned 400 on /jobs: duplicate destination'));
+      // Second listLogpushJobs call (post-failure re-check) finds the job the race created.
+      mockCfClient.listLogpushJobs.onSecondCall().resolves([{ id: 'race-job', destination_conf: DESTINATION_CONF }]);
+
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ created: false, alreadyExisted: true, jobId: 'race-job' });
+    });
+
+    it('returns 502 when job creation fails and the post-failure re-check finds no match', async () => {
+      mockCfClient.createLogpushJob.rejects(new Error('Cloudflare API returned 500 on /jobs: boom'));
+      // Null re-check result exercises the same "treat as empty" fallback as the initial check.
+      mockCfClient.listLogpushJobs.onSecondCall().resolves(null);
+      const res = await controller.createLogpush(mockContext);
+      expect(res.status).to.equal(502);
+    });
+
+    it('returns 502 when job creation fails and the post-failure re-check itself fails', async () => {
+      mockCfClient.createLogpushJob.rejects(new Error('Cloudflare API returned 500 on /jobs: boom'));
+      mockCfClient.listLogpushJobs.onSecondCall().rejects(new Error('Cloudflare API returned 500 on /jobs: boom'));
+      const res = await controller.createLogpush(mockContext);
       expect(res.status).to.equal(502);
     });
   });
