@@ -1068,6 +1068,99 @@ export default function ElementsController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
+   *     /url-inspector/stats
+   * URL Inspector stats KPI cards (totalPromptsCited, totalPrompts, uniqueUrls,
+   * totalCitations) plus a per-week sparkline breakdown, matching the response
+   * shape of the Aurora/Postgres reference endpoint
+   * (docs/llmo-brandalf-apis/url-inspector-stats-api.md). See
+   * docs/elements/url-inspector-stats-plan.md for the full design, including two
+   * known approximation gaps: `totalPromptsCited` sums a per-URL count (Semrush
+   * exposes no distinct prompts-cited element, so a prompt citing multiple owned
+   * URLs is overcounted), and `totalPrompts` is not date-scoped (the Semrush
+   * PROMPTS element has no date filter, unlike the Aurora RPC).
+   */
+  const getUrlInspectorStats = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      // Date range is required (the UI always sends it) and must be a valid
+      // YYYY-MM-DD — mirrors listCitedDomains/listOwnedUrls/listDomainUrls.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year range
+      // fanned across every project (plus up to 8 per-week fan-out calls for the
+      // sparkline) is needlessly expensive upstream.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // Scope per project (region): a specific region → that one project; otherwise
+      // all the brand's markets — mirrors listOwnedUrls/listDomainUrls.
+      let projects;
+      let projectIds;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+        projects = [{ region, projectId }];
+        projectIds = [projectId];
+      } else {
+        projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
+        projectIds = brandSemrushProjects.map((p) => p.semrushProjectId).filter(hasText);
+      }
+
+      const result = await service.getUrlInspectorStats(workspaceId, {
+        projects,
+        projectIds,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        category: query.categoryId || query.category,
+      });
+
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
@@ -1078,5 +1171,6 @@ export default function ElementsController(context, log, env) {
     listDomainUrls,
     getMarketTrackingTrends,
     getStats,
+    getUrlInspectorStats,
   };
 }

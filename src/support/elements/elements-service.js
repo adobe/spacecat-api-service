@@ -48,6 +48,7 @@ import {
   transformStatsVisibilityResponse,
   buildStatsCitationsPayload,
   transformStatsCitationsResponse,
+  aggregateUrlInspectorStats,
 } from './definitions/index.js';
 
 // Bounds parallel per-week upstream fan-out for the /stats trends array (up to
@@ -502,6 +503,103 @@ export function createElementsService(transport) {
       }
 
       return response;
+    },
+
+    /**
+     * Fetches the URL Inspector stats KPI cards (`GET .../url-inspector/stats`) —
+     * `totalPromptsCited`, `totalPrompts`, `uniqueUrls`, `totalCitations` — plus a
+     * per-week breakdown, matching the response shape of the Aurora/Postgres
+     * reference endpoint (`docs/llmo-brandalf-apis/url-inspector-stats-api.md`).
+     * See `docs/elements/url-inspector-stats-plan.md` for the full design and its
+     * two known approximation gaps (`totalPromptsCited` overcounting,
+     * `totalPrompts` not being date-scoped).
+     *
+     * `uniqueUrls`/`totalCitations`/`totalPromptsCited` reuse the same
+     * Stats-per-URL element (9af5ed83) as `getOwnedUrls`, fanned out per project
+     * (region) like it — but WITHOUT the URL_TRENDS element (no per-URL trend
+     * needed here), via {@link aggregateUrlInspectorStats}. `totalPrompts` comes
+     * from a single PROMPTS element call — that element has no date filter at
+     * all, so it is fetched ONCE (not per range/week) and the same value is
+     * reported for the aggregate `stats` and every `weeklyTrends` entry.
+     *
+     * `weeklyTrends` reuses `splitDateRangeIntoWeeksBackward` (max 8 most-recent
+     * weeks, same cap as `getBrandPresenceStats`) — a wider requested range is
+     * silently truncated to the most recent 8 weeks of sparkline data; `stats`
+     * itself always covers the full requested `[startDate, endDate]`.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {Array<{region?: string, projectId?: string}>} [params.projects] -
+     *   Projects to query for the citation KPIs. Empty → one unscoped
+     *   (workspace-wide) fetch.
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs, used
+     *   to scope the PROMPTS element (empty/omitted → all projects in the
+     *   sub-workspace).
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD.
+     * @param {string} [params.category] - Category tag filter.
+     * @returns {Promise<{stats: object, weeklyTrends: object[]}>}
+     */
+    async getUrlInspectorStats(workspaceId, {
+      projects = [], projectIds = [], model, platform, startDate, endDate, category,
+    }) {
+      const scopes = projects.length > 0 ? projects : [{}];
+      // Bound the per-project fan-out (mirrors getOwnedUrls/getDomainUrls) so a
+      // brand with many markets can't spawn unbounded parallel Semrush requests.
+      const STATS_PROJECT_CONCURRENCY = 8;
+
+      const fetchCitationKpisForRange = async (rangeStart, rangeEnd) => {
+        const projectResults = await mapWithConcurrency(
+          scopes,
+          STATS_PROJECT_CONCURRENCY,
+          async ({ projectId }) => ({
+            stats: await transport.fetchElement(
+              workspaceId,
+              ELEMENT_IDS.STATS_PER_URL,
+              buildOwnedUrlsStatsPayload({
+                model, platform, startDate: rangeStart, endDate: rangeEnd, category, projectId,
+              }),
+            ),
+          }),
+        );
+        return aggregateUrlInspectorStats(projectResults);
+      };
+
+      // PROMPTS has no date filter — fetch once, reuse for `stats` and every week.
+      const promptsRaw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.PROMPTS,
+        buildPromptsPayload({
+          model,
+          platform,
+          tags: category ? [`category__${category}`] : [],
+          projectIds,
+        }),
+      );
+      const { count: totalPrompts } = transformPromptsResponse(promptsRaw);
+
+      const citationKpis = await fetchCitationKpisForRange(startDate, endDate);
+      const stats = { ...citationKpis, totalPrompts };
+
+      const weeks = splitDateRangeIntoWeeksBackward(startDate, endDate);
+      const weekCitationKpis = await mapWithConcurrency(
+        weeks,
+        STATS_TRENDS_WEEK_CONCURRENCY,
+        (week) => fetchCitationKpisForRange(week.startDate, week.endDate),
+      );
+      // `weekStart`/`weekEnd` are the actual fetched window boundaries — NOT
+      // calendar-ISO-week-aligned (they're 7-day windows built backward from
+      // `endDate`, same as `getBrandPresenceStats`'s trends), so no `week`
+      // ("YYYY-Www") label is attached; that would misrepresent the boundary as
+      // Monday-Sunday when it may not be.
+      const weeklyTrends = weeks.map((week, i) => ({
+        weekStart: week.startDate,
+        weekEnd: week.endDate,
+        ...weekCitationKpis[i],
+        totalPrompts,
+      }));
+
+      return { stats, weeklyTrends };
     },
   };
 }
