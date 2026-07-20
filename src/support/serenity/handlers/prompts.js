@@ -19,7 +19,8 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeValueInjection } from '../tag-tree.js';
+import { resolveTypeValueInjection, resolveOriginValueInjection } from '../tag-tree.js';
+import { ORIGIN_VALUE } from '../prompt-tags.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -366,60 +367,115 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
 }
 
 /**
- * Builds the per-request `type` injector — the UNIFIED classification layer
- * (serenity-docs#31). Given a pure `classifyPromptType(text, geoTargetId)`
+ * Builds the per-request `type` + `origin` injector — the UNIFIED
+ * classification layer (serenity-docs#31, extended by the-origin-dimension
+ * spec for `origin`). Given a pure `classifyPromptType(text, geoTargetId)`
  * closure (built by the controller from the brand name + region-clamped
  * aliases) that yields a BARE `type` value (`branded` / `non-branded`), it
- * returns `injectComputedType(projectId, input)` which:
- *   - STRIPS every caller-supplied tag id that lives under the `type` root (the
- *     client may never set the value), and
- *   - APPENDS the pre-resolved upstream id of the server-computed value. The
- *     atomic `createPromptsByIds` 500s on an unresolved id, so it is resolved
+ * returns `injectComputedType(projectId, input, options)` which, for BOTH
+ * dimensions:
+ *   - STRIPS every caller-supplied tag id that lives under the dimension's root
+ *     (the client may never set either value directly), and
+ *   - APPENDS a resolved upstream tag id in its place. The atomic
+ *     `createPromptsByIds` 500s on an unresolved id, so ids are resolved
  *     BEFORE the write.
  * The returned input carries the rewritten `tagIds`, so the caller's response
- * echo reflects the computed type without a refetch (decision 5).
+ * echo reflects the computed values without a refetch (decision 5).
  *
- * The strip set is every id under the `type` root, not a name prefix: a tag's
- * dimension is its root, and a sub-category could legitimately be named
- * `branded` without being a `type` value.
+ * The strip set for each dimension is every id under that dimension's root,
+ * not a name prefix: a tag's dimension is its root, and a sub-category could
+ * legitimately be named `branded` or `ai` without being a `type`/`origin` value.
  *
- * Resolution ({@link resolveTypeValueInjection}, two tag-tree reads per distinct
- * `type` value per project — the root level plus the `type` root's children) is
- * memoized for the request, so a bulk create fans out over the distinct computed
- * values rather than over the items. A non-function `classifyPromptType`
- * (defensive) is a pass-through.
+ * `type` is always freshly classified from the write's own text. `origin` is
+ * asymmetric between create and update (`options.mode`, default `'create'`):
+ *   - `'create'`: derives to {@link ORIGIN_VALUE.AI} — every prompt this layer
+ *     creates is AI-generated.
+ *   - `'update'`: re-injects whichever `origin` tag id is ALREADY in
+ *     `input.tagIds` (the client round-trips the tags it read off the prior
+ *     list call), rather than deriving a new one from anything in the update
+ *     request. This is deliberate: `origin` records who authored the prompt
+ *     ORIGINALLY, which an edit does not change. If none is found (a prompt
+ *     tagged before this dimension existed), it falls back to `AI` rather than
+ *     leave the prompt untagged — a strip-without-inject would make it invisible
+ *     to origin-based filtering.
  *
- * `resolveTypeValueInjection` resolves or throws, so the computed tag is always
- * attached. It must never be dropped: `type` is the one dimension a client may
- * not set, so a prompt written without it stays unclassified forever, and the
- * caller sees a 2xx. Failing the write instead is free — the upstream bulk create
- * is atomic and has not run yet.
+ * Resolution (two tag-tree reads per distinct value per project — the root
+ * level plus that dimension root's children) is memoized for the request per
+ * dimension, so a bulk create fans out over the distinct computed values
+ * rather than over the items. A non-function `classifyPromptType` (defensive)
+ * skips the `type` step; `origin` is always injected.
+ *
+ * Both resolvers resolve or throw, so the computed tags are always attached.
+ * They must never be dropped: neither dimension is client-settable, so a
+ * prompt written without one stays unclassified forever, and the caller sees a
+ * 2xx. Failing the write instead is free — the upstream bulk create is atomic
+ * and has not run yet.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
  * @param {object} [log]
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
- *   tagIds: string[] }) =>
+ *   tagIds: string[] }, options?: { mode?: 'create' | 'update' }) =>
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
  */
 export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptType, log) {
   /** @type {Map<string, Promise<{ computedId: string, typeTagIds: string[] }>>} */
-  const cache = new Map();
-  return async function injectComputedType(projectId, input) {
-    if (typeof classifyPromptType !== 'function') {
-      return input;
+  const typeCache = new Map();
+  /** @type {Map<string, Promise<{ computedId: string, originTagIds: string[] }>>} */
+  const originCache = new Map();
+
+  return async function injectComputedType(projectId, input, { mode = 'create' } = {}) {
+    let out = input;
+
+    if (typeof classifyPromptType === 'function') {
+      const typeValue = classifyPromptType(input.text, input.geoTargetId);
+      const typeKey = `${projectId} ${typeValue}`;
+      let typePending = typeCache.get(typeKey);
+      if (!typePending) {
+        typePending = resolveTypeValueInjection(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          typeValue,
+          log,
+        );
+        typeCache.set(typeKey, typePending);
+      }
+      const { computedId, typeTagIds } = await typePending;
+      const stripped = out.tagIds.filter((id) => !typeTagIds.includes(id));
+      out = { ...out, tagIds: [...stripped, computedId] };
     }
-    const typeValue = classifyPromptType(input.text, input.geoTargetId);
-    const key = `${projectId} ${typeValue}`;
-    let pending = cache.get(key);
-    if (!pending) {
-      pending = resolveTypeValueInjection(transport, semrushWorkspaceId, projectId, typeValue, log);
-      cache.set(key, pending);
+
+    // `origin` resolution is the same tree lookup on both create and update —
+    // every id under the root, plus the resolved `AI` id — only what CREATE
+    // does with it differs from what UPDATE does.
+    const originKey = `${projectId} ${ORIGIN_VALUE.AI}`;
+    let originPending = originCache.get(originKey);
+    if (!originPending) {
+      originPending = resolveOriginValueInjection(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        ORIGIN_VALUE.AI,
+        log,
+      );
+      originCache.set(originKey, originPending);
     }
-    const { computedId, typeTagIds } = await pending;
-    const stripped = input.tagIds.filter((id) => !typeTagIds.includes(id));
-    return { ...input, tagIds: [...stripped, computedId] };
+    const { computedId: aiId, originTagIds } = await originPending;
+    const stripped = out.tagIds.filter((id) => !originTagIds.includes(id));
+
+    // UPDATE re-injects whichever origin tag the caller already carried — it
+    // never derives a new one. CREATE always derives to AI. Falling back to AI
+    // when update finds none avoids a strip-without-inject (which would make
+    // the prompt invisible to origin-based filtering) for a prompt tagged
+    // before this dimension existed.
+    const nextOriginId = mode === 'update'
+      ? (out.tagIds.find((id) => originTagIds.includes(id)) ?? aiId)
+      : aiId;
+    out = { ...out, tagIds: [...stripped, nextOriginId] };
+
+    return out;
   };
 }
 
@@ -722,7 +778,7 @@ export async function handleUpdatePrompt(
   );
   const typed = await injectComputedType(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
-  });
+  }, { mode: 'update' });
 
   try {
     await transport.renamePrompt(semrushWorkspaceId, projectId, semrushPromptId, nextText);

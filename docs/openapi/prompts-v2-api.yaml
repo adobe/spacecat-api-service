@@ -254,6 +254,10 @@ v2-prompts-by-brand-and-id:
     tags:
       - customer-config
     summary: Update a single prompt
+    description: >-
+      `origin` in the body is not honored on PATCH — it is set once at create
+      time (see `V2PromptInput.origin`) and can never be changed afterward, so
+      any `origin` sent here is ignored.
     operationId: updatePromptByBrandAndId
     security:
       - ims_key: [ ]

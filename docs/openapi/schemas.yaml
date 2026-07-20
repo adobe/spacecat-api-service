@@ -6643,6 +6643,11 @@ V2PromptInput:
       type: string
       enum: [ai, human]
       default: human
+      description: >-
+        Who authored the prompt. Service-principal only: honored (and
+        validated against the enum) only when the caller authenticates as an
+        S2S service; for a user-authenticated request this field is ignored
+        and always overridden to `human`, regardless of what is sent.
     source:
       type: string
       description: The source system or process that created the prompt

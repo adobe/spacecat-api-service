@@ -554,6 +554,11 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+      // Service principals (e.g. llmo-data-retrieval-service) authenticate over
+      // s2sAuthWrapper, which sets `context.s2sConsumer`; a user principal never
+      // carries it. Gates whether a per-prompt `origin` in the body is honored —
+      // see `resolveOriginForWrite`.
+      const isServicePrincipal = Boolean(context.s2sConsumer);
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
       if (!brandUuid) {
@@ -567,6 +572,7 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
         updatedBy,
         classifyIntent: classifyIntent ?? undefined,
+        isServicePrincipal,
       });
 
       return createResponse({ created, updated, prompts: outPrompts }, 201);
