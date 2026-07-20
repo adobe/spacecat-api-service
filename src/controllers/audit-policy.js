@@ -13,33 +13,25 @@
 import {
   badRequest, createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { UnauthorizedProductError } from '../support/errors.js';
 import { AuditPolicyDto, AuditPolicyRevisionDto } from '../dto/audit-policy.js';
 
 const POLICY_TABLE = 'audit_policy';
 const REVISION_TABLE = 'audit_policy_revision';
-// Unused until the granular array-mutation endpoints (add/remove exclusions/inclusions) land in
-// a later task of this same plan; kept here rather than deleted so that task can reuse them.
-// eslint-disable-next-line no-unused-vars
 const UPSERT_RPC = 'wrpc_upsert_audit_policy';
 
-// eslint-disable-next-line no-unused-vars
-const MAX_EXCLUSION_GLOBS = 1000;
-// eslint-disable-next-line no-unused-vars
-const MAX_MANUAL_URLS = 50000;
-// eslint-disable-next-line no-unused-vars
+const MAX_EXCLUSION_GLOBS = 200;
+const MAX_MANUAL_URLS = 2000;
 const MAX_ELEMENT_LEN = 2048;
-// eslint-disable-next-line no-unused-vars
+const MAX_RETRY_ATTEMPTS = 3;
 const MAX_NOTE_LEN = 2000;
-// eslint-disable-next-line no-unused-vars
 const MAX_REASON_LEN = 2000;
 // 40000 (transaction_rollback) is the code this RPC actually raises today (PostgREST v14.4,
 // pinned by mysticat-data-service, hangs on 40001/serialization_failure due to hasql-transaction's
 // auto-retry on that specific code - PostgREST/postgrest#3673). 40001 is accepted too so this
 // mapping keeps working if a future PostgREST upgrade lets the RPC use the more conventional code.
-// eslint-disable-next-line no-unused-vars
 const SQLSTATE_VERSION_CONFLICT = ['40000', '40001'];
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
@@ -51,8 +43,6 @@ const MAX_CURSOR_VERSION = 1_000_000;
 
 // Resolves false (not throw) when the caller's x-product header doesn't match productCode,
 // so the ASO/LLMO OR-check below can still try the other product.
-// Unused until a later task's write endpoints call it again.
-// eslint-disable-next-line no-unused-vars
 async function hasProductAccess(ac, site, productCode) {
   try {
     return await ac.hasAccess(site, '', productCode);
@@ -75,8 +65,6 @@ function encodeCursor(version) {
   return Buffer.from(String(version), 'utf8').toString('base64url');
 }
 
-// Unused until a later task's write endpoints call it again.
-// eslint-disable-next-line no-unused-vars
 function getAuthor(context) {
   const profile = context.attributes?.authInfo?.getProfile?.();
   const identity = profile?.email || profile?.name;
@@ -130,6 +118,124 @@ export default function AuditPolicyController() {
     return ok(AuditPolicyDto.toJSON(data));
   }
 
+  const RESOURCE_CONFIG = {
+    exclusions: { field: 'exclusionGlobs', max: MAX_EXCLUSION_GLOBS },
+    inclusions: { field: 'manualUrls', max: MAX_MANUAL_URLS },
+  };
+
+  // returns a string error message, or null when valid
+  function validateMutateBody(b) {
+    if (!isObject(b)) {
+      return 'request body must be a JSON object';
+    }
+    if (!Array.isArray(b.values) || b.values.length === 0) {
+      return 'values must be a non-empty array';
+    }
+    if (b.values.some((s) => typeof s !== 'string' || s.length > MAX_ELEMENT_LEN)) {
+      return `values entries must be strings <= ${MAX_ELEMENT_LEN} chars`;
+    }
+    if (!hasText(b.reason) || b.reason.length > MAX_REASON_LEN) {
+      return `reason is required and must be <= ${MAX_REASON_LEN} chars`;
+    }
+    if (b.note !== undefined && b.note !== null
+      && (typeof b.note !== 'string' || b.note.length > MAX_NOTE_LEN)) {
+      return `note must be a string <= ${MAX_NOTE_LEN} chars`;
+    }
+    return null;
+  }
+
+  // add = set-union (preserves existing order, appends new values in call order);
+  // remove = set-difference. Both are no-ops for elements already in the target state,
+  // which is what makes retrying this operation safe (§3.2 of the design doc).
+  function computeNewArray(currentArray, values, mode) {
+    if (mode === 'add') {
+      return [...new Set([...currentArray, ...values])];
+    }
+    const removeSet = new Set(values);
+    return currentArray.filter((v) => !removeSet.has(v));
+  }
+
+  async function mutateArray(context, resourceKey, mode) {
+    const config = RESOURCE_CONFIG[resourceKey];
+    const auth = await authorizeRead(context);
+    if (auth.error) {
+      return auth.error;
+    }
+    const {
+      site, siteId, client, ac,
+    } = auth;
+
+    const aso = await hasProductAccess(ac, site, 'ASO');
+    const llmo = aso ? true : await hasProductAccess(ac, site, 'LLMO');
+    if (!aso && !llmo) {
+      return forbidden('Editing the audit policy requires ASO or LLMO entitlement for this site');
+    }
+
+    const body = context.data || {};
+    const invalid = validateMutateBody(body);
+    if (invalid) {
+      return badRequest(invalid);
+    }
+
+    const attempt = async (remainingAttempts) => {
+      const { data: row, error: selectError } = await client
+        .from(POLICY_TABLE).select('*').eq('site_id', siteId).maybeSingle();
+      if (selectError) {
+        context.log?.error?.(`audit-policy ${resourceKey} select failed: ${selectError.code} ${selectError.message}`);
+        return internalServerError('Failed to read audit policy');
+      }
+      const current = row ? AuditPolicyDto.toJSON(row) : AuditPolicyDto.defaultDocument(siteId);
+      const newArray = computeNewArray(current[config.field], body.values, mode);
+      if (newArray.length > config.max) {
+        return badRequest(`${config.field} would exceed the maximum of ${config.max}`);
+      }
+
+      const { data, error } = await client.rpc(UPSERT_RPC, {
+        p_site_id: siteId,
+        p_budget: current.budget,
+        p_strategy_name: current.strategyName,
+        p_exclusion_globs: config.field === 'exclusionGlobs' ? newArray : current.exclusionGlobs,
+        p_manual_urls: config.field === 'manualUrls' ? newArray : current.manualUrls,
+        p_scope_config: current.scopeConfig,
+        p_lifecycle_overrides: current.lifecycleOverrides,
+        p_author: getAuthor(context),
+        p_reason: body.reason,
+        p_note: body.note ?? null,
+        p_expected_version: current.version,
+      });
+
+      if (!error) {
+        return ok(AuditPolicyDto.toJSON(data));
+      }
+      if (SQLSTATE_VERSION_CONFLICT.includes(error.code)) {
+        if (remainingAttempts > 1) {
+          return attempt(remainingAttempts - 1);
+        }
+        const currentVersion = Number.parseInt(error.details, 10);
+        return createResponse(
+          {
+            message: 'policy was modified; retried and failed, reload and retry',
+            ...(Number.isInteger(currentVersion) ? { currentVersion } : {}),
+          },
+          409,
+        );
+      }
+      if (error.code === 'P0001') {
+        context.log?.warn?.(`audit-policy ${resourceKey} rejected by RPC validation (P0001): ${error.message}`);
+        return badRequest('audit policy rejected by validation');
+      }
+      context.log?.error?.(`audit-policy ${resourceKey} failed: ${error.code} ${error.message}`);
+      return internalServerError('Failed to write audit policy');
+    };
+
+    return attempt(MAX_RETRY_ATTEMPTS);
+  }
+
+  const addExclusions = (context) => mutateArray(context, 'exclusions', 'add');
+  const removeExclusions = (context) => mutateArray(context, 'exclusions', 'remove');
+  const addInclusions = (context) => mutateArray(context, 'inclusions', 'add');
+  const removeInclusions = (context) => mutateArray(context, 'inclusions', 'remove');
+
   async function listRevisions(context) {
     const auth = await authorizeRead(context);
     if (auth.error) {
@@ -178,6 +284,14 @@ export default function AuditPolicyController() {
   const getScopeSections = notImplemented;
 
   return {
-    getPolicy, listRevisions, getScopePages, getScopeSummary, getScopeSections,
+    getPolicy,
+    listRevisions,
+    addExclusions,
+    removeExclusions,
+    addInclusions,
+    removeInclusions,
+    getScopePages,
+    getScopeSummary,
+    getScopeSections,
   };
 }
