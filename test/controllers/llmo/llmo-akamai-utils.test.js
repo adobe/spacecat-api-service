@@ -141,11 +141,7 @@ describe('llmo-akamai-utils', () => {
       expect(findBehavior(rule, 'advanced')).to.equal(undefined);
       const failAction = findBehavior(rule, 'failAction');
       expect(failAction.options.contentHostname).to.equal(HOSTNAME);
-      // A setVariable flips the failover observability flag TRUE, then the GA failAction runs.
-      expect(rule.behaviors).to.have.length(2);
-      const setVar = findBehavior(rule, 'setVariable');
-      expect(setVar.options.variableName).to.equal('PMUSER_EDGE_OPTIMIZE_FAILOVER');
-      expect(setVar.options.variableValue).to.equal('TRUE');
+      expect(rule.behaviors).to.have.length(1);
     });
   });
 
@@ -278,11 +274,8 @@ describe('llmo-akamai-utils', () => {
     it('creates a variables array when the tree has none', () => {
       const treeNoVars = { rules: { name: 'default', children: [] } };
       const merged = mergeIntoTree(treeNoVars, cfg);
-      // Declares both managed PMUSER vars: the cache key and the failover flag.
-      expect(merged.rules.variables).to.be.an('array').with.length(2);
-      const names = merged.rules.variables.map((v) => v.name);
-      expect(names).to.include(cfg.cacheKeyVariable.name);
-      expect(names).to.include('PMUSER_EDGE_OPTIMIZE_FAILOVER');
+      expect(merged.rules.variables).to.be.an('array').with.length(1);
+      expect(merged.rules.variables[0].name).to.equal(cfg.cacheKeyVariable.name);
     });
 
     it('throws when the tree has no top-level rules object', () => {
@@ -318,14 +311,11 @@ describe('llmo-akamai-utils', () => {
         rules: {
           name: 'default',
           children: [{ name: 'Existing' }, { name: 'Optimize at Edge ' }],
-          variables: [
-            { name: cfg.cacheKeyVariable.name, value: '' },
-            { name: 'PMUSER_EDGE_OPTIMIZE_FAILOVER', value: 'FALSE' },
-          ],
+          variables: [{ name: cfg.cacheKeyVariable.name, value: '' }],
         },
       };
       const ops = buildRuleTreePatch(tree, cfg);
-      // Trailing-space rule at index 1 is removed; no variable op (both vars already present).
+      // Trailing-space rule at index 1 is removed; no variable op (the cache-key var is present).
       expect(removeOps(ops).map((o) => o.path)).to.deep.equal(['/rules/children/1']);
       expect(ops.some((o) => o.path.startsWith('/rules/variables'))).to.equal(false);
       expect(addChildOps(ops)[0].value.name).to.equal(cfg.ruleNames.parent);
@@ -372,9 +362,7 @@ describe('llmo-akamai-utils', () => {
     it('creates the variables array when the tree has none', () => {
       const ops = buildRuleTreePatch({ rules: { name: 'default', children: [] } }, cfg);
       const varOp = ops.find((o) => o.path === '/rules/variables');
-      // Both managed PMUSER vars: cache key + failover flag.
-      expect(varOp.value).to.be.an('array').with.length(2);
-      expect(varOp.value.map((v) => v.name)).to.include('PMUSER_EDGE_OPTIMIZE_FAILOVER');
+      expect(varOp.value).to.be.an('array').with.length(1);
     });
 
     it('appends via `-` for a non-numeric insertIndex (falls back to the default)', () => {

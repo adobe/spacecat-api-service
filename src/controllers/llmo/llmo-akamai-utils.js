@@ -37,11 +37,6 @@ const LOOP_GUARD_HEADER = 'x-edgeoptimize-api-key';
 // same header name.
 const FAILOVER_MARKER_HEADER = 'x-edgeoptimize-request';
 
-// PMUSER flag flipped TRUE when the Site Failover rule fires (worker 4xx/5xx or origin timeout).
-// It does not affect routing or caching — it's an observability marker so a failover event is
-// identifiable in Akamai logs / DataStream. Mirrors the POC's v38 rule tree for parity.
-const FAILOVER_FLAG_VARIABLE = 'PMUSER_EDGE_OPTIMIZE_FAILOVER';
-
 // Stable defaults for the managed rule config. These mirror the doc 1:1 and are service-owned
 // (not caller-supplied); only the per-site hostname and the LLMO API key are injected at runtime
 // via buildRuleConfig.
@@ -260,11 +255,7 @@ export function buildSiteFailoverRule(cfg) {
     name: 'Site Failover Behavior',
     criteria: [criterionMatchResponseCode(400, 599), criterionOriginTimeout()],
     criteriaMustSatisfy: 'any',
-    behaviors: [
-      // Flag the failover for observability (Akamai logs), then fail over. Mirrors POC v38.
-      behaviorSetVariable(FAILOVER_FLAG_VARIABLE, 'TRUE'),
-      behaviorFailActionAlternateHostname(cfg.failover.alternateHostname),
-    ],
+    behaviors: [behaviorFailActionAlternateHostname(cfg.failover.alternateHostname)],
     children: [],
     comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). On origin failure, fails over '
       + "to the property's normal origin so the end user still gets a response.",
@@ -417,17 +408,6 @@ function managedCacheKeyVariable(varName) {
   };
 }
 
-// The failover flag PMUSER_* declaration (default FALSE; flipped TRUE by the Site Failover rule).
-function managedFailoverVariable() {
-  return {
-    name: FAILOVER_FLAG_VARIABLE,
-    value: 'FALSE',
-    description: 'Edge Optimize failover flag (managed by Adobe LLM Optimizer)',
-    hidden: false,
-    sensitive: false,
-  };
-}
-
 // PMUSER_* variables must be declared in the rule tree's `variables` list. Mutates the given
 // variables array in place (the caller owns a freshly-cloned tree), returning it for convenience.
 function ensureVariableDeclared(variables, variable) {
@@ -467,7 +447,6 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
     root.variables = [];
   }
   ensureVariableDeclared(root.variables, managedCacheKeyVariable(cfg.cacheKeyVariable.name));
-  ensureVariableDeclared(root.variables, managedFailoverVariable());
 
   const managedNames = new Set([
     cfg.ruleNames.parent,
@@ -564,21 +543,13 @@ export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
     });
   }
 
-  // 2. Declare the PMUSER variables the managed rules depend on (cache key + failover flag) if the
-  //    tree doesn't already have them. `add` to a missing `/rules/variables` would fail, so create
-  //    the array when absent.
-  const managedVars = [
-    managedCacheKeyVariable(cfg.cacheKeyVariable.name),
-    managedFailoverVariable(),
-  ];
+  // 2. Declare the PMUSER cache-key variable if the tree doesn't already have it. `add` to a
+  //    missing `/rules/variables` would fail, so create the array when absent.
+  const varName = cfg.cacheKeyVariable.name;
   if (!Array.isArray(root.variables)) {
-    ops.push({ op: 'add', path: '/rules/variables', value: managedVars });
-  } else {
-    managedVars.forEach((v) => {
-      if (!root.variables.some((existing) => existing?.name === v.name)) {
-        ops.push({ op: 'add', path: '/rules/variables/-', value: v });
-      }
-    });
+    ops.push({ op: 'add', path: '/rules/variables', value: [managedCacheKeyVariable(varName)] });
+  } else if (!root.variables.some((v) => v?.name === varName)) {
+    ops.push({ op: 'add', path: '/rules/variables/-', value: managedCacheKeyVariable(varName) });
   }
 
   return ops;
