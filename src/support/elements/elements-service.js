@@ -13,6 +13,7 @@
 import { ELEMENT_IDS } from './element-ids.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
+import { INTENT_VALUE } from '../serenity/prompt-tags.js';
 import {
   buildBrandsPayload,
   transformBrandsToFilterDimensions,
@@ -28,7 +29,6 @@ import {
   transformWeeksResponse,
   buildPromptsPayload,
   transformPromptsResponse,
-  SEMRUSH_INTENT_TAG_VALUES,
   INTENT_ENRICH_CONCURRENCY,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
@@ -164,7 +164,7 @@ export function createElementsService(transport) {
       // parallel (~one extra round-trip of latency). The intent fan-out is
       // non-fatal — degrade to blank `userIntent` on any failure.
       const intentPromise = mapWithConcurrency(
-        SEMRUSH_INTENT_TAG_VALUES,
+        Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
           const raw = await transport.fetchElement(

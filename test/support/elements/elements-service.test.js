@@ -16,7 +16,9 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import { createElementsService } from '../../../src/support/elements/elements-service.js';
 import { ELEMENT_IDS } from '../../../src/support/elements/element-ids.js';
-import { SEMRUSH_INTENT_TAG_VALUES } from '../../../src/support/elements/definitions/prompts.js';
+import { INTENT_VALUE } from '../../../src/support/serenity/prompt-tags.js';
+
+const INTENT_VALUES = Object.values(INTENT_VALUE);
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -244,7 +246,7 @@ describe('createElementsService', () => {
     beforeEach(() => {
       transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
       // All intent-filtered calls return empty except Commercial, which claims p-comm.
-      SEMRUSH_INTENT_TAG_VALUES
+      INTENT_VALUES
         .filter((v) => v !== 'Commercial')
         .forEach((v) => transport.fetchElement
           .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(`intent__${v}`)).resolves(rawWith([])));
@@ -262,7 +264,7 @@ describe('createElementsService', () => {
       expect(byPrompt['p-info']).to.equal('');
       const promptCalls = transport.fetchElement.getCalls()
         .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
-      expect(promptCalls).to.have.length(1 + SEMRUSH_INTENT_TAG_VALUES.length);
+      expect(promptCalls).to.have.length(1 + INTENT_VALUES.length);
     });
 
     it('does not enrich or make extra calls without the flag', async () => {

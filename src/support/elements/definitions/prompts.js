@@ -12,22 +12,6 @@
 
 import { resolveElementModel } from '../constants.js';
 
-/**
- * The Semrush 5-value intent taxonomy, as the exact (capitalized) tag VALUES
- * stored under the `intent` dimension — verified live against a real workspace
- * (Lovesac): `tags contains intent__Informational` returns that subset. These
- * match the values the write-path classifier (serenity-docs#32 / api PR #2785)
- * assigns. Used to enrich each prompt row with its own intent (see `getPrompts`):
- * one `intent__<value>`-filtered PROMPTS call per value, joined back by prompt.
- */
-export const SEMRUSH_INTENT_TAG_VALUES = [
-  'Informational',
-  'Commercial',
-  'Transactional',
-  'Task',
-  'Navigational',
-];
-
 /** Max parallel intent-filtered PROMPTS calls when enriching `userIntent`. */
 export const INTENT_ENRICH_CONCURRENCY = 5;
 

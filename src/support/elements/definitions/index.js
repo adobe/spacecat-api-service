@@ -24,7 +24,6 @@ export { buildWeeksPayload, transformWeeksResponse } from './weeks.js';
 export {
   buildPromptsPayload,
   transformPromptsResponse,
-  SEMRUSH_INTENT_TAG_VALUES,
   INTENT_ENRICH_CONCURRENCY,
 } from './prompts.js';
 export { buildCitedDomainsPayload, transformCitedDomainsResponse } from './cited-domains.js';
