@@ -2889,20 +2889,24 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
-   * Capture an ESE review verdict from the Backoffice (SITES-43974 / SITES-39001).
+   * Shared core for capturing a human review verdict on a suggestion (SITES-43974
+   * / SITES-39002). Used by both the Backoffice (ESE) and the ASO UI (customer)
+   * review endpoints — the caller supplies the `source` (bound by the route,
+   * never trusted from the body — FR-10) and the rejection categories allowed for
+   * that source.
    *
-   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews
-   *
-   * `source` is bound to 'backoffice' by the route (never trusted from the body —
-   * FR-10). `event_id` is a mandatory client-supplied idempotency key (FR-09):
-   * a duplicate collapses to a no-op (HTTP 200 with the existing row). Customer-
-   * derived fields are secret-scrubbed and the markdown is sanitised before
-   * insert. The raw patches are NOT echoed in the response.
+   * `event_id` is a mandatory client-supplied idempotency key (FR-09): a duplicate
+   * collapses to a no-op (HTTP 200 with the existing row). Customer-derived fields
+   * are secret-scrubbed and the markdown is sanitised before insert. The raw
+   * patches are NOT echoed in the response.
    *
    * @param {Object} context - request context.
+   * @param {Object} opts
+   * @param {string} opts.source - one of REVIEW_SOURCES; stamped on the row.
+   * @param {string[]} opts.allowedRejectionCategories - categories accepted for this source.
    * @returns {Promise<Response>}
    */
-  const createBackofficeReview = async (context) => {
+  const captureReview = async (context, { source, allowedRejectionCategories }) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
@@ -2928,14 +2932,14 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('event_id is required and must be a UUID');
     }
     // FR-10: a client must not self-assert a higher-trust source.
-    if (hasText(body.source) && body.source !== REVIEW_SOURCES.BACKOFFICE) {
+    if (hasText(body.source) && body.source !== source) {
       return badRequest('source is derived from the route and must not be set in the body');
     }
     if (verdict !== REVIEW_VERDICTS.UP && verdict !== REVIEW_VERDICTS.DOWN) {
       return badRequest('verdict must be "up" or "down"');
     }
     if (rejectionCategory != null
-      && !Object.values(REJECTION_CATEGORIES).includes(rejectionCategory)) {
+      && !allowedRejectionCategories.includes(rejectionCategory)) {
       return badRequest('invalid rejection_category');
     }
     if (stateTransition != null && !FEEDBACK_STATE_TRANSITIONS.includes(stateTransition)) {
@@ -3023,7 +3027,7 @@ function SuggestionsController(ctx, sqs, env) {
       site_id: siteId,
       suggestion_id: suggestionId,
       opportunity_type: opportunity.getType?.() ?? null,
-      source: REVIEW_SOURCES.BACKOFFICE,
+      source,
       signal,
       reviewer_id: reviewerId,
       detail_markdown: cleanMarkdown ?? null,
@@ -3061,8 +3065,37 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(toReviewView(data), 201);
   };
 
+  /**
+   * Capture an ESE review from the Backoffice.
+   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews
+   * Binds source='backoffice'; all rejection categories are allowed.
+   * @param {Object} context - request context.
+   * @returns {Promise<Response>}
+   */
+  const createBackofficeReview = (context) => captureReview(context, {
+    source: REVIEW_SOURCES.BACKOFFICE,
+    allowedRejectionCategories: Object.values(REJECTION_CATEGORIES),
+  });
+
+  /**
+   * Capture a customer review from the ASO UI (SITES-39002).
+   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/aso-reviews
+   * Binds source='aso_ui'; only 'bad_recommendation' and 'other' are accepted as
+   * rejection categories (no 'product_bug' from customers).
+   * @param {Object} context - request context.
+   * @returns {Promise<Response>}
+   */
+  const createAsoReview = (context) => captureReview(context, {
+    source: REVIEW_SOURCES.ASO_UI,
+    allowedRejectionCategories: [
+      REJECTION_CATEGORIES.BAD_RECOMMENDATION,
+      REJECTION_CATEGORIES.OTHER,
+    ],
+  });
+
   return {
     createBackofficeReview,
+    createAsoReview,
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,

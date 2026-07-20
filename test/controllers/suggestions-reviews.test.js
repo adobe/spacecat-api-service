@@ -498,4 +498,42 @@ describe('Suggestions Controller - backoffice reviews', () => {
       expect(json).to.not.have.property('reviews');
     });
   });
+
+  describe('ASO reviews (createAsoReview) — SITES-39002', () => {
+    const okInsert = () => ({
+      postgrest: { onInsert: () => ({ data: { event_id: EVENT_ID, signal: 'negative', tier: 'free' }, error: null }) },
+    });
+
+    it('records a review stamped source=aso_ui', async () => {
+      const context = makeContext(okInsert());
+      const response = await controller.createAsoReview(context);
+      expect(response.status).to.equal(201);
+      const inserted = context.dataAccess.services.postgrestClient.capturedInserts[0];
+      expect(inserted.source).to.equal('aso_ui');
+      // shared core still captures the per-issue fields
+      expect(inserted.previous_fix).to.deep.equal({ patch: 'before' });
+    });
+
+    it('accepts rejectionCategory "other"', async () => {
+      const context = makeContext(okInsert());
+      context.data.rejectionCategory = 'other';
+      const response = await controller.createAsoReview(context);
+      expect(response.status).to.equal(201);
+      expect(context.dataAccess.services.postgrestClient.capturedInserts[0].rejection_category).to.equal('other');
+    });
+
+    it('rejects rejectionCategory "product_bug" from the ASO route with 400', async () => {
+      const context = makeContext();
+      context.data.rejectionCategory = 'product_bug';
+      const response = await controller.createAsoReview(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('rejects a body-supplied source that mismatches aso_ui with 400 (FR-10)', async () => {
+      const context = makeContext();
+      context.data.source = 'backoffice';
+      const response = await controller.createAsoReview(context);
+      expect(response.status).to.equal(400);
+    });
+  });
 });
