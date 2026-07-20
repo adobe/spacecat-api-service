@@ -15,9 +15,8 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { SerenityTransportError } from '../rest-transport.js';
 import {
-  ERROR_CODES, isUpstreamGone, toQuotaExceededError,
+  ERROR_CODES, isUpstreamGone, isMeteredQuota, toQuotaExceededError,
 } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import {
@@ -595,10 +594,14 @@ export async function handleCreateMarketSubworkspace(
     } catch (e) {
       // Case 1 (serenity-docs#72 §2): the brand carve is exhausted (allocator OFF — production
       // today), or `retryOnQuota`'s bounded top-up+retry (LLMO-6190 item 4) still didn't clear
-      // the disguised quota 405. Surface it as the stable `quotaExceeded` 409 token instead of
-      // letting it fall through mapError's generic `serenityUpstreamError` 502 — a caller can
-      // then show the contractual-limit message and never retry a rejection that can't succeed.
-      if (e instanceof SerenityTransportError && e.status === 405) {
+      // the disguised quota 405. Classify via `isMeteredQuota` (body-SHAPE check, not bare
+      // status — MysticatBot review) so a genuine app-level 405 Method-Not-Allowed (JSON body)
+      // is never mistaken for a quota rejection and hidden behind the wrong error token; this
+      // also gives the shared `MeteredQuotaClassifier` metric (LLMO-6191) a live call site.
+      // Surface a real quota match as the stable `quotaExceeded` 409 token instead of letting it
+      // fall through mapError's generic `serenityUpstreamError` 502 — a caller can then show the
+      // contractual-limit message and never retry a rejection that can't succeed.
+      if (isMeteredQuota(e)) {
         log?.warn?.('handleCreateMarketSubworkspace: publish rejected — quota exceeded', {
           workspaceId, projectId,
         });
@@ -611,15 +614,16 @@ export async function handleCreateMarketSubworkspace(
       await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
       published = true;
     } catch (e) {
-      if (e instanceof SerenityTransportError && e.status === 405) {
+      if (isMeteredQuota(e)) {
         // Swallowed by design (best-effort provisioning must not fail the brand create), but this
         // IS a quota rejection and the event that creates the dark draft market a customer later
         // trips over — serenity-docs#72 §5 requires it to alert even though nothing failed here.
         // TODO(serenity-docs#72 step 2): fire the Slack alert here once the alerting mechanism
-        // lands; `recordRejection('quotaExceeded')` inside toQuotaExceededError already feeds the
-        // CloudWatch metric this alarm will key on, so calling it (without throwing) keeps the
-        // classifier + alerting signal consistent between this swallowed path and the `require`
-        // path above.
+        // lands; the call below is side-effect-only (its returned error is intentionally
+        // discarded, never thrown — best-effort swallows it) purely to run
+        // `recordRejection('quotaExceeded')` inside it, so the CloudWatch metric this alarm will
+        // key on fires here too, keeping the classifier + alerting signal consistent between
+        // this swallowed path and the `require` path above (MysticatBot review, non-blocking nit).
         toQuotaExceededError();
         log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota exceeded, project left as draft', {
           workspaceId, projectId,
