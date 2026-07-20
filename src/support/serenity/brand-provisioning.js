@@ -17,7 +17,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../utils.js';
 import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
-import { RELEASE_ALLOCATION } from './workspace-lifecycle.js';
+import { deleteAllProjects, releaseFullAllocation } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 
 // Re-exported for callers/tests that drive brand provisioning. The tag
@@ -151,15 +151,24 @@ export async function provisionBrandSubworkspace(context, {
   // never written (so the caller's `provisionedWorkspaceId` stays null and its
   // compensation can't fire), and repeated failed creates would drain the pool.
   // Best-effort; never masks the original error.
+  //
+  // LLMO-6189: a zero-payload transfer is a silent no-op against the gateway, so it can never
+  // actually reclaim the captured workspace's allocation. Delete the projects, then lower the
+  // allocation to a non-zero floor (releaseFullAllocation) — the workspace itself is never deleted
+  // (production never deletes a sub-workspace). The workspace may already have a project in it at
+  // this point (a failure at/after createProject) or may still be empty (an earlier failure) —
+  // deleteAllProjects tolerates both.
   const releaseCapturedOnFailure = async () => {
     if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
       return;
     }
     try {
-      await transport.transferWorkspaceResources(capturedWorkspaceId, RELEASE_ALLOCATION);
-      log?.info?.('serenity: released sub-workspace allocation after failed brand provisioning', {
-        semrushWorkspaceId: capturedWorkspaceId,
-      });
+      await deleteAllProjects(transport, capturedWorkspaceId);
+      await releaseFullAllocation(transport, capturedWorkspaceId, parentWorkspaceId, log);
+      log?.info?.(
+        'serenity: emptied sub-workspace after failed brand provisioning — allocation lowered to floor',
+        { semrushWorkspaceId: capturedWorkspaceId },
+      );
     } catch (releaseErr) {
       log?.error?.('serenity: failed to release sub-workspace allocation after failed provisioning', {
         semrushWorkspaceId: capturedWorkspaceId,
@@ -253,17 +262,29 @@ export async function provisionBrandSubworkspace(context, {
  * brand row was never written (e.g. the post-provision DB upsert threw). Because
  * the brand id was a throwaway UUID never persisted, nothing references this
  * workspace, so it would otherwise leak and permanently hold its CREATE allocation
- * against the parent pool. Releasing the allocation hands the quota back. The
- * sub-workspace itself is never deleted (deletion is fail-closed) — it is left
- * empty and reclaimable. Never throws: the caller is already on an error path, so
- * a failed release is logged at ERROR (with the workspace id, for manual recovery)
- * and swallowed.
+ * against the parent pool.
+ *
+ * At this point provisioning fully SUCCEEDED (project created, models attached, possibly
+ * published) before the subsequent brand-row write failed — the workspace always has exactly one
+ * project. Deletes the project, then lowers the allocation to a non-zero floor via
+ * {@link releaseFullAllocation} (LLMO-6189) — the workspace itself is never deleted (production
+ * never deletes a sub-workspace); the previous zero-payload transfer this replaced was a silent
+ * no-op against the gateway. Never throws: the caller is already on an error path, so any failure
+ * here is logged at ERROR (with the workspace id, for manual recovery) and swallowed.
  *
  * @param {object} context - request context (env, pathInfo headers, attributes).
  * @param {string} workspaceId - the orphaned sub-workspace id to release.
+ * @param {string} [spaceCatId] - the organization UUID, used to resolve the org's parent workspace
+ *   for the assertNotParent guard inside `releaseFullAllocation`. Omit only when unavailable (the
+ *   guard then simply cannot fire); every known caller has it in scope.
  * @param {object} [log]
  */
-export async function releaseProvisionedWorkspace(context, workspaceId, log = console) {
+export async function releaseProvisionedWorkspace(
+  context,
+  workspaceId,
+  spaceCatId = undefined,
+  log = console,
+) {
   if (!hasText(workspaceId)) {
     return;
   }
@@ -273,10 +294,18 @@ export async function releaseProvisionedWorkspace(context, workspaceId, log = co
     // helper is only reachable after provisioning already passed it.
     const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
     const transport = createSerenityTransport({ env: context.env, imsToken });
-    await transport.transferWorkspaceResources(workspaceId, RELEASE_ALLOCATION);
-    log?.info?.('serenity: released orphaned subworkspace allocation back to parent pool', {
-      semrushWorkspaceId: workspaceId,
-    });
+    // typeof narrows `string | undefined` → `string` (hasText is not a type guard — see this
+    // dir's CLAUDE.md); resolveWorkspaceId can resolve `null`, normalised to `undefined` for
+    // releaseFullAllocation's `string | undefined` parentWorkspaceId param.
+    const parentWorkspaceId = typeof spaceCatId === 'string' && hasText(spaceCatId)
+      ? (await resolveWorkspaceId(context, spaceCatId)) ?? undefined
+      : undefined;
+    await deleteAllProjects(transport, workspaceId);
+    await releaseFullAllocation(transport, workspaceId, parentWorkspaceId, log);
+    log?.info?.(
+      'serenity: emptied orphaned subworkspace — allocation lowered to floor',
+      { semrushWorkspaceId: workspaceId },
+    );
   } catch (e) {
     log?.error?.('serenity: failed to release orphaned subworkspace allocation', {
       semrushWorkspaceId: workspaceId,

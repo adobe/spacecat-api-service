@@ -1731,7 +1731,7 @@ function BrandsController(ctx, log, env) {
         log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
-        await releaseProvisionedWorkspace(context, provisionedWorkspaceId, log);
+        await releaseProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
       }
       return createErrorResponse(error);
     }

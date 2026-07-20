@@ -2255,7 +2255,7 @@ describe('SerenityController', () => {
         WORKSPACE,
         { enforceLinkedGuard: false },
       );
-      // The pointer is cleared (disconnect) — never the workspace deleted.
+      // The pointer is cleared (disconnect) — the workspace itself is never deleted.
       expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
       expect(brand.save).to.have.been.called;
