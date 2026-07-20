@@ -28,6 +28,8 @@ import {
   transformWeeksResponse,
   buildPromptsPayload,
   transformPromptsResponse,
+  SEMRUSH_INTENT_TAG_VALUES,
+  INTENT_ENRICH_CONCURRENCY,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
   buildSentimentOverviewPayload,
@@ -135,17 +137,63 @@ export function createElementsService(transport) {
     /**
      * Fetches the prompts matching the given filters, plus their count.
      *
+     * When `params.enrichUserIntent` is set, each returned row also carries its
+     * OWN intent (`userIntent`) — the intent isn't a column on the PROMPTS
+     * element, so it's derived with one `intent__<value>`-filtered call per
+     * Semrush intent (run in parallel), joined back to the base rows by prompt
+     * text. Enrichment is NON-FATAL: if the intent calls fail, rows are returned
+     * with `userIntent: ''` rather than failing the whole request. The base call
+     * itself still propagates on failure. Without the flag, behavior + upstream
+     * call count are unchanged.
+     *
      * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} params - Filter parameters (model/platform, topics, projectIds).
+     * @param {object} params - Filter parameters (model/platform, tags, projectIds,
+     *   and `enrichUserIntent`).
      * @returns {Promise<{count: number, prompts: object[]}>} `{ count, prompts }`.
      */
     async getPrompts(workspaceId, params) {
-      const raw = await transport.fetchElement(
-        workspaceId,
-        ELEMENT_IDS.PROMPTS,
-        buildPromptsPayload(params),
-      );
-      return transformPromptsResponse(raw);
+      const basePromise = transport
+        .fetchElement(workspaceId, ELEMENT_IDS.PROMPTS, buildPromptsPayload(params))
+        .then(transformPromptsResponse);
+
+      if (!params?.enrichUserIntent) {
+        return basePromise;
+      }
+
+      // Fire the base call + one intent-filtered call per intent value in
+      // parallel (~one extra round-trip of latency). The intent fan-out is
+      // non-fatal — degrade to blank `userIntent` on any failure.
+      const intentPromise = mapWithConcurrency(
+        SEMRUSH_INTENT_TAG_VALUES,
+        INTENT_ENRICH_CONCURRENCY,
+        async (value) => {
+          const raw = await transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.PROMPTS,
+            buildPromptsPayload({ ...params, tags: [...(params.tags ?? []), `intent__${value}`] }),
+          );
+          return { key: value.toLowerCase(), rows: transformPromptsResponse(raw).prompts };
+        },
+      ).catch(() => []);
+
+      const [base, intentResults] = await Promise.all([basePromise, intentPromise]);
+
+      // prompt text → own intent. A prompt carries exactly one intent tag, so
+      // it appears in at most one filtered result.
+      const intentByPrompt = new Map();
+      for (const { key, rows } of intentResults) {
+        for (const row of rows) {
+          if (row?.prompt != null) {
+            intentByPrompt.set(row.prompt, key);
+          }
+        }
+      }
+
+      const prompts = base.prompts.map((p) => ({
+        ...p,
+        userIntent: intentByPrompt.get(p.prompt) ?? '',
+      }));
+      return { count: prompts.length, prompts };
     },
 
     /**

@@ -13,6 +13,25 @@
 import { resolveElementModel } from '../constants.js';
 
 /**
+ * The Semrush 5-value intent taxonomy, as the exact (capitalized) tag VALUES
+ * stored under the `intent` dimension — verified live against a real workspace
+ * (Lovesac): `tags contains intent__Informational` returns that subset. These
+ * match the values the write-path classifier (serenity-docs#32 / api PR #2785)
+ * assigns. Used to enrich each prompt row with its own intent (see `getPrompts`):
+ * one `intent__<value>`-filtered PROMPTS call per value, joined back by prompt.
+ */
+export const SEMRUSH_INTENT_TAG_VALUES = [
+  'Informational',
+  'Commercial',
+  'Transactional',
+  'Task',
+  'Navigational',
+];
+
+/** Max parallel intent-filtered PROMPTS calls when enriching `userIntent`. */
+export const INTENT_ENRICH_CONCURRENCY = 5;
+
+/**
  * Builds the payload for the Prompts element ({@link ELEMENT_IDS.PROMPTS}).
  *
  * The element is a `table` — it returns one row per prompt
@@ -89,6 +108,10 @@ export function buildPromptsPayload({
  * @property {number} volume - Estimated number of times per month a user asked the LLM
  *   a question about this topic. A per-topic estimate, so prompts sharing a topic carry
  *   the same volume.
+ * @property {string} [userIntent] - The prompt's OWN intent (a lowercased Semrush intent
+ *   key, e.g. `commercial`), independent of the topic's `primary_intent`. Present only
+ *   when the caller opts into enrichment; `''` when the prompt has no intent tag. Added by
+ *   the service (`getPrompts`), NOT by `transformPromptsResponse`.
  */
 
 /**
