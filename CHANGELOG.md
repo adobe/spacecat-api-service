@@ -1,3 +1,25 @@
+# [1.670.0](https://github.com/adobe/spacecat-api-service/compare/v1.669.0...v1.670.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** adopt the shared Project Engine facade + typed errors via a boundary adapter (LLMO-6379) ([#2863](https://github.com/adobe/spacecat-api-service/issues/2863)) ([5c9773c](https://github.com/adobe/spacecat-api-service/commit/5c9773ca73124ad851afd49d3ac8217b099e9675)), closes [spacecat-shared#1823](https://github.com/spacecat-shared/issues/1823)
+
+# [1.669.0](https://github.com/adobe/spacecat-api-service/compare/v1.668.1...v1.669.0) (2026-07-20)
+
+
+### Features
+
+* **llmo-akamai:** CUSTOM-default OAE onboarding (PUT deploy + caching/scope gates) ([#2850](https://github.com/adobe/spacecat-api-service/issues/2850)) ([e67e9c5](https://github.com/adobe/spacecat-api-service/commit/e67e9c5ea699e2ff501c02c2ff458c85b36c76bc)), closes [Hi#Level](https://github.com/Hi/issues/Level) [adobe/spacecat-shared#1825](https://github.com/adobe/spacecat-shared/issues/1825)
+
+## [1.668.1](https://github.com/adobe/spacecat-api-service/compare/v1.668.0...v1.668.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **elements:** bounded retry with backoff on the Semrush Elements transport (LLMO-5980) ([#2859](https://github.com/adobe/spacecat-api-service/issues/2859)) ([cd9b672](https://github.com/adobe/spacecat-api-service/commit/cd9b672cae9e82fbc21d288b36580a92c15de356)), closes [spacecat-api-service#2766](https://github.com/spacecat-api-service/issues/2766)
+* **serenity:** classify disguised-405 quota rejections as a stable 40… ([#2854](https://github.com/adobe/spacecat-api-service/issues/2854)) ([11b0bf2](https://github.com/adobe/spacecat-api-service/commit/11b0bf2b9c6ecda5881cc9448880b9b52996f4d7))
+
 # [1.668.0](https://github.com/adobe/spacecat-api-service/compare/v1.667.0...v1.668.0) (2026-07-20)
 
 
