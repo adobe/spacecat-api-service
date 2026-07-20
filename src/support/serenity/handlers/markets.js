@@ -16,8 +16,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
-import { SerenityTransportError } from '../rest-transport.js';
+import { ERROR_CODES, isUpstreamGone, isSemrushTransportError } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
 
@@ -890,7 +889,7 @@ export async function listGlobalModelCatalog(transport) {
       page += 1;
     }
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;
@@ -929,7 +928,7 @@ export async function listLanguageCatalog(transport) {
     const resp = await transport.listLanguages();
     rawItems = Array.isArray(resp?.items) ? resp.items : [];
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;

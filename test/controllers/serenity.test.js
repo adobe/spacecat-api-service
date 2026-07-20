@@ -15,8 +15,14 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 import { brandPointerReloader } from '../../src/controllers/serenity.js';
+// The REAL transport error type: since LLMO-6386 the controller's mapError classifies via
+// errors.js (isSemrushTransportError), which recognises the real SerenityTransportError /
+// ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
+// (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
+import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -208,14 +214,10 @@ describe('SerenityController', () => {
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
-    MockTransportError = class extends Error {
-      constructor(status, message, body) {
-        super(message);
-        this.name = 'SerenityTransportError';
-        this.status = status;
-        this.body = body;
-      }
-    };
+    // Alias the REAL SerenityTransportError so instances are recognised by errors.js's
+    // isSemrushTransportError (which mapError now delegates to). Same (status, message, body)
+    // constructor signature the tests already use.
+    MockTransportError = RealSerenityTransportError;
     const MockAccessControlUtil = {
       default: {
         fromContext: () => ({
@@ -884,6 +886,84 @@ describe('SerenityController', () => {
       expect(body.error).to.equal('internalServerError');
       expect(body.message).to.equal('Internal server error');
       expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
+    });
+
+    // LLMO-6386: a Project Engine call now throws ProjectEngineApiError directly (adaptPE gone).
+    // mapError's widened branch must map it to the SAME HTTP envelope the old transport error
+    // produced, redacting the body/message. ProjectEngineApiError does NOT extend
+    // ErrorWithStatusCode, so it correctly reaches the widened branch.
+    it('upstream ProjectEngineApiError (HTTP status) maps to 502 without leaking provider detail', async () => {
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(503, 'GET', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('serenityUpstreamError');
+      expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+      // The raw "Project Engine ..." message must never reach the client.
+      expect(JSON.stringify(body)).not.to.match(/Project Engine/);
+    });
+
+    it('upstream ProjectEngineApiError 401 propagates as 401 authenticationRequired (redacted)', async () => {
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(401, 'GET', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(401);
+      const body = await readBody(response);
+      expect(body.error).to.equal('authenticationRequired');
+      expect(body.message).to.equal('Upstream authorization failed');
+    });
+
+    it('upstream ProjectEngineApiError 409 propagates as 409 conflict (redacted)', async () => {
+      handlers.handleUpdatePrompt.rejects(new ProjectEngineApiError(409, 'POST', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updatePrompt(fakeContext({
+        params: { semrushPromptId: 'sem-1' },
+        data: {
+          geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['t1'],
+        },
+      }));
+      expect(response.status).to.equal(409);
+      const body = await readBody(response);
+      expect(body.error).to.equal('conflict');
+      expect(body.message).to.equal('Upstream rejected the request as a conflict');
+    });
+
+    // The behaviour-preservation crux (LLMO-6386): a no-HTTP-response Project Engine failure is a
+    // ProjectEngineApiError with status undefined wrapping the original throw as `.cause`. mapError
+    // must unwrap it so the auth-401 keeps mapping to 401 (NOT flattening to 502) and a timeout 504
+    // still maps to 502 — exactly what the retired adaptPE boundary produced.
+    it('unwraps a status-undefined ProjectEngineApiError to preserve the auth 401 (not 502)', async () => {
+      const authCause = new RealSerenityTransportError(401, 'Missing IMS bearer token');
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(undefined, 'POST', null, { cause: authCause }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(401);
+      const body = await readBody(response);
+      expect(body.error).to.equal('authenticationRequired');
+      expect(body.message).to.equal('Upstream authorization failed');
+    });
+
+    it('maps a status-undefined ProjectEngineApiError wrapping a 504 timeout cause to 502', async () => {
+      const timeoutCause = new RealSerenityTransportError(504, 'Semrush request timed out');
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(undefined, 'GET', null, { cause: timeoutCause }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('serenityUpstreamError');
+    });
+
+    it('maps a status-undefined ProjectEngineApiError wrapping a raw network cause to the generic 500', async () => {
+      const netCause = Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' });
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(undefined, 'GET', null, { cause: netCause }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(500);
+      const body = await readBody(response);
+      expect(body.error).to.equal('internalServerError');
+      expect(body.message).to.equal('Internal server error');
     });
 
     it('listTags dispatches to handleListTags and wraps the result in ok()', async () => {
