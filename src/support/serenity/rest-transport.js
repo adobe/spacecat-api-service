@@ -13,7 +13,11 @@
 // @ts-check
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { createSerenityProjectEngineApiClient } from '@adobe/spacecat-shared-project-engine-client';
+import {
+  createSerenityProjectEngineApiClient,
+  createSerenityProjectEngineTransport,
+  ProjectEngineApiError,
+} from '@adobe/spacecat-shared-project-engine-client';
 import { createSerenityUserManagerApiClient } from '@adobe/spacecat-shared-user-manager-client';
 import { ErrorWithStatusCode } from '../utils.js';
 // Two typed Semrush clients back this transport, each owning its own gateway
@@ -212,6 +216,39 @@ function unwrap(method, result) {
 }
 
 /**
+ * Boundary adapter for the shared Project Engine facade
+ * ({@link createSerenityProjectEngineTransport}). The facade already unwraps the 2xx body and
+ * throws its own typed `ProjectEngineApiError` on failure; this rethrows that as the transport's
+ * existing {@link SerenityTransportError} so the ~42 downstream `instanceof SerenityTransportError`
+ * classifiers (allocator / quota / retry — see errors.js) keep working UNCHANGED. Classifiers key
+ * on `.status` and `.body`, never on `.message`, so those two are preserved exactly; the message
+ * text differs (facade says "Project Engine …" where the old hand-rolled path said "Semrush …"),
+ * which is immaterial to classification and redacted from clients by the controller's mapError.
+ *
+ * @template T
+ * @param {Promise<T>} promise a pending facade-method call.
+ * @returns {Promise<T>} the facade's unwrapped 2xx body.
+ */
+async function adaptPE(promise) {
+  try {
+    return await promise;
+  } catch (e) {
+    if (e instanceof ProjectEngineApiError) {
+      // HTTP error: preserve the exact status + body the old unwrap threw (classifiers key on
+      // these, never on .message).
+      if (e.status !== undefined) {
+        throw new SerenityTransportError(e.status, e.message, e.body);
+      }
+      // No HTTP response (timeout / auth / network): the facade wrapped the original throw as
+      // `cause` — surface it unchanged to preserve prior behavior (createTimeoutFetch's 504,
+      // authToken's 401, or a raw network error).
+      throw e.cause ?? e;
+    }
+    throw e;
+  }
+}
+
+/**
  * Creates the Semrush HTTP client. Each request is authenticated with the
  * caller's IMS bearer token; the Adobe gateway exchanges it server-side for
  * Semrush's internal credential.
@@ -256,18 +293,31 @@ export function createSerenityTransport({ env, imsToken }) {
     return imsToken;
   };
 
-  // Typed Project Engine client; appends '/enterprise/projects/api'. Retry,
-  // backoff, and the POST-never-retries-on-5xx idempotency gate are the shared
-  // library's contract, not this file's — see createRetryingFetch in
-  // spacecat-shared-project-engine-client's internal.js (library defaults:
-  // maxRetries 2, retryBaseDelayMs 200; per-attempt timeout via the injected
-  // `createTimeoutFetch` below, since the retry layer wraps it and calls it
-  // once per attempt).
-  const projects = createSerenityProjectEngineApiClient({
+  // Shared options for both the Project Engine facade and the raw brand-topics
+  // client below — identical to what the raw client was previously built with.
+  const projectEngineOptions = {
     baseUrl: root,
     authToken,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
-  });
+  };
+
+  // Shared Project Engine FACADE (ADR-0001); builds its own typed client over
+  // '/enterprise/projects/api' from the same options. Each facade method returns
+  // the unwrapped 2xx body and throws `ProjectEngineApiError` on failure — routed
+  // through `adaptPE` back to `SerenityTransportError` at the boundary so the
+  // downstream classifiers stay untouched. Retry, backoff, and the
+  // POST-never-retries-on-5xx idempotency gate are the shared library's contract,
+  // not this file's — see createRetryingFetch in spacecat-shared-project-engine-
+  // client's internal.js (library defaults: maxRetries 2, retryBaseDelayMs 200;
+  // per-attempt timeout via the injected `createTimeoutFetch`, since the retry
+  // layer wraps it and calls it once per attempt).
+  const projects = createSerenityProjectEngineTransport(projectEngineOptions);
+
+  // Raw Project Engine client, ONLY for GET /v1/workspaces/{id}/brand-topics: the
+  // facade does not expose a brand-topics method yet (it is in-spec — the future
+  // 29th facade method — but unshipped as of 1.14.0), so this one call keeps the
+  // raw client + the local `unwrap`. Same options as the facade above.
+  const projectsRaw = createSerenityProjectEngineApiClient(projectEngineOptions);
 
   // Typed User Manager client over the sub-workspace lifecycle gateway (same
   // retry/timeout contract as above); appends '/enterprise/users/api'. Uses
@@ -302,8 +352,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * the fields the upstream documents as accepted.
      */
     async listPromptsByTags(semrushWorkspaceId, projectId, body) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/by_tags',
+      return adaptPE(projects.listPromptsByTagIds(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: {
@@ -343,8 +392,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {string[]} tagIds - upstream tag ids attached to EVERY item.
      */
     async createPromptsByIds(semrushWorkspaceId, projectId, items, tagIds) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts',
+      return adaptPE(projects.createPrompts(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { items, tag_ids: tagIds },
@@ -357,8 +405,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * this project. Body shape: { ids: [...] }.
      */
     async deletePromptsByIds(semrushWorkspaceId, projectId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts',
+      return adaptPE(projects.deletePromptsByIds(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { ids },
@@ -383,8 +430,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {string} newName - the prompt's next text.
      */
     async renamePrompt(semrushWorkspaceId, projectId, promptId, newName) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/{prompt_id}/rename',
+      return adaptPE(projects.renamePrompt(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId, prompt_id: promptId },
@@ -410,8 +456,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {Array<{ id: string, references: string[], replace: boolean }>} items
      */
     async updatePromptTagsByIds(semrushWorkspaceId, projectId, items) {
-      return unwrap('PUT', await projects.PUT(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tags',
+      return adaptPE(projects.updatePromptTags(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { items },
@@ -425,8 +470,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * this is called.
      */
     async publishProject(semrushWorkspaceId, projectId) {
-      return unwrap('POST', await projects.POST(
-        '/v1/workspaces/{id}/projects/{project_id}/publish',
+      return adaptPE(projects.publishProject(
         { params: { path: { id: semrushWorkspaceId, project_id: projectId } } },
       ));
     },
@@ -437,8 +481,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * expects as `CBF_model`.
      */
     async listAiModels(semrushWorkspaceId, projectId, { page = 1, limit = 100 } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models',
+      return adaptPE(projects.listAiModels(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId },
@@ -458,7 +501,9 @@ export function createSerenityTransport({ env, imsToken }) {
      * hang them under, so generated prompts arrive uncategorized.
      */
     async getBrandTopics(semrushWorkspaceId, { domain, country }) {
-      return unwrap('GET', await projects.GET(
+      // Raw client + local unwrap: the shared facade has no brand-topics method
+      // yet (see `projectsRaw` above). Swap to a facade method once one ships.
+      return unwrap('GET', await projectsRaw.GET(
         '/v1/workspaces/{id}/brand-topics',
         {
           params: {
@@ -491,8 +536,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {string} [opts.parentId] - upstream tag id to nest the names under.
      */
     async createProjectTags(semrushWorkspaceId, projectId, names, { parentId } = {}) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+      return adaptPE(projects.createProjectTags(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           // Only send parent_id when nesting — an empty string is a no-op
@@ -536,8 +580,7 @@ export function createSerenityTransport({ env, imsToken }) {
         parentId = '', search = '', page = 1, limit = 100, draft,
       } = {},
     ) {
-      return unwrap('GET', await projects.GET(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+      return adaptPE(projects.listProjectTags(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId },
@@ -583,8 +626,7 @@ export function createSerenityTransport({ env, imsToken }) {
         );
       }
       const body = { name, parent_id: parentId };
-      return unwrap('PATCH', await projects.PATCH(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/tags/{tag_id}',
+      return adaptPE(projects.updateProjectTag(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId, tag_id: tagId },
@@ -598,8 +640,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      */
     async createProject(semrushWorkspaceId, body) {
-      return unwrap('POST', await projects.POST(
-        '/v1/workspaces/{id}/projects',
+      return adaptPE(projects.createProject(
         { params: { path: { id: semrushWorkspaceId } }, body },
       ));
     },
@@ -615,8 +656,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * Callers (handleDeleteMarket) treat upstream 404 as idempotent success.
      */
     async deleteProject(semrushWorkspaceId, projectId) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v1/workspaces/{id}/projects/{project_id}',
+      return adaptPE(projects.deleteProject(
         { params: { path: { id: semrushWorkspaceId, project_id: projectId } } },
       ));
     },
@@ -630,8 +670,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * prod 2026-06-24 (OPTIONS .../projects/{pid} → 405 allow: PATCH, DELETE, GET).
      */
     async updateProject(semrushWorkspaceId, projectId, body) {
-      return unwrap('PATCH', await projects.PATCH(
-        '/v1/workspaces/{id}/projects/{project_id}',
+      return adaptPE(projects.updateProject(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body,
@@ -649,8 +688,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * routes have no v2 variant (v2 ai_models is POST-only) and stay on v1.
      */
     async addAiModel(semrushWorkspaceId, projectId, modelId) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/ai_models',
+      return adaptPE(projects.createAioModel(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { model_id: modelId },
@@ -664,8 +702,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * `ProjectAIModelResponse`, NOT the catalog `model.id`).
      */
     async deleteAiModelsByIds(semrushWorkspaceId, projectId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models',
+      return adaptPE(projects.deleteAiModels(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { ids },
@@ -680,8 +717,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * Returns {page, total, items: [{id, key, name, icon}]}.
      */
     async listGlobalAiModels({ page = 1, limit = 100 } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v1/ai_models',
+      return adaptPE(projects.listGlobalAiModels(
         { params: { query: { page, limit } } },
       ));
     },
@@ -692,7 +728,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * caller is expected to cache the result (catalog is stable).
      */
     async listLanguages() {
-      return unwrap('GET', await projects.GET('/v1/languages', {}));
+      return adaptPE(projects.listLanguages({}));
     },
 
     // ─────────────────────────────────────────────────────────────────────
@@ -811,8 +847,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * live-view shape with `brand_names: null` for drafts).
      */
     async listProjects(workspaceId) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects',
+      return adaptPE(projects.listProjects(
         { params: { path: { id: workspaceId }, query: { type: 'ai' } } },
       ));
     },
@@ -826,8 +861,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * destructive PUT.
      */
     async getProject(workspaceId, projectId, { draft = true } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}',
+      return adaptPE(projects.getProject(
         {
           params: {
             path: { id: workspaceId, project_id: projectId },
@@ -846,8 +880,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * resulting { ci_competitors: [...] }.
      */
     async updateCiCompetitors(workspaceId, projectId, ciCompetitors) {
-      return unwrap('PUT', await projects.PUT(
-        '/v1/workspaces/{id}/projects/{project_id}/ci/competitors',
+      return adaptPE(projects.updateCompetitors(
         {
           params: { path: { id: workspaceId, project_id: projectId } },
           body: { ci_competitors: ciCompetitors },
@@ -868,8 +901,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * draft-faithfulness concern here.
      */
     async getInitStatus(workspaceId, projectId) {
-      return unwrap('GET', await projects.GET(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/init_status',
+      return adaptPE(projects.getProjectInitStatus(
         { params: { path: { id: workspaceId, project_id: projectId } } },
       ));
     },
@@ -890,8 +922,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * URL endpoints require. Returns `{ aio_benchmarks: [...] }`.
      */
     async listBenchmarks(workspaceId, projectId) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+      return adaptPE(projects.listBenchmarks(
         { params: { path: { id: workspaceId, project_id: projectId } } },
       ));
     },
@@ -905,8 +936,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
      */
     async createBenchmarks(workspaceId, projectId, benchmarks) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+      return adaptPE(projects.createBenchmarks(
         {
           params: { path: { id: workspaceId, project_id: projectId } },
           body: benchmarks,
@@ -921,8 +951,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * competitor that was removed from the brand.
      */
     async deleteBenchmarks(workspaceId, projectId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+      return adaptPE(projects.deleteBenchmarks(
         {
           params: { path: { id: workspaceId, project_id: projectId } },
           body: { ids },
@@ -941,8 +970,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * some aliases; read them back from `listBenchmarks` (`rejected_brand_aliases`).
      */
     async updateBenchmark(workspaceId, projectId, benchmarkId, benchmark) {
-      return unwrap('PUT', await projects.PUT(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks/{benchmark_id}',
+      return adaptPE(projects.updateBenchmark(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
@@ -973,8 +1001,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {boolean} [opts.draft=false] - read the draft (pending) view.
      */
     async listBrandUrls(workspaceId, projectId, benchmarkId, { draft = false } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+      return adaptPE(projects.listBrandUrls(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
@@ -991,8 +1018,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * duplicated) and counted in the response `existing_count`.
      */
     async createBrandUrls(workspaceId, projectId, benchmarkId, entries) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+      return adaptPE(projects.createBrandUrls(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
@@ -1007,8 +1033,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * by id. Body `{ ids: [...] }`. Ids not in this benchmark are ignored.
      */
     async deleteBrandUrls(workspaceId, projectId, benchmarkId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+      return adaptPE(projects.deleteBrandUrls(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
