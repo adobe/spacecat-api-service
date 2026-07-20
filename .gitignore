@@ -26,3 +26,6 @@ docs/index.html
 mcp-server.log
 # Scout MCP local config (per-developer, never commit)
 .scout/
+
+# oh-my-claudecode workspace state (per-developer, never commit)
+.omc/

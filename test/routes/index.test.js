@@ -32,6 +32,9 @@ describe('getRouteHandlers', () => {
     updateQueues: sinon.stub(),
     updateJob: sinon.stub(),
     updateHandler: sinon.stub(),
+    // TEMPORARY: Mock for temporary cleanup API - will be removed once cleanup is done
+    // This is added here to prevent route tests from failing, not for unit testing the endpoint
+    replaceHandlerEnabledDisabled: sinon.stub(),
     restoreVersion: sinon.stub(),
   };
 
@@ -860,6 +863,7 @@ describe('getRouteHandlers', () => {
       'DELETE /configurations/audits/:auditType',
       'PATCH /configurations/latest/jobs/:jobType',
       'PATCH /configurations/latest/handlers/:handlerType',
+      'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled',
       'POST /event/fulfillment/:eventType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
@@ -912,8 +916,11 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',

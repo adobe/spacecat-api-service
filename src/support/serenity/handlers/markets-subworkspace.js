@@ -36,6 +36,7 @@ import {
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
+import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
 } from '../resource-manager.js';
@@ -967,11 +968,21 @@ export async function handleUpdateModelsSubworkspace(
     // 0 for any dim is silently ignored by the gateway (only workspace delete reclaims to zero).
     // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
     // transfer (which it would refuse anyway — this just keeps the request off that path).
-    await releaseAiSurplus(transport, {
-      subWorkspaceId: workspaceId,
-      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
-      failFast: true,
-    }, log);
+    //
+    // Wrapped in `withResourceLock` (LLMO-6191 item 3): `releaseAiSurplus` does the same
+    // read-then-absolute-set as `ensureAiHeadroom` (via `createHeadroomGuard.ensure`, above), so
+    // an in-flight `ensure` for this SAME child in this same warm container must not race this
+    // release — both go through the one per-child lock. This closes the same-container half of
+    // the absolute-set race; the cross-container half is the deferred distributed lock (see
+    // docs/decisions/007-cross-container-resource-lock.md).
+    await withResourceLock(
+      workspaceId,
+      () => releaseAiSurplus(transport, {
+        subWorkspaceId: workspaceId,
+        floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+        failFast: true,
+      }, log),
+    );
   }
 
   return result;

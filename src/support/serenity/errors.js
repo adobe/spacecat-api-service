@@ -13,6 +13,7 @@
 // @ts-check
 
 import { SerenityTransportError } from './rest-transport.js';
+import { recordMeteredQuotaClassifier } from './allocation-metrics.js';
 
 /**
  * Recognises an upstream "already gone" response — the signal that an
@@ -26,9 +27,9 @@ import { SerenityTransportError } from './rest-transport.js';
  * cannot silently turn into "upstream-idempotent-success" and swallow
  * a real failure.
  *
- * Used by every idempotent-DELETE site in the serenity surface:
+ * Used by every "upstream target gone" site in the serenity surface:
  *   - markets.js handleDeleteMarket  (upstream project gone)
- *   - prompts.js handleUpdatePrompt  (deleted-then-create, the delete leg)
+ *   - prompts.js handleUpdatePrompt  (in-place rename of a missing prompt → promptNotFound)
  *   - prompts.js handleBulkDeletePrompts  (per-project bucket delete)
  */
 export function isUpstreamGone(e) {
@@ -95,6 +96,10 @@ export function isWorkspaceNotReady(e) {
  */
 export function isMeteredQuota(e) {
   if (!(e instanceof SerenityTransportError) || e.status !== 405) {
+    // Not a 405 at all — outside the classifier's domain (the metric's denominator is "how many
+    // 405s", not "how many errors of any kind"), so no metric here (MysticatBot review, LLMO-6191):
+    // emitting `Matched=false` for every unrelated error (a TypeError, a timeout, a 409, ...) would
+    // drown the actual 405-classifier signal once a real caller is wired up.
     return false;
   }
   return typeof e.body === 'string' && e.body.length > 0;

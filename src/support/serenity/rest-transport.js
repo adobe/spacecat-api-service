@@ -233,13 +233,14 @@ export function createSerenityTransport({ env, imsToken }) {
   // calls hit a separate (mock) host independently of Project Engine.
   const usersRoot = usersBaseUrl(env);
 
-  // Fail-closed guard for the destructive workspace delete. Deleting a
-  // sub-workspace must be IMPOSSIBLE in every deployed environment
-  // (dev/stage/prod) — production decommission empties and releases a
-  // workspace but never deletes it (design §6); upstream deprovisioning is
-  // Semrush CS's act. The capability is retained only so the net-zero live
-  // smoke can tidy up after itself, and is unlocked solely by this explicit
-  // opt-in flag, which no deployed environment sets (local test-cleanup only).
+  // Fail-closed guard for the destructive workspace delete. Deleting a sub-workspace is
+  // IMPOSSIBLE unless this exact flag is explicitly set — the default in every deployed
+  // environment (dev/stage/prod) today. Test/smoke-cleanup-only (LLMO-6189): the net-zero live
+  // smoke / IT-harness teardown, and manual operator cleanup of throwaway canary workspaces. No
+  // production lifecycle path (workspace-lifecycle.js / brand-provisioning.js) calls this or
+  // branches on this flag — those paths reclaim an allocation by lowering it to a non-zero floor
+  // via releaseFullAllocation, never by deleting the workspace (production never deletes a
+  // sub-workspace; a shell is only ever deprovisioned manually by Semrush CS).
   const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
   // Shared IMS-bearer getter for both typed clients. Raises the transport's own
@@ -255,26 +256,26 @@ export function createSerenityTransport({ env, imsToken }) {
     return imsToken;
   };
 
-  // Typed Project Engine client over the project gateway. maxRetries:0 preserves
-  // the one-shot behaviour the hand-rolled transport had; the injected fetch
-  // re-adds the 15s timeout + Accept header the client does not impose. `root` is
-  // the validated origin; the client appends its own '/enterprise/projects/api'
-  // prefix.
+  // Typed Project Engine client; appends '/enterprise/projects/api'. Retry,
+  // backoff, and the POST-never-retries-on-5xx idempotency gate are the shared
+  // library's contract, not this file's — see createRetryingFetch in
+  // spacecat-shared-project-engine-client's internal.js (library defaults:
+  // maxRetries 2, retryBaseDelayMs 200; per-attempt timeout via the injected
+  // `createTimeoutFetch` below, since the retry layer wraps it and calls it
+  // once per attempt).
   const projects = createSerenityProjectEngineApiClient({
     baseUrl: root,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
-  // Typed User Manager client over the sub-workspace lifecycle gateway. Same
-  // shape as the project client; appends its own '/enterprise/users/api' prefix.
-  // Uses `usersRoot` (SEMRUSH_USERS_BASE_URL, or `root` by fallback) so the
-  // lifecycle gateway can be a separate host from Project Engine.
+  // Typed User Manager client over the sub-workspace lifecycle gateway (same
+  // retry/timeout contract as above); appends '/enterprise/users/api'. Uses
+  // `usersRoot` (SEMRUSH_USERS_BASE_URL, falling back to `root`) since this
+  // gateway can be a separate host from Project Engine.
   const users = createSerenityUserManagerApiClient({
     baseUrl: usersRoot,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
@@ -361,6 +362,59 @@ export function createSerenityTransport({ env, imsToken }) {
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { ids },
+        },
+      ));
+    },
+
+    /**
+     * POST /v2/.../aio/prompts/{prompt_id}/rename — edits ONE prompt's text IN
+     * PLACE. In the AIO model a prompt's `name` IS its text, so rename is the
+     * text-edit operation. Live-verified 2026-07-14 (serenity-docs#63 §2): the
+     * prompt id is preserved across draft, publish and live (`{ id, name,
+     * is_updated }` echoes the SAME id), and renaming onto ANOTHER prompt's
+     * exact text fails with a clean 409 — no mutation, no duplicate. A rename
+     * onto the prompt's OWN current text is a documented `is_updated: false`
+     * no-op, not a conflict. The edit lands in the DRAFT layer; the live view
+     * keeps the old text until the project is published.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} promptId - upstream prompt id to rename.
+     * @param {string} newName - the prompt's next text.
+     */
+    async renamePrompt(semrushWorkspaceId, projectId, promptId, newName) {
+      return unwrap('POST', await projects.POST(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/{prompt_id}/rename',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId, prompt_id: promptId },
+          },
+          body: { new_name: newName },
+        },
+      ));
+    },
+
+    /**
+     * PUT /v2/.../aio/prompts/tags — batch-updates prompts' tag REFERENCES by
+     * id (aio-update-prompts-batch), in place. Body: { items: [{ id,
+     * references: [tagId…], replace }] } — per item, `replace: false` MERGES
+     * the references onto the prompt's existing tag set, `replace: true` makes
+     * the tag set EXACTLY `references`. The prompt id is preserved (verified
+     * live 2026-07-14, serenity-docs#63 §2). Answers 204 with no body; an
+     * unknown prompt id is skipped SILENTLY (still 204), so a caller needing
+     * existence must establish it separately (the update handlers do, via the
+     * preceding rename's 404).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {Array<{ id: string, references: string[], replace: boolean }>} items
+     */
+    async updatePromptTagsByIds(semrushWorkspaceId, projectId, items) {
+      return unwrap('PUT', await projects.PUT(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/tags',
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items },
         },
       ));
     },
@@ -725,21 +779,21 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY, and fail-closed: throws
-     * unless SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which
-     * no deployed environment (dev/stage/prod) does. Production flows NEVER
-     * delete sub-workspaces (decommission empties and disconnects them but
-     * never deletes — design §6); workspace deprovisioning at offboarding is
-     * Semrush CS's act. Kept here so the
-     * net-zero live smoke can tidy up after itself. Delete cascades over the
-     * workspace's projects; subsequent reads return 403 (workspace doc §4).
+     * DELETE /v1/workspaces/{ws} — fail-closed: throws unless
+     * SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which is unset (off) in every
+     * deployed environment by default (LLMO-6189). Production lifecycle paths (decommission,
+     * failed-provisioning cleanup) never call this — a sub-workspace is only ever reclaimed by
+     * lowering its allocation to a non-zero floor via `workspace-lifecycle.js`'s
+     * `releaseFullAllocation`, never by deletion. This primitive exists purely for
+     * net-zero live smoke / IT-harness teardown (its original and only intended use) and manual
+     * operator cleanup of throwaway test workspaces. Delete cascades over the workspace's projects
+     * (subsequent reads return 403, workspace doc §4).
      */
     async deleteWorkspace(workspaceId) {
       if (!allowWorkspaceDelete) {
         throw new Error(
-          'Serenity workspace deletion is disabled. It is test-cleanup only and '
-          + 'must never run in a deployed environment; set '
-          + 'SERENITY_ALLOW_WORKSPACE_DELETE=true to enable it locally.',
+          'Serenity workspace deletion is disabled. Set SERENITY_ALLOW_WORKSPACE_DELETE=true to '
+          + 'enable it (test/smoke cleanup only — production never deletes a sub-workspace).',
         );
       }
       return unwrap('DELETE', await users.DELETE(

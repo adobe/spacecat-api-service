@@ -339,9 +339,8 @@ export function normalizePromptInput(input) {
 
 /**
  * Creates ONE prompt through the id-based upstream write (`POST aio/prompts`).
- * Both {@link handleCreatePrompts}'s per-item fan-out and
- * {@link handleUpdatePrompt}'s post-delete recreate call this, so the upstream
- * shape is never duplicated across create and update.
+ * Called per item by {@link handleCreatePrompts}'s bulk fan-out (and its
+ * subworkspace twin), so the upstream shape lives in one place.
  *
  * The write is ATOMIC on an unresolvable tag id — live 500s and creates nothing
  * — so every id must already be a known-good upstream tag id, resolved by the
@@ -628,33 +627,42 @@ export async function handleCreatePrompts(
 }
 
 /**
- * PATCH /serenity/prompts/:semrushPromptId — replace.
+ * PATCH /serenity/prompts/:semrushPromptId — in-place edit.
  *
- * Body carries `{geoTargetId, languageCode, text, tags}` (name-based) or
- * `{geoTargetId, languageCode, text, tagIds}` (id-based, mutually exclusive
- * with `tags` -- see {@link parseUpdatePromptBody}). All are required: the
- * upstream provider has no in-place update (no GET-by-id either), so the
- * implementation is DELETE-then-CREATE and we treat the payload as the full
- * next state. Clients always have the existing text/tags(-ids) available
- * locally (they were returned by the preceding list call that rendered the
- * edit form), so requiring both keeps the server side a single straight line
- * and removes the per-request pagination that "preserve-on-omit" semantics
- * would force.
+ * Body carries `{geoTargetId, languageCode, text, tagIds}` (id-based; a
+ * `tags` key is rejected -- see {@link parseUpdatePromptBody}). All are
+ * required — the payload is the full next state. Clients always have the
+ * existing text/tagIds available locally (they were returned by the preceding
+ * list call that rendered the edit form), so requiring both keeps the server
+ * side a single straight line and removes the per-request pagination that
+ * "preserve-on-omit" semantics would force.
+ *
+ * The edit is IN PLACE (serenity-docs#63): `rename` writes the text and the
+ * batch tag-reference write replaces the tag set, both preserving the prompt
+ * id — the response echoes the UNCHANGED semrushPromptId, and everything keyed
+ * to that id survives the edit. Nothing is deleted on this path, so there is
+ * no data-loss window. Both writes run unconditionally: upstream has no
+ * GET-by-id, so the handler cannot know what changed — and does not need to
+ * (an unchanged-text rename is a documented `is_updated: false` no-op, and the
+ * replace-mode tag write is idempotent). Rename runs FIRST because it is the
+ * one operation that can refuse (409): a collision aborts the edit before any
+ * mutation. A tag-write failure after a successful rename leaves a
+ * half-applied edit (text updated, tags not) — retryable, nothing lost.
  *
  * Contract:
- *   - body missing text, or missing both tags and tagIds, or both present
+ *   - body missing text or tagIds, or carrying the retired `tags` key
  *     → 400 (missingFields / invalidRequest).
  *   - slice missing on the brand → 404 (marketNotFound).
- *   - upstream DELETE returns 404 → 404 (promptNotFound).
- *   - upstream DELETE returns any other error → throw (handler-level
- *     500 / 502 mapping by the controller). We never CREATE after a
- *     failed DELETE: a previous warn-and-create behaviour produced
- *     duplicate prompts whenever DELETE flaked (5xx / timeout).
+ *   - upstream rename returns 404 → 404 (promptNotFound).
+ *   - upstream rename returns 409 — the new text collides with a SIBLING
+ *     prompt's — → throw; the controller's mapError answers 409 `conflict`
+ *     with a redacted message. Nothing has mutated upstream.
+ *   - any other upstream error → throw (controller 502 mapping).
  *
- * After a successful CREATE the per-project tag cache is invalidated on
- * this container (a PATCH can introduce a new tag or drop the last
- * carrier of an old tag), then `publishProject` is fired to push the
- * new upstream prompt id live.
+ * After the writes the per-project tag cache is invalidated on this container
+ * (a PATCH can introduce a new tag or drop the last carrier of an old tag),
+ * then `publishProject` is fired — edits land in the draft layer, publish
+ * moves them live (same publish contract as the create path).
  */
 export async function handleUpdatePrompt(
   transport,
@@ -702,9 +710,10 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
-  // Recompute the type tag from the NEW text BEFORE the delete: the unified layer
-  // (tree read / on-demand tag create) must not run between delete and create,
-  // so a classification failure aborts cleanly with the old prompt still present.
+  // Recompute the type tag from the NEW text BEFORE any upstream write: the
+  // unified layer (tree read / on-demand tag create) resolves the computed
+  // value's id first, so a classification failure aborts cleanly with the
+  // prompt completely untouched.
   const injectComputedType = makeTypeInjector(
     transport,
     semrushWorkspaceId,
@@ -716,7 +725,7 @@ export async function handleUpdatePrompt(
   });
 
   try {
-    await transport.deletePromptsByIds(semrushWorkspaceId, projectId, [semrushPromptId]);
+    await transport.renamePrompt(semrushWorkspaceId, projectId, semrushPromptId, nextText);
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -727,27 +736,26 @@ export async function handleUpdatePrompt(
         },
       };
     }
-    log?.error?.('handleUpdatePrompt: deletePromptsByIds failed; aborting before create to avoid duplicate', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
-    });
+    // A 409 (the new text collides with a sibling prompt's) and every other
+    // upstream error propagate to the controller's mapError; nothing has
+    // mutated upstream — the tag write below has not run.
     throw e;
   }
 
-  let newSemrushPromptId;
+  // Full replace with the injector's output: the caller's tagIds minus any
+  // caller-supplied type value, plus the server-computed one. An unknown
+  // prompt id would be skipped silently (204) — the rename above has already
+  // established existence.
   try {
-    newSemrushPromptId = await createOnePrompt(transport, semrushWorkspaceId, projectId, typed);
+    await transport.updatePromptTagsByIds(semrushWorkspaceId, projectId, [
+      { id: semrushPromptId, references: typed.tagIds, replace: true },
+    ]);
   } catch (e) {
-    // The DELETE above already succeeded, so the old prompt is gone upstream —
-    // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
-    // create) is a genuine data-loss event, not a retryable no-op. Log it
-    // distinctly from the pre-delete failure above so on-call can tell "nothing
-    // happened" apart from "the prompt is gone and must be recreated manually".
-    log?.error?.('handleUpdatePrompt: createOnePrompt failed AFTER a successful delete; the prompt is now lost upstream and must be recreated manually', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
+    // The rename above already landed: the prompt's text has moved while its
+    // tags are stale. Record the partial mutation before propagating, so the
+    // generic upstream error the caller sees is attributable on-call.
+    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+      semrushPromptId, projectId, error: e.message,
     });
     throw e;
   }
@@ -759,7 +767,7 @@ export async function handleUpdatePrompt(
   return {
     status: 200,
     body: {
-      semrushPromptId: newSemrushPromptId,
+      semrushPromptId,
       geoTargetId,
       languageCode,
       text: nextText,
