@@ -362,6 +362,35 @@ function rootIdOf(roots, dimension) {
 }
 
 /**
+ * The id of a SERVER-OWNED dimension root, failing LOUD when it is unresolved.
+ *
+ * The only dimension whose root can come back `undefined` is `source` on a
+ * mid-rename project — {@link ensureDimensionRoots} deliberately leaves the
+ * `source` key unset while that project's `source` root still means authorship
+ * (WP-O6-gated). Without this guard an `undefined` root id flows into
+ * {@link ensureChildren}, whose `createProjectTags(missing, parentId ? {parentId}
+ * : {})` degrades to a ROOT-LEVEL create, silently minting a stranded value as a
+ * bogus new dimension root. The external deploy gate should keep this state out of
+ * production, but a gate bypass must fail visibly, not corrupt the tree — so refuse
+ * rather than proceed. A no-op for the always-provisioned dimensions.
+ *
+ * @param {Map<string, string | undefined>} roots - the resolved root name → id map.
+ * @param {string} dimension - a server-owned dimension root name.
+ * @returns {string}
+ */
+function requireServerOwnedRootId(roots, dimension) {
+  const rootId = roots.get(dimension);
+  if (!rootId) {
+    throw new ErrorWithStatusCode(
+      `${dimension} dimension root not provisioned (source-dimension.md is WP-O6-gated); `
+      + 'refusing to create a stranded root-level tag',
+      502,
+    );
+  }
+  return rootId;
+}
+
+/**
  * Locates every id in `tagIds` in the project's draft tag tree, in ONE walk, and
  * reports where each sits: the DIMENSION it belongs to (the name of its root
  * ancestor) and the ids of its ancestors, root-first.
@@ -608,7 +637,7 @@ export async function ensureServerOwnedValue(
   log,
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const rootId = rootIdOf(roots, dimension);
+  const rootId = requireServerOwnedRootId(roots, dimension);
   const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
@@ -658,7 +687,7 @@ export async function resolveClosedValueInjection(
   log,
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const rootId = rootIdOf(roots, dimension);
+  const rootId = requireServerOwnedRootId(roots, dimension);
   const { byName } = await ensureChildren(
     transport,
     semrushWorkspaceId,
