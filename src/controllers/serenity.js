@@ -775,7 +775,10 @@ function SerenityController(context, log, env) {
           log,
           // Narrowed to the one model the mapping-row helpers touch — see the
           // create-market call site above for the same rationale.
-          { dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject } },
+          {
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+          },
         )
         : handleDeleteMarket(
           transport,
@@ -1113,7 +1116,9 @@ function SerenityController(context, log, env) {
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
-          { dynamicAllocation: dynamicAllocationEnabled(ctx) },
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+          },
         );
         let bareSucceeded = true;
         if (typeof brand.setStatus === 'function') {
@@ -1208,7 +1213,9 @@ function SerenityController(context, log, env) {
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
-        { dynamicAllocation: dynamicAllocationEnabled(ctx) },
+        {
+          dynamicAllocation: dynamicAllocationEnabled(ctx),
+        },
       );
       const results = [];
       for (const m of markets) {
@@ -1465,14 +1472,15 @@ function SerenityController(context, log, env) {
 
   /**
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
-   * (design flow 6): delete every project and release the allocation back to
-   * the parent pool, then DISCONNECT the brand by clearing its
-   * semrush_sub_workspace_id pointer. The sub-workspace itself is NEVER deleted
-   * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
-   * is left empty and unowned. Clearing the pointer flips the brand back to
-   * flat mode, so a future activate allocates a fresh sub-workspace. Sets
-   * brands.status = 'pending'. No-op decommission (still 200) for a brand with
-   * no sub-workspace.
+   * (design flow 6): delete every project and lower the allocation to a small non-zero floor,
+   * returning the surplus to the parent pool, then DISCONNECT the brand by clearing its
+   * semrush_sub_workspace_id pointer. The sub-workspace itself is never deleted — production never
+   * deletes a sub-workspace (upstream deprovisioning is Semrush CS's act) — it is left empty,
+   * unowned, and minimally resourced (LLMO-6189 — a to-zero transfer is a silent gateway no-op, so
+   * lowering to a non-zero floor is the only reliable way to actually reclaim the surplus).
+   * Clearing the pointer flips the brand back to flat mode, so a future
+   * activate allocates a fresh sub-workspace. Sets brands.status = 'pending'.
+   * No-op decommission (still 200) for a brand with no sub-workspace.
    */
   const deactivate = async (ctx) => {
     try {
@@ -1495,9 +1503,9 @@ function SerenityController(context, log, env) {
               (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
           },
         );
-        // Disconnect the brand from the now-emptied sub-workspace. The
-        // sub-workspace is kept (never deleted); clearing the pointer is what
-        // returns the brand to flat mode. Invalidate the resolver cache HERE —
+        // Disconnect the brand from the now-emptied, floor-lowered sub-workspace (never
+        // deleted); clearing the pointer is what returns the brand to flat mode.
+        // Invalidate the resolver cache HERE —
         // before the save — so that even if save() throws, the resolver can't
         // keep routing to the already-emptied sub-workspace for the full
         // positive-TTL window (the upstream is empty the moment decommission

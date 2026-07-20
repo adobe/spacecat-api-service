@@ -724,8 +724,10 @@ function StateAccessMappingsController(context) {
         createdBy,
       });
       if (result.created.length === 0 && result.skipped.length > 0) {
-        // Active duplicate already exists. Surface the existing row id for
-        // idempotent client handling — look it up by the natural key.
+        // Active duplicate already exists — upsert semantics: overwrite the
+        // existing binding's capabilities with the request's set rather than
+        // rejecting the call. Look the row up by its natural key, then replace
+        // its capabilities via the same capability-edit RPC PATCH uses.
         const existing = await listFacsAccessMappings(postgrestClient, {
           imsOrgId,
           product,
@@ -736,13 +738,49 @@ function StateAccessMappingsController(context) {
           limit: 1,
         });
         const conflictId = existing[0]?.id ?? null;
-        return createResponse(
-          {
-            message: 'Active access mapping already exists for this subject and resource',
-            id: conflictId,
-          },
-          409,
-        );
+        // Defensive: the active row vanished (revoked) between the insert
+        // conflict and this read. Nothing to update — surface the conflict.
+        if (!conflictId) {
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: null,
+            },
+            409,
+          );
+        }
+        const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
+          id: conflictId,
+          imsOrgId,
+          product,
+          grantedCapabilities: capabilitiesToStore,
+          updatedBy: createdBy,
+        });
+        if (!updated) {
+          // Same race as above, observed one layer down (the RPC filters on
+          // `revoked_at IS NULL`). Surface the conflict rather than a 500.
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: conflictId,
+            },
+            409,
+          );
+        }
+        await emitAuditEvent(ctx, {
+          imsOrgId,
+          product,
+          operation: 'update_capabilities',
+          outcome: 'allow',
+          statusCode: 200,
+          mappingId: updated.id,
+          bindingSubjectType: updated.subject_type,
+          bindingSubjectId: updated.subject_id,
+          resourceType: updated.resource_type,
+          resourceId: updated.resource_id,
+          grantedCapabilities: capabilitiesToStore,
+        });
+        return ok(toMappingDto(updated));
       }
       const createdRow = result.created[0];
       await emitAuditEvent(ctx, {

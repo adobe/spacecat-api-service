@@ -1,3 +1,38 @@
+# [1.668.0](https://github.com/adobe/spacecat-api-service/compare/v1.667.0...v1.668.0) (2026-07-20)
+
+
+### Features
+
+* map platform values sent to Semrush elements api for brand presence data ([#2855](https://github.com/adobe/spacecat-api-service/issues/2855)) ([d1eb929](https://github.com/adobe/spacecat-api-service/commit/d1eb92917fa207b4275711904a3d2be745848516))
+
+# [1.667.0](https://github.com/adobe/spacecat-api-service/compare/v1.666.0...v1.667.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** flag-flip readiness gates for dynamic AI allocation (LLMO-6190) ([#2813](https://github.com/adobe/spacecat-api-service/issues/2813)) ([03d305c](https://github.com/adobe/spacecat-api-service/commit/03d305c9188a546118a7ae6168033ed50055808b)), closes [#2764](https://github.com/adobe/spacecat-api-service/issues/2764)
+
+# [1.666.0](https://github.com/adobe/spacecat-api-service/compare/v1.665.1...v1.666.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= sparse-fieldset projection to list endpoints ([#2840](https://github.com/adobe/spacecat-api-service/issues/2840)) ([c5af373](https://github.com/adobe/spacecat-api-service/commit/c5af373090ea1caac32cd7ca25b26aaf5920882d))
+
+## [1.665.1](https://github.com/adobe/spacecat-api-service/compare/v1.665.0...v1.665.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **serenity:** stop the RELEASE_ALLOCATION zero-transfer silent no-op ([#2812](https://github.com/adobe/spacecat-api-service/issues/2812)) ([0d80fcf](https://github.com/adobe/spacecat-api-service/commit/0d80fcf5c79d338cc3d0aa6c0f75aff4e5ef83f9))
+
+# [1.665.0](https://github.com/adobe/spacecat-api-service/compare/v1.664.0...v1.665.0) (2026-07-19)
+
+
+### Features
+
+* upsert on conflict for state access-mapping create ([#2852](https://github.com/adobe/spacecat-api-service/issues/2852)) ([df33f52](https://github.com/adobe/spacecat-api-service/commit/df33f52dd9404b81a66ea2f37cbd7e987dd649a0))
+
 # [1.664.0](https://github.com/adobe/spacecat-api-service/compare/v1.663.0...v1.664.0) (2026-07-18)
 
 

@@ -24,6 +24,7 @@ export const ELEMENT_MODELS = Object.freeze([
   'deepseek',
   'search-gpt',
   'perplexity',
+  'chatgpt-paid',
 ]);
 
 /**
@@ -33,19 +34,17 @@ export const ELEMENT_MODELS = Object.freeze([
  * SpaceCat side.
  *
  * Only entries whose names DIFFER are listed. Codes that are already identical to a
- * Semrush model (`google-ai-overview`, `google-ai-mode`, `perplexity`) and any
- * Semrush-only model with no UI counterpart (`grok-3`, `open-evidence`,
- * `claude-sonnet-4`, `deepseek`) need no entry — {@link resolveElementModel} passes
- * them through unchanged.
- *
- * TODO(LLMO-6011): confirm the two ChatGPT tier mappings with product — `openai`
- * (ChatGPT Paid) → `gpt-5` and `chatgpt` (ChatGPT Free) → `search-gpt` are best-guess.
+ * Semrush model (`google-ai-overview`, `google-ai-mode`, `perplexity`, `deepseek`)
+ * and any Semrush-only model with no UI counterpart (`open-evidence`) need no
+ * entry — {@link resolveElementModel} passes them through unchanged.
  */
 export const PLATFORM_TO_ELEMENT_MODEL = Object.freeze({
   copilot: 'microsoft-copilot',
   gemini: 'gemini-2.5-flash',
-  openai: 'gpt-5',
+  openai: 'chatgpt-paid',
   chatgpt: 'search-gpt',
+  grok: 'grok-3',
+  anthropic: 'claude-sonnet-4',
 });
 
 /**
