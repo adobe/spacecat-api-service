@@ -166,8 +166,8 @@ export default function AuditPolicyController() {
     } = auth;
 
     const aso = await hasProductAccess(ac, site, 'ASO');
-    const llmo = aso ? true : await hasProductAccess(ac, site, 'LLMO');
-    if (!aso && !llmo) {
+    const hasWriteEntitlement = aso || await hasProductAccess(ac, site, 'LLMO');
+    if (!hasWriteEntitlement) {
       return forbidden('Editing the audit policy requires ASO or LLMO entitlement for this site');
     }
 
@@ -175,6 +175,9 @@ export default function AuditPolicyController() {
     const invalid = validateMutateBody(body);
     if (invalid) {
       return badRequest(invalid);
+    }
+    if (resourceKey === 'exclusions' && body.values.some((v) => v.includes('../'))) {
+      return badRequest("exclusionGlobs entries must not contain path-traversal sequences ('../')");
     }
 
     const attempt = async (remainingAttempts) => {

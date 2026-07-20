@@ -446,6 +446,29 @@ describe('AuditPolicyController — exclusions add/remove', () => {
     const res = await controller.addExclusions(buildContext({ data: { values: ['/a/*'], reason: 'r' } }));
     expect(res.status).to.equal(403);
   });
+
+  it('exclusion glob containing a path-traversal sequence (../) -> 400', async () => {
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({
+      data: { values: ['/checkout/../admin/*'], reason: 'r' },
+    }));
+    expect(res.status).to.equal(400);
+    const body = await res.json();
+    expect(body.message).to.match(/path-traversal/);
+  });
+
+  it('exclusion glob containing ../ is rejected even alongside otherwise-valid globs, before the RPC is called', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [],
+    });
+    const controller = loadController();
+    const res = await controller.removeExclusions(buildContext({
+      client, data: { values: ['/checkout/*', '../etc/passwd'], reason: 'r' },
+    }));
+    expect(res.status).to.equal(400);
+    expect(client.rpc).to.not.have.been.called;
+  });
 });
 
 describe('AuditPolicyController — inclusions add/remove', () => {
@@ -496,6 +519,22 @@ describe('AuditPolicyController — inclusions add/remove', () => {
     }));
     expect(res.status).to.equal(400);
     expect(client.rpc).to.not.have.been.called;
+  });
+
+  it('inclusion URL containing ../ in its path is still accepted (path-traversal check is exclusions-only)', async () => {
+    const row = { ...ROW_V5, manual_urls: [] };
+    const client = buildSequencedClient({
+      selectQueue: [{ data: row, error: null }],
+      rpcQueue: [{ data: { ...row, version: 6, manual_urls: ['https://example.com/a/../b'] }, error: null }],
+    });
+    const controller = loadController();
+    const res = await controller.addInclusions(buildContext({
+      client, data: { values: ['https://example.com/a/../b'], reason: 'add url with ../ in path' },
+    }));
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_manual_urls: ['https://example.com/a/../b'],
+    }));
   });
 });
 
