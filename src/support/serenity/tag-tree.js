@@ -608,3 +608,46 @@ export async function resolveTypeValueInjection(
     typeTagIds: [...byName.values()],
   };
 }
+
+/**
+ * Resolves the id-based injection of a server-computed `origin` value into a
+ * prompt write. Returns the wanted value's id plus EVERY id under the resolved
+ * authorship root, so the caller can strip any caller-supplied `origin` tag id
+ * (a client must never set the value itself on create; on update the caller
+ * re-injects the prompt's already-stored id instead of calling this with a
+ * freshly derived one — see `makeTypeInjector` in `handlers/prompts.js`).
+ *
+ * The root is resolved through {@link ensureDimensionRoots}, so during the
+ * `source` → `origin` rename this returns the tolerantly-resolved authorship
+ * root (whichever physical name it currently carries) — never a second one.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} wantValue - the bare `origin` value (`ai` / `human`).
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string, originTagIds: string[] }>} `computedId`
+ *   is always resolved — {@link ensureChildren} throws rather than leave a hole.
+ */
+export async function resolveOriginValueInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  wantValue,
+  log,
+) {
+  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+  const originRootId = rootIdOf(roots, DIMENSION.ORIGIN);
+  const { byName } = await ensureChildren(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    originRootId,
+    [wantValue],
+    log,
+  );
+  return {
+    computedId: /** @type {string} */ (byName.get(wantValue)),
+    originTagIds: [...byName.values()],
+  };
+}

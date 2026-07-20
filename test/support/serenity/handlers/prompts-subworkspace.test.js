@@ -154,7 +154,9 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1']);
+      // No classifier supplied, so the `type` step is skipped; the `origin`
+      // step always runs and appends the AI-authored origin id on create.
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1', TAG_IDS.originAi]);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
@@ -210,13 +212,13 @@ describe('prompts-subworkspace handlers', () => {
         }],
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         ['is Acme good?'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi],
       );
     });
 
@@ -311,10 +313,11 @@ describe('prompts-subworkspace handlers', () => {
       // The id is preserved — the edit is in place, never a re-create.
       expect(result.body.semrushPromptId).to.equal('old-id');
       expect(transport.renamePrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', 'new');
+      // No caller-supplied origin id, so update falls back to the AI origin id.
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        [{ id: 'old-id', references: ['tag-1'], replace: true }],
+        [{ id: 'old-id', references: ['tag-1', TAG_IDS.originAi], replace: true }],
       );
       expect(transport.deletePromptsByIds).to.not.have.been.called;
       expect(transport.createPromptsByIds).to.not.have.been.called;
@@ -374,12 +377,12 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.status).to.equal(200);
       expect(result.body.semrushPromptId).to.equal('old-id');
-      expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
+      expect(result.body.tagIds).to.deep.equal(['tag-cat-1', TAG_IDS.originAi]);
       expect(transport.renamePrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', 'new');
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        [{ id: 'old-id', references: ['tag-cat-1'], replace: true }],
+        [{ id: 'old-id', references: ['tag-cat-1', TAG_IDS.originAi], replace: true }],
       );
     });
 
@@ -410,14 +413,14 @@ describe('prompts-subworkspace handlers', () => {
       }, log, classifyByBrandMention);
       expect(result.status).to.equal(200);
       expect(result.body.tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi,
       ]);
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         [{
           id: 'old-id',
-          references: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+          references: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originAi],
           replace: true,
         }],
       );
@@ -740,6 +743,6 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
       languageCode: 'en',
     }, log);
     expect(result.status).to.equal(200);
-    expect(result.body.tagIds).to.deep.equal(['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep', TAG_IDS.originAi]);
   });
 });
