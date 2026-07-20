@@ -622,6 +622,10 @@ describe('getRouteHandlers', () => {
 
   const mockAuditPolicyController = {
     getPolicy: sinon.stub(),
+    addExclusions: sinon.stub(),
+    removeExclusions: sinon.stub(),
+    addInclusions: sinon.stub(),
+    removeInclusions: sinon.stub(),
     listRevisions: sinon.stub(),
     getScopePages: sinon.stub(),
     getScopeSummary: sinon.stub(),
@@ -1317,6 +1321,10 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
       'GET /sites/:siteId/audit-policy',
+      'POST /sites/:siteId/audit-policy/exclusions',
+      'POST /sites/:siteId/audit-policy/exclusions/delete',
+      'POST /sites/:siteId/audit-policy/inclusions',
+      'POST /sites/:siteId/audit-policy/inclusions/delete',
       'GET /sites/:siteId/audit-policy/revisions',
       'GET /sites/:siteId/audit-scope/pages',
       'GET /sites/:siteId/audit-scope/summary',

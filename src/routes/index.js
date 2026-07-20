@@ -336,6 +336,10 @@ export default function getRouteHandlers(
 
     // Audit Policy contract (SITES-47306). Static segments precede dynamic :auditType match.
     'GET /sites/:siteId/audit-policy': auditPolicyController.getPolicy,
+    'POST /sites/:siteId/audit-policy/exclusions': auditPolicyController.addExclusions,
+    'POST /sites/:siteId/audit-policy/exclusions/delete': auditPolicyController.removeExclusions,
+    'POST /sites/:siteId/audit-policy/inclusions': auditPolicyController.addInclusions,
+    'POST /sites/:siteId/audit-policy/inclusions/delete': auditPolicyController.removeInclusions,
     'GET /sites/:siteId/audit-policy/revisions': auditPolicyController.listRevisions,
     'GET /sites/:siteId/audit-scope/pages': auditPolicyController.getScopePages,
     'GET /sites/:siteId/audit-scope/summary': auditPolicyController.getScopeSummary,

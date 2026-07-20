@@ -474,6 +474,10 @@ const routeRequiredCapabilities = {
 
   // Audit Policy contract (SITES-47306)
   'GET /sites/:siteId/audit-policy': 'site:read',
+  'POST /sites/:siteId/audit-policy/exclusions': 'site:write',
+  'POST /sites/:siteId/audit-policy/exclusions/delete': 'site:write',
+  'POST /sites/:siteId/audit-policy/inclusions': 'site:write',
+  'POST /sites/:siteId/audit-policy/inclusions/delete': 'site:write',
   'GET /sites/:siteId/audit-policy/revisions': 'site:read',
   'GET /sites/:siteId/audit-scope/pages': 'site:read',
   'GET /sites/:siteId/audit-scope/summary': 'site:read',

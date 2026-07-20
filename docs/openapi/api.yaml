@@ -369,6 +369,14 @@ paths:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
   /sites/{siteId}/audit-policy:
     $ref: './audit-policy-api.yaml#/audit-policy'
+  /sites/{siteId}/audit-policy/exclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions'
+  /sites/{siteId}/audit-policy/exclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions-delete'
+  /sites/{siteId}/audit-policy/inclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions'
+  /sites/{siteId}/audit-policy/inclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions-delete'
   /sites/{siteId}/audit-policy/revisions:
     $ref: './audit-policy-api.yaml#/audit-policy-revisions'
   /sites/{siteId}/audit-scope/pages:
