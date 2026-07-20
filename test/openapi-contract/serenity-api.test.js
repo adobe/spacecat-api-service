@@ -417,6 +417,31 @@ const FIXTURES = {
       ],
     },
   },
+  // Also served by ElementsController — see the note on
+  // listSerenityUrlInspectorFilterDimensions above.
+  getSerenityUrlInspectorStats: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getUrlInspectorStats',
+    serviceMethod: 'getUrlInspectorStats',
+    handlerResult: {
+      stats: {
+        uniqueUrls: 187,
+        totalCitations: 964,
+        totalPromptsCited: 312,
+        totalPrompts: 1250,
+      },
+      weeklyTrends: [
+        {
+          weekStart: '2026-06-25',
+          weekEnd: '2026-07-01',
+          uniqueUrls: 42,
+          totalCitations: 155,
+          totalPromptsCited: 48,
+        },
+      ],
+    },
+  },
 };
 
 function makeAjv() {
@@ -480,6 +505,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
               createElementsService: () => ({
                 [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
                 resolveRegionProjectId: sinon.stub().resolves(null),
+                // Only consumed by getUrlInspectorStats's aggregate (no-region)
+                // path — without at least one project, it 404s before ever
+                // reaching the service call (mirrors getStats's BrandSemrushProject
+                // fixture above).
+                getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
               }),
             },
           },
