@@ -33,9 +33,12 @@ import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtur
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the two standard values (source=ai,
-// intent=Informational); the third tag is the per-prompt computed `type`.
+// Every generated prompt carries the two standard values (origin=ai,
+// intent=Informational) plus the producing `source/semrush` value; the last tag
+// is the per-prompt computed `type`. Order matches the write site:
+// [...standardIds, sourceId, typeId].
 const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
+const GENERATED_IDS = [...STANDARD_IDS, TAG_IDS.sourceSemrush];
 
 const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';
@@ -730,8 +733,8 @@ describe('markets-subworkspace handlers', () => {
       // grouped by computed type, one upstream call per group, because
       // createPromptsByIds carries ONE shared tag_ids array per call.
       expect(transport.createPromptsByIds).to.have.been.calledTwice;
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['best running shoes'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['top trail shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['best running shoes'], [...GENERATED_IDS, TAG_IDS.typeNonBranded]);
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['top trail shoes'], [...GENERATED_IDS, TAG_IDS.typeBranded]);
       expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
       // Models are STAGED (no inner publish) — only the single final publish runs,
       // so a quota 405 can never escape mid-flow from the model-set commit.
@@ -844,13 +847,13 @@ describe('markets-subworkspace handlers', () => {
         WS,
         'new-proj',
         ['Best ACME running shoes', 'top trail sneakers from zoom'],
-        [...STANDARD_IDS, TAG_IDS.typeBranded],
+        [...GENERATED_IDS, TAG_IDS.typeBranded],
       );
       expect(transport.createPromptsByIds).to.have.been.calledWithExactly(
         WS,
         'new-proj',
         ['most comfortable sandals'],
-        [...STANDARD_IDS, TAG_IDS.typeNonBranded],
+        [...GENERATED_IDS, TAG_IDS.typeNonBranded],
       );
     });
 
@@ -1584,7 +1587,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // 'adobe shoes' contains 'adobe' → branded (null alias was dropped, not used).
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'new-proj', ['adobe shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'new-proj', ['adobe shoes'], [...GENERATED_IDS, TAG_IDS.typeBranded]);
   });
 
   // Line 115 truthy branch: body.name is provided and valid — String(body.name) is used
@@ -1683,8 +1686,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(res.status).to.equal(201);
     // Needles = ['b','real'] (the '' element was coerced + filtered out).
     // 'real deal' contains 'real' → branded; 'plain text' → non-branded.
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['real deal'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['real deal'], [...GENERATED_IDS, TAG_IDS.typeBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...GENERATED_IDS, TAG_IDS.typeNonBranded]);
   });
 
   // serenity-docs#32: a classified prompt gets its real intent id; a text absent
@@ -1721,8 +1724,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // Both are non-branded ('Trail' not mentioned); intent differs, so two calls.
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['buy now'], [SOURCE_AI_ID, TAG_IDS.intentTransactional, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['about it'], [SOURCE_AI_ID, TAG_IDS.intentInformational, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['buy now'], [SOURCE_AI_ID, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['about it'], [SOURCE_AI_ID, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
   });
 
   // Boundary: at exactly AI_GEN_CLASSIFY_MAX + 1 texts, only the first MAX are
@@ -1762,8 +1765,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(classifySpy).to.have.been.calledOnce;
     expect(classifySpy.firstCall.args[0]).to.deep.equal(['p1', 'p2']);
     // p1/p2 classified Transactional; p3 (beyond the cap) defaults Informational.
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p1', 'p2'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentTransactional, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p3'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentInformational, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p1', 'p2'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p3'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
     // The cap-hit is observable, not silent.
     expect(capLog.info).to.have.been.calledWithMatch(
       'generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational',

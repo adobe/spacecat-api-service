@@ -41,8 +41,10 @@ import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
 } from '../resource-manager.js';
-import { DIMENSION, STANDARD_PROMPT_TAG_VALUES, INTENT_VALUE } from '../prompt-tags.js';
-import { provisionDimensionTree } from '../tag-tree.js';
+import {
+  DIMENSION, STANDARD_PROMPT_TAG_VALUES, INTENT_VALUE, GENERATED_PROMPT_SOURCE_VALUE,
+} from '../prompt-tags.js';
+import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
@@ -273,11 +275,11 @@ function validateCreateBody(body) {
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
  * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}, minus
- * its seeded `intent` default), plus a branded / non-branded `type` value derived
- * from `brandNames` (brand name + aliases) and a per-prompt server-classified
- * `intent` value (serenity-docs#32, replacing the seeded `Informational`
- * default). Returns the topic/prompt counts. A generation that yields nothing is
- * a clean no-op (no upstream write).
+ * its seeded `intent` default), the producing `source/semrush` value, plus a
+ * branded / non-branded `type` value derived from `brandNames` (brand name +
+ * aliases) and a per-prompt server-classified `intent` value (serenity-docs#32,
+ * replacing the seeded `Informational` default). Returns the topic/prompt counts.
+ * A generation that yields nothing is a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
  * topic is a sub-category — a depth-3 descendant of a customer category — and
@@ -366,6 +368,19 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   const standardIdsNonIntent = STANDARD_PROMPT_TAG_VALUES
     .filter(({ dimension }) => dimension !== DIMENSION.INTENT)
     .map(({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)));
+  // Stamp the producing system. This generator builds its prompts from Semrush's
+  // own `getBrandTopics`, so every generated prompt is `source/semrush` — the
+  // persisted SR-AI-Visibility key, a constant at THIS write site, NOT `config`
+  // (source-dimension.md §1 item 2). `source` is open, so the value is resolved-or-
+  // created on demand rather than pre-provisioned in `provisioned.values`.
+  const { id: sourceId } = await ensureServerOwnedValue(
+    transport,
+    workspaceId,
+    projectId,
+    DIMENSION.SOURCE,
+    GENERATED_PROMPT_SOURCE_VALUE,
+    log,
+  );
   const typeValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.TYPE));
   const intentValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.INTENT));
 
@@ -415,7 +430,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
       const intentId = /** @type {string} */ (intentValues.get(intentValue));
       byTagSet.set(key, {
         items: [text],
-        tagIds: [...standardIdsNonIntent, intentId, typeId],
+        // `sourceId` (source/semrush) is constant for every generated prompt, so
+        // it rides in every bucket alongside the per-(type, intent) ids.
+        tagIds: [...standardIdsNonIntent, intentId, sourceId, typeId],
       });
     }
   }
@@ -431,7 +448,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
     // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
     // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
-    // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + type).
+    // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + source + type).
     // eslint-disable-next-line no-await-in-loop
     await headroom.retryOnQuota(
       () => transport.createPromptsByIds(workspaceId, projectId, items, tagIds),

@@ -478,28 +478,30 @@ v2-serenity-tags:
     description: |
       Registers a BARE-NAMED prompt tag on the market addressed by the
       `(geoTargetId, languageCode)` slice. Every tag is a descendant of one of
-      the four dimension roots (`category`, `intent`, `source`, `type`); a tag's
-      dimension is that root ancestor, never a prefix on its name. `type` names
-      the dimension the value belongs to, and `name` must not contain `:` nor
-      shadow a dimension root's name.
+      the five dimension roots (`category`, `intent`, `origin`, `type`,
+      `source`); a tag's dimension is that root ancestor, never a prefix on its
+      name. `type` names the dimension the value belongs to, and `name` must not
+      contain `:` nor shadow a dimension root's name.
 
-      `category` is the one OPEN dimension: its values are customer-authored. A
-      duplicate name under the same parent is a hard upstream error, so
-      resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
+      `category` is the one CUSTOMER-AUTHORED open dimension: its values are the
+      customer's. A duplicate name under the same parent is a hard upstream error,
+      so resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
       value directly under the `category` root; pass an upstream tag id (from a
       prior tags list) to nest it under an existing category as a sub-category.
       The "Categories" view is the `category` root's subtree across a brand's
       markets.
 
-      `intent` / `source` / `type` are CLOSED dimensions with a fixed value enum:
-      `name` must be one of that enum's values, and `parentId` is not accepted
-      because their values are always direct children of the dimension root. A
-      closed-dimension create is resolve-OR-create (idempotent): if the project
-      already carries that value its existing id is returned (200,
-      `created: false`) instead of attempting another create.
+      `intent` / `origin` / `type` / `source` are SERVER-OWNED: `parentId` is not
+      accepted (their values are always direct children of the dimension root),
+      and the create is resolve-OR-create (idempotent) — if the project already
+      carries that value its existing id is returned (200, `created: false`)
+      instead of attempting another create. `intent` / `origin` / `type` are
+      additionally CLOSED (their `name` must be one of a fixed value enum);
+      `source` is OPEN (the producing system — source-dimension.md), so any bare
+      `name` resolves-or-creates with no enum.
 
-      The four dimension roots are provisioned on demand, so a project that
-      predates this taxonomy is brought forward by the first write to it.
+      The dimension roots are provisioned on demand, so a project that predates
+      this taxonomy is brought forward by the first write to it.
     operationId: createSerenityTag
     security:
       - ims_key: []
@@ -514,8 +516,8 @@ v2-serenity-tags:
             properties:
               type:
                 type: string
-                enum: [category, intent, source, type]
-                description: The tag's dimension. `category` is open (customer-authored); `intent`/`source`/`type` are closed (fixed enum).
+                enum: [category, intent, origin, type, source]
+                description: The tag's dimension. `category` is customer-authored (open); `intent`/`origin`/`type`/`source` are server-owned — the first three closed (fixed enum), `source` open (producing system, resolve-or-create).
               name:
                 type: string
                 minLength: 1

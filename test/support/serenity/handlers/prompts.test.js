@@ -579,13 +579,13 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'hello',
-      tagIds: ['tag-cat-1', 'tag-child-1', TAG_IDS.originHuman, TAG_IDS.intentInformational],
+      tagIds: ['tag-cat-1', 'tag-child-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
     });
     expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
       WORKSPACE,
       'proj-us-en',
       ['hello'],
-      ['tag-cat-1', 'tag-child-1', TAG_IDS.originHuman, TAG_IDS.intentInformational],
+      ['tag-cat-1', 'tag-child-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
     );
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
   });
@@ -670,8 +670,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     expect(result.created[0].semrushPromptId).to.equal('');
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
   });
 
   it('returns empty semrushPromptId (not the string "undefined") when createPromptsByIds returns an item with no id', async () => {
@@ -719,8 +719,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
   });
 
   it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
@@ -744,11 +744,15 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     // The MAX_TAG_IDS cap bounds the CALLER's tags (50); the server-derived
-    // `origin` (human) and classified `intent` (Informational) are injected on
-    // top, so the stored set is the 50 capped tags plus those two computed ids.
-    expect(result.created[0].tagIds).to.have.lengthOf(52);
+    // `origin` (human), producing `source` (config), and classified `intent`
+    // (Informational) are injected on top, so the stored set is the 50 capped tags
+    // plus those three computed ids.
+    expect(result.created[0].tagIds).to.have.lengthOf(53);
     expect(result.created[0].tagIds).to.deep.equal(
-      [...tooMany.slice(0, 50), TAG_IDS.originHuman, TAG_IDS.intentInformational],
+      [
+        ...tooMany.slice(0, 50),
+        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+      ],
     );
   });
 
@@ -1985,7 +1989,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.created[0].tagIds).to.deep.equal([
         TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
-        TAG_IDS.intentInformational,
+        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WORKSPACE,
@@ -1993,7 +1997,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         ['is Acme good?'],
         [
           TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
-          TAG_IDS.intentInformational,
+          TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
         ],
       );
       // The whole taxonomy already exists, so nothing is provisioned.
@@ -2021,7 +2025,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.created[0].tagIds).to.deep.equal([
         TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originHuman,
-        TAG_IDS.intentInformational,
+        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
     });
 
@@ -2061,7 +2065,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.created[0].tagIds).to.deep.equal([
         decoyCategoryId, TAG_IDS.typeBranded, TAG_IDS.originHuman,
-        TAG_IDS.intentInformational,
+        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
     });
 
@@ -2085,11 +2089,12 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      // The four roots are created at the root level, then `branded` beneath the
-      // freshly-minted `type` root, then `human` beneath the `origin` root — the
-      // create path stamps the derived origin as well as the computed type.
+      // The five roots are created at the root level, then `branded` beneath the
+      // freshly-minted `type` root, then `human` beneath the `origin` root, then
+      // `config` beneath the `source` root — the create path stamps the derived
+      // origin AND source as well as the computed type.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', 'intent', 'origin', 'type',
+        'category', 'intent', 'origin', 'type', 'source',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
@@ -2098,12 +2103,15 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       // `human` beneath the freshly-created `origin` root...
       expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['human']);
       expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::origin' });
-      // ...then intent injection mints the default `Informational` beneath `intent`.
-      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['Informational']);
-      expect(createProjectTags.getCall(3).args[3]).to.deep.equal({ parentId: 'created::intent' });
+      // ...then source injection mints the default `config` beneath `source`, and
+      // finally intent injection mints the default `Informational` beneath `intent`.
+      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['config']);
+      expect(createProjectTags.getCall(3).args[3]).to.deep.equal({ parentId: 'created::source' });
+      expect(createProjectTags.getCall(4).args[2]).to.deep.equal(['Informational']);
+      expect(createProjectTags.getCall(4).args[3]).to.deep.equal({ parentId: 'created::intent' });
       expect(result.created[0].tagIds).to.deep.equal([
         'tag-cat-1', 'created:created::type:branded', 'created:created::origin:human',
-        'created:created::intent:Informational',
+        'created:created::source:config', 'created:created::intent:Informational',
       ]);
     });
   });
@@ -2445,7 +2453,7 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
 
     expect(result.created[0].tagIds).to.deep.equal([
       TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originHuman,
-      TAG_IDS.intentInformational,
+      TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
     ]);
     expect(result.created[0].tagIds).to.not.include(TAG_IDS.originAi);
   });
@@ -2485,10 +2493,10 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
     }, fakeLog(), classifyByBrandMention);
 
     // The `ai` CATEGORY survives; only the origin-root id is stripped, and the
-    // derived origin is injected.
+    // derived origin and source are injected.
     expect(result.created[0].tagIds).to.deep.equal([
       decoyAiCategoryId, TAG_IDS.typeBranded, TAG_IDS.originHuman,
-      TAG_IDS.intentInformational,
+      TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
     ]);
   });
 

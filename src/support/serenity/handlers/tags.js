@@ -21,11 +21,12 @@ import {
 } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
-  ALL_DIMENSIONS, CLOSED_DIMENSIONS,
-  isClosedDimension, closedValuesOf, isDimensionRootName,
+  ALL_DIMENSIONS, CLOSED_DIMENSIONS, SERVER_OWNED_DIMENSIONS,
+  isClosedDimension, isServerOwnedDimension, closedValuesOf, isDimensionRootName,
+  MAX_TAG_NAME_LEN,
 } from '../prompt-tags.js';
 import {
-  ensureClosedValue,
+  ensureServerOwnedValue,
   ensureDimensionRoots,
   findTagsInTree,
   assertParentPlacement,
@@ -36,27 +37,26 @@ import { republishBestEffort } from '../brand-urls.js';
 /**
  * POST /serenity/tags — create a prompt TAG on a single market.
  *
- * Every tag is BARE-NAMED and lives under one of the four dimension roots
- * (`category`, `intent`, `origin`, `type`) on a market's project — the
+ * Every tag is BARE-NAMED and lives under one of the five dimension roots
+ * (`category`, `intent`, `origin`, `type`, `source`) on a market's project — the
  * `aio/tags` surface, via {@link createProjectTags}. A tag's dimension is its
  * root ancestor, never a prefix on its name, so `type` in the request body
  * names the dimension the value belongs to rather than something written into
  * the name.
  *
- * The three CLOSED dimensions (`intent` / `origin` / `type`) have a fixed value
- * enum: `name` must be one of those values, no `parentId` is accepted (their
- * values are always direct children of the dimension root), and the create is
- * resolve-or-create — a small, project-wide-shared set every caller may need
- * the id of. The one OPEN dimension (`category`) carries customer-authored
- * values: a category hangs under the `category` root, a sub-category under a
- * category (via `parentId`). The UI's "Categories" view is the `category`
+ * The four SERVER-OWNED dimensions (`intent` / `origin` / `type` / `source`)
+ * accept no `parentId` (their values are always direct children of the dimension
+ * root) and are created resolve-or-create — a small, project-wide-shared set every
+ * caller may need the id of. The three CLOSED ones additionally enum-check the
+ * `name`; `source` is open (source-dimension.md) so any bare name resolves-or-
+ * creates. The one CUSTOMER-AUTHORED open dimension (`category`) carries
+ * customer values: a category hangs under the `category` root, a sub-category
+ * under a category (via `parentId`). The UI's "Categories" view is the `category`
  * root's subtree across the brand's markets.
  *
  * Both the flat-mode and subworkspace-mode handlers resolve the market's project
  * id from the `(geoTargetId, languageCode)` slice and register one tag.
  */
-
-const MAX_TAG_NAME_LEN = 100;
 
 /**
  * Length + whitespace/control-char validation shared by every parentId parser
@@ -153,15 +153,24 @@ function parseUpdateParentId(body) {
  * `type` names one of {@link ALL_DIMENSIONS}. `name` is BARE — a `:` is
  * rejected rather than rewritten, and a reserved dimension-root name is refused
  * so no value can shadow a root. `parentId` (optional) is the upstream id of
- * the tag the new one nests under; it is only legal for the OPEN dimension,
- * since a closed dimension's values are always direct children of its root.
- * `isClosed` is true for the dimensions in {@link CLOSED_DIMENSIONS}, whose
+ * the tag the new one nests under; it is only legal for the CUSTOMER-AUTHORED open
+ * dimension (`category`), since a server-owned dimension's values are always
+ * direct children of its root.
+ *
+ * The two flags answer two independent questions. `isClosed`
+ * ({@link CLOSED_DIMENSIONS}) drives VOCABULARY validation: a closed value's
  * `name` must be one of that dimension's fixed values ({@link closedValuesOf}).
+ * `isServerOwned` ({@link SERVER_OWNED_DIMENSIONS}) drives the WRITE GUARD and
+ * CREATE SEMANTICS: it forbids a `parentId` (server-owned values hang directly off
+ * their root) and routes the create through resolve-or-create. `source` is
+ * server-owned yet open — a `parentId` is refused and the value is resolved-or-
+ * created, but there is no enum to check against.
  *
  * @param {object} body - request body.
  * @returns {{
  *   type: string, name: string, geoTargetId: number,
- *   languageCode: string, parentId: string | undefined, isClosed: boolean,
+ *   languageCode: string, parentId: string | undefined,
+ *   isClosed: boolean, isServerOwned: boolean,
  * }}
  */
 function parseCreateTagBody(body) {
@@ -176,6 +185,7 @@ function parseCreateTagBody(body) {
     );
   }
   const isClosed = isClosedDimension(type);
+  const isServerOwned = isServerOwnedDimension(type);
   const rawName = hasText(body?.name) ? String(body.name).trim() : '';
   if (!rawName) {
     throw new ErrorWithStatusCode('name is required', 400);
@@ -227,15 +237,15 @@ function parseCreateTagBody(body) {
     );
   }
   const parentId = parseParentId(body?.parentId);
-  if (isClosed && parentId !== undefined) {
+  if (isServerOwned && parentId !== undefined) {
     throw new ErrorWithStatusCode(
-      `parentId is not allowed for a closed dimension (${CLOSED_DIMENSIONS.join(', ')}): `
+      `parentId is not allowed for a server-owned dimension (${SERVER_OWNED_DIMENSIONS.join(', ')}): `
       + 'its values are always direct children of the dimension root',
       400,
     );
   }
   return {
-    type, name: rawName, geoTargetId, languageCode, parentId, isClosed,
+    type, name: rawName, geoTargetId, languageCode, parentId, isClosed, isServerOwned,
   };
 }
 
@@ -368,7 +378,7 @@ export async function handleCreateTag(
   log,
 ) {
   const {
-    type, name, geoTargetId, languageCode, parentId, isClosed,
+    type, name, geoTargetId, languageCode, parentId, isServerOwned,
   } = parseCreateTagBody(body);
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
@@ -380,8 +390,8 @@ export async function handleCreateTag(
   }
   const projectId = row.getSemrushProjectId();
 
-  if (isClosed) {
-    const { id, rootId, created } = await ensureClosedValue(
+  if (isServerOwned) {
+    const { id, rootId, created } = await ensureServerOwnedValue(
       transport,
       semrushWorkspaceId,
       projectId,
@@ -389,7 +399,7 @@ export async function handleCreateTag(
       name,
       log,
     );
-    log?.info?.('handleCreateTag: resolved closed-dimension value', {
+    log?.info?.('handleCreateTag: resolved server-owned-dimension value', {
       brandId, geoTargetId, languageCode, type, name, created,
     });
     // A create leaves the project in `live_with_unpublished_updates`; publish so
@@ -464,7 +474,7 @@ export async function handleCreateTagSubworkspace(
   log,
 ) {
   const {
-    type, name, geoTargetId, languageCode, parentId, isClosed,
+    type, name, geoTargetId, languageCode, parentId, isServerOwned,
   } = parseCreateTagBody(body);
   const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
@@ -472,8 +482,8 @@ export async function handleCreateTagSubworkspace(
   }
   const projectId = String(project.id);
 
-  if (isClosed) {
-    const { id, rootId, created } = await ensureClosedValue(
+  if (isServerOwned) {
+    const { id, rootId, created } = await ensureServerOwnedValue(
       transport,
       workspaceId,
       projectId,
@@ -481,7 +491,7 @@ export async function handleCreateTagSubworkspace(
       name,
       log,
     );
-    log?.info?.('handleCreateTagSubworkspace: resolved closed-dimension value', {
+    log?.info?.('handleCreateTagSubworkspace: resolved server-owned-dimension value', {
       geoTargetId, languageCode, type, name, created,
     });
     // Publish the seeded value so it is live (best-effort). See handleCreateTag.

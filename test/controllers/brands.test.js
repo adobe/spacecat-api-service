@@ -4835,9 +4835,9 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
     });
 
-    it('forwards source param through to the prompts query as an exact filter', async () => {
+    it('forwards source param through to the prompts query as a canonical filter', async () => {
       // Recording client so the assertion fails if source stops being forwarded
-      // from the controller through to listPrompts' `.eq('source', ...)`.
+      // from the controller through to listPrompts' canonical source filter.
       const eqCalls = [];
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake((table) => {
@@ -4869,7 +4869,7 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(200);
-      expect(eqCalls).to.deep.include({ column: 'source', value: 'gsc' });
+      expect(eqCalls).to.deep.include({ column: "lower(replace(source, '_', '-'))", value: 'gsc' });
     });
 
     it('returns prompt items from normalized tables', async () => {
