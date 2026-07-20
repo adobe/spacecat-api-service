@@ -44,36 +44,37 @@ export default function auditPolicyTests(getHttpClient, resetData) {
       expect(res.body.version).to.equal(0);
     });
 
-    it('API-3/API-5: first PUT with expectedVersion 0 creates version 1', async () => {
+    it('first-write via exclusions add creates version 1 with no client-supplied version', async () => {
       const http = getHttpClient();
-      const res = await http.admin.put(`/sites/${SITE_1_ID}/audit-policy`, {
-        budget: 4000,
-        strategyName: 'tiered',
-        exclusionGlobs: [],
-        manualUrls: [],
-        scopeConfig: {},
-        lifecycleOverrides: {},
+      const res = await http.admin.post(`/sites/${SITE_1_ID}/audit-policy/exclusions`, {
+        values: ['/checkout/*'],
         reason: 'init',
-        expectedVersion: 0,
       });
       expect(res.status).to.equal(200);
       expect(res.body.version).to.equal(1);
+      expect(res.body.exclusionGlobs).to.deep.equal(['/checkout/*']);
     });
 
-    it('API-5: stale expectedVersion yields 409 with currentVersion', async () => {
+    it('inclusions add unions into manualUrls and bumps the version', async () => {
       const http = getHttpClient();
-      const res = await http.admin.put(`/sites/${SITE_1_ID}/audit-policy`, {
-        budget: 4000,
-        strategyName: 'tiered',
-        exclusionGlobs: [],
-        manualUrls: [],
-        scopeConfig: {},
-        lifecycleOverrides: {},
-        reason: 'stale',
-        expectedVersion: 0,
+      const res = await http.admin.post(`/sites/${SITE_1_ID}/audit-policy/inclusions`, {
+        values: ['https://example.com/campaign-a'],
+        reason: 'add campaign page',
       });
-      expect(res.status).to.equal(409);
-      expect(res.body.currentVersion).to.equal(1);
+      expect(res.status).to.equal(200);
+      expect(res.body.version).to.equal(2);
+      expect(res.body.manualUrls).to.deep.equal(['https://example.com/campaign-a']);
+    });
+
+    it('exclusions/delete removes a glob via set-difference', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.post(`/sites/${SITE_1_ID}/audit-policy/exclusions/delete`, {
+        values: ['/checkout/*'],
+        reason: 'remove checkout exclusion',
+      });
+      expect(res.status).to.equal(200);
+      expect(res.body.version).to.equal(3);
+      expect(res.body.exclusionGlobs).to.deep.equal([]);
     });
 
     it('API-8: non-member gets 403', async () => {
