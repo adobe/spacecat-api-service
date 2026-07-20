@@ -16,6 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import AuditPolicyController from '../../src/controllers/audit-policy.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
+import { UnauthorizedProductError } from '../../src/support/errors.js';
 
 use(sinonChai);
 use(chaiAsPromised);
@@ -111,6 +112,67 @@ const ROW_V5 = {
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 };
+
+describe('AuditPolicyController — defensive/error-handling branches', () => {
+  afterEach(() => sinon.restore());
+
+  it('hasProductAccess returns false (not throw) when hasAccess rejects with UnauthorizedProductError, letting the other product check proceed', async () => {
+    const hasAccess = sinon.stub();
+    hasAccess.withArgs(sinon.match.any).resolves(true);
+    hasAccess.withArgs(sinon.match.any, '', 'ASO').rejects(new UnauthorizedProductError('wrong product'));
+    hasAccess.withArgs(sinon.match.any, '', 'LLMO').resolves(true);
+    const controller = loadController(hasAccess);
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [{ data: { ...ROW_V5, version: 6 }, error: null }],
+    });
+    const res = await controller.addExclusions(buildContext({
+      client, data: { values: ['/account/*'], reason: 'r' },
+    }));
+    expect(res.status).to.equal(200);
+  });
+
+  it('hasProductAccess propagates non-UnauthorizedProductError errors instead of swallowing them', async () => {
+    const hasAccess = sinon.stub();
+    hasAccess.withArgs(sinon.match.any).resolves(true);
+    hasAccess.withArgs(sinon.match.any, '', 'ASO').rejects(new Error('boom'));
+    hasAccess.withArgs(sinon.match.any, '', 'LLMO').resolves(true);
+    const controller = loadController(hasAccess);
+    await expect(controller.addExclusions(buildContext({
+      data: { values: ['/account/*'], reason: 'r' },
+    }))).to.be.rejectedWith('boom');
+  });
+
+  it('getAuthor falls back to "system" and logs a warning when there is no authenticated identity', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [{ data: { ...ROW_V5, version: 6 }, error: null }],
+    });
+    const controller = loadController();
+    const ctx = buildContext({ client, profile: {}, data: { values: ['/account/*'], reason: 'r' } });
+    const res = await controller.addExclusions(ctx);
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({ p_author: 'system' }));
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/no authenticated identity/));
+  });
+
+  it('authorizeRead falls back to {} when context.params is entirely absent (siteId required -> 400)', async () => {
+    const controller = loadController();
+    // Built by hand (not via buildContext, which always supplies `params`) so the
+    // `context.params || {}` fallback in authorizeRead is actually exercised.
+    const ctx = {
+      data: {},
+      attributes: { authInfo: { getProfile: () => ({ email: 'u@x.com' }) } },
+      dataAccess: {
+        Site: { findById: sinon.stub().resolves({ getId: () => SITE_ID }) },
+        services: { postgrestClient: buildClient() },
+      },
+      log: { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() },
+    };
+    const res = await controller.getPolicy(ctx);
+    expect(res.status).to.equal(400);
+  });
+});
 
 describe('AuditPolicyController — exclusions add/remove', () => {
   afterEach(() => sinon.restore());
@@ -223,6 +285,59 @@ describe('AuditPolicyController — exclusions add/remove', () => {
     expect(res.status).to.equal(400);
   });
 
+  it('body is not a JSON object (e.g. an array) -> 400', async () => {
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({ data: ['not', 'an', 'object'] }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('values array contains a non-string entry -> 400', async () => {
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({
+      data: { values: [123], reason: 'r' },
+    }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('non-string note -> 400', async () => {
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({
+      data: { values: ['/a/*'], reason: 'r', note: 12345 },
+    }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('mutateArray returns authorizeRead\'s own error (invalid siteId) before touching the client', async () => {
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({ params: { siteId: 'not-a-uuid' } }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('returns 500 and logs when the initial policy read fails inside the RPC attempt loop', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: null, error: { code: '500', message: 'boom' } }],
+      rpcQueue: [],
+    });
+    const controller = loadController();
+    const ctx = buildContext({ client, data: { values: ['/a/*'], reason: 'r' } });
+    const res = await controller.addExclusions(ctx);
+    expect(res.status).to.equal(500);
+    expect(client.rpc).to.not.have.been.called;
+    expect(ctx.log.error).to.have.been.calledWith(sinon.match(/500.*boom/));
+  });
+
+  it('RPC rejects with P0001 -> 400 and logs a validation warning', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [{ data: null, error: { code: 'P0001', message: 'some validation message' } }],
+    });
+    const controller = loadController();
+    const ctx = buildContext({ client, data: { values: ['/account/*'], reason: 'r' } });
+    const res = await controller.addExclusions(ctx);
+    expect(res.status).to.equal(400);
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/P0001/));
+  });
+
   it('conflict then retry succeeds: re-reads fresh version and reapplies', async () => {
     const client = buildSequencedClient({
       selectQueue: [
@@ -264,6 +379,25 @@ describe('AuditPolicyController — exclusions add/remove', () => {
     const body = await res.json();
     expect(body.currentVersion).to.equal(9);
     expect(client.rpc).to.have.been.calledThrice;
+  });
+
+  it('conflict on every attempt with non-numeric error.details omits currentVersion from the 409 body', async () => {
+    const conflict = { data: null, error: { code: '40000', details: undefined } };
+    const client = buildSequencedClient({
+      selectQueue: [
+        { data: ROW_V5, error: null },
+        { data: { ...ROW_V5, version: 6 }, error: null },
+        { data: { ...ROW_V5, version: 7 }, error: null },
+      ],
+      rpcQueue: [conflict, conflict, conflict],
+    });
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({
+      client, data: { values: ['/account/*'], reason: 'always conflicts, no version details' },
+    }));
+    expect(res.status).to.equal(409);
+    const body = await res.json();
+    expect(body).to.not.have.property('currentVersion');
   });
 
   it('first-write bootstrap: no existing row -> uses synthetic defaults and expectedVersion 0', async () => {
@@ -584,6 +718,21 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     const res = await controller.listRevisions(ctx);
     expect(ctx.log.error).to.have.been.calledWith(sinon.match(/500.*boom/));
     expect(res.status).to.equal(500);
+  });
+
+  it('returns an empty items array (not throwing) when the terminal query resolves data: null', async () => {
+    const limitSpy = sinon.stub().resolves({ data: null, error: null });
+    const order = sinon.stub().returnsThis();
+    const client = {
+      from: () => ({ select: () => ({ eq: () => ({ order, limit: limitSpy }) }) }),
+      rpc: sinon.stub(),
+    };
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items).to.deep.equal([]);
+    expect(body.cursor).to.be.undefined;
   });
 });
 
