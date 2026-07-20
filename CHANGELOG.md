@@ -1,3 +1,10 @@
+# [1.670.0](https://github.com/adobe/spacecat-api-service/compare/v1.669.0...v1.670.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** adopt the shared Project Engine facade + typed errors via a boundary adapter (LLMO-6379) ([#2863](https://github.com/adobe/spacecat-api-service/issues/2863)) ([5c9773c](https://github.com/adobe/spacecat-api-service/commit/5c9773ca73124ad851afd49d3ac8217b099e9675)), closes [spacecat-shared#1823](https://github.com/spacecat-shared/issues/1823)
+
 # [1.669.0](https://github.com/adobe/spacecat-api-service/compare/v1.668.1...v1.669.0) (2026-07-20)
 
 
