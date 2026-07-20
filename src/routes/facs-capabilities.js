@@ -935,7 +935,6 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type/:channel': 'aso/can_configure',
-      'PUT /sites/:siteId/audit-policy': 'aso/can_configure',
 
       // ---- Manage users (state-layer management endpoints) ---------------
       'GET /state/access-mappings': 'aso/can_manage_users',
