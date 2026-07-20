@@ -34,6 +34,7 @@ import { clearTagCache } from '../../../src/support/serenity/handlers/markets.js
 import { clearResourceLocks } from '../../../src/support/serenity/resource-lock.js';
 import { PROJECT_BLOCK, PROMPT_BLOCK } from '../../../src/support/serenity/resource-manager.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../src/support/serenity/errors.js';
 import { makeProvisioningTransportStubs } from './fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -566,16 +567,30 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
     expect(t.publishProject).to.have.been.calledTwice;
   });
 
-  it('create-market (require mode), flag OFF: a 405 is NOT retried — propagates on the first failure', async () => {
+  // serenity-docs#72 §2/§4.1 — case 1 (brand carve exhausted, allocator OFF, production today):
+  // the raw 405 is classified into the stable `quotaExceeded` 409 token rather than propagating
+  // unclassified (which mapError's generic branch would otherwise flatten into a 502).
+  it('create-market (require mode), flag OFF: a 405 is NOT retried, and is classified as quotaExceeded', async () => {
     const t = makeTransport({
       listProjects: sinon.stub().resolves({ items: [] }),
       publishProject: sinon.stub().rejects(quota405()),
     });
-    await expect(
-      handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
-        dynamicAllocation: false, parentWorkspaceId: MASTER, publishMode: 'require',
-      }),
-    ).to.be.rejectedWith(SerenityTransportError);
+    const opts = { dynamicAllocation: false, parentWorkspaceId: MASTER, publishMode: 'require' };
+    const p = handleCreateMarketSubworkspace(
+      t,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      opts,
+    );
+    const err = await p.then(() => null, (e) => e);
+    expect(err).to.not.equal(null);
+    expect(err).to.not.be.instanceOf(SerenityTransportError);
+    expect(err.status).to.equal(409);
+    expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
     expect(t.publishProject).to.have.been.calledOnce;
   });
 });
