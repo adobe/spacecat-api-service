@@ -1074,9 +1074,8 @@ export default function ElementsController(context, log, env) {
    * URL Inspector stats KPI cards (totalPromptsCited, totalPrompts, uniqueUrls,
    * totalCitations) plus a per-week sparkline breakdown, matching the response
    * shape of the Aurora/Postgres reference endpoint
-   * (docs/llmo-brandalf-apis/url-inspector-stats-api.md). See
-   * docs/elements/url-inspector-stats-plan.md for the full design, including two
-   * known approximation gaps: `totalPromptsCited` sums a per-URL count (Semrush
+   * (docs/llmo-brandalf-apis/url-inspector-stats-api.md). Two known
+   * approximation gaps: `totalPromptsCited` sums a per-URL count (Semrush
    * exposes no distinct prompts-cited element, so a prompt citing multiple owned
    * URLs is overcounted), and `totalPrompts` is not date-scoped (the Semrush
    * PROMPTS element has no date filter, unlike the Aurora RPC).
@@ -1156,6 +1155,14 @@ export default function ElementsController(context, log, env) {
       } else {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
         projectIds = brandSemrushProjects.map((p) => p.semrushProjectId).filter(hasText);
+        // An empty list here must not silently fall through to an unscoped
+        // (workspace-wide) Semrush query (mirrors getStats's Decision 4.1) —
+        // if this brand has no sub-workspace of its own yet, `workspaceId`
+        // resolves to the org's shared parent, so an unscoped call would
+        // return every brand/project in that parent, not just this one.
+        if (projectIds.length === 0) {
+          return notFound(`No Semrush projects configured for brand: ${brandId}`);
+        }
       }
 
       const result = await service.getUrlInspectorStats(workspaceId, {

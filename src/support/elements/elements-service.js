@@ -510,9 +510,9 @@ export function createElementsService(transport) {
      * `totalPromptsCited`, `totalPrompts`, `uniqueUrls`, `totalCitations` — plus a
      * per-week breakdown, matching the response shape of the Aurora/Postgres
      * reference endpoint (`docs/llmo-brandalf-apis/url-inspector-stats-api.md`).
-     * See `docs/elements/url-inspector-stats-plan.md` for the full design and its
-     * two known approximation gaps (`totalPromptsCited` overcounting,
-     * `totalPrompts` not being date-scoped).
+     * Two known approximation gaps: `totalPromptsCited` overcounts (see
+     * {@link aggregateUrlInspectorStats}), and `totalPrompts` is not date-scoped
+     * (see below).
      *
      * `uniqueUrls`/`totalCitations`/`totalPromptsCited` reuse the same
      * Stats-per-URL element (9af5ed83) as `getOwnedUrls`, fanned out per project
@@ -523,9 +523,12 @@ export function createElementsService(transport) {
      * reported for the aggregate `stats` and every `weeklyTrends` entry.
      *
      * `weeklyTrends` reuses `splitDateRangeIntoWeeksBackward` (max 8 most-recent
-     * weeks, same cap as `getBrandPresenceStats`) — a wider requested range is
-     * silently truncated to the most recent 8 weeks of sparkline data; `stats`
-     * itself always covers the full requested `[startDate, endDate]`.
+     * weeks, same cap as `getBrandPresenceStats`) — a request wider than 8 weeks
+     * would truncate `weeklyTrends` while `stats` kept covering the full range.
+     * This function has no range cap of its own; the controller
+     * (`elements.js#getUrlInspectorStats`) bounds the request to 56 days (8
+     * weeks) precisely so that can't happen — `stats` and `weeklyTrends` always
+     * cover the same window in practice.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params
