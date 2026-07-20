@@ -1364,6 +1364,17 @@ describe('SerenityController', () => {
       expect(handlers.handleDeleteMarketSubworkspace).to.have.been.calledOnce;
     });
 
+    it('deleteMarket threads the dynamic-allocation flag (LLMO-6190 item 3) into the subworkspace handler options', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.deleteMarket(fakeContext({
+        params: { geoTargetId: '2840', languageCode: 'en' },
+        env: { SERENITY_DYNAMIC_ALLOCATION: 'true' },
+      }));
+      const opts = handlers.handleDeleteMarketSubworkspace.firstCall.args[5];
+      expect(opts.dynamicAllocation).to.equal(true);
+    });
+
     it('getMarket defaults the path slice to an empty object when ctx.params is absent post-auth', async () => {
       // Defensive `ctx?.params || {}` guard: authorize reads brandId/spaceCatId up
       // front, so if params is later cleared, the slice parsing must still tolerate
