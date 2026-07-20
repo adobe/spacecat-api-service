@@ -107,7 +107,9 @@ function parseRetryAfterMs(response) {
   }
   const seconds = Number(raw);
   if (Number.isFinite(seconds)) {
-    return Math.max(0, Math.round(seconds * 1000));
+    // A negative delta-seconds is non-conforming (RFC 9110); treat it as absent so the caller
+    // falls back to jittered backoff rather than reading it as "retry immediately".
+    return seconds >= 0 ? Math.round(seconds * 1000) : null;
   }
   const epochMs = Date.parse(raw);
   if (Number.isNaN(epochMs)) {
@@ -218,6 +220,11 @@ async function request(url, imsToken, body, {
  * @param {number} [args.maxRetries] - Retries after the first attempt on a 429 (default 2;
  *   <=0 ⇒ single attempt). Defaults match the shared Project Engine client.
  * @param {number} [args.retryBaseDelayMs] - Base delay for the jittered backoff (default 200).
+ *
+ * Worst-case wall time per `fetchElement` is bounded but can be significant: with the defaults
+ * (`maxRetries` 2, per-attempt `timeoutMs` 15s, backoff capped at `MAX_RETRY_DELAY_MS` 20s) the
+ * theoretical ceiling is ~70s (3 × 15s attempts + up to 2 × 20s waits). Callers on a tight
+ * execution budget (e.g. a Lambda timeout) should lower `maxRetries` / `timeoutMs` accordingly.
  */
 export function createElementsTransport({
   env,

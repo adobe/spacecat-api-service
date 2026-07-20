@@ -402,5 +402,43 @@ describe('createElementsTransport', () => {
         clock.restore();
       }
     });
+
+    it('treats a negative Retry-After (non-conforming) as absent → falls back to backoff', async () => {
+      const successBody = { ok: true };
+      // With retryBaseDelayMs 0, a null Retry-After ⇒ instant retry. A negative header value must
+      // be ignored (parseRetryAfterMs returns null), never read as "retry immediately" or worse.
+      fetchStub.onCall(0).resolves(makeResponse(429, {}, { 'Retry-After': '-5' }));
+      fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+      const transport = fastTransport();
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      expect(fetchStub.callCount).to.equal(2);
+      expect(result).to.deep.equal(successBody);
+    });
+
+    it('applies jittered backoff (baseDelayMs > 0) using the [0.5, 1) multiplier', async () => {
+      const clock = sinon.useFakeTimers();
+      const randStub = sinon.stub(Math, 'random').returns(0); // multiplier = 0.5 + 0*0.5 = 0.5
+      try {
+        const successBody = { ok: true };
+        // base 200ms, attempt 0, no Retry-After → 200 * 2**0 * 0.5 = 100ms.
+        fetchStub.onCall(0).resolves(makeResponse(429, { error: 'rate limited' }));
+        fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+        const transport = createElementsTransport({
+          env: ENV, imsToken: IMS_TOKEN, maxRetries: 1, retryBaseDelayMs: 200,
+        });
+        const promise = transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+        await clock.tickAsync(0);
+        expect(fetchStub.callCount).to.equal(1);
+        await clock.tickAsync(99); // not yet — the jittered wait is 100ms
+        expect(fetchStub.callCount).to.equal(1);
+        await clock.tickAsync(1); // 100ms reached → retry fires
+        const result = await promise;
+        expect(fetchStub.callCount).to.equal(2);
+        expect(result).to.deep.equal(successBody);
+      } finally {
+        randStub.restore();
+        clock.restore();
+      }
+    });
   });
 });
