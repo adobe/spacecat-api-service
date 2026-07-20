@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   isUpstreamGone,
@@ -21,6 +24,8 @@ import {
   isRateLimited,
 } from '../../../src/support/serenity/errors.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
+
+use(sinonChai);
 
 describe('serenity error classification', () => {
   describe('isUpstreamGone', () => {
@@ -61,14 +66,52 @@ describe('serenity error classification', () => {
       expect(isWorkspaceNotReady(err(422, { message: 'insufficient available units' }))).to.be.false;
     });
 
-    it('isMeteredQuota: only a 405 with an explicit quota signal — never a bare Method-Not-Allowed', () => {
-      expect(isMeteredQuota(err(405, { message: 'Quota exceeded' }))).to.be.true;
-      expect(isMeteredQuota(err(405, 'quota exceeded'))).to.be.true; // string body
-      expect(isMeteredQuota(err(405, '<html>prompt allocation exhausted</html>'))).to.be.true;
-      expect(isMeteredQuota(err(405, { message: 'Method Not Allowed' }))).to.be.false; // legitimate 405
-      expect(isMeteredQuota(err(405, 'method not allowed'))).to.be.false;
-      expect(isMeteredQuota(err(405, null))).to.be.false; // no body signal → not quota
+    it('isMeteredQuota: keys on body SHAPE, not content — a string body is the disguised quota rejection, a JSON body is a genuine app-level error', () => {
+      // Live-verified pinned fixture (Rainer, LLMO-6190, LLMO-Dev-2) — the real disguised-405 body
+      // carries NO "quota"/"allocation exhausted" text at all, just a bare nginx page.
+      const PINNED_DISGUISED_405_BODY = '<html>\r\n<head><title>405 Not Allowed</title></head>\r\n<body>\r\n<center><h1>405 Not Allowed</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n';
+      expect(isMeteredQuota(err(405, PINNED_DISGUISED_405_BODY))).to.be.true;
+      expect(isMeteredQuota(err(405, 'quota exceeded'))).to.be.true; // any non-empty string body
+      expect(isMeteredQuota(err(405, ''))).to.be.false; // empty string carries no signal
+      // A genuine app-level Method-Not-Allowed always arrives as JSON on this gateway — never
+      // absorbed, regardless of what its message says.
+      expect(isMeteredQuota(err(405, { message: 'Method Not Allowed' }))).to.be.false;
+      expect(isMeteredQuota(err(405, { message: 'Quota exceeded' }))).to.be.false;
+      expect(isMeteredQuota(err(405, null))).to.be.false;
       expect(isMeteredQuota(err(404, null))).to.be.false;
+    });
+
+    describe('isMeteredQuota — MeteredQuotaClassifier metric only fires for actual 405s', () => {
+      let sandbox;
+      let recordMeteredQuotaClassifier;
+      let isMeteredQuotaMocked;
+
+      beforeEach(async () => {
+        sandbox = sinon.createSandbox();
+        recordMeteredQuotaClassifier = sandbox.stub();
+        ({ isMeteredQuota: isMeteredQuotaMocked } = await esmock(
+          '../../../src/support/serenity/errors.js',
+          { '../../../src/support/serenity/allocation-metrics.js': { recordMeteredQuotaClassifier } },
+        ));
+      });
+
+      afterEach(() => sandbox.restore());
+
+      it('does NOT emit the metric for a non-405 (would drown the 405 ratio otherwise)', () => {
+        isMeteredQuotaMocked(err(404, null));
+        isMeteredQuotaMocked(new TypeError('boom'));
+        expect(recordMeteredQuotaClassifier).to.not.have.been.called;
+      });
+
+      it('emits Matched=true for the disguised-405 shape (string body)', () => {
+        isMeteredQuotaMocked(err(405, '<html>405 Not Allowed</html>'));
+        expect(recordMeteredQuotaClassifier).to.have.been.calledOnceWith(true);
+      });
+
+      it('emits Matched=false for a legitimate (JSON-bodied) 405', () => {
+        isMeteredQuotaMocked(err(405, { message: 'Method Not Allowed' }));
+        expect(recordMeteredQuotaClassifier).to.have.been.calledOnceWith(false);
+      });
     });
 
     it('isRateLimited: a 429', () => {

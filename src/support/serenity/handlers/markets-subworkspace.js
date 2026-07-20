@@ -36,6 +36,7 @@ import {
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
+import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
 } from '../resource-manager.js';
@@ -213,6 +214,12 @@ function validateCreateBody(body) {
  *   classification (serenity-docs#32).
  * @param {number} [options.writeDeadline] - shared request-write deadline.
  * @param {object} log - logger.
+ * @param {{ ensure: Function }} headroom - the caller's headroom guard (createHeadroomGuard) —
+ *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
+ *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
+ *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
+ *   LLMO-6190): the metered write is `createPromptsByIds` below, NOT publish — front it BEFORE the
+ *   write loop, sized on the real prompt count now that it's known (`texts.size`), not an estimate.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned, env,
@@ -527,6 +534,7 @@ export async function handleCreateMarketSubworkspace(
         writeDeadline,
       },
       log,
+      headroom,
     );
   }
 
@@ -612,13 +620,19 @@ export async function handleCreateMarketSubworkspace(
   // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
   // empty-units child 405s as a disguised quota rejection, workspace doc §5) and
   // leaves the project a draft so the brand still succeeds.
+  //
+  // Both branches route the publish through `headroom.retryOnQuota` (LLMO-6190 item 4): a no-op
+  // passthrough when the flag is OFF (or `headroom.ensure` above already covered the need), and
+  // ONE bounded re-read+top-up+retry when the publish 405s as a disguised metered-quota rejection
+  // despite the pre-publish `ensure`. A 'best-effort' publish that STILL 405s after that one retry
+  // falls through to the existing swallow below, unchanged.
   let published = false;
   if (publishMode === 'require') {
-    await transport.publishProject(workspaceId, projectId);
+    await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
     published = true;
   } else if (publishMode === 'best-effort') {
     try {
-      await transport.publishProject(workspaceId, projectId);
+      await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
       published = true;
     } catch (e) {
       if (e instanceof SerenityTransportError && e.status === 405) {
@@ -670,6 +684,14 @@ export async function handleCreateMarketSubworkspace(
  * already-vanished project is left un-tombstoned — accepted,
  * reconcile-recoverable drift (implementation plan §3.2/§11).
  *
+ * Wires `releaseAiSurplus` (LLMO-6190 item 3) once the project is confirmed gone — either branch
+ * (our own `deleteProject` succeeded, or it 404'd because the upstream was already gone) leaves the
+ * project truly absent, so both are treated identically: release fires after the try/catch, not
+ * just on the success leg. Same shape as the model-removal seam
+ * (`handleUpdateModelsSubworkspace`): inline, fail-fast (`releaseAiSurplus({ failFast: true })`),
+ * best-effort (its own internal try/catch swallows expected transport/pool failures — a release
+ * hiccup must never fail an otherwise-successful DELETE), post-delete. No-op when the flag is OFF.
+ *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
  * @param {string|number|null} geoTargetId - the market's Google Ads Geo Target id.
@@ -677,6 +699,8 @@ export async function handleCreateMarketSubworkspace(
  * @param {object} log - logger.
  * @param {object} [options]
  * @param {any} [options.dataAccess]
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, hands
+ *   the deleted project's freed units back to the parent pool after the delete.
  */
 export async function handleDeleteMarketSubworkspace(
   transport,
@@ -684,7 +708,7 @@ export async function handleDeleteMarketSubworkspace(
   geoTargetId,
   languageCode,
   log,
-  { dataAccess = null } = {},
+  { dataAccess = null, dynamicAllocation = false } = {},
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
@@ -702,12 +726,20 @@ export async function handleDeleteMarketSubworkspace(
   if (dataAccess) {
     await tombstoneMappingRow(dataAccess, project.id, log);
   }
-  // SCOPE NOTE (serenity-docs#22): this market DELETE does NOT yet call `releaseAiSurplus` to hand
-  // the freed project/prompt units back to the parent pool — release wiring on the delete path is a
-  // deliberate fast-follow, not built here. The stranded units self-heal (next `ensureAiHeadroom`
-  // reuse, a later release, or decommission — see the `releaseAiSurplus` scope note). When it
-  // lands, follow the model-update seam (`handleUpdateModelsSubworkspace`): inline, fail-fast
-  // (`releaseAiSurplus({ failFast: true })`), best-effort, post-publish — no async queue/worker.
+  if (dynamicAllocation) {
+    // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
+    // transfer (silently ignored by the gateway — see resource-manager.js). Best-effort: a release
+    // failure must not turn an already-successful delete into a 500 — releaseAiSurplus's own
+    // try/catch guarantees this by construction (it never throws for expected failures).
+    // `resolveProject` above already resolved a project against `workspaceId`, so it is a real,
+    // non-blank id here; releaseAiSurplus's own requireWorkspaceId re-asserts this at runtime —
+    // narrow the (JSDoc-optional) `string|null` param for tsc, which cannot infer that.
+    await releaseAiSurplus(transport, {
+      subWorkspaceId: /** @type {string} */ (workspaceId),
+      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+      failFast: true,
+    }, log);
+  }
   return { status: 204 };
 }
 
@@ -962,6 +994,10 @@ export async function handleUpdateModelsSubworkspace(
     modelIds,
     { geoTargetId, languageCode },
     log,
+    // LLMO-6190 item 4: bounded top-up+retry if the sync's publish 405s as a disguised
+    // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
+    // when OFF.
+    { wrapPublish: (fn) => headroom.retryOnQuota(fn) },
   );
 
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then
@@ -973,11 +1009,21 @@ export async function handleUpdateModelsSubworkspace(
     // 0 for any dim is silently ignored by the gateway (only workspace delete reclaims to zero).
     // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
     // transfer (which it would refuse anyway — this just keeps the request off that path).
-    await releaseAiSurplus(transport, {
-      subWorkspaceId: workspaceId,
-      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
-      failFast: true,
-    }, log);
+    //
+    // Wrapped in `withResourceLock` (LLMO-6191 item 3): `releaseAiSurplus` does the same
+    // read-then-absolute-set as `ensureAiHeadroom` (via `createHeadroomGuard.ensure`, above), so
+    // an in-flight `ensure` for this SAME child in this same warm container must not race this
+    // release — both go through the one per-child lock. This closes the same-container half of
+    // the absolute-set race; the cross-container half is the deferred distributed lock (see
+    // docs/decisions/007-cross-container-resource-lock.md).
+    await withResourceLock(
+      workspaceId,
+      () => releaseAiSurplus(transport, {
+        subWorkspaceId: workspaceId,
+        floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+        failFast: true,
+      }, log),
+    );
   }
 
   return result;

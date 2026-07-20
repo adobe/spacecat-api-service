@@ -23,6 +23,7 @@ import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
+import { addDaysToDate } from '../support/elements/week-utils.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -130,6 +131,19 @@ function isYmdDate(value) {
 }
 
 /**
+ * Default 28-day trailing date range for `/stats`, mirroring
+ * `llmo-brand-presence.js#defaultDateRange`, used when the caller omits
+ * startDate/endDate. Uses `addDaysToDate` (anchored to T12:00:00Z) rather than
+ * `Date#setDate`, which operates in local time before `toISOString()` converts
+ * to UTC — avoiding a DST-boundary date-shift bug.
+ */
+function defaultStatsDateRange() {
+  const endDate = new Date().toISOString().slice(0, 10);
+  const startDate = addDaysToDate(endDate, -28);
+  return { startDate, endDate };
+}
+
+/**
  * Splits a comma-separated query value into a trimmed, non-empty string array.
  * `extractQuery` collapses repeated params (last value wins), so multi-valued
  * filters (topics, project ids) are passed as a single CSV value.
@@ -142,6 +156,27 @@ function splitCsv(value) {
     return [];
   }
   return value.split(',').map((v) => v.trim()).filter((v) => v.length > 0);
+}
+
+/**
+ * True when the `showTrends`/`show_trends` query param requests trend data,
+ * mirroring `llmo-brand-presence.js#parseShowTrends`.
+ *
+ * Exported (unlike this file's other private helpers) because `extractQuery`
+ * always yields string values from `URLSearchParams`, so the boolean/number
+ * branch below is unreachable through the HTTP query-string path and can only
+ * be exercised via a direct unit test.
+ */
+export function parseShowTrends(q) {
+  const v = q?.showTrends ?? q?.show_trends;
+  if (v === true || v === 1) {
+    return true;
+  }
+  if (typeof v === 'string') {
+    const s = v.toLowerCase().trim();
+    return s === 'true' || s === '1';
+  }
+  return false;
 }
 
 /**
@@ -425,7 +460,7 @@ export default function ElementsController(context, log, env) {
    * {@link authorizeBrandSubWorkspace}.
    *
    * Query params (all optional): `model`/`platform` (AI model, default search-gpt),
-   * `tag` (CSV of FULL tag values, AND-ed — e.g. `type:branded`, `category:Brand`),
+   * `tag` (CSV of FULL tag values, AND-ed — e.g. `type__branded`, `category__Brand`),
    * `projectId` (CSV of Semrush project UUIDs; omitted → all of the brand's projects
    * in its sub-workspace).
    */
@@ -527,6 +562,83 @@ export default function ElementsController(context, log, env) {
 
       const result = await service.getCitedDomains(workspaceId, params);
       return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview
+   * Returns per-week brand sentiment (positive/neutral/negative percentages) sourced from
+   * the Semrush Sentiment element, in the legacy `{ weeklyTrends: [...] }` contract so the
+   * existing brand-presence sentiment chart consumes it drop-in. Single upstream call
+   * (aggregate, no fan-out); region → top-level project_id like cited-domains.
+   */
+  /* c8 ignore start -- LLMO-6300 POC endpoint; unit tests intentionally deferred */
+  const listSentimentOverview = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is required + validated (mirrors cited-domains) — never silently
+      // default to a rolling window nor forward a malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year range is
+      // needlessly expensive upstream and inflates the in-memory weekly rollup.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+
+      // Region scoping: a Semrush project == one (brand, market). Resolve the UI's region
+      // code to that project's id (via the Markets element) and pass it as top-level
+      // `project_id`. region=all/absent → aggregate across all the brand's markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          [brand],
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      }
+
+      const params = {
+        projectId,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        category: query.categoryId || query.category,
+      };
+
+      const result = await service.getSentimentOverview(workspaceId, params);
+      return cachedOk(result);
     } catch (e) {
       return mapError(e, log);
     }
@@ -739,12 +851,232 @@ export default function ElementsController(context, log, env) {
   };
   /* c8 ignore stop */
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends
+   * Weekly per-competitor mentions + citations for the Competitor Comparison chart on
+   * the brand-presence-sr-ui dashboard. Backed by two weekly `line` elements (TRENDS_MV
+   * for mentions, MARKET_CITATIONS_TREND for citations); competitors come back natively
+   * as tracked-benchmark legends, so no competitor list is needed as input. See
+   * docs/elements/market-tracking-trends-plan.md.
+   *
+   * Query params (all optional): `startDate`/`start_date` + `endDate`/`end_date`
+   * (default: 28-day trailing window), `model`/`platform` (default search-gpt),
+   * `regionCode`/`region_code`/`region` (a single region → its one Semrush project;
+   * `all`/absent → aggregate across every project the brand owns), `siteId`/`site_id`
+   * (cross-check only — must belong to `:brandId`).
+   */
+  /* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
+  const getMarketTrackingTrends = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // The path already names the brand; a siteId filter is only honored when it
+      // belongs to that brand (mirrors listWeeks / listCitedDomains).
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      // Date range is optional (defaults to a 28-day trailing window); when a value is
+      // sent it must be a valid YYYY-MM-DD and correctly ordered.
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      // Require both or neither (mirrors listOwnedUrls/listDomainUrls): a half-supplied
+      // range would otherwise pair a caller-provided date with the default's other half,
+      // silently producing an unbounded window that bypasses the 28-day-default contract.
+      // If either is absent, fall back to the full default range as a unit.
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year range fanned
+      // across every project is needlessly expensive upstream, and this endpoint also
+      // aggregates across all projects when no region is given, compounding the fan-out.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // A single selected region+language → its one Semrush projectId. region=all/absent
+      // → every project the brand owns (the payload builder ORs them into one call, so
+      // neither path fans out).
+      let projectId;
+      let projectIds;
+      const region = query.regionCode || query.region_code || query.region;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      } else {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        // Guard the aggregate path: with no project ids the trend payload would carry
+        // no `CBF_project(s)` filter and Semrush would return the ENTIRE workspace —
+        // which, on the org-parent-workspace fallback (a brand with no sub-workspace),
+        // is other brands' data. A brand with zero Semrush projects has no trends, so
+        // return empty rather than issue an unscoped upstream query.
+        if (projectIds.length === 0) {
+          return cachedOk({ weeklyTrends: [] });
+        }
+      }
+
+      const result = await service.getMarketTrackingTrends(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        projectId,
+        projectIds,
+        brandName: brand.name,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats
+   * Elements-backed equivalent of the Postgres-RPC `/stats` endpoint (see
+   * llmo-brand-presence.js#createBrandPresenceStatsHandler): same response shape
+   * (`{ stats, trends? }`) — aggregated `total_executions`, `average_visibility_score`,
+   * `total_mentions`, `total_citations`, plus an optional weekly `trends` array. See
+   * docs/elements/brand-presence-stats-plan.md for the full design + resolved decisions.
+   *
+   * `categoryId(s)`/`topicIds`/`origin` are accepted by the reference endpoint but are
+   * NOT yet supported here — the Elements API has no confirmed filter equivalent for
+   * them (see the plan doc's gap analysis); they are currently no-ops.
+   */
+  const getStats = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+      const siteId = query.siteId || query.site_id;
+
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const defaultRange = defaultStatsDateRange();
+      const effectiveStartDate = startDate || defaultRange.startDate;
+      const effectiveEndDate = endDate || defaultRange.endDate;
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): the Brand Presence
+      // date picker only allows selecting up to 8 weeks, matching the trends
+      // fan-out cap (splitDateRangeIntoWeeksBackward's TRENDS_MAX_WEEKS), so a
+      // wider range can only come from a caller bypassing the UI.
+      const MAX_RANGE_DAYS = 56;
+      const spanDays = (Date.parse(`${effectiveEndDate}T00:00:00Z`)
+        - Date.parse(`${effectiveStartDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // A single selected region+language maps 1:1 to a Semrush projectId — the
+      // common case, needing no fan-out. Absent → aggregate "all regions" view,
+      // scoped to every project this brand owns.
+      let projectId;
+      let projectIds;
+      const regionCode = query.regionCode || query.region_code || query.region;
+      if (hasText(regionCode)) {
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region: regionCode, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${regionCode}`);
+        }
+      } else {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        // An empty list here must not silently fall through to an unscoped
+        // (workspace-wide) Semrush query — that would return data for every
+        // brand/project in the subworkspace, not just this one. Fail explicitly.
+        if (projectIds.length === 0) {
+          return notFound(`No Semrush projects configured for brand: ${brandId}`);
+        }
+      }
+
+      const result = await service.getBrandPresenceStats(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate: effectiveStartDate,
+        endDate: effectiveEndDate,
+        projectId,
+        projectIds,
+        brandName: brand.name,
+        showTrends: parseShowTrends(query),
+      });
+
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
     listPrompts,
     listCitedDomains,
+    listSentimentOverview,
     listOwnedUrls,
     listDomainUrls,
+    getMarketTrackingTrends,
+    getStats,
   };
 }

@@ -40,6 +40,10 @@ import { pollUntilCreated } from './workspace-lifecycle.js';
 import {
   ERROR_CODES, isPoolExhausted, isWorkspaceNotReady,
 } from './errors.js';
+import {
+  recordHeadroomCheck, recordTopUpLatency, recordPoolFreeRatio, recordRejection,
+  recordNotReadyRetry, recordReleaseOutcome,
+} from './allocation-metrics.js';
 
 /** @typedef {{ used: number, drafted: number, total: number }} AiDim */
 /** @typedef {{ projects: AiDim, prompts: AiDim }} AiTotals */
@@ -57,6 +61,28 @@ export const PROJECT_BLOCK = 1;
 export const PROMPT_BLOCK = 100;
 /** @type {Blocks} */
 export const DEFAULT_BLOCKS = Object.freeze({ projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK });
+
+/**
+ * PLACEHOLDER per-brand ceiling (LLMO-6190 item 2 — flag-flip readiness). `ensureAiHeadroom`'s
+ * `ceiling` param throws `brandAiLimit` (409) once a top-up would push a dim's `total` past the
+ * cap, but NO product/sizing number exists yet for what a brand's real ceiling should be — an
+ * explicit open item in the original design doc. This default is threaded through
+ * {@link createHeadroomGuard} (dynamic-allocation-active.js) so the flag-flip readiness criterion
+ * "a per-brand ceiling in force" is satisfied, but it is deliberately set ASTRONOMICALLY high — far
+ * above any org's whole Semrush pool — so it is *effectively non-enforcing*: the org pool
+ * exhausts (transfer's authoritative 422, mapped to `orgPoolExhausted`) long before any brand's
+ * per-dim `total` approaches these numbers. A brand cannot be spuriously 409'd by this fabricated
+ * value; it exists so the enforcement PATH is wired and covered by a test, not to cap anyone today.
+ *
+ * REPLACE with a real product/sizing number (and likely real per-brand configurability — a Brand
+ * field or config source, neither of which exists today) once product specifies one; don't invent
+ * that data-model change speculatively here.
+ * @type {Blocks}
+ */
+export const DEFAULT_BRAND_AI_CEILING = Object.freeze({
+  projects: 1_000_000,
+  prompts: 1_000_000_000,
+});
 
 /** The AI dimensions this allocator moves. */
 const DIMS = Object.freeze(/** @type {const} */ (['projects', 'prompts']));
@@ -158,6 +184,12 @@ export function readAiTotals(resources) {
 // `.code` (part of the public contract); the detailed context (ids, numbers) is logged at the throw
 // site instead.
 
+// NOTE (MysticatBot review, LLMO-6191): these factories are plain, side-effect-free constructors —
+// deliberately mirroring the peer predicates in errors.js (`isPoolExhausted`,
+// `isWorkspaceNotReady`), which are also pure. The rejection metric is recorded at each THROW site
+// (see the `recordRejection` calls below), not here, so constructing one of these for comparison/
+// logging/testing never fires a phantom rejection metric.
+
 /** @returns {ErrorWithStatusCode} */
 function orgPoolExhausted() {
   const e = new ErrorWithStatusCode('Organization AI resource pool is exhausted', 409);
@@ -198,32 +230,41 @@ function workspaceBusy() {
  * @returns {Promise<void>}
  */
 async function transferAndSettle(transport, workspaceId, totals, poll, log) {
-  for (let attempt = 0; attempt <= NOT_READY_RETRIES; attempt += 1) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await transport.transferWorkspaceResources(workspaceId, { ai: totals });
-      // eslint-disable-next-line no-await-in-loop
-      await pollUntilCreated(transport, workspaceId, poll);
-      return;
-    } catch (e) {
-      if (isPoolExhausted(e)) {
-        log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
-        throw orgPoolExhausted();
+  const startedAt = Date.now();
+  try {
+    for (let attempt = 0; attempt <= NOT_READY_RETRIES; attempt += 1) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await transport.transferWorkspaceResources(workspaceId, { ai: totals });
+        // eslint-disable-next-line no-await-in-loop
+        await pollUntilCreated(transport, workspaceId, poll);
+        return;
+      } catch (e) {
+        if (isPoolExhausted(e)) {
+          log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
+          recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
+          throw orgPoolExhausted();
+        }
+        if (!isWorkspaceNotReady(e)) {
+          throw e; // any other error (incl. poll timeout 504) propagates for the caller to map
+        }
+        if (attempt === NOT_READY_RETRIES) {
+          break; // exhausted retries on the transient lock
+        }
+        log?.info?.(`SERENITY_ALLOC workspace-not-ready, retrying transfer (attempt ${attempt + 1})`, { workspaceId });
+        recordNotReadyRetry();
+        // eslint-disable-next-line no-await-in-loop
+        await poll.sleep(poll.intervalMs * (attempt + 1));
       }
-      if (!isWorkspaceNotReady(e)) {
-        throw e; // any other error (incl. poll timeout 504) propagates for the caller to map
-      }
-      if (attempt === NOT_READY_RETRIES) {
-        break; // exhausted retries on the transient lock
-      }
-      log?.info?.(`SERENITY_ALLOC workspace-not-ready, retrying transfer (attempt ${attempt + 1})`, { workspaceId });
-      // eslint-disable-next-line no-await-in-loop
-      await poll.sleep(poll.intervalMs * (attempt + 1));
     }
+    // Lock contention, not a full pool — surface a retryable 503, not orgPoolExhausted.
+    log?.warn?.('SERENITY_ALLOC transfer never cleared workspace-not-ready', { workspaceId });
+    // Pager-worthy: JIT top-up itself is degraded (never cleared the async lock) — see the runbook.
+    recordRejection('workspaceBusy');
+    throw workspaceBusy();
+  } finally {
+    recordTopUpLatency(Date.now() - startedAt, 'settle');
   }
-  // Lock contention, not a full pool — surface a retryable 503, not orgPoolExhausted.
-  log?.warn?.('SERENITY_ALLOC transfer never cleared workspace-not-ready', { workspaceId });
-  throw workspaceBusy();
 }
 
 /**
@@ -244,19 +285,25 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
  * @returns {Promise<void>}
  */
 async function transferOnce(transport, workspaceId, totals, log) {
+  const startedAt = Date.now();
   try {
     await transport.transferWorkspaceResources(workspaceId, { ai: totals });
   } catch (e) {
     if (isPoolExhausted(e)) {
       log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
+      recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
       throw orgPoolExhausted();
     }
     if (isWorkspaceNotReady(e)) {
       // Still settling — do NOT poll. Fail fast with a retryable 503; the transfer is idempotent.
       log?.info?.('SERENITY_ALLOC workspace not ready on transfer — returning 503', { workspaceId });
+      // Pager-worthy: JIT top-up itself is degraded (never cleared the async lock) — see runbook.
+      recordRejection('workspaceBusy');
       throw workspaceBusy();
     }
     throw e;
+  } finally {
+    recordTopUpLatency(Date.now() - startedAt, 'fail-fast');
   }
 }
 
@@ -306,6 +353,7 @@ export async function ensureAiHeadroom(transport, {
         log?.warn?.('SERENITY_ALLOC brand ceiling reached', {
           subWorkspaceId, dim, target, cap,
         });
+        recordRejection('brandAiLimit'); // dashboard-only — expected under normal pool load
         throw brandAiLimit();
       }
       newTotal[dim] = target;
@@ -314,8 +362,10 @@ export async function ensureAiHeadroom(transport, {
   }
 
   if (!toppedUp) {
-    return { toppedUp: false, newTotal }; // hot path — no transfer, no poll
+    recordHeadroomCheck(false); // hot-path ratio — no transfer, no poll
+    return { toppedUp: false, newTotal };
   }
+  recordHeadroomCheck(true);
 
   // Advisory pool gauge (NOT a gate): read the MASTER's OWN /resources — NOT /parent/resources,
   // which returns child-relative numbers (Gate 0). This read is a non-atomic advisory: under
@@ -327,6 +377,7 @@ export async function ensureAiHeadroom(transport, {
   for (const dim of DIMS) {
     const delta = newTotal[dim] - child[dim].total;
     const free = master[dim].total - master[dim].used;
+    recordPoolFreeRatio(dim, free, master[dim].total);
     if (delta > 0 && free < delta) {
       log?.warn?.('SERENITY_ALLOC advisory pool-free low (proceeding; transfer 422 is authoritative)', {
         subWorkspaceId, dim, free, delta,
@@ -366,17 +417,32 @@ export async function ensureAiHeadroom(transport, {
  *   this for a SYNCHRONOUS request-path caller (e.g. the model-update seam releasing units the
  *   removal just freed): honours the fail-fast hot-path rule, and is safe because release is
  *   best-effort + the transfer is absolute/idempotent and has no dependent op after it in-request.
+ * @param {boolean} [opts.dryRun] when true, compute `target`/`lowered`/`requiresDecommission`
+ *   exactly as a real call would, but return before issuing the transfer — no transport write
+ *   happens. This is the SINGLE SOURCE OF TRUTH for "what would this call do", so a caller that
+ *   wants to preview a release (e.g. `scripts/serenity-rightsizing-sweep.mjs`) reuses this
+ *   function's own math instead of reimplementing `roundUpToBlock`/floor/to-zero logic, which
+ *   would drift from the real behavior over time. Returns `released: false, reason: 'dry-run'`
+ *   when there IS surplus to release (mirrors the `target` a real call would transfer); still
+ *   reports `nothing-to-release` / `requires-decommission` for those cases as a live call would.
  * @param {any} [log]
  * @returns {Promise<{
  *   released: boolean,
- *   reason?: 'nothing-to-release' | 'requires-decommission' | 'error',
+ *   reason?: 'nothing-to-release' | 'requires-decommission' | 'error' | 'dry-run',
  *   target?: { projects: number, prompts: number },
+ *   errorCode?: string,
+ *   errorMessage?: string,
  * }>} `released:false` carries a `reason`: `nothing-to-release` (already at/below target),
  *   `requires-decommission` (surplus exists but its target floors to 0 — unreclaimable via
- *   transfer; see below), or `error` (a swallowed best-effort transport failure).
+ *   transfer; see below), `dry-run` (see `opts.dryRun`), or `error` (a swallowed best-effort
+ *   transport failure — `errorCode` carries the typed `ErrorWithStatusCode.code`/`ERROR_CODES`
+ *   value when available, e.g. `orgPoolExhausted`/`workspaceBusy`, so a batch caller can
+ *   distinguish an EXPECTED failure class from a genuinely unexpected one without re-parsing
+ *   `errorMessage`).
  */
 export async function releaseAiSurplus(transport, {
   subWorkspaceId, floor = {}, blocks = DEFAULT_BLOCKS, poll = DEFAULT_POLL, failFast = false,
+  dryRun = false,
 }, log) {
   try {
     // Fail LOUD on a missing/blank id, same as ensureAiHeadroom: a blank id is a caller wiring bug,
@@ -415,15 +481,24 @@ export async function releaseAiSurplus(transport, {
       if (requiresDecommission) {
         log?.warn?.('SERENITY_ALLOC releaseAiSurplus: surplus cannot be reclaimed via transfer '
           + `(target floors to 0) — needs decommission for ${subWorkspaceId}`);
+        recordReleaseOutcome('requires-decommission');
         return { released: false, reason: 'requires-decommission' };
       }
+      recordReleaseOutcome('nothing-to-release');
       return { released: false, reason: 'nothing-to-release' };
+    }
+    if (dryRun) {
+      recordReleaseOutcome('dry-run'); // so a sweep dry-run pass is visible in the same dashboard
+      return {
+        released: false, reason: 'dry-run', target,
+      };
     }
     if (failFast) {
       await transferOnce(transport, subWorkspaceId, target, log);
     } else {
       await transferAndSettle(transport, subWorkspaceId, target, poll, log);
     }
+    recordReleaseOutcome('released');
     return { released: true, target };
   } catch (e) {
     // Best-effort for EXPECTED failures (transport / pool / busy) — a reconciler converges strays.
@@ -435,6 +510,16 @@ export async function releaseAiSurplus(transport, {
     log?.warn?.('SERENITY_ALLOC releaseAiSurplus best-effort failure', {
       subWorkspaceId, error: e?.message,
     });
-    return { released: false, reason: 'error' };
+    recordReleaseOutcome('error');
+    // Surface the typed error code (e.g. orgPoolExhausted/brandAiLimit/workspaceBusy) when present,
+    // so a batch caller (the rightsizing sweep) can tell an EXPECTED failure class apart from a
+    // genuinely unexpected transport error without re-parsing errorMessage — see the sweep's
+    // reason-aware abort threshold in scripts/serenity-rightsizing-sweep.mjs.
+    return {
+      released: false,
+      reason: 'error',
+      errorCode: /** @type {{code?: string}} */ (e)?.code,
+      errorMessage: e?.message,
+    };
   }
 }

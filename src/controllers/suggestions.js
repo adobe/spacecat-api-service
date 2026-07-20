@@ -43,6 +43,7 @@ import {
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -78,6 +79,16 @@ const FEEDBACK_STATE_TRANSITIONS = [
 // suggestion is 2-3, but this bounds payload size (esp. with ?include=patches)
 // and is backed by idx_feedback_event_suggestion (suggestion_id, event_time).
 const FEEDBACK_REVIEW_READ_LIMIT = 100;
+
+// Contextual experiment names by opportunity type to be visible on Oppty Workspace Strategy UI
+const EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE = {
+  prerender: 'Recover content visibility',
+  toc: 'Add table of contents',
+  summarization: 'Add LLM-Friendly Summaries',
+};
+
+const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE[opportunityType]
+  || `${opportunityType.charAt(0).toUpperCase()}${opportunityType.slice(1).replace(/-/g, ' ')}`;
 
 async function isSitePlgTier(site, log) {
   try {
@@ -464,7 +475,11 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -531,8 +546,12 @@ function SuggestionsController(ctx, sqs, env) {
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
 
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,
@@ -593,7 +612,11 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -659,8 +682,12 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,
@@ -2046,7 +2073,6 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (isAsyncExperimentRequested) {
       context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
-      let urls;
       const geoExperimentId = crypto.randomUUID();
 
       context.log.info('[edge-geo-exp] Initiating experiment', {
@@ -2061,6 +2087,7 @@ function SuggestionsController(ctx, sqs, env) {
       // outer catch knows whether to compensate by deleting it if a later
       // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
+      let validSuggestionEntities = [];
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -2072,48 +2099,58 @@ function SuggestionsController(ctx, sqs, env) {
           context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
           throw new Error('Missing required environment variables');
         }
-        const domainWideSuggestionIds = new Set(
-          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
-        );
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          promptSources = [...allSuggestions]
-            .filter((s) => {
-              const data = s.getData() || {};
-              return !domainWideSuggestionIds.has(s.getId())
-                && s.getStatus() === SuggestionModel.STATUSES.NEW
-                && !data.edgeDeployed
-                && data.aiSummary
-                && data.valuable === true;
-            })
-            .sort((a, b) => {
-              const aScore = (a.getData()?.agenticTraffic || 0)
-                * (a.getData()?.contentGainRatio || 0);
-              const bScore = (b.getData()?.agenticTraffic || 0)
-                * (b.getData()?.contentGainRatio || 0);
-              return bScore - aScore;
-            })
-            .slice(0, 100);
+        const hasPatternDeploy = domainWideSuggestions.length > 0 || pathSuggestions.length > 0;
+        // A single request can select multiple pattern suggestions
+        const patternSuggestions = [
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
+        ];
+        const metadataBase = {};
+
+        if (hasPatternDeploy) {
+          const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+          if (!Array.isArray(highImpactIds) || highImpactIds.length === 0
+            || !highImpactIds.every((id) => isValidUUID(id))) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+            throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
+          }
+          const highImpactIdSet = new Set(highImpactIds);
+          const measurementSuggestions = allSuggestions.filter(
+            (s) => highImpactIdSet.has(s.getId()),
+          );
+          if (measurementSuggestions.length === 0) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for pattern deploy`);
+            throw new Error('No high-impact suggestions found for the provided IDs');
+          }
+          // suggestionIds holds only what actually deploys (the pattern[s]); the high-impact
+          // measurement suggestions live in metadata and drive prompt generation only.
+          metadataBase.urls = [
+            ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
+          metadataBase.patterns = patternSuggestions.map((ps) => (
+            ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+          ));
+          metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
         } else {
-          promptSources = validSuggestions;
+          metadataBase.urls = [
+            ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
         }
-        urls = [...new Set(promptSources
-          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
-          .map((s) => s.getData()?.url)
-          .filter(Boolean))];
+
+        const experimentName = context.data?.name || getExperimentName(opportunity.getType());
+
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
           siteId,
           opportunityId,
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          name: context.data?.name
-            || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
+          name: experimentName,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           phase: GeoExperimentModel.PHASES.INITIATED,
           suggestionIds: validSuggestionIds,
           metadata: buildExperimentMetadata(
             context,
-            { urls },
+            metadataBase,
             GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
             opportunity.getType(),
           ),
@@ -2131,18 +2168,14 @@ function SuggestionsController(ctx, sqs, env) {
           geoExperimentId,
           opportunityId,
           opportunityType: opportunity.getType(),
-          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          name: geoExperiment.getName?.() || experimentName,
           profile,
           s3: context.s3,
           log: context.log,
         });
         atomicStrategyCreated = true;
 
-        const validSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
+        validSuggestionEntities = [...validSuggestions, ...patternSuggestions];
 
         const markResults = await Promise.allSettled(
           validSuggestionEntities.map(async (suggestion) => {
@@ -2186,6 +2219,25 @@ function SuggestionsController(ctx, sqs, env) {
           prePhaseScheduleId: null,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
+
+        // Mark suggestions covered by domain/pattern so they get hidden on the UI (non-fatal).
+        if (hasPatternDeploy) {
+          const tokowakaClient = TokowakaClient.createFrom(context);
+          for (const ps of patternSuggestions) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.markPatternCoveredSuggestions(
+                ps,
+                allSuggestions,
+                siteId,
+                profile?.email || 'geo-experiment',
+              );
+            } catch (coverError) {
+              context.log.warn(`[geo-experiment-failed] Failed to mark pattern-covered suggestions for ${ps.getId()}: ${coverError.message}`, coverError);
+            }
+          }
+        }
+
         return createResponse(experimentResponse, 207);
       } catch (error) {
         context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
@@ -2210,13 +2262,8 @@ function SuggestionsController(ctx, sqs, env) {
             context.log.error(`[atomic-strategy-cleanup-failed] site: ${apexBaseUrl}, Failed to delete atomic strategy ${geoExperimentId}: ${cleanupError.message}`, cleanupError);
           }
         }
-        const allSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
         await Promise.allSettled(
-          allSuggestionEntities
+          validSuggestionEntities
             .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
             .map(async (s) => {
               try {
@@ -2872,8 +2919,8 @@ function SuggestionsController(ctx, sqs, env) {
 
     const body = isNonEmptyObject(context.data) ? context.data : {};
     const {
-      eventId, verdict, detailMarkdown, rejectionCategory,
-      stateTransition, previousFix, editedFix,
+      eventId, verdict, detailMarkdown, guidanceMarkdown, rejectionCategory,
+      stateTransition, previousFix, editedFix, feedbackSubjectId,
     } = body;
 
     // FR-09: event_id is MANDATORY and client-supplied (no server fallback).
@@ -2900,6 +2947,24 @@ function SuggestionsController(ctx, sqs, env) {
       }
       if (Buffer.byteLength(detailMarkdown, 'utf8') > 8192) {
         return createResponse({ message: 'detail_markdown exceeds the 8 KB limit' }, 413);
+      }
+    }
+    // guidance_markdown is the AI-generated issue context (title + description).
+    // Larger cap than detail_markdown (64 KB) because issue descriptions +
+    // implementation guidance run long.
+    if (guidanceMarkdown != null) {
+      if (typeof guidanceMarkdown !== 'string') {
+        return badRequest('guidance_markdown must be a string');
+      }
+      if (Buffer.byteLength(guidanceMarkdown, 'utf8') > 65536) {
+        return createResponse({ message: 'guidance_markdown exceeds the 64 KB limit' }, 413);
+      }
+    }
+    // feedback_subject_id is an opaque grouping id (e.g. a CWV issue id) — a short
+    // string, not free text. Bounded to guard against abuse.
+    if (feedbackSubjectId != null) {
+      if (typeof feedbackSubjectId !== 'string' || feedbackSubjectId.length > 200) {
+        return badRequest('feedback_subject_id must be a string of at most 200 characters');
       }
     }
 
@@ -2939,10 +3004,13 @@ function SuggestionsController(ctx, sqs, env) {
 
     const {
       detailMarkdown: cleanMarkdown,
+      guidanceMarkdown: cleanGuidance,
       previousFix: cleanPreviousFix,
       editedFix: cleanEditedFix,
       scrubHits,
-    } = redactFeedbackContent({ detailMarkdown, previousFix, editedFix });
+    } = redactFeedbackContent({
+      detailMarkdown, guidanceMarkdown, previousFix, editedFix,
+    });
 
     const scrubbed = Object.entries(scrubHits);
     if (scrubbed.length > 0) {
@@ -2959,6 +3027,8 @@ function SuggestionsController(ctx, sqs, env) {
       signal,
       reviewer_id: reviewerId,
       detail_markdown: cleanMarkdown ?? null,
+      guidance_markdown: cleanGuidance ?? null,
+      feedback_subject_id: feedbackSubjectId ?? null,
       previous_fix: cleanPreviousFix ?? null,
       edited_fix: cleanEditedFix ?? null,
       state_transition: hasText(stateTransition) ? stateTransition : null,

@@ -13,6 +13,7 @@
 // @ts-check
 
 import { SerenityTransportError } from './rest-transport.js';
+import { recordMeteredQuotaClassifier } from './allocation-metrics.js';
 
 /**
  * Recognises an upstream "already gone" response — the signal that an
@@ -26,9 +27,9 @@ import { SerenityTransportError } from './rest-transport.js';
  * cannot silently turn into "upstream-idempotent-success" and swallow
  * a real failure.
  *
- * Used by every idempotent-DELETE site in the serenity surface:
+ * Used by every "upstream target gone" site in the serenity surface:
  *   - markets.js handleDeleteMarket  (upstream project gone)
- *   - prompts.js handleUpdatePrompt  (deleted-then-create, the delete leg)
+ *   - prompts.js handleUpdatePrompt  (in-place rename of a missing prompt → promptNotFound)
  *   - prompts.js handleBulkDeletePrompts  (per-project bucket delete)
  */
 export function isUpstreamGone(e) {
@@ -82,19 +83,34 @@ export function isWorkspaceNotReady(e) {
 }
 
 /**
- * The disguised metered-quota rejection: a `405` from a metered write/publish whose body signals a
- * quota (`used + need > total`). Matches ONLY on an explicit quota signal in the body — NOT any
- * `405`, so a legitimate Method-Not-Allowed is not absorbed. The exact disguised-405 body is pinned
- * by the PR-4 live-gateway canary; widen the signal here only from that pinned shape.
+ * The disguised metered-quota rejection: a `405` from a metered write/publish when
+ * `used + need > total`. Live-verified (Rainer, LLMO-6190, `LLMO-Dev-2`): the body carries NO
+ * "quota"/"allocation exhausted" text at all — it is a bare nginx `text/html` page
+ * (`<html>...405 Not Allowed...nginx...</html>`), while every genuine app-level Method-Not-Allowed
+ * this gateway returns comes back as JSON (`{ message: 'Method Not Allowed' }`). Body content
+ * cannot distinguish the two cases — only SHAPE can: a string body is the disguised gateway-level
+ * quota rejection, an object body is a real app-level error. Widen this only from a newly pinned
+ * live fixture, never from a guessed substring.
+ *
+ * Emits the `MeteredQuotaClassifier` observability metric (LLMO-6191 item 2) ONLY when `e` is an
+ * actual `405` (the metric's denominator is "how many 405s", not "how many errors of any kind" —
+ * see the non-405 early return), dimensioned by match/no-match, so the "405-classifier match
+ * ratio" the rollout-hardening ticket asks for reflects the real shape-based signal now that
+ * `retryOnQuota` (dynamic-allocation-active.js) is a live production caller.
  * @param {unknown} e
  * @returns {boolean}
  */
 export function isMeteredQuota(e) {
   if (!(e instanceof SerenityTransportError) || e.status !== 405) {
+    // Not a 405 at all — outside the classifier's domain (the metric's denominator is "how many
+    // 405s", not "how many errors of any kind"), so no metric here (MysticatBot review, LLMO-6191):
+    // emitting `Matched=false` for every unrelated error (a TypeError, a timeout, a 409, ...) would
+    // drown the actual 405-classifier signal once a real caller is wired up.
     return false;
   }
-  const text = bodyText(e);
-  return text.includes('quota') || text.includes('allocation exhausted');
+  const matched = typeof e.body === 'string' && e.body.length > 0;
+  recordMeteredQuotaClassifier(matched);
+  return matched;
 }
 
 /**

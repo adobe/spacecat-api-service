@@ -522,6 +522,40 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
+    it('dynamic-allocation ON: fronts prompt headroom sized on the generated batch BEFORE the write (LLMO-6190, live-verified)', async () => {
+      // The metered write is createPromptsByIds itself (Rainer, live-verified) — a disguised-quota
+      // 405 fires there, before any publish. getWorkspaceResources must be read before the first
+      // createPromptsByIds call for the generated batch, not only before the final publish.
+      const transport = makeTransport({
+        getBrandTopics: sinon.stub().resolves([
+          { topic: 'Running Shoes', volume: 900, prompts: ['best running shoes', 'top trail shoes'] },
+        ]),
+        getWorkspaceResources: sinon.stub().resolves({
+          product_resources: {
+            ai: {
+              resources: {
+                projects: { used: 0, total: 10 }, prompts: { used: 0, total: 100 },
+              },
+            },
+          },
+        }),
+      });
+      const res = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        { ...createBody, brandNames: ['Trail'] },
+        log,
+        null,
+        null,
+        { generateTopics: true, publishMode: 'require', dynamicAllocation: true },
+      );
+      expect(res.status).to.equal(201);
+      expect(transport.getWorkspaceResources).to.have.been.called;
+      expect(transport.getWorkspaceResources.firstCall)
+        .to.have.been.calledBefore(transport.createPromptsByIds.firstCall);
+    });
+
     it('propagates a fatal model-attach failure (NOT best-effort like URL/competitor enrichment)', async () => {
       // Model attach is a core correctness step: a failure must abort the create
       // (a half-provisioned project must never be reported as success).

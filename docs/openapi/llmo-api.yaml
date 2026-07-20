@@ -5089,8 +5089,11 @@ llmo-referral-traffic-has-data:
     description: |
       Returns whether the site has any referral traffic data and which sources
       are available. Uses a direct table existence check (no RPC). Ignores the
-      `source` query param. Response is cacheable. `availableSources` items are
-      `optel` or `cdn` only, in priority order (optel first).
+      `source` query param. Response is cacheable. `availableSources` lists all
+      sources with data in resolution-priority order
+      (`adobe_analytics` > `cja` > `ga4` > `cdn` > `optel`); callers use the
+      first entry as the active source. `activeSource` exposes that highest-priority
+      source directly, or null when no source has data.
     operationId: getReferralTrafficHasData
     responses:
       '200':
@@ -5117,8 +5120,8 @@ llmo-referral-traffic-filter-dimensions:
     summary: Distinct referral traffic filter values
     description: |
       Returns the distinct filter values (platforms, regions, devices, page
-      intents) and available sources for the selected site and date range.
-      Queries `rpc_referral_traffic_filter_dimensions`.
+      intents, categories) and available sources for the selected site and date
+      range. Queries `rpc_referral_traffic_filter_dimensions`.
     operationId: getReferralTrafficFilterDimensions
     parameters:
       - name: source
@@ -5165,6 +5168,7 @@ llmo-referral-traffic-kpis:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Aggregated KPI metrics
@@ -5204,6 +5208,7 @@ llmo-referral-traffic-trend:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Referral traffic KPI time series
@@ -5242,6 +5247,7 @@ llmo-referral-traffic-by-platform:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by platform
@@ -5277,6 +5283,7 @@ llmo-referral-traffic-by-region:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by region
@@ -5312,6 +5319,7 @@ llmo-referral-traffic-by-page-intent:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by page intent
@@ -5361,6 +5369,7 @@ llmo-referral-traffic-by-url:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
       - name: pageSize
         in: query
         description: 'Number of rows per page (default 50, max 500). Aliases: page_size, limit'
@@ -5436,6 +5445,7 @@ llmo-referral-traffic-by-url-trend:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
       - name: urlPath
         in: query
         required: true
@@ -5479,6 +5489,7 @@ llmo-referral-traffic-by-device:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by device
@@ -5530,6 +5541,7 @@ llmo-referral-traffic-business-impact:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Business impact metrics
@@ -6138,6 +6150,23 @@ site-llmo-akamai-plan:
                   items:
                     type: string
                   description: Top-level rule names after the merge.
+                validated:
+                  type: boolean
+                  description: >-
+                    Whether the dry-run PAPI validation ran. When false, it could not be performed
+                    and errors/warnings fall back to the base version's own warnings.
+                errors:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                  description: PAPI validation errors for the change deploy would make (empty if none).
+                warnings:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                  description: PAPI validation warnings for the change deploy would make.
                 merged:
                   type: object
                   additionalProperties: true

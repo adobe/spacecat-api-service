@@ -43,6 +43,7 @@ import { SiteIdentityDto } from '../dto/site-identity.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
@@ -536,12 +537,20 @@ function SitesController(ctx, log, env) {
       // query value (URLs may be sensitive) — only its length and result counts.
       log.info(`[sites][baseUrlContains] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
 
+      const { list: projectedSites, error: fieldsError } = applyFieldProjection(
+        sites,
+        context?.data?.fields,
+      );
+      if (fieldsError) {
+        return badRequest(fieldsError);
+      }
+
       // Echo the trimmed query in the pagination so a new client can confirm its
       // search was actually applied. An older deployment that ignores `baseUrlContains`
       // but still honors `limit` would return the cursor envelope with unfiltered
       // sites and no `baseUrlContains` echo — letting clients detect the version skew.
       return ok({
-        sites,
+        sites: projectedSites,
         pagination: {
           limit: effectiveLimit, offset, hasMore, baseUrlContains: q,
         },
@@ -612,6 +621,12 @@ function SitesController(ctx, log, env) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
+    const { list, error } = applyFieldProjection(sites, context?.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    responseBody = Array.isArray(responseBody) ? list : { ...responseBody, sites: list };
+
     return ok(responseBody);
   };
 
@@ -632,7 +647,11 @@ function SitesController(ctx, log, env) {
 
     const sites = (await Site.allByDeliveryType(deliveryType))
       .map((site) => SiteDto.toJSON(site));
-    return ok(sites);
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -663,7 +682,11 @@ function SitesController(ctx, log, env) {
         const audit = await site.getLatestAuditByAuditType(auditType);
         return SiteDto.toJSON(site, audit);
       }));
-    return ok(result);
+    const { list, error } = applyFieldProjection(result, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**

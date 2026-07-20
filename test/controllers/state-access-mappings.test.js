@@ -601,7 +601,78 @@ describe('StateAccessMappingsController', () => {
       expect(ctx.log.warn.called).to.be.true;
     });
 
-    it('returns 409 when an active duplicate exists', async () => {
+    it('upserts on active duplicate: overwrites capabilities and returns 200', async () => {
+      const existing = makeRow({ id: 'pre-existing-id' });
+      const updated = makeRow({
+        id: 'pre-existing-id',
+        granted_capabilities: ['llmo/can_configure', 'llmo/can_view'],
+      });
+      const updateStub = sinon.stub().resolves(updated);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([existing]),
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({
+        body: { ...validBody, grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.id).to.equal('pre-existing-id');
+      // The existing row is updated by id with the request's capability set
+      // (plus the auto-injected can_view baseline).
+      expect(updateStub.calledOnce).to.be.true;
+      expect(updateStub.firstCall.args[1].id).to.equal('pre-existing-id');
+      expect(updateStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['llmo/can_configure', 'llmo/can_view']);
+    });
+
+    it('audits an update_capabilities (allow) event on upsert', async () => {
+      const existing = makeRow({ id: 'pre-existing-id' });
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([existing]),
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(existing),
+      });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(200);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        product: 'LLMO',
+        operation: 'update_capabilities',
+        outcome: 'allow',
+        mappingId: 'pre-existing-id',
+      });
+    });
+
+    it('returns 409 with null id when conflict lookup misses', async () => {
+      const updateStub = sinon.stub().resolves(null);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([]),
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(409);
+      expect(body.id).to.equal(null);
+      // No row id to update — the upsert update is never attempted.
+      expect(updateStub.called).to.be.false;
+    });
+
+    it('returns 409 when the row is revoked between conflict and update', async () => {
       const existing = makeRow({ id: 'pre-existing-id' });
       const { Controller } = await loadController({
         createFacsAccessMappings: sinon.stub().resolves({
@@ -609,27 +680,14 @@ describe('StateAccessMappingsController', () => {
           skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
         }),
         listFacsAccessMappings: sinon.stub().resolves([existing]),
+        // RPC finds no active row (raced revoke) → returns null.
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
       });
       const ctx = makeContext({ body: validBody });
       const res = await Controller(ctx).createMapping(ctx);
-      expect(res.status).to.equal(409);
       const body = await res.json();
+      expect(res.status).to.equal(409);
       expect(body.id).to.equal('pre-existing-id');
-    });
-
-    it('returns 409 with null id when conflict lookup misses', async () => {
-      const { Controller } = await loadController({
-        createFacsAccessMappings: sinon.stub().resolves({
-          created: [],
-          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
-        }),
-        listFacsAccessMappings: sinon.stub().resolves([]),
-      });
-      const ctx = makeContext({ body: validBody });
-      const res = await Controller(ctx).createMapping(ctx);
-      const body = await res.json();
-      expect(res.status).to.equal(409);
-      expect(body.id).to.equal(null);
     });
 
     it('returns 500 when the helper throws', async () => {

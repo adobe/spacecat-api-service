@@ -264,7 +264,7 @@ linked Site per distinct market domain.)
 
 **Caveats operators must know:**
 - **Deactivate is destructive, not a pause.** It deletes every project in the sub-workspace (all markets, prompts, benchmarks, competitors). There is **no stored market memory**: a later activate must re-supply the markets and rebuilds everything from scratch. Reactivation does NOT restore the prior data.
-- **The sub-workspace shell is never deleted** (deletion is fail-closed behind `SERENITY_ALLOW_WORKSPACE_DELETE`, unset in every deployed env). Deactivate empties it and releases its allocation; the empty shell remains in the parent family and is reclaimed only by Semrush CS. A future activate allocates a fresh sub-workspace.
+- **The sub-workspace shell is never deleted.** Production never deletes a sub-workspace (Rainer, PR #2812 review — Semrush CS is the only party that ever deprovisions a workspace shell). Deactivate empties every project, then lowers the AI allocation down to a small non-zero floor (`{projects:1, prompts:1}` by default) via `releaseFullAllocation` — a transfer to a non-zero target resizes reliably (a transfer to exactly 0 is a silently-ignored no-op against the Semrush gateway, confirmed by a live probe; that is why the floor is non-zero and never 0). The surplus above the floor returns to the parent pool; the floor amount stays reserved on the (now-empty) shell so a future activate can reuse it immediately without a fresh create. `SERENITY_ALLOW_WORKSPACE_DELETE` (unset — off — in every deployed env) gates only the raw `deleteWorkspace` transport primitive, used solely for test/smoke-cleanup (e.g. the LLMO-6189 canary's own throwaway teardown) — no production lifecycle path calls it or branches on it.
 - **`status = 'pending'` is overloaded.** A deactivated brand and a never-finished onboarding both read `pending`; downstream consumers cannot distinguish "off by choice" from "incomplete" on status alone.
 - **IMS-user only.** activate/deactivate (and all `/serenity/*`) require an IMS user token; a non-IMS S2S consumer is refused (401). There is no backend/automation path to activate a Semrush brand today.
 
@@ -298,6 +298,30 @@ Expected fields in the structured log payload:
 - outbound host: `adobe-hackathon.semrush.com`
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
+
+## Dynamic AI resource allocation — operations (LLMO-6191)
+
+The JIT top-up allocator (`SERENITY_DYNAMIC_ALLOCATION`, default OFF — see
+`src/support/serenity/dynamic-allocation-active.js`) has its own operational surface, separate from
+the request-path proxy documented above:
+
+- **Metrics/SLIs:** `src/support/serenity/allocation-metrics.js` emits CloudWatch EMF metrics
+  (namespace `Mysticat/SerenityAllocation`) — pool-free ratio, top-up latency, rejection/retry/
+  release-outcome counters, and the hot-path (topped-up vs not) ratio. See that file's module doc
+  for the full catalog and the pager-worthy/dashboard-only split.
+- **Zombie-workspace recovery:** see
+  [`docs/runbooks/serenity-zombie-workspace-recovery.md`](./runbooks/serenity-zombie-workspace-recovery.md)
+  for diagnosing and recovering a sub-workspace stuck `workspaceBusy` after a partially-applied
+  transfer, and for the alerting/paging guidance.
+- **Rightsizing sweep:** `scripts/serenity-rightsizing-sweep.mjs` is a one-time backfill that
+  lowers already-carved sub-workspaces (brands onboarded before the JIT allocator shipped) down to
+  their actual usage, using `releaseAiSurplus` as the reclaim primitive. Run `--dry-run` first —
+  see the script's own header comment for full usage and the auth caveat (requires an operator
+  IMS token; there is no service-account path to Semrush in this repo).
+- **Cross-container serialization:** `src/support/serenity/resource-lock.js` only serializes
+  same-container contention. The cross-container gap and the options considered for closing it are
+  recorded in
+  [`docs/decisions/007-cross-container-resource-lock.md`](./decisions/007-cross-container-resource-lock.md).
 
 ## Dev environment smoke tests
 
