@@ -449,7 +449,7 @@ export async function handleCreateMarketSubworkspace(
   }
 
   // Provision the dimension-root taxonomy on the project (independent of prompts),
-  // so classification can later apply intent/source/type values per prompt and the
+  // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
   // exactly the four dimension roots, whether or not it has prompts yet.
@@ -828,7 +828,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
       }),
   ]);
   // Merge by ID, not by name. Names are unique only per (project, parent), so a
-  // sub-category `human` and the `source` value `human` are two distinct tags —
+  // sub-category `human` and the `origin` value `human` are two distinct tags —
   // keying by name silently drops one of them.
   const byId = new Map();
   // Both sources back-fill a missing upstream id with the tag's own name (a
@@ -839,8 +839,8 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // Placeholders are keyed by name, not by a synthetic composite: an id-less
   // entry carries ONLY its bare name (`id === name`), so two id-less tags sharing
   // a name are indistinguishable here — there is no id to tell a `category` value
-  // `human` from a `source` value `human` once both arrive without one. Keying by
-  // `(name, source)` would just emit two identical `{ id: name, name }` rows, a
+  // `human` from an `origin` value `human` once both arrive without one. Keying by
+  // `(name, dimension)` would just emit two identical `{ id: name, name }` rows, a
   // duplicate that is worse than the collapse. So they intentionally collapse to
   // one; the by-id merge above is what actually preserves two same-named tags,
   // and it fires whenever either carries a real upstream id (the common case).

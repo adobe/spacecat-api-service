@@ -320,7 +320,7 @@ export default function serenityTests(
       );
       expect(roots.status).to.equal(200);
       expect(roots.body.items.map((t) => t.name))
-        .to.have.members(['category', 'intent', 'source', 'type']);
+        .to.have.members(['category', 'intent', 'origin', 'type']);
       const categoryRoot = roots.body.items.find((t) => t.name === 'category');
       expect(res.body.parentId).to.equal(categoryRoot.id);
     });
@@ -475,20 +475,20 @@ export default function serenityTests(
       expect(res.status).to.equal(400);
     });
 
-    it('POST /serenity/tags resolves a closed-dimension tag idempotently (source/intent/type)', async () => {
+    it('POST /serenity/tags resolves a closed-dimension tag idempotently (origin/intent/type)', async () => {
       await createUsMarket();
       const first = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(first.status).to.equal(200);
-      expect(first.body).to.include({ type: 'source', name: 'ai' });
+      expect(first.body).to.include({ type: 'origin', name: 'ai' });
       expect(first.body.id).to.be.a('string').that.is.not.empty;
-      // The value hangs under the `source` root, never at the root level.
+      // The value hangs under the `origin` root, never at the root level.
       expect(first.body.parentId).to.be.a('string').that.is.not.empty;
 
       // Same closed-dimension value again — resolved, not re-created (no upstream collision).
       const second = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(second.status).to.equal(200);
       expect(second.body).to.include({ name: 'ai', id: first.body.id, created: false });
@@ -500,7 +500,7 @@ export default function serenityTests(
     it('PATCH /serenity/tags/:tagId 400s a rename of a closed-dimension value', async () => {
       await createUsMarket();
       const created = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(created.status).to.equal(200);
       const res = await getHttpClient().admin.patch(`${base}/tags/${created.body.id}`, {
