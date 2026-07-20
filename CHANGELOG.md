@@ -1,3 +1,17 @@
+# [1.666.0](https://github.com/adobe/spacecat-api-service/compare/v1.665.1...v1.666.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= sparse-fieldset projection to list endpoints ([#2840](https://github.com/adobe/spacecat-api-service/issues/2840)) ([c5af373](https://github.com/adobe/spacecat-api-service/commit/c5af373090ea1caac32cd7ca25b26aaf5920882d))
+
+## [1.665.1](https://github.com/adobe/spacecat-api-service/compare/v1.665.0...v1.665.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **serenity:** stop the RELEASE_ALLOCATION zero-transfer silent no-op ([#2812](https://github.com/adobe/spacecat-api-service/issues/2812)) ([0d80fcf](https://github.com/adobe/spacecat-api-service/commit/0d80fcf5c79d338cc3d0aa6c0f75aff4e5ef83f9))
+
 # [1.665.0](https://github.com/adobe/spacecat-api-service/compare/v1.664.0...v1.665.0) (2026-07-19)
 
 
