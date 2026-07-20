@@ -22,6 +22,7 @@ import {
   isWorkspaceNotReady,
   isMeteredQuota,
   isRateLimited,
+  toQuotaExceededError,
 } from '../../../src/support/serenity/errors.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
@@ -46,7 +47,22 @@ describe('serenity error classification', () => {
       expect(ERROR_CODES.LINKED_SUBWORKSPACES).to.equal('linkedSubworkspaces');
       expect(ERROR_CODES.ORG_POOL_EXHAUSTED).to.equal('orgPoolExhausted');
       expect(ERROR_CODES.BRAND_AI_LIMIT).to.equal('brandAiLimit');
+      expect(ERROR_CODES.QUOTA_EXCEEDED).to.equal('quotaExceeded');
       expect(Object.isFrozen(ERROR_CODES)).to.be.true;
+    });
+  });
+
+  // serenity-docs#72 §2/§4.1 — case 1 (brand carve exhausted, allocator OFF, production today).
+  describe('toQuotaExceededError', () => {
+    it('returns a 409 ErrorWithStatusCode carrying the quotaExceeded token', () => {
+      const e = toQuotaExceededError();
+      expect(e.status).to.equal(409);
+      expect(e.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+    });
+
+    it('the message carries no internal ids/upstream detail (client-safe, mirrors orgPoolExhausted/brandAiLimit)', () => {
+      const e = toQuotaExceededError();
+      expect(e.message).to.not.match(/workspace|project|semrush/i);
     });
   });
 
