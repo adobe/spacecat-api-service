@@ -6643,6 +6643,13 @@ V2PromptInput:
       type: string
       enum: [ai, human]
       default: human
+      description: >-
+        Who authored the prompt's text. SERVICE-PRINCIPAL-ONLY and read-only for
+        end users: a user-authenticated request (IMS/JWT) has this field IGNORED
+        (never rejected) and the value derived as `human`; only a service
+        principal (e.g. the generation pipeline) may assert it, validated against
+        the enum. It is never patched on update — it is fixed by the writer that
+        created the row (origin-dimension.md §3).
     source:
       type: string
       description: The source system or process that created the prompt

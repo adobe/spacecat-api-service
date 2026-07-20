@@ -25,6 +25,45 @@ import { INTENT_VALUES, normalizeIntent } from './intent.js';
 export { INTENT_VALUES, normalizeIntent };
 
 /**
+ * The closed `origin` vocabulary — who authored the prompt's text
+ * (origin-dimension.md §1). Matches the `category_origin` enum on `prompts.origin`.
+ */
+export const V2_PROMPT_ORIGINS = Object.freeze(['ai', 'human']);
+const DEFAULT_ORIGIN = 'human';
+
+/**
+ * Derives the `origin` to store for a v2-prompts write, as a function of the
+ * request PRINCIPAL, never of the caller-supplied body value (origin-dimension.md
+ * §3). `origin` records who authored the prompt's text and is read-only wherever a
+ * user can reach it:
+ *
+ *   - a USER-authenticated principal (IMS / JWT) always writes `human`; any
+ *     `origin` in the body is IGNORED (never rejected — the derived value is
+ *     authoritative, so the caller loses nothing);
+ *   - a SERVICE principal (e.g. DRS via admin `x-api-key`) is believed: its body
+ *     value is honoured, validated against {@link V2_PROMPT_ORIGINS}, defaulting
+ *     to `human` only when absent or out-of-vocabulary. This is the DRS contract
+ *     (`origin: 'ai'`); dropping it would relabel every generated prompt `human`
+ *     on its next upsert (origin-dimension.md §3 consequence 1).
+ *
+ * This governs CREATE only — `origin` is never patched on update (it is fixed by
+ * the writer that created the row), which the update path enforces by not writing
+ * the column at all.
+ *
+ * @param {unknown} bodyOrigin - the caller-supplied `origin`, or undefined.
+ * @param {boolean} isUserPrincipal - true for an IMS/JWT user request.
+ * @returns {string} the origin to store (`ai` or `human`).
+ */
+export function deriveV2PromptOrigin(bodyOrigin, isUserPrincipal) {
+  if (isUserPrincipal) {
+    return DEFAULT_ORIGIN;
+  }
+  return V2_PROMPT_ORIGINS.includes(/** @type {string} */ (bodyOrigin))
+    ? /** @type {string} */ (bodyOrigin)
+    : DEFAULT_ORIGIN;
+}
+
+/**
  * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
  * the PostgREST client so unit tests (fresh mock clients) never bleed state and
  * production detects once per client instance. Absent = unknown (try with
@@ -406,7 +445,11 @@ function mapRowToPrompt(row) {
     name: row.name,
     regions: row.regions || [],
     status: row.status || 'active',
-    origin: row.origin || 'human',
+    // Return the stored `origin` verbatim, no `|| 'human'` fallback: origin is
+    // NOT NULL in production (zero NULLs in 265,980 rows, origin-dimension.md
+    // §2.3), and a fallback would silently mislabel a model-written prompt as
+    // human-authored were a NULL ever inserted.
+    origin: row.origin,
     source: row.source || 'config',
     intent: row.intent ?? null,
     createdAt: row.created_at,
@@ -850,6 +893,12 @@ export async function upsertPrompts({
           status: 'active',
           intent: row.intent ?? match.intent,
           source: match.source ?? source,
+          // `origin` is fixed by the writer that created the row and is never
+          // re-derived on a later write (origin-dimension.md §3): preserve the
+          // stored value across a reactivation. `?? row.origin` is a defensive
+          // fallback for an in-memory/test match without an origin, mirroring
+          // `source` above — not a backfill path (prod has zero NULL origins).
+          origin: match.origin ?? row.origin,
         };
         toUpdate.push(reactivated);
         processed.push({ ...reactivated, prompt_id: promptId });
@@ -859,7 +908,18 @@ export async function upsertPrompts({
     }
 
     if (match) {
-      const updated = { ...row, id: match.id, source: match.source ?? source };
+      // `source` AND `origin` are both immutable on an UPDATE: source names the
+      // producing system, origin names the writer that created the row, and
+      // neither is re-derived on a later write (origin-dimension.md §3). Preserve
+      // the stored values so a user-principal derive of `human` cannot relabel an
+      // existing `ai` prompt. `?? row.*` is the same defensive in-memory/test
+      // fallback used for `source` — not a backfill.
+      const updated = {
+        ...row,
+        id: match.id,
+        source: match.source ?? source,
+        origin: match.origin ?? row.origin,
+      };
       toUpdate.push(updated);
       processed.push({ ...updated, prompt_id: promptId });
     } else {
@@ -1050,9 +1110,10 @@ export async function updatePromptById({
   if (updates.status !== undefined) {
     patch.status = updates.status;
   }
-  if (updates.origin !== undefined) {
-    patch.origin = updates.origin;
-  }
+  // `origin` is deliberately NOT patchable: it is fixed by the writer that
+  // created the row and is never re-derived on update (origin-dimension.md §3
+  // item 3 / §1 item 5). A caller-supplied `origin` in the PATCH body is ignored,
+  // leaving the stored value — including an `ai` prompt's — untouched.
   if (updates.intent !== undefined) {
     // The shared fallback strips intent when the column is known-absent.
     patch.intent = normalizeIntent(updates.intent);

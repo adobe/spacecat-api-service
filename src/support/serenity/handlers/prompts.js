@@ -19,7 +19,8 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeValueInjection } from '../tag-tree.js';
+import { resolveTypeValueInjection, resolveClosedValueInjection } from '../tag-tree.js';
+import { DIMENSION, ORIGIN_VALUE } from '../prompt-tags.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -366,60 +367,109 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
 }
 
 /**
- * Builds the per-request `type` injector — the UNIFIED classification layer
- * (serenity-docs#31). Given a pure `classifyPromptType(text, geoTargetId)`
- * closure (built by the controller from the brand name + region-clamped
- * aliases) that yields a BARE `type` value (`branded` / `non-branded`), it
- * returns `injectComputedType(projectId, input)` which:
- *   - STRIPS every caller-supplied tag id that lives under the `type` root (the
- *     client may never set the value), and
- *   - APPENDS the pre-resolved upstream id of the server-computed value. The
- *     atomic `createPromptsByIds` 500s on an unresolved id, so it is resolved
- *     BEFORE the write.
- * The returned input carries the rewritten `tagIds`, so the caller's response
- * echo reflects the computed type without a refetch (decision 5).
+ * Builds the per-request prompt-tag injector — the UNIFIED server-owned-dimension
+ * layer (serenity-docs#31 for `type`; origin-dimension.md §3 for `origin`). It
+ * stamps the two dimensions a client may never set on a prompt: `type` (branded /
+ * non-branded, classified from the text) and `origin` (who authored the prompt).
  *
- * The strip set is every id under the `type` root, not a name prefix: a tag's
- * dimension is its root, and a sub-category could legitimately be named
- * `branded` without being a `type` value.
+ * `injectComputedTags(projectId, input)` STRIPS every caller-supplied tag id that
+ * lives under a server-owned dimension's root and APPENDS the pre-resolved
+ * upstream id of the server value. The strip is BY RESOLVED ROOT ID, never by
+ * name: a tag's dimension is its root ancestor, so a customer category
+ * legitimately named `branded` or `ai` is not under a server root and is left
+ * alone (origin-dimension.md §3, gate 8). The rewritten `tagIds` are returned so
+ * the caller's response echo needs no refetch (decision 5).
  *
- * Resolution ({@link resolveTypeValueInjection}, two tag-tree reads per distinct
- * `type` value per project — the root level plus the `type` root's children) is
- * memoized for the request, so a bulk create fans out over the distinct computed
- * values rather than over the items. A non-function `classifyPromptType`
- * (defensive) is a pass-through.
+ * **`type`** — resolved from `classifyPromptType(text, geoTargetId)` on every
+ * write (create AND update): it is a classification of the prompt text, so it is
+ * always safe to recompute. A non-function `classifyPromptType` (defensive) skips
+ * the `type` step.
  *
- * `resolveTypeValueInjection` resolves or throws, so the computed tag is always
- * attached. It must never be dropped: `type` is the one dimension a client may
- * not set, so a prompt written without it stays unclassified forever, and the
- * caller sees a 2xx. Failing the write instead is free — the upstream bulk create
- * is atomic and has not run yet.
+ * **`origin`** — carries the CREATE/UPDATE ASYMMETRY (origin-dimension.md §3
+ * item 3). It is a fact about the row's CREATION, never a classification, so:
+ *   - on CREATE (`originValue` set, e.g. `human` for a user-authenticated write),
+ *     any caller-supplied origin id is stripped and the derived value injected;
+ *   - on UPDATE (`originValue` unset) the injector leaves origin ALONE. The stored
+ *     value the caller echoes back rides through the full-replace tag write
+ *     unchanged. Re-deriving would relabel every edited `ai` prompt `human`;
+ *     stripping without injecting would leave the prompt invisible to the
+ *     dimension's filter — both are illegal, so the update path does neither.
+ *
+ * Resolution ({@link resolveTypeValueInjection} / {@link resolveClosedValueInjection},
+ * two tag-tree reads per distinct value per project — the root level plus the
+ * root's children) is memoized for the request, so a bulk create fans out over
+ * the distinct computed values rather than over the items. The origin value is
+ * constant per request, so its resolution is memoized per project.
+ *
+ * Resolution resolves or throws, so a server tag is always attached; it is never
+ * dropped, and a resolution failure aborts the write (which is free — the upstream
+ * bulk create is atomic and has not run yet) rather than writing an unclassified
+ * or unattributed prompt behind a 2xx.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
  * @param {object} [log]
+ * @param {{ originValue?: string }} [options] - `originValue` is the derived
+ *   `origin` to inject on CREATE; omit it on UPDATE so origin is left untouched.
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
  *   tagIds: string[] }) =>
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
  */
-export function makeTypeInjector(transport, semrushWorkspaceId, classifyPromptType, log) {
+export function makePromptTagInjector(
+  transport,
+  semrushWorkspaceId,
+  classifyPromptType,
+  log,
+  options = {},
+) {
+  const { originValue } = options;
   /** @type {Map<string, Promise<{ computedId: string, typeTagIds: string[] }>>} */
-  const cache = new Map();
-  return async function injectComputedType(projectId, input) {
-    if (typeof classifyPromptType !== 'function') {
-      return input;
+  const typeCache = new Map();
+  /** @type {Map<string, Promise<{ computedId: string, valueTagIds: string[] }>>} */
+  const originCache = new Map();
+  return async function injectComputedTags(projectId, input) {
+    let { tagIds } = input;
+
+    // type — every write (safe to recompute from the text).
+    if (typeof classifyPromptType === 'function') {
+      const typeValue = classifyPromptType(input.text, input.geoTargetId);
+      const key = `${projectId} ${typeValue}`;
+      let pending = typeCache.get(key);
+      if (!pending) {
+        pending = resolveTypeValueInjection(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          typeValue,
+          log,
+        );
+        typeCache.set(key, pending);
+      }
+      const { computedId, typeTagIds } = await pending;
+      tagIds = [...tagIds.filter((id) => !typeTagIds.includes(id)), computedId];
     }
-    const typeValue = classifyPromptType(input.text, input.geoTargetId);
-    const key = `${projectId} ${typeValue}`;
-    let pending = cache.get(key);
-    if (!pending) {
-      pending = resolveTypeValueInjection(transport, semrushWorkspaceId, projectId, typeValue, log);
-      cache.set(key, pending);
+
+    // origin — CREATE only. `originValue` unset means UPDATE: leave origin alone
+    // (the stored value the caller echoes rides through the replace-mode write).
+    if (originValue) {
+      let pending = originCache.get(projectId);
+      if (!pending) {
+        pending = resolveClosedValueInjection(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          DIMENSION.ORIGIN,
+          originValue,
+          log,
+        );
+        originCache.set(projectId, pending);
+      }
+      const { computedId, valueTagIds } = await pending;
+      tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
     }
-    const { computedId, typeTagIds } = await pending;
-    const stripped = input.tagIds.filter((id) => !typeTagIds.includes(id));
-    return { ...input, tagIds: [...stripped, computedId] };
+
+    return { ...input, tagIds };
   };
 }
 
@@ -525,11 +575,16 @@ export async function handleCreatePrompts(
     projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
   }
 
-  const injectComputedType = makeTypeInjector(
+  // CREATE: user-authenticated write → derived `origin` is `human`
+  // (origin-dimension.md §3). Any caller-supplied origin tag id is stripped and
+  // this value injected; on the twin AI-generation path a service producer stamps
+  // `ai` via STANDARD_PROMPT_TAG_VALUES instead (that path does not run here).
+  const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
+    { originValue: ORIGIN_VALUE.HUMAN },
   );
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
@@ -553,8 +608,9 @@ export async function handleCreatePrompts(
     }
     const projectId = project.getSemrushProjectId();
     try {
-      // Unified layer: strip any caller-supplied type + inject the computed one.
-      const typed = await injectComputedType(projectId, input);
+      // Unified layer: strip any caller-supplied type/origin + inject the
+      // computed type and the derived origin (`human`).
+      const typed = await injectComputedTags(projectId, input);
       const semrushPromptId = await createOnePrompt(
         transport,
         semrushWorkspaceId,
@@ -713,14 +769,17 @@ export async function handleUpdatePrompt(
   // Recompute the type tag from the NEW text BEFORE any upstream write: the
   // unified layer (tree read / on-demand tag create) resolves the computed
   // value's id first, so a classification failure aborts cleanly with the
-  // prompt completely untouched.
-  const injectComputedType = makeTypeInjector(
+  // prompt completely untouched. NO `originValue` is passed: `origin` is a fact
+  // about the row's creation, never re-derived on edit (origin-dimension.md §3
+  // item 3). The prompt's stored origin id, echoed back by the caller, rides
+  // through the replace-mode tag write untouched.
+  const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
   );
-  const typed = await injectComputedType(projectId, {
+  const typed = await injectComputedTags(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
   });
 

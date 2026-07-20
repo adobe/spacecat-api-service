@@ -49,6 +49,7 @@ import {
   getPromptStats,
   resolveBrandUuid,
   findPromptsBlockingRegionRemoval,
+  deriveV2PromptOrigin,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -560,10 +561,25 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
+      // `origin` is derived from the request PRINCIPAL, never trusted from the
+      // body (origin-dimension.md §3): a user (IMS/JWT) write is `human`, body
+      // ignored; a service principal (e.g. DRS via admin x-api-key, whose auth
+      // type is neither `ims` nor `jwt`) is believed. The auth type is read from
+      // the per-request context — the same source as `updatedBy` above — so it
+      // reflects the actual caller. Stamp it here so the store writes the derived
+      // value on insert; on update the stored origin is preserved (upsertPrompts)
+      // and never patched (updatePromptById).
+      const authType = context.attributes?.authInfo?.getType?.();
+      const isUserPrincipal = authType === 'jwt' || authType === 'ims';
+      const derivedPrompts = prompts.map((p) => ({
+        ...p,
+        origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
+      }));
+
       const { created, updated, prompts: outPrompts } = await upsertPrompts({
         organizationId: spaceCatId,
         brandUuid,
-        prompts,
+        prompts: derivedPrompts,
         postgrestClient,
         updatedBy,
         classifyIntent: classifyIntent ?? undefined,
