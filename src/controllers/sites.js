@@ -35,6 +35,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -144,8 +145,6 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
-const DEFAULT_PAGE_SIZE = 100;
-const MAX_PAGE_SIZE = 500;
 const DEFAULT_LIMIT = 100;
 const SEARCH_DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
@@ -661,12 +660,11 @@ function SitesController(ctx, log, env) {
    * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
    * code via the `productCode` query parameter (e.g. 'LLMO').
    *
-   * Cursor-paginated: pass `limit` (default 100, max 500) and the `cursor`
-   * returned in the previous response to fetch the next page. Sites are
-   * ordered by ID.
+   * Returns the full result set (no pagination) - acceptable for a
+   * bounded admin-only use case. Sites are ordered by ID.
    *
    * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Paginated sites response.
+   * @returns {Promise<Response>} Sites response.
    */
   const getAllByEnrollmentAndTier = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
@@ -674,8 +672,6 @@ function SitesController(ctx, log, env) {
     }
     const tier = context.params?.tier;
     const productCode = context.data?.productCode;
-    const cursor = context.data?.cursor || null;
-    const parsedLimit = parseInt(context.data?.limit, 10);
 
     if (!hasText(tier)) {
       return badRequest('Tier required');
@@ -683,22 +679,16 @@ function SitesController(ctx, log, env) {
     if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
       return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
     }
-    if (context.data?.limit !== undefined
-      && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
-      return badRequest('Page size must be a positive integer');
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+    if (productCode !== undefined && !validProductCodes.includes(productCode)) {
+      return badRequest(`productCode must be one of: ${validProductCodes.join(', ')}`);
     }
-    const limit = Math.min(parsedLimit || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
     const all = (await Site.allByEnrollmentAndTier(tier, productCode))
       .sort((a, b) => a.getId().localeCompare(b.getId()));
-    const remaining = cursor ? all.filter((s) => s.getId() > cursor) : all;
-    const page = remaining.slice(0, limit);
-    const hasMore = remaining.length > page.length;
-    const nextCursor = hasMore ? page[page.length - 1].getId() : null;
 
     return ok({
-      sites: page.map((site) => SiteDto.toJSON(site)),
-      pagination: { limit, cursor: nextCursor, hasMore },
+      sites: all.map((site) => SiteDto.toJSON(site)),
     });
   };
 

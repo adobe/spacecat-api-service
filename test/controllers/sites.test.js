@@ -1833,7 +1833,7 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Delivery type required');
   });
 
-  it('gets all sites by enrollment tier with default pagination', async () => {
+  it('gets all sites by enrollment tier', async () => {
     mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
 
     const result = await sitesController.getAllByEnrollmentAndTier({
@@ -1845,7 +1845,17 @@ describe('Sites Controller', () => {
       .to.have.been.calledOnceWithExactly('PAID', undefined);
     expect(body.sites).to.be.an('array').with.lengthOf(2);
     expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
-    expect(body.pagination).to.deep.equal({ limit: 100, cursor: null, hasMore: false });
+  });
+
+  it('returns an empty list when no sites match the tier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves([]);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const body = await result.json();
+
+    expect(body.sites).to.be.an('array').with.lengthOf(0);
   });
 
   it('forwards productCode to allByEnrollmentAndTier when supplied', async () => {
@@ -1891,56 +1901,16 @@ describe('Sites Controller', () => {
     expect(error.message).to.match(/^Tier must be one of:/);
   });
 
-  it('returns bad request when limit is invalid on getAllByEnrollmentAndTier', async () => {
+  it('returns bad request when productCode is invalid on getAllByEnrollmentAndTier', async () => {
     const result = await sitesController.getAllByEnrollmentAndTier({
       params: { tier: 'PAID' },
-      data: { limit: '0' },
+      data: { productCode: 'NOT_A_PRODUCT' },
     });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Page size must be a positive integer');
+    expect(error.message).to.match(/^productCode must be one of:/);
     expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
-  });
-
-  it('paginates and returns cursor when more results remain', async () => {
-    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
-
-    const result = await sitesController.getAllByEnrollmentAndTier({
-      params: { tier: 'PAID' },
-      data: { limit: '1' },
-    });
-    const body = await result.json();
-
-    expect(body.sites).to.have.lengthOf(1);
-    expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
-    expect(body.pagination).to.deep.equal({ limit: 1, cursor: SITE_IDS[0], hasMore: true });
-  });
-
-  it('returns next page when cursor is supplied', async () => {
-    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
-
-    const result = await sitesController.getAllByEnrollmentAndTier({
-      params: { tier: 'PAID' },
-      data: { limit: '1', cursor: SITE_IDS[0] },
-    });
-    const body = await result.json();
-
-    expect(body.sites).to.have.lengthOf(1);
-    expect(body.sites[0]).to.have.property('id', SITE_IDS[1]);
-    expect(body.pagination).to.deep.equal({ limit: 1, cursor: null, hasMore: false });
-  });
-
-  it('caps limit at MAX_PAGE_SIZE', async () => {
-    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
-
-    const result = await sitesController.getAllByEnrollmentAndTier({
-      params: { tier: 'PAID' },
-      data: { limit: '99999' },
-    });
-    const body = await result.json();
-
-    expect(body.pagination.limit).to.equal(500);
   });
 
   it('returns bad request if audit type is not provided', async () => {

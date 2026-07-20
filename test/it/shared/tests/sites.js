@@ -495,6 +495,47 @@ export default function siteTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /sites/by-tier/:tier', () => {
+      it('admin: returns sites enrolled at the given tier', async () => {
+        const http = getHttpClient();
+        // SITE_1 (ee222222 → dd333333) and SITE_4 (ee333333 → dd333333) are
+        // enrolled under ORG_3's LLMO PAID entitlement.
+        const res = await http.admin.get('/sites/by-tier/PAID?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(2);
+        const ids = res.body.sites.map((site) => site.id);
+        expect(ids).to.include.members([SITE_1_ID, SITE_4_ID]);
+      });
+
+      it('admin: narrows by productCode', async () => {
+        const http = getHttpClient();
+        // SITE_1 (ee111111 → dd111111) is enrolled under ORG_1's LLMO FREE_TRIAL entitlement.
+        const res = await http.admin.get('/sites/by-tier/FREE_TRIAL?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_1_ID);
+      });
+
+      it('admin: returns empty list for a tier with no enrollments', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/PLG?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('admin: returns 400 for an invalid tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/PRE_ONBOARD?productCode=LLMO');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 403', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites/by-tier/PAID?productCode=LLMO');
+        expect(res.status).to.equal(403);
+      });
+    });
+
     // ── Write operations ──
 
     describe('POST /sites', () => {
