@@ -1,3 +1,17 @@
+# [1.672.0](https://github.com/adobe/spacecat-api-service/compare/v1.671.0...v1.672.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= projection to GET /organizations/{organizationId}/sites ([#2856](https://github.com/adobe/spacecat-api-service/issues/2856)) ([10b30c2](https://github.com/adobe/spacecat-api-service/commit/10b30c2884485af445fa22f44c8a962dfcf4b1c8)), closes [#2840](https://github.com/adobe/spacecat-api-service/issues/2840)
+
+# [1.671.0](https://github.com/adobe/spacecat-api-service/compare/v1.670.0...v1.671.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** tolerant origin/source authorship-root resolver; rename source→origin (LLMO-6274) ([#2862](https://github.com/adobe/spacecat-api-service/issues/2862)) ([cad46af](https://github.com/adobe/spacecat-api-service/commit/cad46af2b700b1ad5dcadd175ad14f799b9e1f99))
+
 # [1.670.0](https://github.com/adobe/spacecat-api-service/compare/v1.669.0...v1.670.0) (2026-07-20)
 
 
