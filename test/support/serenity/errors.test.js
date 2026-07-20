@@ -140,6 +140,12 @@ describe('serenity error classification', () => {
       expect(isPoolExhausted(peErr(500, { message: 'insufficient available units' }))).to.be.false;
     });
 
+    it('isPoolExhausted: matches a bare STRING body (bodyText string path), both error types', () => {
+      // The gateway can return a bare text body (not JSON); bodyText lowercases it and matches.
+      expect(isPoolExhausted(err(422, 'Insufficient Available Units in subscription'))).to.be.true;
+      expect(isPoolExhausted(peErr(422, 'insufficient available units'))).to.be.true;
+    });
+
     it('isWorkspaceNotReady: only the transient 422 lock', () => {
       expect(isWorkspaceNotReady(err(422, { message: 'workspace not ready' }))).to.be.true;
       expect(isWorkspaceNotReady(err(422, { message: 'insufficient available units' }))).to.be.false;
