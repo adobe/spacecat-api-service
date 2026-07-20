@@ -19,7 +19,7 @@
  * serenity flow.
  *
  * A tag's DIMENSION is its root ancestor, not a prefix on its name. Every
- * project's tag tree has exactly four roots — `category`, `intent`, `source`,
+ * project's tag tree has exactly four roots — `category`, `intent`, `origin`,
  * `type` — and every tag value is a bare-named descendant of one of them. No
  * tag name contains a `:`. A tag's dimension is therefore `path[0]` of the
  * upstream breadcrumb (verified against the live Semrush API: `path[]` is a
@@ -30,8 +30,13 @@
  * The upstream API caps neither, so nothing here does either.
  *
  * Names are NOT unique on their own — upstream uniqueness is scoped per
- * `(project, parent)`. A sub-category named `human` and the `source` value
+ * `(project, parent)`. A sub-category named `human` and the `origin` value
  * `human` are two distinct tags. Never key a tag by name alone; key by id.
+ *
+ * The authorship root is being renamed `source` → `origin` in place across the
+ * live projects (origin-dimension.md). Until that migration's contract phase
+ * (WP-O6) lands, the tag-tree resolver tolerates BOTH names — see
+ * {@link LEGACY_AUTHORSHIP_ROOT_NAME} and `tag-tree.js`.
  */
 
 /**
@@ -40,20 +45,27 @@
 export const DIMENSION = Object.freeze({
   CATEGORY: 'category',
   INTENT: 'intent',
-  SOURCE: 'source',
+  ORIGIN: 'origin',
   TYPE: 'type',
 });
+
+/**
+ * The pre-rename name of the authorship root. Live projects provisioned before
+ * the rename still carry a root named `source` (with `ai` / `human` beneath it);
+ * the tolerant resolver accepts it in place of `origin` until WP-O6 drops this.
+ */
+export const LEGACY_AUTHORSHIP_ROOT_NAME = 'source';
 
 /** Root names, in the order they are provisioned on a project. */
 export const DIMENSION_ROOT_NAMES = Object.freeze([
   DIMENSION.CATEGORY,
   DIMENSION.INTENT,
-  DIMENSION.SOURCE,
+  DIMENSION.ORIGIN,
   DIMENSION.TYPE,
 ]);
 
-/** `source` values — who authored the prompt. */
-export const SOURCE_VALUE = Object.freeze({
+/** `origin` values — who authored the prompt. */
+export const ORIGIN_VALUE = Object.freeze({
   AI: 'ai',
   HUMAN: 'human',
 });
@@ -98,14 +110,14 @@ export const TYPE_VALUE = Object.freeze({
  */
 export const CLOSED_DIMENSION_VALUES = Object.freeze({
   [DIMENSION.INTENT]: Object.freeze(Object.values(INTENT_VALUE)),
-  [DIMENSION.SOURCE]: Object.freeze(Object.values(SOURCE_VALUE)),
+  [DIMENSION.ORIGIN]: Object.freeze(Object.values(ORIGIN_VALUE)),
   [DIMENSION.TYPE]: Object.freeze(Object.values(TYPE_VALUE)),
 });
 
 /** The closed dimensions — fixed vocabularies, never customer-authored. */
 export const CLOSED_DIMENSIONS = Object.freeze([
   DIMENSION.INTENT,
-  DIMENSION.SOURCE,
+  DIMENSION.ORIGIN,
   DIMENSION.TYPE,
 ]);
 
@@ -120,17 +132,17 @@ export const OPEN_DIMENSIONS = Object.freeze([DIMENSION.CATEGORY]);
 export const ALL_DIMENSIONS = Object.freeze([...OPEN_DIMENSIONS, ...CLOSED_DIMENSIONS]);
 
 /**
- * The closed-dimension values applied to EVERY AI-generated prompt: `source:ai`
- * (AI-authored) plus the default `Informational` intent (the most common intent
- * for brand-topic prompts; re-classification can refine it later). The `type`
- * value is classified per prompt at generation time (branded vs non-branded —
- * see the handler), so it is NOT seeded here.
+ * The closed-dimension values applied to EVERY AI-generated prompt: the `origin`
+ * value `ai` (AI-authored) plus the default `Informational` intent (the most
+ * common intent for brand-topic prompts; re-classification can refine it later).
+ * The `type` value is classified per prompt at generation time (branded vs
+ * non-branded — see the handler), so it is NOT seeded here.
  *
  * Each entry names a dimension and the bare value beneath it; the caller resolves
  * the pair to an upstream tag id against the project's tree.
  */
 export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
-  Object.freeze({ dimension: DIMENSION.SOURCE, name: SOURCE_VALUE.AI }),
+  Object.freeze({ dimension: DIMENSION.ORIGIN, name: ORIGIN_VALUE.AI }),
   Object.freeze({ dimension: DIMENSION.INTENT, name: INTENT_VALUE.INFORMATIONAL }),
 ]);
 
