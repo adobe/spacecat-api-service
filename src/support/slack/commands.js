@@ -59,6 +59,7 @@ import removeDelegate from './commands/remove-delegate.js';
 import checkAgenticTrafficDbStatus from './commands/check-agentic-traffic-db-status.js';
 import checkCdnLogsStatus from './commands/check-cdn-logs-status.js';
 import addOaeStageDomain from './commands/add-oae-stage-domain.js';
+import forceOptimizeAtEdgeEnable from './commands/force-optimize-at-edge-enable.js';
 import togglePathSuggestions from './commands/toggle-path-suggestions.js';
 import getPathSuggestionsStatus from './commands/get-path-suggestions-status.js';
 
@@ -118,6 +119,7 @@ export default (context) => [
   checkAgenticTrafficDbStatus(context),
   checkCdnLogsStatus(context),
   addOaeStageDomain(context),
+  forceOptimizeAtEdgeEnable(context),
   togglePathSuggestions(context),
   getPathSuggestionsStatus(context),
 ];
