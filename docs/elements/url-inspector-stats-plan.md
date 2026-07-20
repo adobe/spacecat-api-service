@@ -35,8 +35,8 @@ org + brand access, resolves the brand's Semrush sub-workspace).
 
 | Param | Aliases | Required | Description |
 |---|---|---|---|
-| `startDate` | `start_date` | **Yes** | Range start, `YYYY-MM-DD`. 400 if missing or not a valid calendar date. Required (not defaulted) — mirrors `listOwnedUrls`/`listCitedDomains`/`listDomainUrls`, not `getStats` (Brand Presence), which defaults. |
-| `endDate` | `end_date` | **Yes** | Range end, `YYYY-MM-DD`. 400 if missing, invalid, or before `startDate`. Span capped at 366 days (mirrors `listOwnedUrls`/`listDomainUrls`). |
+| `startDate` | `start_date` | No | Range start, `YYYY-MM-DD`. Defaults to 28 days before today (`defaultStatsDateRange()`) when either date is omitted — matches every other `*/stats` endpoint (`getStats`, and both Aurora stats endpoints), **not** the required-date convention `listOwnedUrls`/`listCitedDomains`/`listDomainUrls` use. 400 if present but not a valid calendar date. |
+| `endDate` | `end_date` | No | Range end, `YYYY-MM-DD`. Same defaulting as `startDate`. 400 if present but invalid or before `startDate`. Effective span (after defaulting) capped at 56 days. |
 | `model` | `platform` | No | AI model/platform filter, e.g. `search-gpt`. Unrecognized values fall back to the default (`resolveElementModel`). |
 | `siteId` | `site_id` | No | Must resolve (via `getBrandBySite`) to the same brand as `:brandId`; 400 otherwise. Cross-check only. |
 | `region` | — | No | A single region code (e.g. `US`) → its one Semrush `projectId` via `resolveRegionProjectId`; 404 if unmatched. Omitted/`all` → aggregate across every project the brand owns (mirrors `listOwnedUrls`/`listDomainUrls`, not `getStats`'s `regionCode` naming). |
@@ -82,7 +82,7 @@ org + brand access, resolves the brand's Semrush sub-workspace).
 
 | Status | `error` token | Cause |
 |---|---|---|
-| 400 | `invalidRequest` | `brandId` not a UUID; missing/malformed/out-of-order `startDate`/`endDate`; range > 366 days; `siteId` doesn't belong to `:brandId`'s brand |
+| 400 | `invalidRequest` | `brandId` not a UUID; malformed/out-of-order `startDate`/`endDate`; effective range > 56 days; `siteId` doesn't belong to `:brandId`'s brand |
 | 401 | `authenticationRequired` | Missing/invalid `Authorization` bearer (non-IMS caller with no `x-promise-token`) |
 | 403 | `forbidden` | Caller lacks access to the organization |
 | 404 | `notFound` | Organization/brand not found; brand has no resolvable Semrush workspace; `region` doesn't match any market |
@@ -139,12 +139,19 @@ same pattern as `getBrandPresenceStats`) for `weeklyTrends`.
 
 ### 3.3 `src/controllers/elements.js#getUrlInspectorStats` (new)
 
-Mirrors `listOwnedUrls`/`listDomainUrls`'s auth/date-validation/region-resolution
-shape (required dates, 366-day cap, `siteId` cross-check, `region` → single
-project or all-brand-projects fan-out) rather than `getStats`'s (Brand Presence)
-shape (optional dates with a 28-day default, `regionCode` naming, 56-day cap) —
-this endpoint is a *url-inspector* sibling, so it follows that family's
-conventions.
+Mirrors `listOwnedUrls`/`listDomainUrls`'s auth/region-resolution shape
+(`siteId` cross-check, `region` → single project or all-brand-projects
+fan-out, `region` naming not `getStats`'s `regionCode`) — this endpoint is a
+*url-inspector* sibling, so it follows that family's param conventions. Its
+**date handling instead follows `getStats`** (optional, 28-day default via the
+shared `defaultStatsDateRange()`, 56-day cap) rather than
+`listOwnedUrls`/`listDomainUrls`'s required-dates/366-day-cap shape — a stats
+endpoint should behave like the other stats endpoints on dates, since a caller
+requesting "the current snapshot" is the expected default UX for a KPI card
+(unlike a paginated table browse, where an unbounded historical query is a
+legitimate use case). The 56-day cap also keeps `stats` and `weeklyTrends`
+(capped to the most recent 8 weeks regardless) covering the same window,
+avoiding the mismatch a wider cap would create.
 
 ### 3.4 Routing
 
@@ -163,11 +170,13 @@ conventions.
 - `test/support/elements/elements-service.test.js` — added `getUrlInspectorStats`
   cases (single PROMPTS call reused across stats+trends, per-project fan-out,
   per-week trend fan-out capped at 8, error propagation).
-- `test/controllers/elements.test.js` — added `getUrlInspectorStats` cases
-  (date validation/required-ness, region resolution vs. aggregate fan-out,
-  siteId cross-check, error propagation) mirroring `listOwnedUrls`/`getStats`.
 - `test/routes/index.test.js` — added the new route key to
   `expectedDynamicRouteKeys`.
+- `test/controllers/elements.test.js` — **not added.** The controller's own
+  date-defaulting/cap/region-resolution/siteId-cross-check logic (§3.3) has no
+  dedicated test coverage yet, unlike `getStats`'s full describe block. Only an
+  unused `getUrlInspectorStats` stub was added to the shared `serviceStub`
+  fixture. Follow-up if this endpoint graduates past POC.
 
 ---
 
@@ -205,9 +214,12 @@ produce a genuinely time-varying `totalPrompts` sparkline from Semrush today.
 Unlike the Aurora endpoint (a single cheap grouped SQL query, so trends are
 always returned for the full requested range), each Semrush trend week costs a
 real fan-out of upstream calls. `splitDateRangeIntoWeeksBackward`'s default
-`maxWeeks=8` (same cap `getBrandPresenceStats` uses) silently truncates a wider
-request to its most recent 8 weeks of sparkline data — `stats` itself is
-unaffected and always covers the full requested range.
+`maxWeeks=8` (same cap `getBrandPresenceStats` uses) truncates to the most
+recent 8 weeks of sparkline data. The controller's 56-day (8-week) `MAX_RANGE_DAYS`
+cap (§3.3) keeps this a non-issue in practice — the widest `stats` request
+possible is already exactly 8 weeks, so `stats` and `weeklyTrends` always cover
+the same window; there is no request shape where `stats` covers a wider range
+than `weeklyTrends` can show.
 
 ---
 
