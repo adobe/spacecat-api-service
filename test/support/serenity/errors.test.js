@@ -103,12 +103,12 @@ describe('serenity error classification', () => {
         expect(recordMeteredQuotaClassifier).to.not.have.been.called;
       });
 
-      it('emits Matched=true for an actual quota-signalling 405', () => {
-        isMeteredQuotaMocked(err(405, { message: 'Quota exceeded' }));
+      it('emits Matched=true for the disguised-405 shape (string body)', () => {
+        isMeteredQuotaMocked(err(405, '<html>405 Not Allowed</html>'));
         expect(recordMeteredQuotaClassifier).to.have.been.calledOnceWith(true);
       });
 
-      it('emits Matched=false for a legitimate (non-quota) 405', () => {
+      it('emits Matched=false for a legitimate (JSON-bodied) 405', () => {
         isMeteredQuotaMocked(err(405, { message: 'Method Not Allowed' }));
         expect(recordMeteredQuotaClassifier).to.have.been.calledOnceWith(false);
       });

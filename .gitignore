@@ -22,6 +22,7 @@ admin-idp-p*.json
 scripts/
 !scripts/backfill-rum-config.mjs
 !scripts/serenity-metered-405-canary.mjs
+!scripts/serenity-rightsizing-sweep.mjs
 docs/index.html
 mcp-server.log
 # Scout MCP local config (per-developer, never commit)

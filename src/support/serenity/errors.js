@@ -91,6 +91,12 @@ export function isWorkspaceNotReady(e) {
  * cannot distinguish the two cases — only SHAPE can: a string body is the disguised gateway-level
  * quota rejection, an object body is a real app-level error. Widen this only from a newly pinned
  * live fixture, never from a guessed substring.
+ *
+ * Emits the `MeteredQuotaClassifier` observability metric (LLMO-6191 item 2) ONLY when `e` is an
+ * actual `405` (the metric's denominator is "how many 405s", not "how many errors of any kind" —
+ * see the non-405 early return), dimensioned by match/no-match, so the "405-classifier match
+ * ratio" the rollout-hardening ticket asks for reflects the real shape-based signal now that
+ * `retryOnQuota` (dynamic-allocation-active.js) is a live production caller.
  * @param {unknown} e
  * @returns {boolean}
  */
@@ -102,7 +108,9 @@ export function isMeteredQuota(e) {
     // drown the actual 405-classifier signal once a real caller is wired up.
     return false;
   }
-  return typeof e.body === 'string' && e.body.length > 0;
+  const matched = typeof e.body === 'string' && e.body.length > 0;
+  recordMeteredQuotaClassifier(matched);
+  return matched;
 }
 
 /**
