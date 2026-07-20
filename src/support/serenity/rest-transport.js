@@ -228,8 +228,10 @@ function unwrap(method, result) {
  * @template T
  * @param {Promise<T>} promise a pending facade-method call.
  * @returns {Promise<T>} the facade's unwrapped 2xx body.
+ * @throws {SerenityTransportError} on any Project Engine failure (HTTP non-2xx, or the wrapped
+ *   timeout/auth/network cause), so callers and the controller's mapError classify it uniformly.
  */
-async function adaptPE(promise) {
+export async function adaptPE(promise) {
   try {
     return await promise;
   } catch (e) {
@@ -320,6 +322,9 @@ export function createSerenityTransport({ env, imsToken }) {
   // facade does not expose a brand-topics method yet (it is in-spec — the future
   // 29th facade method — but unshipped as of 1.14.0), so this one call keeps the
   // raw client + the local `unwrap`. Same options as the facade above.
+  // TODO(LLMO): once @adobe/spacecat-shared-project-engine-client ships a brand-topics facade
+  // method, retire `projectsRaw` and route brand-topics through `projects` + `adaptPE` like the
+  // other 28 ops (this is the only remaining raw Project Engine caller in this file).
   const projectsRaw = createSerenityProjectEngineApiClient(projectEngineOptions);
 
   // Typed User Manager client over the sub-workspace lifecycle gateway (same
