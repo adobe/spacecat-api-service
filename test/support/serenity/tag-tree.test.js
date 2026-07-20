@@ -347,6 +347,9 @@ describe('serenity tag-tree', () => {
       expect(roots.get('origin')).to.equal('root-origin');
       // Nothing was created and the orphan `source` was not touched.
       expect(transport.createProjectTags).to.not.have.been.called;
+      // Performance contract: finding `origin` short-circuits before any legacy
+      // adoption, so no child-level read of the orphan `source` — exactly ONE read.
+      expect(transport.listProjectTags).to.have.callCount(1);
     });
 
     it('adopts a CHILDLESS legacy `source` root in place (vacuous authorship guard)', async () => {

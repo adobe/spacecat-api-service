@@ -258,7 +258,11 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         WORKSPACE,
         { ...validBody, name: 'source' },
         fakeLog(),
-      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      )).to.be.rejected.then((err) => {
+        expect(err.status).to.equal(400);
+        // The domain guard, not a generic schema rejection.
+        expect(err.message).to.match(/reserved dimension root name/);
+      });
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
@@ -908,6 +912,26 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
           fakeLog(),
         )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
       }
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('400s on a rename to the legacy `source` name during the migration window', async () => {
+      // Mirrors the create-path guard: `source` is reserved until WP-O6, so a tag
+      // cannot be renamed onto it any more than a fresh one can be minted with it.
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TARGET,
+        { ...updateBody, name: 'source' },
+        fakeLog(),
+      )).to.be.rejected.then((err) => {
+        expect(err.status).to.equal(400);
+        expect(err.message).to.match(/reserved dimension root name/);
+      });
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
