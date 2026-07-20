@@ -1100,23 +1100,35 @@ export default function ElementsController(context, log, env) {
         }
       }
 
-      // Date range is required (the UI always sends it) and must be a valid
-      // YYYY-MM-DD — mirrors listCitedDomains/listOwnedUrls/listDomainUrls.
-      const startDate = query.startDate || query.start_date;
-      const endDate = query.endDate || query.end_date;
-      if (!hasText(startDate) || !hasText(endDate)) {
-        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      // Date range is optional (defaults to a 28-day trailing window) — matches
+      // every other *stats* endpoint (getStats, both Aurora stats endpoints),
+      // not the required-date convention of the table endpoints
+      // (listCitedDomains/listOwnedUrls/listDomainUrls) this file's other
+      // url-inspector routes use.
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
       }
-      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
-        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
       }
-      if (startDate > endDate) {
+      if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
         return badRequest('startDate must not be after endDate');
       }
-      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year range
-      // fanned across every project (plus up to 8 per-week fan-out calls for the
-      // sparkline) is needlessly expensive upstream.
-      const MAX_RANGE_DAYS = 366;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      // Bound the span at 56 days (8 weeks) — matches getStats (brand-presence),
+      // and keeps `stats` covering exactly the same window `weeklyTrends` does
+      // (weeklyTrends is capped to the most recent 8 weeks regardless — see
+      // getUrlInspectorStats in elements-service.js). A wider requested `stats`
+      // range than what `weeklyTrends` can show is a confusing mismatch, unlike
+      // the 366-day cap on listOwnedUrls/listDomainUrls, which have no trends
+      // array to stay in sync with.
+      const MAX_RANGE_DAYS = 56;
       const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
         - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
       if (spanDays > MAX_RANGE_DAYS) {
