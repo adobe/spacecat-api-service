@@ -161,20 +161,27 @@ export function createElementsService(transport) {
       }
 
       // Fire the base call + one intent-filtered call per intent value in
-      // parallel (~one extra round-trip of latency). The intent fan-out is
-      // non-fatal — degrade to blank `userIntent` on any failure.
+      // parallel (~one extra round-trip of latency). Enrichment is non-fatal
+      // PER intent value: each call catches its own failure and contributes an
+      // empty result, so one failing intent drops only that intent's rows — not
+      // the whole enrichment.
       const intentPromise = mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
-          const raw = await transport.fetchElement(
-            workspaceId,
-            ELEMENT_IDS.PROMPTS,
-            buildPromptsPayload({ ...params, tags: [...(params.tags ?? []), `intent__${value}`] }),
-          );
-          return { key: value.toLowerCase(), rows: transformPromptsResponse(raw).prompts };
+          const key = value.toLowerCase();
+          try {
+            const raw = await transport.fetchElement(
+              workspaceId,
+              ELEMENT_IDS.PROMPTS,
+              buildPromptsPayload({ ...params, tags: [...(params.tags ?? []), `intent__${value}`] }),
+            );
+            return { key, rows: transformPromptsResponse(raw).prompts };
+          } catch {
+            return { key, rows: [] };
+          }
         },
-      ).catch(() => []);
+      );
 
       const [base, intentResults] = await Promise.all([basePromise, intentPromise]);
 
@@ -189,11 +196,13 @@ export function createElementsService(transport) {
         }
       }
 
+      // Preserve the base response's `count` (may be a server-reported total)
+      // rather than substituting the local row count on the enriched path.
       const prompts = base.prompts.map((p) => ({
         ...p,
         userIntent: intentByPrompt.get(p.prompt) ?? '',
       }));
-      return { count: prompts.length, prompts };
+      return { count: base.count, prompts };
     },
 
     /**
