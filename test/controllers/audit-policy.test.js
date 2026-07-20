@@ -314,6 +314,57 @@ describe('AuditPolicyController — exclusions add/remove', () => {
   });
 });
 
+describe('AuditPolicyController — inclusions add/remove', () => {
+  afterEach(() => sinon.restore());
+
+  it('add: unions a new URL into manualUrls and calls the RPC against manual_urls, not exclusion_globs', async () => {
+    const row = { ...ROW_V5, manual_urls: ['https://example.com/a'] };
+    const client = buildSequencedClient({
+      selectQueue: [{ data: row, error: null }],
+      rpcQueue: [{ data: { ...row, version: 6, manual_urls: ['https://example.com/a', 'https://example.com/b'] }, error: null }],
+    });
+    const controller = loadController();
+    const res = await controller.addInclusions(buildContext({
+      client, data: { values: ['https://example.com/b'], reason: 'add partner page' },
+    }));
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_manual_urls: ['https://example.com/a', 'https://example.com/b'],
+      p_exclusion_globs: ['/checkout/*'],
+    }));
+  });
+
+  it('remove: set-difference drops the given URL from manualUrls', async () => {
+    const row = { ...ROW_V5, manual_urls: ['https://example.com/a', 'https://example.com/b'] };
+    const client = buildSequencedClient({
+      selectQueue: [{ data: row, error: null }],
+      rpcQueue: [{ data: { ...row, version: 6, manual_urls: ['https://example.com/a'] }, error: null }],
+    });
+    const controller = loadController();
+    const res = await controller.removeInclusions(buildContext({
+      client, data: { values: ['https://example.com/b'], reason: 'remove partner page' },
+    }));
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_manual_urls: ['https://example.com/a'],
+    }));
+  });
+
+  it('cap exceeded uses the manualUrls cap (2000), not exclusionGlobs\' (200)', async () => {
+    const bigRow = { ...ROW_V5, manual_urls: Array.from({ length: 2000 }, (_, i) => `https://example.com/p${i}`) };
+    const client = buildSequencedClient({
+      selectQueue: [{ data: bigRow, error: null }],
+      rpcQueue: [],
+    });
+    const controller = loadController();
+    const res = await controller.addInclusions(buildContext({
+      client, data: { values: ['https://example.com/one-too-many'], reason: 'over cap' },
+    }));
+    expect(res.status).to.equal(400);
+    expect(client.rpc).to.not.have.been.called;
+  });
+});
+
 describe('AuditPolicyController — E1 getPolicy', () => {
   afterEach(() => sinon.restore());
 
