@@ -239,10 +239,13 @@ async function adaptPE(promise) {
       if (e.status !== undefined) {
         throw new SerenityTransportError(e.status, e.message, e.body);
       }
-      // No HTTP response (timeout / auth / network): the facade wrapped the original throw as
-      // `cause` — surface it unchanged to preserve prior behavior (createTimeoutFetch's 504,
-      // authToken's 401, or a raw network error).
-      throw e.cause ?? e;
+      // No HTTP response (timeout / auth / network): the facade wraps the original throw as
+      // `cause`, so surface it unchanged to preserve prior behavior (createTimeoutFetch's 504,
+      // authToken's 401, or a raw network error). Defensive fallback: the facade always sets
+      // `cause` on this path today, but if it ever didn't, wrap as a 502 SerenityTransportError
+      // so a bare ProjectEngineApiError can never escape unclassified past the downstream
+      // `instanceof SerenityTransportError` sites.
+      throw e.cause ?? new SerenityTransportError(502, e.message, e.body);
     }
     throw e;
   }
