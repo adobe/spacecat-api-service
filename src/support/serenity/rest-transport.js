@@ -228,8 +228,11 @@ function unwrap(method, result) {
  * @template T
  * @param {Promise<T>} promise a pending facade-method call.
  * @returns {Promise<T>} the facade's unwrapped 2xx body.
- * @throws {SerenityTransportError} on any Project Engine failure (HTTP non-2xx, or the wrapped
- *   timeout/auth/network cause), so callers and the controller's mapError classify it uniformly.
+ * @throws {SerenityTransportError} for a Project Engine HTTP failure (`status` + `body` preserved
+ *   so classifiers match) and for the defensive no-`cause` fallback (502). On the
+ *   timeout/auth/network path the original `cause` is rethrown unchanged — a SerenityTransportError
+ *   from createTimeoutFetch's 504 / authToken's 401, or a raw network error — and a
+ *   non-ProjectEngineApiError is propagated as-is.
  */
 export async function adaptPE(promise) {
   try {
