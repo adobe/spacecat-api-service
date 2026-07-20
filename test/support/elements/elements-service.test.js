@@ -337,4 +337,143 @@ describe('createElementsService', () => {
       })).to.be.rejectedWith('mentions upstream failure');
     });
   });
+
+  describe('getUrlInspectorStats', () => {
+    const STATS_PER_URL_RESULT = {
+      blocks: {
+        data: [
+          {
+            source: '/a', citations: 5, prompts_with_citation: 2, domain_type: 'Owned',
+          },
+          {
+            source: '/b', citations: 3, prompts_with_citation: 1, domain_type: 'Owned',
+          },
+        ],
+      },
+    };
+    const PROMPTS_RESULT = {
+      blocks: { data: [{ prompt: 'p1' }, { prompt: 'p2' }, { prompt: 'p3' }] },
+    };
+
+    beforeEach(() => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.STATS_PER_URL, sinon.match.any)
+        .resolves(STATS_PER_URL_RESULT);
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, sinon.match.any)
+        .resolves(PROMPTS_RESULT);
+    });
+
+    it('returns aggregated stats plus totalPrompts for a single-project (single-region) request', async () => {
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        projectIds: ['proj-1'],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      expect(result.stats).to.deep.equal({
+        uniqueUrls: 2, totalCitations: 8, totalPromptsCited: 3, totalPrompts: 3,
+      });
+    });
+
+    it('fetches PROMPTS exactly once regardless of the number of trend weeks', async () => {
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        projectIds: ['proj-1'],
+        startDate: '2026-06-01',
+        endDate: '2026-07-14',
+      });
+      const promptsCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      expect(promptsCalls).to.have.length(1);
+    });
+
+    it('repeats the same totalPrompts value on every weeklyTrends entry (PROMPTS has no date filter)', async () => {
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        projectIds: ['proj-1'],
+        startDate: '2026-06-24',
+        endDate: '2026-07-07',
+      });
+      expect(result.weeklyTrends).to.have.length(2);
+      expect(result.weeklyTrends.every((w) => w.totalPrompts === 3)).to.equal(true);
+    });
+
+    it('caps weeklyTrends to the most recent 8 weeks for a wider requested range', async () => {
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        projectIds: ['proj-1'],
+        startDate: '2026-01-01',
+        endDate: '2026-07-14',
+      });
+      expect(result.weeklyTrends).to.have.length(8);
+    });
+
+    it('each weeklyTrends entry carries weekStart/weekEnd plus the citation KPIs', async () => {
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        projectIds: ['proj-1'],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      expect(result.weeklyTrends[0]).to.deep.equal({
+        weekStart: '2026-07-01',
+        weekEnd: '2026-07-07',
+        uniqueUrls: 2,
+        totalCitations: 8,
+        totalPromptsCited: 3,
+        totalPrompts: 3,
+      });
+    });
+
+    it('fans out one Stats-per-URL call per project (region) for the aggregate range', async () => {
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [
+          { region: 'US', projectId: 'proj-us' },
+          { region: 'AU', projectId: 'proj-au' },
+        ],
+        projectIds: ['proj-us', 'proj-au'],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      const statsCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.STATS_PER_URL && c.args[2].project_id);
+      const projectIdsCalled = statsCalls.map((c) => c.args[2].project_id);
+      expect(projectIdsCalled).to.include.members(['proj-us', 'proj-au']);
+    });
+
+    it('omits the project_id field for an unscoped (empty projects) aggregate fetch', async () => {
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [],
+        projectIds: [],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      const statsCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.STATS_PER_URL);
+      expect(statsCall.args[2]).to.not.have.property('project_id');
+    });
+
+    it('propagates Stats-per-URL transport errors', async () => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.STATS_PER_URL, sinon.match.any)
+        .rejects(new Error('stats-per-url upstream failure'));
+      await expect(service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        projectIds: ['proj-1'],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      })).to.be.rejectedWith('stats-per-url upstream failure');
+    });
+
+    it('propagates PROMPTS transport errors', async () => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, sinon.match.any)
+        .rejects(new Error('prompts upstream failure'));
+      await expect(service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        projectIds: ['proj-1'],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      })).to.be.rejectedWith('prompts upstream failure');
+    });
+  });
 });

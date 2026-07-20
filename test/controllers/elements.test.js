@@ -58,6 +58,21 @@ const STATS_RESULT = {
     total_citations: 158903,
   },
 };
+const URL_INSPECTOR_STATS_RESULT = {
+  stats: {
+    uniqueUrls: 187, totalCitations: 964, totalPromptsCited: 312, totalPrompts: 1250,
+  },
+  weeklyTrends: [
+    {
+      weekStart: '2026-06-25',
+      weekEnd: '2026-07-01',
+      uniqueUrls: 42,
+      totalCitations: 155,
+      totalPromptsCited: 48,
+      totalPrompts: 1250,
+    },
+  ],
+};
 
 function fakeLog() {
   return {
@@ -186,6 +201,8 @@ describe('ElementsController', () => {
       getPrompts: sinon.stub().resolves(PROMPTS_RESULT),
       getWeeks: sinon.stub().resolves(WEEKS_RESULT),
       getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
+      getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
+      getOwnedUrlProjects: sinon.stub().resolves([]),
       resolveRegionProjectId: sinon.stub().resolves(null),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
