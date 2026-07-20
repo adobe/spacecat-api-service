@@ -15,6 +15,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -6220,6 +6221,70 @@ describe('Brands Controller', () => {
       // The internal gateway URL must not leak via body or header.
       expect(JSON.stringify(body)).to.not.contain('gw.internal');
       expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+    });
+
+    // LLMO-6386: the brand-edit re-sync runs Project Engine calls, which now throw
+    // ProjectEngineApiError directly (adaptPE retired). createErrorResponse must redact it to the
+    // same generic 502 as the SerenityTransportError case — the raw "Project Engine ..." message
+    // (and any body) must never reach the client.
+    it('redacts a ProjectEngineApiError upstream failure to a generic 502 on brand-edit re-sync', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const syncStub = sinon.stub().rejects(
+        new ProjectEngineApiError(502, 'POST', { secret: 'leak' }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(502);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).to.not.match(/leak/);
+      expect(JSON.stringify(body)).to.not.match(/Project Engine/);
+    });
+
+    // The auth-preservation crux: a no-HTTP-response Project Engine failure (missing IMS token)
+    // is a status-undefined ProjectEngineApiError carrying the 401 SerenityTransportError as
+    // `.cause`. createErrorResponse must unwrap it so the response stays 401 (not flattened).
+    it('unwraps a status-undefined ProjectEngineApiError to preserve the auth 401 on brand-edit re-sync', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const authCause = new SerenityTransportError(401, 'Missing IMS bearer token');
+      const syncStub = sinon.stub().rejects(
+        new ProjectEngineApiError(undefined, 'POST', null, { cause: authCause }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(401);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream authorization failed');
     });
 
     it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {
