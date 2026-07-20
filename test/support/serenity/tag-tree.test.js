@@ -324,6 +324,52 @@ describe('serenity tag-tree', () => {
       expect(created).to.deep.equal(['origin']);
       expect(roots.get('origin')).to.equal('made-origin');
     });
+
+    it('prefers `origin` over a legacy `source` when a project carries BOTH roots', async () => {
+      // A partially-migrated project: the new `origin` root already exists alongside
+      // the not-yet-cleaned-up legacy `source` root. `origin` must win, and the
+      // orphan `source` is left untouched (removed at WP-O6) — never a second mint.
+      const bothLevels = {
+        '': [
+          { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-origin', name: 'origin', children_count: 2 },
+          { id: 'root-source', name: 'source', children_count: 2 },
+          { id: 'root-type', name: 'type', children_count: 2 },
+        ],
+      };
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(bothLevels),
+        createProjectTags: sinon.stub(),
+      };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      // The `origin` key resolves to the real `origin` root, not the legacy `source`.
+      expect(roots.get('origin')).to.equal('root-origin');
+      // Nothing was created and the orphan `source` was not touched.
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('adopts a CHILDLESS legacy `source` root in place (vacuous authorship guard)', async () => {
+      // The intentional vacuous-true branch of `childrenAreAuthorship`: a `source`
+      // root not yet populated is still an authorship root, so it is adopted rather
+      // than shadowed by a second `origin`. Documents the behavior until WP-O6.
+      const childlessLevels = {
+        '': [
+          { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-source', name: 'source', children_count: 0 },
+          { id: 'root-type', name: 'type', children_count: 2 },
+        ],
+        'root-source': [],
+      };
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(childlessLevels),
+        createProjectTags: sinon.stub(),
+      };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      expect(roots.get('origin')).to.equal('root-source');
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
   });
 
   describe('provisionDimensionTree', () => {

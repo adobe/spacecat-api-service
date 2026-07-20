@@ -147,15 +147,22 @@ export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
 ]);
 
 /**
- * True when `name` is one of the four dimension roots. Root names are reserved:
+ * True when `name` is a reserved dimension-root name. Root names are reserved:
  * a customer category may not be called `category`, and a closed value may not
  * be minted at the root level.
+ *
+ * While the `source` → `origin` rename is in flight, the legacy authorship name
+ * ({@link LEGACY_AUTHORSHIP_ROOT_NAME}) is ALSO reserved — a customer must not be
+ * able to mint a tag named `source` during the migration window, or it could be
+ * mistaken for (or collide with) the legacy authorship root the tolerant resolver
+ * still adopts. Dropped with the rest of the fallback at WP-O6.
  *
  * @param {string} name - a bare tag name.
  * @returns {boolean}
  */
 export function isDimensionRootName(name) {
-  return (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
+  return name === LEGACY_AUTHORSHIP_ROOT_NAME
+    || (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
 }
 
 /**

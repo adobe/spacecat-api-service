@@ -26,7 +26,7 @@
  *    Every create in this module is therefore resolve-before-create. Names are
  *    unique per `(project, parent)`, not per project, so the resolve must be
  *    scoped to the parent — a bare-name lookup across the whole tree would
- *    conflate a sub-category `human` with the `source` value `human`.
+ *    conflate a sub-category `human` with the `origin` value `human`.
  *  - Tag writes land in the project's DRAFT layer, and a default read serves the
  *    LIVE view. Reads here go through {@link listProjectTagTree}, which passes
  *    `draft: true`, so a tag this module just created is visible to the tag
@@ -539,7 +539,7 @@ export async function provisionDimensionTree(transport, semrushWorkspaceId, proj
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} dimension - a closed dimension (`intent` / `source` / `type`).
+ * @param {string} dimension - a closed dimension (`intent` / `origin` / `type`).
  * @param {string} value - a bare value from that dimension's fixed vocabulary.
  * @param {object} [log] - logger.
  * @returns {Promise<{ id: string, rootId: string, created: boolean }>} `created`
