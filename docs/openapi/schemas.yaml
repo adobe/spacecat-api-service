@@ -11807,6 +11807,58 @@ SerenityBrandPresenceStats:
             properties:
               stats: { $ref: '#/SerenityBrandPresenceStatsValues' }
 
+SerenityUrlInspectorStatsValues:
+  type: object
+  description: The four URL Inspector KPI values, shared by the top-level `stats` and each `weeklyTrends[]` entry (`totalPrompts` excepted — see below).
+  required: [uniqueUrls, totalCitations, totalPromptsCited]
+  properties:
+    uniqueUrls:
+      type: number
+      description: Distinct owned URLs cited in range, from the Semrush Stats-per-URL element.
+    totalCitations:
+      type: number
+      description: Total citations across owned URLs in range.
+    totalPromptsCited:
+      type: number
+      description: Sum of each owned URL's `prompts_with_citation` count. An UPPER BOUND, not a true distinct-prompt count — Semrush exposes no distinct-prompts-cited element, so a prompt citing more than one owned URL is counted once per URL.
+    totalPrompts:
+      type: number
+      description: Total configured prompt count for the brand, from the Semrush Prompts element. NOT date-scoped (that element has no date filter) — present only in the top-level `stats`, deliberately omitted from each `weeklyTrends` entry to avoid implying a per-week count.
+
+SerenityUrlInspectorStats:
+  type: object
+  description: |
+    URL Inspector stats KPI cards for a brand over a date range, backed by the
+    Semrush Elements API (Stats-per-URL, Prompts).
+  required: [stats, weeklyTrends]
+  properties:
+    stats:
+      allOf:
+        - $ref: '#/SerenityUrlInspectorStatsValues'
+      description: Aggregated stats for the full `[startDate, endDate]` range.
+    weeklyTrends:
+      type: array
+      description: |
+        Always present (no opt-in flag). One entry per week, split backward
+        from `endDate` into up to 8 7-day weeks — capped independently of the
+        56-day request-range cap, so a caller can never request more weeks
+        than this returns.
+      items:
+        type: object
+        required: [weekStart, weekEnd, uniqueUrls, totalCitations, totalPromptsCited]
+        properties:
+          weekStart:
+            type: string
+            format: date
+            description: Start of this 7-day window. NOT necessarily Monday — these windows are built backward from `endDate`, not calendar-ISO-week-aligned.
+          weekEnd:
+            type: string
+            format: date
+            description: End of this 7-day window.
+          uniqueUrls: { type: number }
+          totalCitations: { type: number }
+          totalPromptsCited: { type: number }
+
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
 ReferralTrafficSource:

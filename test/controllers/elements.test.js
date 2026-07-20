@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 import { parseShowTrends } from '../../src/controllers/elements.js';
+import { addDaysToDate } from '../../src/support/elements/week-utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -69,7 +70,6 @@ const URL_INSPECTOR_STATS_RESULT = {
       uniqueUrls: 42,
       totalCitations: 155,
       totalPromptsCited: 48,
-      totalPrompts: 1250,
     },
   ],
 };
@@ -202,7 +202,7 @@ describe('ElementsController', () => {
       getWeeks: sinon.stub().resolves(WEEKS_RESULT),
       getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
       getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
-      getOwnedUrlProjects: sinon.stub().resolves([]),
+      getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
       resolveRegionProjectId: sinon.stub().resolves(null),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
@@ -1161,6 +1161,7 @@ describe('ElementsController', () => {
     });
 
     it('returns 404 when the brand has no configured Semrush projects (empty aggregate view)', async () => {
+      serviceStub.getOwnedUrlProjects.resolves([]);
       const ctx = fakeContext({ url: urlInspectorStatsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorStats(ctx);
@@ -1192,6 +1193,48 @@ describe('ElementsController', () => {
       const spanDays = (Date.parse(`${params.endDate}T00:00:00Z`)
         - Date.parse(`${params.startDate}T00:00:00Z`)) / 86400000;
       expect(spanDays).to.equal(28);
+    });
+
+    it('keeps an explicit startDate and only defaults endDate when endDate alone is omitted', async () => {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      // Pick an explicit startDate close enough to "today" that the resulting
+      // span still passes the 56-day cap, regardless of what "today" is.
+      const explicitStart = addDaysToDate(todayIso, -10);
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl(`?startDate=${explicitStart}`) });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.startDate).to.equal(explicitStart);
+      expect(params.endDate).to.equal(todayIso);
+    });
+
+    it('keeps an explicit endDate and only defaults startDate when startDate alone is omitted', async () => {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const explicitEnd = addDaysToDate(todayIso, -1);
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl(`?endDate=${explicitEnd}`) });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.endDate).to.equal(explicitEnd);
+      expect(params.startDate).to.equal(addDaysToDate(todayIso, -28));
+    });
+
+    it('derives projectIds from the resolved projects array, not raw brandSemrushProjects (aggregate view)', async () => {
+      // getOwnedUrlProjects (Markets-element-derived) resolves a DIFFERENT set
+      // than brandSemrushProjects (DB rows) — projectIds must follow the
+      // former, since that's what's actually used to scope the citation KPIs.
+      serviceStub.getOwnedUrlProjects.resolves([
+        { region: 'US', projectId: 'proj-from-markets' },
+      ]);
+      const ctx = urlInspectorStatsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-from-markets' }]);
+      expect(params.projectIds).to.deep.equal(['proj-from-markets']);
     });
 
     it('returns 400 for a malformed startDate', async () => {

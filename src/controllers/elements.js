@@ -1115,18 +1115,22 @@ export default function ElementsController(context, log, env) {
       if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
         return badRequest('startDate must not be after endDate');
       }
+      // Default each side independently — a caller supplying only one of the
+      // two (e.g. startDate with no endDate) must not have their explicit
+      // value silently discarded by overwriting both with the default range.
       if (!hasText(startDate) || !hasText(endDate)) {
         const defaultRange = defaultStatsDateRange();
-        startDate = defaultRange.startDate;
-        endDate = defaultRange.endDate;
+        if (!hasText(startDate)) {
+          startDate = defaultRange.startDate;
+        }
+        if (!hasText(endDate)) {
+          endDate = defaultRange.endDate;
+        }
       }
       // Bound the span at 56 days (8 weeks) — matches getStats (brand-presence),
       // and keeps `stats` covering exactly the same window `weeklyTrends` does
       // (weeklyTrends is capped to the most recent 8 weeks regardless — see
-      // getUrlInspectorStats in elements-service.js). A wider requested `stats`
-      // range than what `weeklyTrends` can show is a confusing mismatch, unlike
-      // the 366-day cap on listOwnedUrls/listDomainUrls, which have no trends
-      // array to stay in sync with.
+      // getUrlInspectorStats in elements-service.js).
       const MAX_RANGE_DAYS = 56;
       const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
         - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
@@ -1154,7 +1158,12 @@ export default function ElementsController(context, log, env) {
         projectIds = [projectId];
       } else {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
-        projectIds = brandSemrushProjects.map((p) => p.semrushProjectId).filter(hasText);
+        // Derived from the SAME resolved `projects` array used for the citation
+        // KPIs (not re-filtered from brandSemrushProjects) — a project can exist
+        // in the DB rows but not resolve via the Markets element (or vice versa),
+        // and using two different sources here would scope the PROMPTS element
+        // to a different project set than Stats-per-URL.
+        projectIds = projects.map((p) => p.projectId).filter(hasText);
         // An empty list here must not silently fall through to an unscoped
         // (workspace-wide) Semrush query (mirrors getStats's Decision 4.1) —
         // if this brand has no sub-workspace of its own yet, `workspaceId`

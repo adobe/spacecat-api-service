@@ -519,8 +519,9 @@ export function createElementsService(transport) {
      * (region) like it — but WITHOUT the URL_TRENDS element (no per-URL trend
      * needed here), via {@link aggregateUrlInspectorStats}. `totalPrompts` comes
      * from a single PROMPTS element call — that element has no date filter at
-     * all, so it is fetched ONCE (not per range/week) and the same value is
-     * reported for the aggregate `stats` and every `weeklyTrends` entry.
+     * all, so it is fetched ONCE (not per range/week) and reported only in the
+     * top-level `stats` — NOT repeated on each `weeklyTrends` entry, which would
+     * misrepresent an all-time count as a per-week one.
      *
      * `weeklyTrends` reuses `splitDateRangeIntoWeeksBackward` (max 8 most-recent
      * weeks, same cap as `getBrandPresenceStats`) — a request wider than 8 weeks
@@ -595,11 +596,16 @@ export function createElementsService(transport) {
       // `endDate`, same as `getBrandPresenceStats`'s trends), so no `week`
       // ("YYYY-Www") label is attached; that would misrepresent the boundary as
       // Monday-Sunday when it may not be.
+      //
+      // `totalPrompts` is deliberately NOT included per-week here (unlike
+      // `stats`, above) — it's an all-time count (no Semrush date filter, see
+      // the docstring), so repeating it on every entry would read as "prompts
+      // in that week" to a consumer of `weeklyTrends`, which it isn't. It's
+      // reported once, in the top-level `stats` only.
       const weeklyTrends = weeks.map((week, i) => ({
         weekStart: week.startDate,
         weekEnd: week.endDate,
         ...weekCitationKpis[i],
-        totalPrompts,
       }));
 
       return { stats, weeklyTrends };

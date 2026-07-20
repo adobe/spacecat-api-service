@@ -388,7 +388,7 @@ describe('createElementsService', () => {
       expect(promptsCalls).to.have.length(1);
     });
 
-    it('repeats the same totalPrompts value on every weeklyTrends entry (PROMPTS has no date filter)', async () => {
+    it('does not repeat totalPrompts on weeklyTrends entries (it is an all-time count, not per-week)', async () => {
       const result = await service.getUrlInspectorStats('ws-1', {
         projects: [{ region: 'US', projectId: 'proj-1' }],
         projectIds: ['proj-1'],
@@ -396,7 +396,8 @@ describe('createElementsService', () => {
         endDate: '2026-07-07',
       });
       expect(result.weeklyTrends).to.have.length(2);
-      expect(result.weeklyTrends.every((w) => w.totalPrompts === 3)).to.equal(true);
+      expect(result.weeklyTrends.every((w) => !('totalPrompts' in w))).to.equal(true);
+      expect(result.stats.totalPrompts).to.equal(3);
     });
 
     it('caps weeklyTrends to the most recent 8 weeks for a wider requested range', async () => {
@@ -409,7 +410,7 @@ describe('createElementsService', () => {
       expect(result.weeklyTrends).to.have.length(8);
     });
 
-    it('each weeklyTrends entry carries weekStart/weekEnd plus the citation KPIs', async () => {
+    it('each weeklyTrends entry carries weekStart/weekEnd plus the citation KPIs only (no totalPrompts)', async () => {
       const result = await service.getUrlInspectorStats('ws-1', {
         projects: [{ region: 'US', projectId: 'proj-1' }],
         projectIds: ['proj-1'],
@@ -422,7 +423,6 @@ describe('createElementsService', () => {
         uniqueUrls: 2,
         totalCitations: 8,
         totalPromptsCited: 3,
-        totalPrompts: 3,
       });
     });
 
