@@ -1998,6 +1998,45 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       );
     });
 
+    // The create/update asymmetry (the whole point of `mode: 'update'`): an edit
+    // must NOT re-derive origin. A human-authored prompt keeps `human` on every
+    // subsequent edit — the injector re-injects whichever origin tag the caller
+    // round-tripped, never the AI default it applies on create. Without this,
+    // every edit would silently relabel a human prompt as AI-authored.
+    it('preserves an existing human origin on edit — never relabels it to ai', async () => {
+      const dataAccess = makeDataAccess([]);
+      dataAccess.BrandSemrushProject.findBySlice.resolves(project());
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        renamePrompt: sinon.stub().resolves({ id: 'old-id', name: 'now mentions Acme', is_updated: true }),
+        updatePromptTagsByIds: sinon.stub().resolves(null),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleUpdatePrompt(transport, dataAccess, BRAND, WORKSPACE, 'old-id', {
+        text: 'now mentions Acme',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        // The caller round-trips the prompt's stored human origin tag.
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.originHuman],
+      }, fakeLog(), classifyByBrandMention);
+
+      expect(result.status).to.equal(200);
+      // origin stays human — re-injected from the caller's tags, not defaulted to ai.
+      expect(result.body.tagIds).to.deep.equal([
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+      ]);
+      expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-us-en',
+        [{
+          id: 'old-id',
+          references: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman],
+          replace: true,
+        }],
+      );
+    });
+
     // The tree read (and any provisioning it triggers) must happen BEFORE any
     // upstream write, so a classification failure leaves the prompt intact.
     it('resolves the type BEFORE writing to the prompt', async () => {
