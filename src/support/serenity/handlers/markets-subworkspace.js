@@ -15,8 +15,9 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { SerenityTransportError } from '../rest-transport.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import {
+  ERROR_CODES, isUpstreamGone, isMeteredQuota, toQuotaExceededError,
+} from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import {
   resolveLocation,
@@ -208,10 +209,16 @@ function validateCreateBody(body) {
  *   already-provisioned dimension tree. The caller provisions it unconditionally,
  *   so re-resolving it here would read the whole taxonomy a second time per request.
  * @param {object} log - logger.
+ * @param {{ ensure: Function }} headroom - the caller's headroom guard (createHeadroomGuard) —
+ *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
+ *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
+ *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
+ *   LLMO-6190): the metered write is `createPromptsByIds` below, NOT publish — front it BEFORE the
+ *   write loop, sized on the real prompt count now that it's known (`texts.size`), not an estimate.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned,
-}, log) {
+}, log, headroom) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
   if (Array.isArray(raw)) {
@@ -268,6 +275,8 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
       byTypeValue.set(value, [text]);
     }
   }
+
+  await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
   for (const [value, items] of byTypeValue) {
     // `branded` / `non-branded` are the classifier's only outputs and both are in
@@ -440,7 +449,7 @@ export async function handleCreateMarketSubworkspace(
   }
 
   // Provision the dimension-root taxonomy on the project (independent of prompts),
-  // so classification can later apply intent/source/type values per prompt and the
+  // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
   // exactly the four dimension roots, whether or not it has prompts yet.
@@ -485,6 +494,7 @@ export async function handleCreateMarketSubworkspace(
         ],
       },
       log,
+      headroom,
     );
   }
 
@@ -570,17 +580,52 @@ export async function handleCreateMarketSubworkspace(
   // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
   // empty-units child 405s as a disguised quota rejection, workspace doc §5) and
   // leaves the project a draft so the brand still succeeds.
+  //
+  // Both branches route the publish through `headroom.retryOnQuota` (LLMO-6190 item 4): a no-op
+  // passthrough when the flag is OFF (or `headroom.ensure` above already covered the need), and
+  // ONE bounded re-read+top-up+retry when the publish 405s as a disguised metered-quota rejection
+  // despite the pre-publish `ensure`. A 'best-effort' publish that STILL 405s after that one retry
+  // falls through to the existing swallow below, unchanged.
   let published = false;
   if (publishMode === 'require') {
-    await transport.publishProject(workspaceId, projectId);
-    published = true;
-  } else if (publishMode === 'best-effort') {
     try {
-      await transport.publishProject(workspaceId, projectId);
+      await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
       published = true;
     } catch (e) {
-      if (e instanceof SerenityTransportError && e.status === 405) {
-        log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota 405, project left as draft', {
+      // Case 1 (serenity-docs#72 §2): the brand carve is exhausted (allocator OFF — production
+      // today), or `retryOnQuota`'s bounded top-up+retry (LLMO-6190 item 4) still didn't clear
+      // the disguised quota 405. Classify via `isMeteredQuota` (body-SHAPE check, not bare
+      // status — MysticatBot review) so a genuine app-level 405 Method-Not-Allowed (JSON body)
+      // is never mistaken for a quota rejection and hidden behind the wrong error token; this
+      // also gives the shared `MeteredQuotaClassifier` metric (LLMO-6191) a live call site.
+      // Surface a real quota match as the stable `quotaExceeded` 409 token instead of letting it
+      // fall through mapError's generic `serenityUpstreamError` 502 — a caller can then show the
+      // contractual-limit message and never retry a rejection that can't succeed.
+      if (isMeteredQuota(e)) {
+        log?.warn?.('handleCreateMarketSubworkspace: publish rejected — quota exceeded', {
+          workspaceId, projectId,
+        });
+        throw toQuotaExceededError();
+      }
+      throw e;
+    }
+  } else if (publishMode === 'best-effort') {
+    try {
+      await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
+      published = true;
+    } catch (e) {
+      if (isMeteredQuota(e)) {
+        // Swallowed by design (best-effort provisioning must not fail the brand create), but this
+        // IS a quota rejection and the event that creates the dark draft market a customer later
+        // trips over — serenity-docs#72 §5 requires it to alert even though nothing failed here.
+        // TODO(serenity-docs#72 step 2): fire the Slack alert here once the alerting mechanism
+        // lands; the call below is side-effect-only (its returned error is intentionally
+        // discarded, never thrown — best-effort swallows it) purely to run
+        // `recordRejection('quotaExceeded')` inside it, so the CloudWatch metric this alarm will
+        // key on fires here too, keeping the classifier + alerting signal consistent between
+        // this swallowed path and the `require` path above (MysticatBot review, non-blocking nit).
+        toQuotaExceededError();
+        log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota exceeded, project left as draft', {
           workspaceId, projectId,
         });
       } else {
@@ -628,6 +673,14 @@ export async function handleCreateMarketSubworkspace(
  * already-vanished project is left un-tombstoned — accepted,
  * reconcile-recoverable drift (implementation plan §3.2/§11).
  *
+ * Wires `releaseAiSurplus` (LLMO-6190 item 3) once the project is confirmed gone — either branch
+ * (our own `deleteProject` succeeded, or it 404'd because the upstream was already gone) leaves the
+ * project truly absent, so both are treated identically: release fires after the try/catch, not
+ * just on the success leg. Same shape as the model-removal seam
+ * (`handleUpdateModelsSubworkspace`): inline, fail-fast (`releaseAiSurplus({ failFast: true })`),
+ * best-effort (its own internal try/catch swallows expected transport/pool failures — a release
+ * hiccup must never fail an otherwise-successful DELETE), post-delete. No-op when the flag is OFF.
+ *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
  * @param {string|number|null} geoTargetId - the market's Google Ads Geo Target id.
@@ -635,6 +688,8 @@ export async function handleCreateMarketSubworkspace(
  * @param {object} log - logger.
  * @param {object} [options]
  * @param {any} [options.dataAccess]
+ * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, hands
+ *   the deleted project's freed units back to the parent pool after the delete.
  */
 export async function handleDeleteMarketSubworkspace(
   transport,
@@ -642,7 +697,7 @@ export async function handleDeleteMarketSubworkspace(
   geoTargetId,
   languageCode,
   log,
-  { dataAccess = null } = {},
+  { dataAccess = null, dynamicAllocation = false } = {},
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
@@ -660,12 +715,20 @@ export async function handleDeleteMarketSubworkspace(
   if (dataAccess) {
     await tombstoneMappingRow(dataAccess, project.id, log);
   }
-  // SCOPE NOTE (serenity-docs#22): this market DELETE does NOT yet call `releaseAiSurplus` to hand
-  // the freed project/prompt units back to the parent pool — release wiring on the delete path is a
-  // deliberate fast-follow, not built here. The stranded units self-heal (next `ensureAiHeadroom`
-  // reuse, a later release, or decommission — see the `releaseAiSurplus` scope note). When it
-  // lands, follow the model-update seam (`handleUpdateModelsSubworkspace`): inline, fail-fast
-  // (`releaseAiSurplus({ failFast: true })`), best-effort, post-publish — no async queue/worker.
+  if (dynamicAllocation) {
+    // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
+    // transfer (silently ignored by the gateway — see resource-manager.js). Best-effort: a release
+    // failure must not turn an already-successful delete into a 500 — releaseAiSurplus's own
+    // try/catch guarantees this by construction (it never throws for expected failures).
+    // `resolveProject` above already resolved a project against `workspaceId`, so it is a real,
+    // non-blank id here; releaseAiSurplus's own requireWorkspaceId re-asserts this at runtime —
+    // narrow the (JSDoc-optional) `string|null` param for tsc, which cannot infer that.
+    await releaseAiSurplus(transport, {
+      subWorkspaceId: /** @type {string} */ (workspaceId),
+      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+      failFast: true,
+    }, log);
+  }
   return { status: 204 };
 }
 
@@ -765,7 +828,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
       }),
   ]);
   // Merge by ID, not by name. Names are unique only per (project, parent), so a
-  // sub-category `human` and the `source` value `human` are two distinct tags —
+  // sub-category `human` and the `origin` value `human` are two distinct tags —
   // keying by name silently drops one of them.
   const byId = new Map();
   // Both sources back-fill a missing upstream id with the tag's own name (a
@@ -776,8 +839,8 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // Placeholders are keyed by name, not by a synthetic composite: an id-less
   // entry carries ONLY its bare name (`id === name`), so two id-less tags sharing
   // a name are indistinguishable here — there is no id to tell a `category` value
-  // `human` from a `source` value `human` once both arrive without one. Keying by
-  // `(name, source)` would just emit two identical `{ id: name, name }` rows, a
+  // `human` from an `origin` value `human` once both arrive without one. Keying by
+  // `(name, dimension)` would just emit two identical `{ id: name, name }` rows, a
   // duplicate that is worse than the collapse. So they intentionally collapse to
   // one; the by-id merge above is what actually preserves two same-named tags,
   // and it fires whenever either carries a real upstream id (the common case).
@@ -920,6 +983,10 @@ export async function handleUpdateModelsSubworkspace(
     modelIds,
     { geoTargetId, languageCode },
     log,
+    // LLMO-6190 item 4: bounded top-up+retry if the sync's publish 405s as a disguised
+    // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
+    // when OFF.
+    { wrapPublish: (fn) => headroom.retryOnQuota(fn) },
   );
 
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then

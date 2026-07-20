@@ -73,7 +73,7 @@ describe('topics definitions', () => {
 
     it('accepts the platform alias and translates it', () => {
       const payload = buildTopicsPayload({ platform: 'openai' });
-      expect(payload.filters.advanced.filters[0].val).to.equal('gpt-5');
+      expect(payload.filters.advanced.filters[0].val).to.equal('chatgpt-paid');
     });
 
     it('sets comparison_data_formatting to union', () => {

@@ -42,6 +42,20 @@ describe('llmo-akamai-utils', () => {
       expect(cfg.origin.hostname).to.equal('live.edgeoptimize.net');
     });
 
+    it('routes to the given originHostname (env EDGE_OPTIMIZE_EDGE_DOMAIN) over the default', () => {
+      const cfg = buildRuleConfig({
+        hostname: HOSTNAME, apiKey: API_KEY, originHostname: 'dev.edgeoptimize.net',
+      });
+      expect(cfg.origin.hostname).to.equal('dev.edgeoptimize.net');
+      // matchSan still covers all envs, so CUSTOM cert validation works for dev/stage/live.
+      expect(cfg.origin.matchSan).to.equal('*.edgeoptimize.net');
+    });
+
+    it('falls back to the default origin for a blank/whitespace originHostname', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, originHostname: '   ' });
+      expect(cfg.origin.hostname).to.equal('live.edgeoptimize.net');
+    });
+
     it('does not mutate the frozen defaults', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       cfg.match.userAgents.push('EvilBot');
@@ -65,7 +79,11 @@ describe('llmo-akamai-utils', () => {
     });
 
     it('matches AI-bot user agents and HTML/extensionless files', () => {
-      expect(findCriterion(routing, 'userAgent').options.matchWildcard).to.equal(true);
+      const ua = findCriterion(routing, 'userAgent');
+      expect(ua.options.matchWildcard).to.equal(true);
+      // Values are wildcarded (*GPTBot*) so they match real UA strings, not only an exact "GPTBot".
+      expect(ua.options.values).to.include('*GPTBot*');
+      expect(ua.options.values.every((v) => v.startsWith('*') && v.endsWith('*'))).to.equal(true);
       const ext = findCriterion(routing, 'fileExtension');
       expect(ext.options.values).to.include('EMPTY_STRING');
       expect(ext.options.values).to.include('html');
@@ -183,10 +201,13 @@ describe('llmo-akamai-utils', () => {
       };
     });
 
-    it('inserts the managed wrapper as the first child by default and declares the cache variable', () => {
+    it('appends the managed wrapper as the LAST child by default and declares the cache variable', () => {
       const merged = mergeIntoTree(baseTree, cfg);
-      expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
-      expect(merged.rules.children.map((c) => c.name)).to.include('Existing Rule');
+      const names = merged.rules.children.map((c) => c.name);
+      // OAE origin + cacheId are last-match-wins on Akamai, so the wrapper must sit after the
+      // existing delivery rules or a later sibling clobbers its origin override.
+      expect(names[names.length - 1]).to.equal(cfg.ruleNames.parent);
+      expect(names).to.include('Existing Rule');
       const declared = merged.rules.variables.some((v) => v.name === cfg.cacheKeyVariable.name);
       expect(declared).to.equal(true);
     });
@@ -232,7 +253,7 @@ describe('llmo-akamai-utils', () => {
       };
       const merged = mergeIntoTree(flatTree, cfg);
       const names = merged.rules.children.map((c) => c.name);
-      expect(names).to.deep.equal([cfg.ruleNames.parent, 'Existing Rule']);
+      expect(names).to.deep.equal(['Existing Rule', cfg.ruleNames.parent]);
     });
 
     it('honors insertIndex, clamped to the existing children length', () => {
@@ -254,6 +275,7 @@ describe('llmo-akamai-utils', () => {
       const treeNoVars = { rules: { name: 'default', children: [] } };
       const merged = mergeIntoTree(treeNoVars, cfg);
       expect(merged.rules.variables).to.be.an('array').with.length(1);
+      expect(merged.rules.variables[0].name).to.equal(cfg.cacheKeyVariable.name);
     });
 
     it('throws when the tree has no top-level rules object', () => {
@@ -276,7 +298,8 @@ describe('llmo-akamai-utils', () => {
       };
       const ops = buildRuleTreePatch(tree, cfg);
       expect(removeOps(ops)).to.have.length(0);
-      const add = ops.find((o) => o.op === 'add' && o.path === '/rules/children/0');
+      // Default appends after the existing children (last), so the op targets `-`, not index 0.
+      const add = ops.find((o) => o.op === 'add' && o.path === '/rules/children/-');
       expect(add).to.exist;
       expect(add.value.name).to.equal(cfg.ruleNames.parent);
       const varOp = ops.find((o) => o.path === '/rules/variables/-');
@@ -292,7 +315,7 @@ describe('llmo-akamai-utils', () => {
         },
       };
       const ops = buildRuleTreePatch(tree, cfg);
-      // The trailing-space rule is at index 1 and must be removed; no variable op (already there).
+      // Trailing-space rule at index 1 is removed; no variable op (the cache-key var is present).
       expect(removeOps(ops).map((o) => o.path)).to.deep.equal(['/rules/children/1']);
       expect(ops.some((o) => o.path.startsWith('/rules/variables'))).to.equal(false);
       expect(addChildOps(ops)[0].value.name).to.equal(cfg.ruleNames.parent);
@@ -342,12 +365,12 @@ describe('llmo-akamai-utils', () => {
       expect(varOp.value).to.be.an('array').with.length(1);
     });
 
-    it('clamps a non-numeric insertIndex to 0', () => {
+    it('appends via `-` for a non-numeric insertIndex (falls back to the default)', () => {
       const tree = {
         rules: { name: 'default', children: [{ name: 'A' }], variables: [{ name: cfg.cacheKeyVariable.name }] },
       };
       const ops = buildRuleTreePatch(tree, cfg, 'nope');
-      expect(addChildOps(ops)[0].path).to.equal('/rules/children/0');
+      expect(addChildOps(ops)[0].path).to.equal('/rules/children/-');
     });
 
     it('clamps a negative insertIndex to 0', () => {
@@ -418,11 +441,12 @@ describe('llmo-akamai-utils', () => {
       expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
     });
 
-    it('clamps a non-numeric insertIndex to 0', () => {
+    it('appends the wrapper last for a non-numeric insertIndex (falls back to the default)', () => {
       const cfg = base();
       const tree = { rules: { name: 'default', children: [{ name: 'A' }], variables: [] } };
       const merged = mergeIntoTree(tree, cfg, 'nope');
-      expect(merged.rules.children[0].name).to.equal(cfg.ruleNames.parent);
+      const names = merged.rules.children.map((c) => c.name);
+      expect(names[names.length - 1]).to.equal(cfg.ruleNames.parent);
     });
   });
 
