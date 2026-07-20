@@ -14,8 +14,10 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 
 import {
+  adaptPE,
   createSerenityTransport,
   SerenityTransportError,
   redactUpstreamMessage,
@@ -1602,5 +1604,49 @@ describe('Semrush REST transport', () => {
         expect(params.get('country')).to.equal('');
       });
     });
+  });
+});
+
+describe('adaptPE (Project Engine boundary adapter)', () => {
+  it('passes a resolved value through unchanged', async () => {
+    expect(await adaptPE(Promise.resolve({ ok: 1 }))).to.deep.equal({ ok: 1 });
+  });
+
+  it('maps an HTTP ProjectEngineApiError to SerenityTransportError (status + body preserved)', async () => {
+    const body = { message: 'nope' };
+    let err;
+    try {
+      await adaptPE(Promise.reject(new ProjectEngineApiError(404, 'GET', body)));
+    } catch (e) { err = e; }
+    expect(err).to.be.instanceOf(SerenityTransportError);
+    expect(err.status).to.equal(404);
+    expect(err.body).to.deep.equal(body);
+  });
+
+  it('rethrows the original cause on the no-response path (timeout/auth/network)', async () => {
+    const cause = new SerenityTransportError(504, 'timed out');
+    let err;
+    try {
+      await adaptPE(Promise.reject(new ProjectEngineApiError(undefined, 'GET', null, { cause })));
+    } catch (e) { err = e; }
+    expect(err).to.equal(cause);
+  });
+
+  it('defensive fallback: wraps as SerenityTransportError(502) when cause is absent', async () => {
+    let err;
+    try {
+      await adaptPE(Promise.reject(new ProjectEngineApiError(undefined, 'GET', null)));
+    } catch (e) { err = e; }
+    expect(err).to.be.instanceOf(SerenityTransportError);
+    expect(err.status).to.equal(502);
+  });
+
+  it('rethrows a non-ProjectEngineApiError unchanged', async () => {
+    const other = new Error('boom');
+    let err;
+    try {
+      await adaptPE(Promise.reject(other));
+    } catch (e) { err = e; }
+    expect(err).to.equal(other);
   });
 });
