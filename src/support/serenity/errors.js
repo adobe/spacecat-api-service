@@ -12,8 +12,9 @@
 
 // @ts-check
 
+import { ErrorWithStatusCode } from '../utils.js';
 import { SerenityTransportError } from './rest-transport.js';
-import { recordMeteredQuotaClassifier } from './allocation-metrics.js';
+import { recordMeteredQuotaClassifier, recordRejection } from './allocation-metrics.js';
 
 /**
  * Recognises an upstream "already gone" response — the signal that an
@@ -83,18 +84,20 @@ export function isWorkspaceNotReady(e) {
 }
 
 /**
- * The disguised metered-quota rejection: a `405` from a metered write/publish whose body signals a
- * quota (`used + need > total`). Matches ONLY on an explicit quota signal in the body — NOT any
- * `405`, so a legitimate Method-Not-Allowed is not absorbed. The exact disguised-405 body is pinned
- * by the PR-4 live-gateway canary; widen the signal here only from that pinned shape.
+ * The disguised metered-quota rejection: a `405` from a metered write/publish when
+ * `used + need > total`. Live-verified (Rainer, LLMO-6190, `LLMO-Dev-2`): the body carries NO
+ * "quota"/"allocation exhausted" text at all — it is a bare nginx `text/html` page
+ * (`<html>...405 Not Allowed...nginx...</html>`), while every genuine app-level Method-Not-Allowed
+ * this gateway returns comes back as JSON (`{ message: 'Method Not Allowed' }`). Body content
+ * cannot distinguish the two cases — only SHAPE can: a string body is the disguised gateway-level
+ * quota rejection, an object body is a real app-level error. Widen this only from a newly pinned
+ * live fixture, never from a guessed substring.
  *
  * Emits the `MeteredQuotaClassifier` observability metric (LLMO-6191 item 2) ONLY when `e` is an
  * actual `405` (the metric's denominator is "how many 405s", not "how many errors of any kind" —
  * see the non-405 early return), dimensioned by match/no-match, so the "405-classifier match
- * ratio" the rollout-hardening ticket asks for is available the moment a caller wires this
- * predicate into a metered handler's catch path. NOTE: as of this PR no production call site
- * invokes `isMeteredQuota` yet — see the module doc above — so this metric will read zero in
- * every environment until one is added.
+ * ratio" the rollout-hardening ticket asks for reflects the real shape-based signal now that
+ * `retryOnQuota` (dynamic-allocation-active.js) is a live production caller.
  * @param {unknown} e
  * @returns {boolean}
  */
@@ -106,8 +109,7 @@ export function isMeteredQuota(e) {
     // drown the actual 405-classifier signal once a real caller is wired up.
     return false;
   }
-  const text = bodyText(e);
-  const matched = text.includes('quota') || text.includes('allocation exhausted');
+  const matched = typeof e.body === 'string' && e.body.length > 0;
   recordMeteredQuotaClassifier(matched);
   return matched;
 }
@@ -152,4 +154,29 @@ export const ERROR_CODES = Object.freeze({
   // Transient: a transfer never cleared the async `workspace not ready` lock — retryable, NOT
   // pool exhaustion (distinct from ORG_POOL_EXHAUSTED so the operator/client isn't misled).
   WORKSPACE_BUSY: 'workspaceBusy',
+  // Case-1 quota rejection (serenity-docs#72 §2): the disguised-405 signal classified by
+  // isMeteredQuota, surfaced via toQuotaExceededError. Distinct from ORG_POOL_EXHAUSTED /
+  // BRAND_AI_LIMIT (the allocator-ON tokens) so a client need not tell them apart, but a caller
+  // debugging a specific rejection still can from the log line at the throw site.
+  QUOTA_EXCEEDED: 'quotaExceeded',
 });
+
+/**
+ * Case-1 quota rejection (serenity-docs#72 §2): the brand's flat pre-carved sub-workspace
+ * allocation is exhausted — the allocator-OFF path production runs today, or the allocator-ON
+ * path's per-child ceiling isn't the cause but the disguised 405 still surfaced. Maps the
+ * classified {@link isMeteredQuota} signal to the same customer-facing contract as
+ * `orgPoolExhausted` / `brandAiLimit` (409, stable token), so a caller never needs to
+ * distinguish them — see `ERROR_CODES.QUOTA_EXCEEDED`.
+ *
+ * Client-facing message is deliberately generic — no internal ids, no upstream body — matching
+ * the `orgPoolExhausted`/`brandAiLimit` factories in resource-manager.js. Callers should log the
+ * upstream detail themselves before throwing this (see the markets-subworkspace.js call sites).
+ * @returns {ErrorWithStatusCode}
+ */
+export function toQuotaExceededError() {
+  recordRejection('quotaExceeded'); // dashboard-only — expected under normal pool load
+  const e = new ErrorWithStatusCode('AI resource allocation quota exceeded', 409);
+  e.code = ERROR_CODES.QUOTA_EXCEEDED;
+  return e;
+}

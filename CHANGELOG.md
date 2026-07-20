@@ -1,3 +1,74 @@
+# [1.669.0](https://github.com/adobe/spacecat-api-service/compare/v1.668.1...v1.669.0) (2026-07-20)
+
+
+### Features
+
+* **llmo-akamai:** CUSTOM-default OAE onboarding (PUT deploy + caching/scope gates) ([#2850](https://github.com/adobe/spacecat-api-service/issues/2850)) ([e67e9c5](https://github.com/adobe/spacecat-api-service/commit/e67e9c5ea699e2ff501c02c2ff458c85b36c76bc)), closes [Hi#Level](https://github.com/Hi/issues/Level) [adobe/spacecat-shared#1825](https://github.com/adobe/spacecat-shared/issues/1825)
+
+## [1.668.1](https://github.com/adobe/spacecat-api-service/compare/v1.668.0...v1.668.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **elements:** bounded retry with backoff on the Semrush Elements transport (LLMO-5980) ([#2859](https://github.com/adobe/spacecat-api-service/issues/2859)) ([cd9b672](https://github.com/adobe/spacecat-api-service/commit/cd9b672cae9e82fbc21d288b36580a92c15de356)), closes [spacecat-api-service#2766](https://github.com/spacecat-api-service/issues/2766)
+* **serenity:** classify disguised-405 quota rejections as a stable 40… ([#2854](https://github.com/adobe/spacecat-api-service/issues/2854)) ([11b0bf2](https://github.com/adobe/spacecat-api-service/commit/11b0bf2b9c6ecda5881cc9448880b9b52996f4d7))
+
+# [1.668.0](https://github.com/adobe/spacecat-api-service/compare/v1.667.0...v1.668.0) (2026-07-20)
+
+
+### Features
+
+* map platform values sent to Semrush elements api for brand presence data ([#2855](https://github.com/adobe/spacecat-api-service/issues/2855)) ([d1eb929](https://github.com/adobe/spacecat-api-service/commit/d1eb92917fa207b4275711904a3d2be745848516))
+
+# [1.667.0](https://github.com/adobe/spacecat-api-service/compare/v1.666.0...v1.667.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** flag-flip readiness gates for dynamic AI allocation (LLMO-6190) ([#2813](https://github.com/adobe/spacecat-api-service/issues/2813)) ([03d305c](https://github.com/adobe/spacecat-api-service/commit/03d305c9188a546118a7ae6168033ed50055808b)), closes [#2764](https://github.com/adobe/spacecat-api-service/issues/2764)
+
+# [1.666.0](https://github.com/adobe/spacecat-api-service/compare/v1.665.1...v1.666.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= sparse-fieldset projection to list endpoints ([#2840](https://github.com/adobe/spacecat-api-service/issues/2840)) ([c5af373](https://github.com/adobe/spacecat-api-service/commit/c5af373090ea1caac32cd7ca25b26aaf5920882d))
+
+## [1.665.1](https://github.com/adobe/spacecat-api-service/compare/v1.665.0...v1.665.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **serenity:** stop the RELEASE_ALLOCATION zero-transfer silent no-op ([#2812](https://github.com/adobe/spacecat-api-service/issues/2812)) ([0d80fcf](https://github.com/adobe/spacecat-api-service/commit/0d80fcf5c79d338cc3d0aa6c0f75aff4e5ef83f9))
+
+# [1.665.0](https://github.com/adobe/spacecat-api-service/compare/v1.664.0...v1.665.0) (2026-07-19)
+
+
+### Features
+
+* upsert on conflict for state access-mapping create ([#2852](https://github.com/adobe/spacecat-api-service/issues/2852)) ([df33f52](https://github.com/adobe/spacecat-api-service/commit/df33f52dd9404b81a66ea2f37cbd7e987dd649a0))
+
+# [1.664.0](https://github.com/adobe/spacecat-api-service/compare/v1.663.0...v1.664.0) (2026-07-18)
+
+
+### Features
+
+* **preflight:** hostname-membership URL validation per ADR-002 (SITES-48309) ([#2849](https://github.com/adobe/spacecat-api-service/issues/2849)) ([9195c29](https://github.com/adobe/spacecat-api-service/commit/9195c298df42c2761c436b8fe7fd62df759b1e38)), closes [src/controllers/preflight.js#L562-L571](https://github.com/src/controllers/preflight.js/issues/L562-L571) [docs/decisions/002-preflight-api-rest-redesign.md#L69-L72](https://github.com/docs/decisions/002-preflight-api-rest-redesign.md/issues/L69-L72)
+
+# [1.663.0](https://github.com/adobe/spacecat-api-service/compare/v1.662.0...v1.663.0) (2026-07-17)
+
+
+### Features
+
+* **llmo:** register recurring prompt-suggestion schedules only for paying sites; one-shot for trial ([#2847](https://github.com/adobe/spacecat-api-service/issues/2847)) ([8f43e8b](https://github.com/adobe/spacecat-api-service/commit/8f43e8b05fe4080f29e309a874903aa041513f21))
+
+# [1.662.0](https://github.com/adobe/spacecat-api-service/compare/v1.661.1...v1.662.0) (2026-07-17)
+
+
+### Features
+
+* **llmo:** register recurring DRS prompt-suggestion schedules at onboarding ([#2824](https://github.com/adobe/spacecat-api-service/issues/2824)) ([8df07c6](https://github.com/adobe/spacecat-api-service/commit/8df07c6d19e49584aba0a2ba4b377d21a3db457e))
+
 ## [1.661.1](https://github.com/adobe/spacecat-api-service/compare/v1.661.0...v1.661.1) (2026-07-17)
 
 

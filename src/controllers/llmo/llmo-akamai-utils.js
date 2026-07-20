@@ -96,7 +96,10 @@ const criterionUserAgent = (userAgents) => ({
   name: 'userAgent',
   options: {
     matchOperator: 'IS_ONE_OF',
-    values: [...userAgents],
+    // Wildcard each value (*GPTBot* etc.) so it matches real-world agent strings like
+    // "Mozilla/5.0 ... GPTBot/1.2", not only an exact "GPTBot". matchWildcard treats a value with
+    // no '*' as an exact match, which would miss almost every real bot request.
+    values: userAgents.map((ua) => (String(ua).includes('*') ? ua : `*${ua}*`)),
     matchCaseSensitive: false,
     matchWildcard: true,
   },
@@ -186,6 +189,27 @@ const behaviorCacheId = (variableName) => ({
   options: { rule: 'INCLUDE_VARIABLE', variableName },
 });
 
+// "Caching Rules" -> Honor origin Cache-Control and Expires (the doc's step-4 config). Cache ID
+// Modification requires a Caching behavior in scope. Added to the OAE rule ONLY when the property's
+// DEFAULT rule has none (see cfg.addCaching): if the default already provides one, adding it here
+// overrides the property's HTML no-store and makes the optimized path cacheable — serving a stale
+// passthrough copy to bots.
+const behaviorCaching = () => ({
+  name: 'caching',
+  options: {
+    behavior: 'CACHE_CONTROL_AND_EXPIRES',
+    mustRevalidate: false,
+    // Fallback TTL used ONLY when the origin response omits Cache-Control/Expires (the doc's
+    // Honor-origin config). AI-bot responses normally carry the worker's no-store, so this is a
+    // safety net, not the common path — bounded to 1 day to avoid indefinitely caching a bad reply.
+    defaultTtl: '1d',
+    honorPrivate: false,
+    honorMustRevalidate: false,
+    enhancedRfcSupport: false,
+    cacheControlDirectives: '',
+  },
+});
+
 // Every request-header criterion we emit is a presence check (EXISTS / DOES_NOT_EXIST): PAPI
 // ignores value/match flags for those, and including them wouldn't match what PAPI itself emits.
 const criterionRequestHeader = (header, matchOperator) => ({
@@ -257,6 +281,12 @@ export function buildRoutingRule(cfg) {
   (cfg.removeIncomingResponseHeaders || []).forEach((header) => {
     behaviors.push(behaviorRemoveIncomingResponseHeader(header));
   });
+  // Caching goes BEFORE cacheId. Only add it when the property's default rule has no Caching of its
+  // own (cfg.addCaching) — cacheId needs a Caching behavior in scope, but adding one when the
+  // default already provides it overrides the property's HTML no-store and breaks bot delivery.
+  if (cfg.addCaching) {
+    behaviors.push(behaviorCaching());
+  }
   behaviors.push(behaviorCacheId(cfg.cacheKeyVariable.name));
 
   if (cfg.wafBypass?.enabled) {
@@ -380,11 +410,11 @@ function managedCacheKeyVariable(varName) {
 
 // PMUSER_* variables must be declared in the rule tree's `variables` list. Mutates the given
 // variables array in place (the caller owns a freshly-cloned tree), returning it for convenience.
-function ensureVariableDeclared(variables, varName) {
-  if (variables.some((v) => v?.name === varName)) {
+function ensureVariableDeclared(variables, variable) {
+  if (variables.some((v) => v?.name === variable.name)) {
     return variables;
   }
-  variables.push(managedCacheKeyVariable(varName));
+  variables.push(variable);
   return variables;
 }
 
@@ -396,7 +426,10 @@ function ensureVariableDeclared(variables, varName) {
  * flat (non-wrapped) layout, so upgrading is clean.
  *
  * `insertIndex` positions the wrapper among the *existing* (non-managed) children:
- * 0 = before everything (default), length = after everything.
+ * 0 = before everything, length = after everything. The default (no/blank/garbage index) is
+ * AFTER everything: the wrapper's `origin` + `cacheId` are last-match-wins on Akamai, so it must
+ * sit below the stock delivery rules (Offload origin, Increase availability, …) — otherwise a
+ * later sibling clobbers the OAE origin override and cache isolation and bots never get routed.
  *
  * @param {object} ruleTree - the property's current rule tree ({ rules: {...} })
  * @param {object} cfg
@@ -413,7 +446,7 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   if (!Array.isArray(root.variables)) {
     root.variables = [];
   }
-  ensureVariableDeclared(root.variables, cfg.cacheKeyVariable.name);
+  ensureVariableDeclared(root.variables, managedCacheKeyVariable(cfg.cacheKeyVariable.name));
 
   const managedNames = new Set([
     cfg.ruleNames.parent,
@@ -425,9 +458,11 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   const children = (root.children || []).filter((c) => !managedNames.has((c?.name ?? '').trim()));
 
   const n = Math.trunc(Number(insertIndex));
-  // Non-numeric / NaN (e.g. a direct caller passing garbage) clamps to 0 rather than corrupting
-  // the slice; the controller already rejects malformed values with a 400 before reaching here.
-  const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, children.length)) : 0;
+  // Default to LAST (children.length): only a finite, in-range index moves the wrapper earlier; a
+  // missing/blank/garbage value (the wizard sends none) appends after all existing children so the
+  // OAE origin + cacheId win on Akamai (siblings evaluate top-down, last match wins). The
+  // controller already rejects malformed values with a 400 before reaching here.
+  const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, children.length)) : children.length;
   root.children = [...children.slice(0, idx), buildParentRule(cfg), ...children.slice(idx)];
   return tree;
 }
@@ -495,10 +530,11 @@ export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
       .forEach((i) => ops.push({ op: 'remove', path: `/rules/children/${i}` }));
 
     // After those removals run, the array is exactly the non-managed children in their original
-    // order, so clamp insertIndex against that length (mirrors mergeIntoTree). NaN/garbage -> 0.
+    // order, so clamp insertIndex against that length (mirrors mergeIntoTree). Default (no/blank/
+    // garbage index) appends last so the OAE origin + cacheId win (Akamai is last-match-wins).
     const nonManagedCount = children.length - managedIndexes.length;
     const n = Math.trunc(Number(insertIndex));
-    const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, nonManagedCount)) : 0;
+    const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, nonManagedCount)) : nonManagedCount;
     ops.push({
       op: 'add',
       // `-` appends; a numeric index inserts before it. Append when idx lands at/after the end.
@@ -562,17 +598,29 @@ export function redactApiKey(tree) {
  * @param {object} params
  * @param {string} params.hostname - the site's (normalized) hostname
  * @param {string} params.apiKey - the site's LLMO API key
+ * @param {boolean} [params.addCaching=false] - add a Caching behavior to the OAE rule. Set this to
+ *   `!defaultRuleHasCaching(ruleTree)`: only add Caching when the property's default rule has none
+ *   (so Cache ID Modification validates). When the default already caches, leave it OFF so the OAE
+ *   rule inherits the property's HTML no-store instead of overriding it.
+ * @param {string} [params.originHostname] - the Edge Optimize worker host to route AI-bot traffic
+ *   to. Defaults to the prod worker; pass `env.EDGE_OPTIMIZE_EDGE_DOMAIN` so a dev/stage deployment
+ *   routes to dev/stage.edgeoptimize.net. The `matchSan` (`*.edgeoptimize.net`) covers all three.
  * @returns {object} config consumable by buildParentRule/mergeIntoTree
  */
-export function buildRuleConfig({ hostname, apiKey }) {
+export function buildRuleConfig({
+  hostname, apiKey, addCaching = false, originHostname,
+}) {
   const d = EDGE_OPTIMIZE_DEFAULTS;
+  const resolvedOriginHost = (typeof originHostname === 'string' && originHostname.trim())
+    ? originHostname.trim()
+    : d.origin.hostname;
   return {
     match: {
       userAgents: [...d.userAgents],
       fileExtensions: [...d.fileExtensions],
       hostnames: [hostname],
     },
-    origin: { ...d.origin },
+    origin: { ...d.origin, hostname: resolvedOriginHost },
     cacheKeyVariable: { ...d.cacheKeyVariable },
     incomingRequestHeaders: {
       ...d.incomingRequestHeaders,
@@ -582,5 +630,6 @@ export function buildRuleConfig({ hostname, apiKey }) {
     removeIncomingResponseHeaders: [...d.removeIncomingResponseHeaders],
     ruleNames: { ...d.ruleNames },
     failover: { alternateHostname: hostname },
+    addCaching,
   };
 }
