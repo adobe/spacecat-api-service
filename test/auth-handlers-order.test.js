@@ -32,25 +32,74 @@ describe('src/index.js authHandlers order contract', () => {
     source = fs.readFileSync(path.join(testDir, '..', 'src', 'index.js'), 'utf8');
   });
 
-  it('places GitHubWebhookHmacHandler before path-agnostic handlers', () => {
-    // Extract the AUTH_HANDLERS array literal
+  function parseAuthHandlersOrder() {
     const match = source.match(/const AUTH_HANDLERS\s*=\s*\[([^\]]+)\]/);
     expect(match, 'AUTH_HANDLERS array not found in src/index.js').to.not.be.null;
-
-    const order = match[1]
+    return match[1]
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
+  }
 
+  it('places GitHubWebhookHmacHandler before path-agnostic handlers', () => {
+    const order = parseAuthHandlersOrder();
     const ghIdx = order.indexOf('GitHubWebhookHmacHandler');
     expect(ghIdx).to.be.greaterThan(-1, 'GitHubWebhookHmacHandler must be in AUTH_HANDLERS');
 
     // Path-agnostic handlers must come after the path-scoped HMAC handler so
     // webhook requests do not reach them and fail with a misleading 401.
-    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler', 'LegacyApiKeyHandler'].forEach((name) => {
+    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler'].forEach((name) => {
       const idx = order.indexOf(name);
       expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
       expect(ghIdx).to.be.lessThan(idx, `GitHubWebhookHmacHandler must come before ${name}`);
     });
+  });
+
+  it('places AsoOverlayKeyHandler before path-agnostic handlers (path-scoped early-bail)', () => {
+    const order = parseAuthHandlersOrder();
+    const asoIdx = order.indexOf('AsoOverlayKeyHandler');
+    expect(asoIdx).to.be.greaterThan(-1, 'AsoOverlayKeyHandler must be in AUTH_HANDLERS');
+
+    // Like the webhook handler, this is path-scoped to GET /config/.../redirects.txt
+    // and must run before the path-agnostic handlers so an overlay request does not
+    // reach JwtHandler / AdobeImsHandler and fail with a misleading 401.
+    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler'].forEach((name) => {
+      const idx = order.indexOf(name);
+      expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
+      expect(asoIdx).to.be.lessThan(idx, `AsoOverlayKeyHandler must come before ${name}`);
+    });
+  });
+
+  it('places ApiKeyImsHandler before AdobeImsHandler so /tools/api-keys is matched first', () => {
+    // Per the IMS-to-JWT migration design (mysticat-architecture), the route-
+    // scoped ApiKeyImsHandler must run BEFORE the global AdobeImsHandler.
+    // - For /tools/api-keys the scoped handler validates and the global handler
+    //   never runs.
+    // - For other routes the scoped handler returns null and the global handler
+    //   takes over (preserves Auto-Fix until ASO-607 migrates).
+    const order = parseAuthHandlersOrder();
+    const apiKeyIdx = order.indexOf('ApiKeyImsHandler');
+    const adobeImsIdx = order.indexOf('AdobeImsHandler');
+
+    expect(apiKeyIdx).to.be.greaterThan(-1, 'ApiKeyImsHandler must be in AUTH_HANDLERS');
+    expect(adobeImsIdx).to.be.greaterThan(-1, 'AdobeImsHandler must be in AUTH_HANDLERS');
+    expect(apiKeyIdx).to.be.lessThan(
+      adobeImsIdx,
+      'ApiKeyImsHandler must come before AdobeImsHandler',
+    );
+  });
+
+  it('contains RouteScopedLegacyApiKeyHandler but NOT the catch-all LegacyApiKeyHandler', () => {
+    // The catch-all LegacyApiKeyHandler has been removed (SITES-34224). All new
+    // service integrations must use S2S. The only remaining legacy-key surface is
+    // RouteScopedLegacyApiKeyHandler, which is locked to exactly two routes
+    // (POST /event/fulfillment and POST /slack/channels/invite-by-user-id) whose
+    // callers cannot be migrated to IMS S2S. The list is frozen.
+    const order = parseAuthHandlersOrder();
+    const scopedIdx = order.indexOf('RouteScopedLegacyApiKeyHandler');
+    const legacyIdx = order.indexOf('LegacyApiKeyHandler');
+
+    expect(scopedIdx).to.be.greaterThan(-1, 'RouteScopedLegacyApiKeyHandler must remain in AUTH_HANDLERS');
+    expect(legacyIdx).to.equal(-1, 'LegacyApiKeyHandler must NOT be in AUTH_HANDLERS (removed: SITES-34224)');
   });
 });

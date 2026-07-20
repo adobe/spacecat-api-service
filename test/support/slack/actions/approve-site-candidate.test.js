@@ -16,7 +16,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
+import esmock from 'esmock';
 import {
   expectedAnnouncedMessage,
   expectedApprovedReply,
@@ -28,6 +28,23 @@ use(chaiAsPromised);
 use(sinonChai);
 
 describe('approveSiteCandidate', () => {
+  let approveSiteCandidate;
+  let updateRumConfigStub;
+
+  before(async () => {
+    updateRumConfigStub = sinon.stub().resolves(true);
+    approveSiteCandidate = (await esmock('../../../../src/support/slack/actions/approve-site-candidate.js', {
+      '../../../../src/support/rum-config-service.js': {
+        updateRumConfig: updateRumConfigStub,
+      },
+      '../../../../src/agents/org-detector/agent.js': {
+        default: {
+          fromContext: (ctx) => ctx.orgDetectorAgent || { detect: sinon.stub().resolves(null) },
+        },
+      },
+    })).default;
+  });
+
   const baseURL = 'https://spacecat.com';
   const hlxConfig = {
     hlxVersion: 4,
@@ -47,6 +64,7 @@ describe('approveSiteCandidate', () => {
 
   beforeEach(async () => {
     clock = sinon.useFakeTimers();
+    updateRumConfigStub.resolves(true);
 
     slackClient = {
       postMessage: sinon.stub().resolves({ channelId: 'channel-id', threadId: 'thread-ts' }),
@@ -64,6 +82,7 @@ describe('approveSiteCandidate', () => {
       },
       log: {
         info: sinon.stub(),
+        warn: sinon.stub(),
         error: sinon.stub(),
       },
       env: {
@@ -237,5 +256,34 @@ describe('approveSiteCandidate', () => {
     ).to.be.rejectedWith('processing error');
 
     expect(context.log.error).to.have.been.calledWith('Error occurred while acknowledging site candidate approval');
+  });
+
+  it('should log a warning when updateRumConfig fails for a new site', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+    updateRumConfigStub.rejects(new Error('RUM API error'));
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    expect(context.log.warn).to.have.been.calledWith(
+      `[approve-site-candidate] RUM config update failed for ${baseURL}: RUM API error`,
+    );
+  });
+
+  it('should log a warning when updateRumConfig fails for an existing site', async () => {
+    site.getIsLive = () => false;
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+    site.save.resolves(site);
+    updateRumConfigStub.rejects(new Error('RUM API error'));
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    expect(context.log.warn).to.have.been.calledWith(
+      `[approve-site-candidate] RUM config update failed for ${baseURL}: RUM API error`,
+    );
   });
 });

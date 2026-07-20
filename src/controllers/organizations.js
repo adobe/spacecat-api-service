@@ -13,6 +13,7 @@
 import {
   createResponse,
   badRequest,
+  internalServerError,
   notFound,
   ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
@@ -22,13 +23,24 @@ import {
   isString,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import { Response } from '@adobe/fetch';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
-import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
+import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS, getEntitledProductCodes } from '../support/utils.js';
+import { resolveViewableSiteIds } from '../support/facs-site-visibility.js';
+import {
+  ensureOrgEntitlement,
+  resolveProductCode,
+} from '../support/tier-provisioning.js';
+
+// Cross-product sites-listing scope (SITES-46454, Phase 1 of multi-product login support).
+// See mysticat-architecture/platform/decisions/cross-product-sites-listing-via-client-id-scope.md
+const SITES_LIST_CROSS_PRODUCT_SCOPE = 'sites:list:cross_product';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -59,25 +71,52 @@ function OrganizationsController(ctx, env) {
 
   /**
    * Creates an organization. The organization ID is generated automatically.
+   *
+   * Write-time tier provisioning: when an organization is newly created, it ensures org
+   * entitlement via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   *
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Organization response.
    */
   const createOrganization = async (context) => {
+    const { log } = ctx;
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
+    const { productCode, error: productCodeError } = resolveProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
+    let organization;
+    let status;
     // check if the organization already exists
-    const organization = await Organization.findByImsOrgId(context.data.imsOrgId);
-    if (organization) {
-      return createResponse(OrganizationDto.toJSON(organization), 200);
+    const existingOrganization = await Organization.findByImsOrgId(context.data.imsOrgId);
+    if (existingOrganization) {
+      organization = existingOrganization;
+      status = 200;
+    } else {
+      try {
+        organization = await Organization.create(context.data);
+        status = 201;
+      } catch (e) {
+        return badRequest(e.message);
+      }
     }
 
-    try {
-      const organizationCreated = await Organization.create(context.data);
-      return createResponse(OrganizationDto.toJSON(organizationCreated), 201);
-    } catch (e) {
-      return badRequest(e.message);
+    if (productCode && status === 201) {
+      try {
+        await ensureOrgEntitlement(context, organization, productCode, log);
+      } catch (error) {
+        log.error(
+          `Error ensuring entitlement for organization ${organization.getId()}: ${error.message}`,
+          error,
+        );
+        return internalServerError('Failed to ensure entitlement for organization');
+      }
     }
+
+    return createResponse(OrganizationDto.toJSON(organization), status);
   };
 
   /**
@@ -286,17 +325,83 @@ function OrganizationsController(ctx, env) {
       }
     }
 
-    // Own sites go through the enrollment filter (delegate org's entitlement).
-    // Delegated sites have already been validated against the target org's entitlement above.
-    const filteredSites = await filterSitesForProductCode(
-      context,
-      organization,
-      ownSites,
-      productCode,
-      accessControlUtil,
-    );
+    // Cross-product branch (SITES-46454). When the session JWT carries
+    // sites:list:cross_product (minted by spacecat-auth-service for allow-listed IMS
+    // client_ids), widen the per-product filter to a union across every product the
+    // org is entitled to — preserving today's entitlement, tier-visibility, and
+    // enrollment gates and dropping only the single-product restriction. Delegated
+    // sites are NOT touched; their flow above stays product-pinned to x-product.
+    const authInfo = context?.attributes?.authInfo;
+    const isCrossProduct = authInfo?.hasScope?.(SITES_LIST_CROSS_PRODUCT_SCOPE) === true;
 
-    return ok([...filteredSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
+    let filteredSites;
+    if (isCrossProduct) {
+      ctx.log.info(`[sites] cross-product listing for org=${organizationId} user=${authInfo?.getProfile?.()?.userId || 'n/a'}`);
+      const entitledProductCodes = await getEntitledProductCodes(context, organization);
+      const byId = new Map();
+      // Sequential (not parallel) so log lines and DB call ordering stay predictable;
+      // the entitled-product set is small (one entry per SpaceCat product, currently 3).
+      for (const code of entitledProductCodes) {
+        // eslint-disable-next-line no-await-in-loop
+        const perProduct = await filterSitesForProductCode(
+          context,
+          organization,
+          ownSites,
+          code,
+          accessControlUtil,
+        );
+        for (const s of perProduct) {
+          byId.set(s.getId(), s);
+        }
+      }
+      filteredSites = [...byId.values()];
+    } else {
+      // Own sites go through the enrollment filter (delegate org's entitlement).
+      // Delegated sites have already been validated against the target org's entitlement above.
+      filteredSites = await filterSitesForProductCode(
+        context,
+        organization,
+        ownSites,
+        productCode,
+        accessControlUtil,
+      );
+    }
+
+    // ReBAC collection filter. When facsWrapper marks this session as
+    // FACS-enrolled and resource-scoped (no org-wide can_view — see
+    // context.attributes.facs), narrow the org's OWN sites to those the caller
+    // may view via a state-layer grant. Delegated sites are governed by the
+    // delegation grant itself and pass through unchanged. Absent flag (admin /
+    // internal org / non-ReBAC org / org-wide viewer) => full list.
+    //
+    // Product-shape bypass: only filter when the current product actually
+    // ReBAC-scopes `site` (ASO). Under LLMO, `site` is not a ReBAC resource
+    // (LLMO scopes `brand`), so the state layer holds no per-site grants and
+    // filtering would wrongly hide every site — return the full list instead.
+    //
+    // Cross-product (SITES-46454) bypass: when the session carries
+    // `sites:list:cross_product` (minted at login via `unique_client_id` or
+    // `cdn_origin_verified`), the caller is trusted at the CLIENT level to see
+    // the union of sites the org is entitled to across every product. That
+    // client-level trust intentionally supersedes the per-user, per-product
+    // ReBAC filter — the ReBAC filter is keyed on a single product's `site`
+    // resource, and applying it under the cross-product branch would filter
+    // out sites from other products that don't have any per-user grant on the
+    // FACS-enrolled product (they are still authorised by the client-level
+    // scope). Skip the filter entirely in this branch. See
+    // mysticat-architecture/platform/decisions/multi-product-login-phase1.md.
+    let visibleOwnSites = filteredSites;
+    if (!isCrossProduct) {
+      const viewable = await resolveViewableSiteIds(context, organization);
+      if (viewable instanceof Response) {
+        return viewable;
+      }
+      if (viewable) {
+        visibleOwnSites = filteredSites.filter((site) => viewable.has(site.getId()));
+      }
+    }
+
+    return ok([...visibleOwnSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
   };
 
   /**
@@ -343,7 +448,50 @@ function OrganizationsController(ctx, env) {
       updates = true;
     }
 
+    if (isString(requestBody.semrushWorkspaceId)
+      && requestBody.semrushWorkspaceId !== organization.getSemrushWorkspaceId()) {
+      // semrushWorkspaceId binds the Adobe org to a Semrush workspace - billing
+      // and access-level concern. Restrict to admins, unlike the other fields
+      // that any org member can update.
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can set semrushWorkspaceId');
+      }
+      organization.setSemrushWorkspaceId(requestBody.semrushWorkspaceId);
+      updates = true;
+    }
+
     if (isObject(requestBody.config)) {
+      if (isObject(requestBody.config.defaults)) {
+        if (!accessControlUtil.hasAdminAccess()) {
+          return forbidden('Only admins can update config.defaults');
+        }
+        const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
+        for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
+          if (!VALID_PRODUCT_CODES.has(productCode)) {
+            return badRequest(`Unknown product code in config.defaults: ${productCode}`);
+          }
+          if (isObject(entry) && entry.siteId != null) {
+            if (!isValidUUID(entry.siteId)) {
+              return badRequest(`Invalid siteId for product ${productCode} in config.defaults`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const site = await Site.findById(entry.siteId);
+            if (!site || site.getOrganizationId() !== organization.getId()) {
+              return badRequest(`config.defaults.${productCode}: site not found or does not belong to this organization`);
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const siteTierClient = await TierClient.createForSite(context, site, productCode);
+            // eslint-disable-next-line no-await-in-loop
+            const { entitlement, siteEnrollment } = await siteTierClient.checkValidEntitlement();
+            if (!entitlement) {
+              return badRequest(`config.defaults.${productCode}: organization does not have an entitlement for this product`);
+            }
+            if (!siteEnrollment) {
+              return badRequest(`config.defaults.${productCode}: site is not enrolled for this product`);
+            }
+          }
+        }
+      }
       organization.setConfig(requestBody.config);
       updates = true;
     }
@@ -378,6 +526,31 @@ function OrganizationsController(ctx, env) {
     }
 
     const projects = await Project.allByOrganizationId(organizationId);
+
+    // FACS ReBAC filter (mirrors getSitesForOrganization): when the caller is
+    // FACS-enrolled and resource-scoped (no org-wide `<product>/can_view`),
+    // restrict projects to those containing at least one site the caller may
+    // view. Only applies where `site` is a ReBAC resource for the product (ASO,
+    // not LLMO which scopes `brand`) — otherwise the state layer holds no
+    // per-site grants and filtering would wrongly hide everything.
+    const viewable = await resolveViewableSiteIds(context, organization);
+    if (viewable instanceof Response) {
+      return viewable;
+    }
+    if (viewable) {
+      const orgSites = await Site.allByOrganizationId(organizationId);
+      const viewableProjectIds = new Set(
+        orgSites
+          .filter((site) => viewable.has(site.getId()))
+          .map((site) => site.getProjectId())
+          .filter(Boolean),
+      );
+      return ok(
+        projects
+          .filter((project) => viewableProjectIds.has(project.getId()))
+          .map((project) => ProjectDto.toJSON(project)),
+      );
+    }
 
     return ok(projects.map((project) => ProjectDto.toJSON(project)));
   };

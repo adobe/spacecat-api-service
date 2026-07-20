@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
+  ORG_1_IMS_ORG_ID,
   ORG_2_ID,
   SITE_1_ID,
   SITE_1_BASE_URL,
@@ -23,8 +24,11 @@ import {
   SITE_4_BASE_URL,
   SITE_LEGACY_LLMO_ID,
   SITE_NEW_LLMO_ID,
+  MARKET_SITE_1_ID,
+  MARKET_SITE_1_BASE_URL,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
+  PROJECT_2_ID,
 } from '../seed-ids.js';
 
 // LLMO-4176 mode-resolution test sites are seeded with intentionally
@@ -90,7 +94,8 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
+        // Legacy path (no limit/cursor params) excludes DEFAULT_ORGANIZATION_ID (ORG_1)
+        // and ORGANIZATION_ID_FRIENDS_FAMILY sites to stay under 6MB Lambda limit.
         // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
         // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
         expect(res.body).to.be.an('array').with.lengthOf(4);
@@ -140,6 +145,104 @@ export default function siteTests(getHttpClient, resetData) {
         // isolation invariant per the design.
         const http = getHttpClient();
         const res = await http.s2sConsumerUnknown.get('/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns the paginated envelope and advances via cursor', async () => {
+        // Pins both the controller↔DAL contract for the `returnCursor: true` shape AND
+        // the cursor round-trip that pagination exists to provide. Seed has 6 sites
+        // total (paginated branch bypasses the org exclusion), so limit=2 MUST yield
+        // exactly 2 sites with hasMore=true on page 1.
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?limit=2');
+        expect(page1.status).to.equal(200);
+        expect(page1.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({ limit: 2, hasMore: true });
+        expect(page1.body.pagination.cursor).to.be.a('string').and.not.empty;
+        page1.body.sites
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
+
+        // Page 2 must advance — no overlap with page 1, same envelope shape.
+        const page2 = await http.admin.get(`/sites?limit=2&cursor=${encodeURIComponent(page1.body.pagination.cursor)}`);
+        expect(page2.status).to.equal(200);
+        expect(page2.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page2.body.pagination.limit).to.equal(2);
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
+      });
+
+      // ── baseUrlContains substring search (SITES-47203, ADR-006) ──
+      // These exercise the REAL PostgREST `ilike` path end-to-end (not a stub):
+      // the where-builder, deterministic ordering, N+1 hasMore, offset paging, and
+      // DB-level wildcard escaping against actual seeded rows.
+      it('admin: baseUrlContains returns only matching sites in the search envelope with the echo', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, baseUrlContains: 'semrush' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: baseUrlContains honors limit and reports hasMore (N+1 against real rows)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&limit=2');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(res.body.pagination).to.include({ limit: 2, hasMore: true, baseUrlContains: 'example.com' });
+        // every returned row genuinely matches the substring (proves real ilike filtering)
+        res.body.sites.forEach((s) => expect(s.baseURL.toLowerCase()).to.include('example.com'));
+      });
+
+      it('admin: baseUrlContains pages by offset and returns a non-overlapping page', async () => {
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=0');
+        expect(page1.status).to.equal(200);
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({
+          limit: 2, offset: 0, hasMore: true, baseUrlContains: 'example.com',
+        });
+
+        const page2 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=2');
+        expect(page2.status).to.equal(200);
+        expect(page2.body.pagination).to.include({
+          limit: 2, offset: 2, baseUrlContains: 'example.com',
+        });
+        // The two offset pages must not overlap (proves offset actually advanced).
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
+      });
+
+      it('admin: baseUrlContains escapes LIKE wildcards so user % cannot widen the match', async () => {
+        // '%example' is escaped to a literal; no base_url literally contains "%example",
+        // so the result is empty. If escaping were broken it would behave like
+        // '%%example%' and match every *.example.com site.
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites?baseUrlContains=${encodeURIComponent('%example')}`);
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(0);
+        expect(res.body.pagination).to.include({ hasMore: false });
+      });
+
+      it('admin: baseUrlContains shorter than 3 chars is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=ab');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: baseUrlContains with a negative offset is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&offset=-1');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: baseUrlContains still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?baseUrlContains=semrush');
         expect(res.status).to.equal(403);
       });
     });
@@ -241,6 +344,67 @@ export default function siteTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /sites/:siteId/identity', () => {
+      // readAll-class single-site route: returns only the routing identity and resolves
+      // imsOrgId via the site->organization join. Gated on site:readAll, NOT site:read,
+      // so it is cross-tenant and there is no hasAccess(site) per-entity check.
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('admin: returns the routing identity with the resolved imsOrgId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadAll: returns the identity for any site (site:readAll, cross-tenant)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        // Full-shape assertion (like the admin case) so an accidental extra field
+        // leaking through the readAll path is caught, not just siteId/imsOrgId.
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies — the route maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${NON_EXISTENT_SITE_ID}/identity`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for an invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/identity');
+        expect(res.status).to.equal(400);
+      });
+    });
+
     describe('GET /sites/by-base-url/:baseURL', () => {
       it('admin: finds site by base64-encoded URL', async () => {
         const http = getHttpClient();
@@ -286,9 +450,20 @@ export default function siteTests(getHttpClient, resetData) {
         });
       });
 
-      it('admin: returns empty array for unmatched delivery type', async () => {
+      it('admin: returns the Serenity market-mirror site for delivery type other', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/other');
+        expect(res.status).to.equal(200);
+        // MARKET_SITE_1 (Semrush market mirror) is the only delivery_type=other site.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(MARKET_SITE_1_ID);
+        expect(res.body[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expect(res.body[0].deliveryType).to.equal('other');
+      });
+
+      it('admin: returns empty array for unmatched delivery type', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/aem_ams');
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
@@ -352,6 +527,67 @@ export default function siteTests(getHttpClient, resetData) {
         });
         expect(res.status).to.equal(403);
       });
+
+      it('admin: returns 400 for invalid x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          '/sites',
+          { baseURL: 'https://invalid-product-header.example.com' },
+          { 'x-product': 'NOT_A_PRODUCT' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/Unsupported product code/);
+      });
+
+      it('admin: x-product enrolls new site under existing ASO PAID entitlement', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://aso-trial-provisioned.example.com';
+        const createRes = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(createRes.status).to.equal(201);
+        expectSiteDto(createRes.body);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.include(createRes.body.id);
+
+        const entitlementsRes = await http.admin.get(`/organizations/${ORG_1_ID}/entitlements`);
+        const asoEntitlement = entitlementsRes.body.find((e) => e.productCode === 'ASO');
+        expect(asoEntitlement.tier).to.equal('PAID');
+      });
+
+      it('admin: without x-product header does not enroll site for ASO listing', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://no-write-time-product.example.com';
+        const createRes = await http.admin.post(
+          '/sites',
+          { baseURL },
+          { 'x-product': null },
+        );
+        expect(createRes.status).to.equal(201);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.not.include(createRes.body.id);
+      });
+
+      it('admin: idempotent re-POST with x-product returns 200', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://idempotent-x-product.example.com';
+        const first = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(first.status).to.equal(201);
+
+        const second = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(second.status).to.equal(200);
+        expect(second.body.id).to.equal(first.body.id);
+      });
     });
 
     describe('PATCH /sites/:siteId', () => {
@@ -412,6 +648,223 @@ export default function siteTests(getHttpClient, resetData) {
           organizationId: ORG_2_ID,
         });
         expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 403 when trying to change projectId', async () => {
+        // Re-parenting a site to a project in another org via this endpoint is
+        // disallowed (projects are org-scoped) — SITES-46200. SITE_1 belongs to
+        // PROJECT_1_ID, so patching it to PROJECT_2_ID must be rejected.
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
+          projectId: PROJECT_2_ID,
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 403 when changing the baseURL of a site attached to a Semrush-managed brand', async () => {
+        // SITE_1 is the primary site of BRAND_1, which is Semrush-managed
+        // (semrush_workspace_id set in the seed). The brand's tracked domain
+        // lives on its Semrush projects, which have no domain-update path, so the
+        // SpaceCat site URL is immutable while that brand is attached. Admin is
+        // used so the only thing that can 403 is the URL-immutability guard
+        // itself (not access control). Other site fields stay editable.
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
+          baseURL: 'https://semrush-managed-rename.example.com',
+        });
+        expect(res.status).to.equal(403);
+
+        // The URL is unchanged (the guard blocked the write before persist).
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(SITE_1_BASE_URL);
+      });
+    });
+
+    describe('PATCH /sites/:siteId/config/scraper', () => {
+      let scraperSiteId;
+
+      before(async () => {
+        await resetData();
+        // Use a test-scoped site under ORG_1 so `user` has access via the
+        // org-membership rule. Avoids mutating baseline seed entities so
+        // failures here don't bleed into other tests.
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites', {
+          baseURL: 'https://scraper-config-test-scoped.example.com',
+        });
+        expect(res.status).to.equal(201);
+        scraperSiteId = res.body.id;
+      });
+
+      // Cases that exercise the shared `siteConfig.updateScraperConfig(...)`
+      // are skipped until the `@adobe/spacecat-shared-data-access` dep is
+      // bumped to a version that includes the new getter/setter (introduced
+      // in adobe/spacecat-shared#1618). With the currently-pinned shared
+      // version the controller call resolves to `undefined`, throws a
+      // TypeError, and the catch block re-throws it as 500. The other
+      // cases below — 403, 404, missing-body, malformed-UUID — short-circuit
+      // before reaching the shared method and pass on the current dep pin.
+      describe('cases requiring @adobe/spacecat-shared-data-access >= 3.71.0', () => {
+        it('user: persists scraperConfig.headers and returns the narrow shape', async () => {
+          const http = getHttpClient();
+          const payload = {
+            scraperConfig: {
+              headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+            },
+          };
+          const res = await http.user.patch(
+            `/sites/${scraperSiteId}/config/scraper`,
+            payload,
+          );
+          expect(res.status).to.equal(200);
+          // Locks the contract: response carries only siteId + scraperConfig,
+          // not the full site (which may include unrelated secrets).
+          expect(res.body).to.have.all.keys('siteId', 'scraperConfig');
+          expect(res.body.siteId).to.equal(scraperSiteId);
+          expect(res.body.scraperConfig).to.deep.equal(payload.scraperConfig);
+
+          // Verify it actually persisted (not just echoed by the response).
+          const reread = await http.user.get(`/sites/${scraperSiteId}`);
+          expect(reread.status).to.equal(200);
+          expect(reread.body.config.scraperConfig).to.deep.equal(payload.scraperConfig);
+        });
+
+        it('user: replace semantics — partial body fully replaces stored value', async () => {
+          const http = getHttpClient();
+          // Seed an initial config first.
+          await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { 'Accept-Language': 'fr-FR' } },
+          });
+          // PATCH with empty object should clear it.
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: {},
+          });
+          expect(res.status).to.equal(200);
+          expect(res.body.scraperConfig).to.deep.equal({});
+        });
+
+        it('user: rejects reserved header names', async () => {
+          const http = getHttpClient();
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { Authorization: 'Bearer x' } },
+          });
+          expect(res.status).to.equal(400);
+          expect(res.body.message).to.match(/reserved scraper header/i);
+        });
+
+        it('user: rejects CRLF in header values', async () => {
+          const http = getHttpClient();
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { 'X-Foo': 'a\r\nX-Bad: y' } },
+          });
+          expect(res.status).to.equal(400);
+        });
+      });
+
+      it('user: returns 403 for a denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_3_ID}/config/scraper`, {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${NON_EXISTENT_SITE_ID}/config/scraper`, {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 when scraperConfig is missing from the body', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          `/sites/${scraperSiteId}/config/scraper`,
+          {},
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.equal('Scraper config required');
+      });
+
+      it('admin: returns 400 when site ID is malformed', async () => {
+        // The framework's path-param middleware rejects malformed UUIDs in
+        // `src/index.js` via `isValidUUIDV4()` before the controller runs,
+        // so the message comes from the framework (not the controller's
+        // own `Invalid site ID` string, which is only reachable for the
+        // body-only validation cases).
+        const http = getHttpClient();
+        const res = await http.admin.patch('/sites/not-a-uuid/config/scraper', {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/site id is invalid/i);
+      });
+    });
+
+    describe('GET /sites/:siteId/config/scraper', () => {
+      let scraperSiteId;
+
+      before(async () => {
+        await resetData();
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites', {
+          baseURL: 'https://scraper-config-get-test-scoped.example.com',
+        });
+        expect(res.status).to.equal(201);
+        scraperSiteId = res.body.id;
+      });
+
+      it('user: returns empty scraperConfig when none persisted', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(res.status).to.equal(200);
+        // Locks the "no missing case" contract — GET always returns an object,
+        // even before any PATCH has been applied.
+        expect(res.body).to.have.all.keys('siteId', 'scraperConfig');
+        expect(res.body.siteId).to.equal(scraperSiteId);
+        expect(res.body.scraperConfig).to.deep.equal({});
+      });
+
+      it('user: returns persisted scraperConfig after PATCH', async () => {
+        const http = getHttpClient();
+        const payload = {
+          scraperConfig: {
+            headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+          },
+        };
+        const patchRes = await http.user.patch(
+          `/sites/${scraperSiteId}/config/scraper`,
+          payload,
+        );
+        expect(patchRes.status).to.equal(200);
+
+        const getRes = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(getRes.status).to.equal(200);
+        // GET response shape must equal what PATCH returned — same envelope,
+        // same body. If a writer-then-reader sees a different shape, callers
+        // would have to handle two formats. Lock equality here.
+        expect(getRes.body).to.deep.equal(patchRes.body);
+      });
+
+      it('user: returns 403 for a denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/config/scraper`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${NON_EXISTENT_SITE_ID}/config/scraper`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 when site ID is malformed', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/config/scraper');
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/site id is invalid/i);
       });
     });
 

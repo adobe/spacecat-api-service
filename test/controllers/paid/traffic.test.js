@@ -1036,7 +1036,7 @@ describe('Paid TrafficController', async () => {
       // Set temporalCondition for these tests
       mockContext.data.temporalCondition = encodeURIComponent('(year = 2024 AND week = 23) OR (year = 2024 AND week = 22) OR (year = 2024 AND week = 21) OR (year = 2024 AND week = 20)');
 
-      // Mock S3 GetObject for Ahrefs CPC data (needed for bounce gap endpoints)
+      // Mock S3 GetObject for SEO CPC data (needed for bounce gap endpoints)
       mockS3GetObject = sandbox.stub();
       mockS3.send.callsFake((cmd) => {
         if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
@@ -1055,7 +1055,7 @@ describe('Paid TrafficController', async () => {
         return Promise.resolve({});
       });
 
-      // Default: Ahrefs data not available (will use default CPC)
+      // Default: SEO data not available (will use default CPC)
       mockS3GetObject.rejects(new Error('Not found'));
     });
 
@@ -1409,7 +1409,7 @@ describe('Paid TrafficController', async () => {
     it('returns response directly if caching fails for impact endpoints', async () => {
       mockS3.send.callsFake((cmd) => {
         if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
-          // Ahrefs data not available
+          // SEO data not available
           return mockS3GetObject(cmd);
         }
         if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
@@ -1447,7 +1447,7 @@ describe('Paid TrafficController', async () => {
       let cacheExists = false;
       mockS3.send.callsFake((cmd) => {
         if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
-          // Ahrefs data not available
+          // SEO data not available
           return mockS3GetObject(cmd);
         }
         if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
@@ -1542,7 +1542,7 @@ describe('Paid TrafficController', async () => {
       // Set noCache to get JSON responses instead of gzipped cached responses
       mockContext.data.noCache = true;
 
-      // Mock S3 GetObject for Ahrefs CPC data
+      // Mock S3 GetObject for SEO CPC data
       mockS3GetObject = sandbox.stub();
       mockS3.send.callsFake((cmd) => {
         if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
@@ -1565,7 +1565,7 @@ describe('Paid TrafficController', async () => {
     describe('getTrafficLossByDevices', () => {
       it('returns bounce gap data grouped by device without cost fields', async () => {
         mockAthenaQuery.resolves(bounceGapMock);
-        mockS3GetObject.rejects(new Error('Not found')); // Ahrefs data not available
+        mockS3GetObject.rejects(new Error('Not found')); // SEO data not available
 
         const controller = TrafficController(mockContext, mockLog, mockEnv);
         const res = await controller.getTrafficLossByDevices();
@@ -1653,10 +1653,10 @@ describe('Paid TrafficController', async () => {
     });
 
     describe('getImpactByPageTrafficType', () => {
-      it('returns bounce gap data with CPC cost estimates when Ahrefs data available', async () => {
+      it('returns bounce gap data with CPC cost estimates when SEO data available', async () => {
         mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
 
-        // Mock successful Ahrefs data fetch
+        // Mock successful SEO data fetch
         // Both cost and traffic are already fully converted during import
         // CPC = cost / traffic
         mockS3GetObject.resolves({
@@ -1675,6 +1675,10 @@ describe('Paid TrafficController', async () => {
 
         expect(res.status).to.equal(200);
 
+        // Verify S3 key uses the correct 'seo' path (not the old 'ahrefs' path)
+        const s3Call = mockS3GetObject.getCall(0);
+        expect(s3Call.args[0].input.Key).to.equal(`metrics/${SITE_ID}/seo/agg-metrics.json`);
+
         // Validate cached data
         expect(lastPutObject).to.exist;
         const decompressed = await gunzipAsync(lastPutObject.input.Body);
@@ -1690,7 +1694,7 @@ describe('Paid TrafficController', async () => {
         // Should have cost fields
         expect(paidEntry.estimatedCost).to.be.a('number');
         expect(paidEntry.appliedCPC).to.be.a('number');
-        expect(paidEntry.cpcSource).to.equal('ahrefs');
+        expect(paidEntry.cpcSource).to.equal('seo');
 
         // Verify CPC calculation: paidCPC = 15615 / 50000 = 0.3123
         expect(paidEntry.appliedCPC).to.be.closeTo(0.3123, 0.0001);
@@ -1700,7 +1704,7 @@ describe('Paid TrafficController', async () => {
         expect(paidEntry.estimatedCost).to.be.closeTo(expectedCost, 0.01);
       });
 
-      it('uses default CPC when Ahrefs data unavailable', async () => {
+      it('uses default CPC when SEO data unavailable', async () => {
         mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
         mockS3GetObject.rejects(new Error('Not found'));
 
@@ -1725,7 +1729,7 @@ describe('Paid TrafficController', async () => {
       it('applies correct CPC for different traffic types', async () => {
         mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
 
-        // Mock Ahrefs data with different organic and paid CPC
+        // Mock SEO data with different organic and paid CPC
         // Both cost and traffic are already fully converted
         mockS3GetObject.resolves({
           Body: {
@@ -1865,7 +1869,7 @@ describe('Paid TrafficController', async () => {
         // Should have cost fields
         expect(entry.estimatedCost).to.be.a('number');
         expect(entry.appliedCPC).to.be.closeTo(0.3123, 0.0001);
-        expect(entry.cpcSource).to.equal('ahrefs');
+        expect(entry.cpcSource).to.equal('seo');
       });
     });
 
@@ -1990,10 +1994,10 @@ describe('Paid TrafficController', async () => {
         expect(body[0].bounceGapDelta).to.equal(0);
       });
 
-      it('uses default CPC when Ahrefs has zero traffic', async () => {
+      it('uses default CPC when SEO provider has zero traffic', async () => {
         mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
 
-        // Mock Ahrefs data with zero traffic values
+        // Mock SEO data with zero traffic values
         mockS3GetObject.resolves({
           Body: {
             transformToString: async () => JSON.stringify({
@@ -2018,7 +2022,7 @@ describe('Paid TrafficController', async () => {
         // All entries should use default CPC (0.80)
         const paidEntry = body.find((item) => item.type === 'paid');
         expect(paidEntry.appliedCPC).to.equal(0.80);
-        expect(paidEntry.cpcSource).to.equal('ahrefs'); // Source is still ahrefs, just using default
+        expect(paidEntry.cpcSource).to.equal('seo');
 
         const organicEntry = body.find((item) => item.type === 'organic');
         expect(organicEntry.appliedCPC).to.equal(0.80);
@@ -2084,8 +2088,8 @@ describe('Paid TrafficController', async () => {
         let putKey = null;
         mockS3.send.callsFake((cmd) => {
           if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
-            // For Ahrefs CPC data
-            if (cmd.input.Key && cmd.input.Key.includes('ahrefs')) {
+            // For SEO CPC data
+            if (cmd.input.Key && cmd.input.Key.endsWith('/seo/agg-metrics.json')) {
               return mockS3GetObject(cmd);
             }
             // For signed URL verification - return success

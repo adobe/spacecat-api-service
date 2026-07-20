@@ -4,7 +4,7 @@ permissions:
   id-token: write
   contents: write
   issues: read
-  pull-requests: read
+  pull-requests: write
 
 on:
   push:
@@ -20,4 +20,28 @@ jobs:
       docs-lint: true
       it-postgres: true
       vpc-enabled: true
+      bundle-build: true
     secrets: inherit
+
+  # Opt-in TypeScript type-checking (checkJs + JSDoc, no .ts source) over the
+  # `// @ts-check`-annotated files (currently src/support/serenity/**). Blocking.
+  # The reusable service-ci workflow has no type-check seam yet, so this runs as
+  # a self-contained job here. See docs/decisions/005-opt-in-type-checking.md.
+  type-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node & NPM
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
+
+      - name: Type-check
+        run: npm run type-check

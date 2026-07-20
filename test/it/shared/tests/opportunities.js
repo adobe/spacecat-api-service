@@ -18,6 +18,7 @@ import {
   NON_EXISTENT_SITE_ID,
   OPPTY_1_ID,
   OPPTY_2_ID,
+  OPPTY_4_ID,
   NON_EXISTENT_OPPTY_ID,
 } from '../seed-ids.js';
 
@@ -54,12 +55,13 @@ export default function opportunityTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities`);
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((oppty) => expectOpportunityDto(oppty));
 
         const ids = sortById(res.body).map((o) => o.id);
         expect(ids).to.include(OPPTY_1_ID);
         expect(ids).to.include(OPPTY_2_ID);
+        expect(ids).to.include(OPPTY_4_ID);
       });
 
       it('user: returns 403 for denied site', async () => {
@@ -77,6 +79,36 @@ export default function opportunityTests(getHttpClient, resetData) {
       it('returns 400 for invalid UUID', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/not-a-uuid/opportunities');
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for malformed locale parameter', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?locale=INVALID`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns opportunities', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array');
+        res.body.forEach((oppty) => expectOpportunityDto(oppty));
+      });
+
+      it('user: projects opportunities to requested fields with ?fields=', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?fields=title,type`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
+        res.body.forEach((oppty) => {
+          expect(Object.keys(oppty).sort()).to.deep.equal(['id', 'title', 'type']);
+        });
+      });
+
+      it('returns 400 when ?fields= matches no known field', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?fields=nope`);
         expect(res.status).to.equal(400);
       });
     });
@@ -124,6 +156,12 @@ export default function opportunityTests(getHttpClient, resetData) {
         expect(res.body[0].id).to.equal(OPPTY_1_ID);
         expect(res.body[0].status).to.equal('NEW');
       });
+
+      it('returns 400 for malformed locale parameter', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities/by-status/NEW?locale=INVALID`);
+        expect(res.status).to.equal(400);
+      });
     });
 
     describe('GET /sites/:siteId/opportunities/:opportunityId', () => {
@@ -167,6 +205,19 @@ export default function opportunityTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get(`/sites/${SITE_1_ID}/opportunities/not-a-uuid`);
         expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for malformed locale parameter', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities/${OPPTY_1_ID}?locale=fr-FR`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns opportunity', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities/${OPPTY_1_ID}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expectOpportunityDto(res.body);
       });
     });
 

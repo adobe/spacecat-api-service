@@ -38,6 +38,8 @@ audit-for-site:
                 $ref: './examples.yaml#/related-urls-audit'
               broken-internal-links-audit:
                 $ref: './examples.yaml#/broken-internal-links-audit'
+              money-pages-audit:
+                $ref: './examples.yaml#/money-pages-audit'
       '400':
         $ref: './responses.yaml#/400-audit-for-site'
       '401':
@@ -87,6 +89,8 @@ latest-audit-for-site:
                 $ref: './examples.yaml#/related-urls-audit'
               broken-internal-links-audit:
                 $ref: './examples.yaml#/broken-internal-links-audit'
+              money-pages-audit:
+                $ref: './examples.yaml#/money-pages-audit'
       '400':
         $ref: './responses.yaml#/400-latest-audit-for-site'
       '401':

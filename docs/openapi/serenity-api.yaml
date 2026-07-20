@@ -1,0 +1,1524 @@
+# ── Serenity API ──
+# Public surface for AI-visibility prompts and markets. The upstream is
+# currently Semrush AIO (proxied via adobe-hackathon.semrush.com); upstream
+# routing details (`workspaceId`, internal project ids) are NOT exposed.
+#
+# The client sends its IMS user token; api-service forwards it; the upstream
+# gateway exchanges IMS → upstream-internal server-side.
+#
+# Slice key for everything below is (brandId, geoTargetId, languageCode).
+# `:brandId` MUST be a UUID — the controller rejects name-based ids with 400.
+#
+# All operations are tagged `serenity` so the OpenAPI contract test suite can
+# enumerate them. See test/openapi-contract/serenity-api.test.js.
+
+# ─── Shared path parameters ───────────────────────────────────────────────────
+
+v2-serenity-prompts:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List Serenity prompts for one slice
+    description: |
+      Returns the prompts for a single (brandId, geoTargetId, languageCode)
+      slice. Both `geoTargetId` and `languageCode` are required — the request
+      always resolves to exactly one upstream project. Pagination is real
+      upstream pagination (no fan-out, no merged-and-sliced shimming).
+    operationId: listSerenityPrompts
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+        description: Google Ads Geo Target ID for the slice.
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+        description: BCP-47 primary subtag (lowercase) for the slice.
+      - name: page
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, default: 1 }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+      - name: search
+        in: query
+        required: false
+        schema: { type: string }
+        description: Free-text match against prompt text.
+      - name: tagIds
+        in: query
+        required: false
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 128 }
+        description: |
+          Filter prompts to those carrying any of these upstream tag ids.
+          Sent as repeated keys (`?tagIds=a&tagIds=b`); ids come from each
+          prompt's `tagMap`. Omitted/empty lists all prompts in the slice.
+          Maximum 50 ids; excess values are silently truncated (same pattern
+          as the `limit` cap). This matches the server-side `MAX_TAG_IDS`
+          constant in `handlers/prompts.js`.
+    responses:
+      '200':
+        description: Prompts retrieved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Bulk-create Serenity prompts
+    description: |
+      Creates up to 500 prompts in one call. Each input must carry
+      (geoTargetId, languageCode, text, tagIds). Tags are addressed by upstream
+      id: a bare name cannot identify a tag, because names are unique only per
+      (project, parent). Inputs are grouped by slice; each affected upstream
+      project is published once at the end.
+    operationId: createSerenityPrompts
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityCreatePromptsRequest' }
+    responses:
+      '200':
+        description: Bulk create completed (mixed success allowed).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityCreatePromptsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompt-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: semrushPromptId
+      in: path
+      required: true
+      description: Upstream prompt id.
+      schema: { type: string }
+  patch:
+    tags: [serenity]
+    summary: Update a Serenity prompt
+    description: |
+      Body carries `{geoTargetId, languageCode, text, tagIds}` — all
+      required; tags are addressed by upstream id, never by name
+      (serenity-docs#24), and the payload is treated as the full next
+      state. Clients always have the current text/tagIds available
+      locally (from the list call that rendered the edit form), which
+      keeps this endpoint a single straight line and avoids the
+      per-request pagination "preserve-on-omit" semantics would force.
+
+      The edit is applied IN PLACE upstream (serenity-docs#63): the text
+      and the tag set are written without deleting the prompt, so the
+      response echoes the UNCHANGED `semrushPromptId` and anything keyed
+      to that id survives the edit. A `text` that exactly matches a
+      DIFFERENT prompt's text in the same slice is refused with 409
+      `conflict`, with nothing changed upstream. The edit lands in the
+      upstream draft layer and is published as part of the request (same
+      publish contract as create).
+    operationId: updateSerenityPrompt
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityUpdatePromptRequest' }
+    responses:
+      '200':
+        description: Prompt updated successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPrompt' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, slice, or prompt not found, or serenity is not active for the organization.
+      '409':
+        description: The new text exactly matches a different prompt's text in this slice; nothing was changed upstream.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompts-bulk-delete:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Bulk-delete Serenity prompts
+    description: |
+      Body shape:
+      `{ prompts: [{semrushPromptId, geoTargetId, languageCode}, ...] }`.
+      The server resolves each row's owning upstream project from the slice
+      and batches deletes per project. Upstream 404 is idempotent success.
+      Uses POST instead of DELETE because the body-data middleware does not
+      parse DELETE request bodies (see ADR-001).
+    operationId: bulkDeleteSerenityPrompts
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityBulkDeletePromptsRequest' }
+    responses:
+      '200':
+        description: Bulk-delete completed.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityBulkDeletePromptsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Markets ──────────────────────────────────────────────────────────────────
+
+v2-serenity-markets:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List markets configured for a brand
+    description: |
+      Returns the brand's (geoTargetId, languageCode) slices. The presence
+      of a row is the contract that the market is active.
+    operationId: listSerenityMarkets
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Markets retrieved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarketListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Add a new market to a brand
+    description: |
+      Onboards a new (brandId, geoTargetId, languageCode) slice. `market` is
+      an ISO 3166-1 alpha-2 country code resolved server-side to a Geo Target
+      ID; `languageCode` is a BCP-47 primary subtag. The optional `name` is
+      forwarded to the upstream project; it is not echoed back. Strict
+      ordering: upstream create → publish → DB row. A row is written only
+      on full success.
+    operationId: createSerenityMarket
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityCreateMarketRequest' }
+    responses:
+      '201':
+        description: Market created — upstream project published, DB row written.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarket' }
+      '400':
+        description: Bad request (unknown market, malformed languageCode, missing field).
+      '404':
+        description: Organization has no workspace, or serenity is not active for the organization.
+      '409':
+        description: A market already exists for this (brandId, geoTargetId, languageCode) slice.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-market-by-slice:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: geoTargetId
+      in: path
+      required: true
+      description: Google Ads Geo Target ID for the slice.
+      schema: { type: integer, minimum: 1 }
+    - name: languageCode
+      in: path
+      required: true
+      description: BCP-47 primary subtag (lowercase) for the slice.
+      schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+  get:
+    tags: [serenity]
+    summary: Resolve a single market slice (incl. upstream project id)
+    description: |
+      Returns the full detail for one (brandId, geoTargetId, languageCode)
+      slice, including the resolved `semrushProjectId`. This is the single,
+      explicit place the upstream project id crosses the API boundary — the
+      list endpoint stays provider-free (LLMO-5190). The id is exposed only so
+      the embedded Semrush AIO renderer MFE can mount the dashboard for the
+      selected market. A slice with no row returns 404 `marketNotFound` (unlike
+      the list, addressing a specific missing resource is not an empty success).
+    operationId: getSerenityMarket
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Market resolved successfully.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarketDetail' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, workspace, or market slice not found, or serenity is not active for the organization.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      # No 502: this is a pure DB read (findBySlice) with no upstream call —
+      # the only error paths are 400 (validation) and 404 (no row). The
+      # sibling delete: legitimately has a 502 because it calls upstream.
+      '500': { $ref: './responses.yaml#/500' }
+  delete:
+    tags: [serenity]
+    summary: Remove a market from a brand
+    description: |
+      Idempotent: missing slice returns 204. Ordering: upstream DELETE (404
+      treated as already-gone success) → DB row delete → 204. Upstream
+      non-404 failure → 502, row stays. **Caller responsibility:** confirm
+      with the user before invoking — the linked upstream project (and all
+      its prompts) are permanently destroyed.
+    operationId: deleteSerenityMarket
+    security:
+      - ims_key: []
+    responses:
+      '204':
+        description: Market removed (or never existed; idempotent).
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '500': { $ref: './responses.yaml#/500' }
+      '502':
+        description: Upstream non-404 failure; DB row was NOT removed.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+
+# ─── Tags & Models (per-slice) ────────────────────────────────────────────────
+
+v2-serenity-tags:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List tags for one slice
+    description: |
+      Unique tag set across the slice's prompts. When the `parentId` query param
+      is present (even empty), the read instead returns one level of the nested
+      category TREE: `parentId=''` returns the root categories (each with
+      `childrenCount`), a tag id returns that category's children (each with a
+      `path[]` breadcrumb). The tree view reads the draft layer so a just-created
+      category is visible before the project is published.
+    operationId: listSerenityTags
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+      - name: parentId
+        in: query
+        required: false
+        description: |
+          Present (even empty) → nested TREE read at this level: `''` lists the
+          roots, an upstream tag id lists that tag's children. Absent → the flat,
+          prompt-derived tag set.
+        schema: { type: string }
+    responses:
+      '200':
+        description: Tags retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityTagListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  post:
+    tags: [serenity]
+    summary: Create (or, for a closed dimension, resolve) a tag on one market
+    description: |
+      Registers a BARE-NAMED prompt tag on the market addressed by the
+      `(geoTargetId, languageCode)` slice. Every tag is a descendant of one of
+      the four dimension roots (`category`, `intent`, `source`, `type`); a tag's
+      dimension is that root ancestor, never a prefix on its name. `type` names
+      the dimension the value belongs to, and `name` must not contain `:` nor
+      shadow a dimension root's name.
+
+      `category` is the one OPEN dimension: its values are customer-authored. A
+      duplicate name under the same parent is a hard upstream error, so
+      resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
+      value directly under the `category` root; pass an upstream tag id (from a
+      prior tags list) to nest it under an existing category as a sub-category.
+      The "Categories" view is the `category` root's subtree across a brand's
+      markets.
+
+      `intent` / `source` / `type` are CLOSED dimensions with a fixed value enum:
+      `name` must be one of that enum's values, and `parentId` is not accepted
+      because their values are always direct children of the dimension root. A
+      closed-dimension create is resolve-OR-create (idempotent): if the project
+      already carries that value its existing id is returned (200,
+      `created: false`) instead of attempting another create.
+
+      The four dimension roots are provisioned on demand, so a project that
+      predates this taxonomy is brought forward by the first write to it.
+    operationId: createSerenityTag
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [type, name, geoTargetId, languageCode]
+            additionalProperties: false
+            properties:
+              type:
+                type: string
+                enum: [category, intent, source, type]
+                description: The tag's dimension. `category` is open (customer-authored); `intent`/`source`/`type` are closed (fixed enum).
+              name:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: |
+                  A BARE value — no dimension prefix. Must not contain ':' and
+                  must not be one of the reserved dimension root names
+                  (`category`, `intent`, `source`, `type`). For a closed
+                  dimension it must exactly match one of that dimension's fixed
+                  enum values.
+              geoTargetId:
+                type: integer
+                minimum: 1
+                description: Google Ads Geo Target ID of the market slice.
+              languageCode:
+                type: string
+                pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+                description: BCP-47 primary subtag of the market slice.
+              parentId:
+                type: [string, 'null']
+                description: |
+                  Optional upstream tag id (from a prior tags list) to nest the
+                  new OPEN-dimension value under as a sub-category. Omit, or
+                  pass explicit JSON `null`, to hang it directly under the
+                  `category` dimension root — never at the root level, which is
+                  reserved for the four dimension roots. Not allowed for a
+                  closed dimension.
+    responses:
+      '200':
+        description: Closed-dimension value resolved (already existed or was just created — see `created`).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brandId: { type: string, format: uuid }
+                geoTargetId: { type: integer }
+                languageCode: { type: string }
+                type: { type: string, enum: [intent, source, type] }
+                name: { type: string, description: The bare value. }
+                id: { type: string, description: The tag's upstream id. }
+                parentId:
+                  type: string
+                  description: The dimension root's id — a closed value is always a direct child of its root.
+                created:
+                  type: boolean
+                  description: 'true if this call created the value; false if it already existed.'
+      '201':
+        description: OPEN-dimension value registered on the market's project.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brandId: { type: string, format: uuid }
+                geoTargetId: { type: integer }
+                languageCode: { type: string }
+                type: { type: string, enum: [category] }
+                name: { type: string, description: The bare value. }
+                id:
+                  type: string
+                  description: The created tag's upstream id.
+                parentId:
+                  type: string
+                  description: |
+                    The parent tag's id: the `category` dimension root for a
+                    category, or the enclosing category for a sub-category.
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or the (geoTargetId, languageCode) market not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Nested-tag edit (rename / re-parent) ─────────────────────────────
+
+v2-serenity-tag-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: tagId
+      in: path
+      required: true
+      description: Upstream AIO tag id (from a prior tags list).
+      schema:
+        type: string
+  patch:
+    tags: [serenity]
+    summary: Rename and/or re-parent a tag
+    description: |
+      Updates a single AIO tag in place on the market addressed by the
+      `(geoTargetId, languageCode)` slice — renames it and/or re-parents it under
+      another tag. `name` is required on every call and is always BARE: a tag's
+      dimension is its root ancestor, not a prefix on its name, and a name may
+      not shadow a dimension root's name.
+
+      `parentId` names a re-parent target. Omitting it leaves the parent
+      unchanged, which the proxy honours by resolving the tag's CURRENT parent
+      and RE-SENDING it upstream — an upstream PATCH that omits `parent_id`
+      silently PROMOTES the tag to a root, stranding it outside its dimension
+      while every carrying prompt stays attached. Explicit JSON `null` is
+      rejected with a 400: the root level is reserved for the four dimension
+      roots, so a tag can never legally become one.
+
+      A re-parent stays inside the tag's own dimension, and the new parent may
+      not be the tag itself or one of its descendants (400). Upstream stores a
+      parent pointer rather than a tree and would accept such an edge, leaving
+      the tag and its subtree reachable from no root — and so unreachable and
+      unrepairable through this API.
+
+      The four dimension roots themselves cannot be renamed or re-parented
+      (400) — doing so would leave their whole subtree without a dimension. A
+      closed dimension's value cannot be renamed or re-parented either: its
+      vocabulary is fixed.
+    operationId: updateSerenityTag
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name, geoTargetId, languageCode]
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: |
+                  The tag's new BARE name — no dimension prefix. Must not
+                  contain ':' and must not be one of the reserved dimension root
+                  names (`category`, `intent`, `source`, `type`).
+              parentId:
+                type: string
+                description: |
+                  An upstream tag id RE-PARENTS this tag under it. Omit the
+                  field to leave the parent unchanged — the proxy resolves the
+                  tag's current parent and re-sends it upstream rather than
+                  omitting it, which would promote the tag to a root. Explicit
+                  JSON `null` is rejected (400). Must resolve to a tag on this
+                  market, inside the tag's own dimension, and must be neither the
+                  tag itself nor one of its descendants.
+              geoTargetId:
+                type: integer
+                minimum: 1
+                description: Google Ads Geo Target ID of the market slice.
+              languageCode:
+                type: string
+                pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+                description: BCP-47 primary subtag of the market slice.
+    responses:
+      '200':
+        description: Tag updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brandId: { type: string, format: uuid }
+                geoTargetId: { type: integer }
+                languageCode: { type: string }
+                tagId: { type: string }
+                name:
+                  type: string
+                  description: The tag's bare name after the update.
+                parentId:
+                  type: string
+                  description: The tag's parent id after the update.
+      '400':
+        description: |
+          Malformed body, a name carrying ':' or shadowing a dimension root, an
+          explicit null `parentId`, a `parentId` outside the tag's dimension or
+          inside the tag's own subtree, or a PATCH targeting a dimension root or
+          a closed dimension's value.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '404':
+        description: |
+          Organization, brand, the (geoTargetId, languageCode) market, or the
+          `tagId` itself — an id absent from the project's tag tree answers
+          `tagNotFound` rather than being forwarded upstream, because without the
+          tag's current parent there is no request body that preserves it.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Brand activation (sub-workspace mode) ────────────────────────────
+
+v2-serenity-activate:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Activate a brand into sub-workspace mode
+    description: |
+      Ensures the brand has its own resourced Semrush sub-workspace (creating
+      it on first call and persisting `brands.semrush_workspace_id`, which flips
+      the brand into sub-workspace mode), then per supplied market creates-or-resumes a
+      draft and publishes it once. Markets are caller-supplied (reactivation
+      re-supplies them — there is no stored market memory); a pending (draft)
+      brand falls back to its stashed `pending_semrush_provisioning`. Idempotent on
+      the workspace; per-market it is 409-safe (an already-live slice is reported,
+      not duplicated).
+
+      A primary URL/domain is REQUIRED to activate. Activation resolves the primary
+      domain's Site and sets it as the brand's base site (`brands.site_id`) in the
+      same write that flips status — so an active brand is always site-anchored, the
+      same contract as a non-Serenity brand. A pending brand with no primary URL
+      therefore cannot be activated: it stays pending and the response is a 400. (An
+      already-active brand re-supplying no URL is a no-op reactivation.) With a domain
+      but no market, a single US/EN fallback project is provisioned. `generatePrompts`
+      (body, else stash, else false) decides whether topics/prompts are generated for
+      the provisioned project(s); it requires a domain, so true with no domain is a 400.
+
+      ALL-OR-NOTHING: the brand flips to `active` (HTTP 200) only when the FULL
+      chain succeeds — sub-workspace ensured, EVERY market's project live, the
+      brand linked to its sub-workspace, AND every project mirrored as a Site
+      (`brand_sites` type=`serenity`). If ANY step fails, a pending brand STAYS
+      pending and the response is HTTP 502 (its stash + workspace pointer are kept
+      intact; retry converges idempotently). An already-active brand re-supplying
+      markets is never downgraded (a partial failure is reported as 207).
+    operationId: activateSerenityBrand
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityActivateRequest' }
+    responses:
+      '200':
+        description: Full chain succeeded; brand set `active`. Body lists per-market outcomes.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+      '207':
+        description: >-
+          An already-active brand re-supplied markets and at least one failed; the
+          brand is NOT downgraded (stays `active`). Body lists per-market outcomes.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or parent workspace not found, or serenity is not active for the organization.
+      '409':
+        description: >-
+          Either (a) the primary domain is already another active brand's primary
+          site (`brands_base_site_unique`): the brand STAYS `pending` and the body
+          carries `error: serenityActivationSiteConflict` plus the per-market
+          outcomes — the operator must choose a different primary URL; or (b)
+          misconfiguration: the brand's sub-workspace equals the organization parent
+          workspace (refused to avoid acting on the shared parent pool).
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - { $ref: './schemas.yaml#/SerenityActivateResponse' }
+                - { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: >-
+          Incomplete activation — a pending (draft) brand's provisioning chain did
+          not fully complete (a market failed, or markets are live but could not be
+          linked as Sites). The brand STAYS `pending`; the body carries
+          `error`/`message` and the per-market outcomes so the caller can retry.
+          Also returned when an upstream call returns a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-deactivate:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Deactivate a brand (decommission its sub-workspace)
+    description: |
+      Decommissions the brand's sub-workspace: deletes every project and
+      releases the allocation back to the parent pool, then DISCONNECTS the
+      brand by clearing its `semrush_workspace_id` pointer. The sub-workspace
+      itself is never deleted (it is left empty and unowned); a future activate
+      allocates a fresh one. Sets the brand status to `pending`. No-op (200) for
+      a brand with no sub-workspace. Convergent and idempotent.
+    operationId: deactivateSerenityBrand
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Brand decommissioned (or already had no sub-workspace); status pending.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityDeactivateResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization or brand not found, or serenity is not active for the organization.
+      '409':
+        description: >-
+          Refused to protect dependents: the brand's sub-workspace equals the
+          organization parent workspace, or it still has active linked (child)
+          sub-workspaces. Decommission would empty/release a shared or
+          depended-on pool, so it is blocked.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-models:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List AI models
+    description: |
+      Two modes depending on whether slice filters are provided:
+
+      **Slice mode** (`geoTargetId` + `languageCode` both present): returns the
+      AI models configured for that slice's upstream project. `key` is the
+      value the Reporting API expects as `CBF_model`.
+
+      **Catalog mode** (neither param present): returns the global catalog of
+      ALL AI models available for tracking via `GET /v1/ai_models` (not
+      workspace-scoped). Falls back to an empty list if the upstream endpoint
+      is unavailable. Use this to populate "available models" selectors in the
+      UI before a market is configured.
+
+      Providing exactly one of the two params returns 400.
+    operationId: listSerenityModels
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: false
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    responses:
+      '200':
+        description: Models retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  put:
+    tags: [serenity]
+    summary: Replace the AI-model set for one slice
+    description: |
+      Diff-based sync of the AI models tracked for a (geoTargetId, languageCode)
+      slice: models absent from `modelIds` are removed, models present but not
+      yet assigned are added, already-assigned models are left untouched.
+      `modelIds` are catalog model ids (the `id` from `GET /serenity/models`),
+      NOT assignment-row ids. Duplicates are de-duplicated; the slice's project
+      is published after any change so the new set goes live. Returns the final
+      model list in the same shape as `GET`.
+    operationId: updateSerenityModels
+    security:
+      - ims_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityUpdateModelsRequest' }
+    responses:
+      '200':
+        description: Model set updated; returns the final list.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, workspace, or market slice not found, or serenity is not active for the organization.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-org-models:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List the global AI-model catalog (org-level)
+    description: |
+      Returns the global catalog of ALL AI models available for tracking
+      (`GET /v1/ai_models`, not workspace-scoped) — the brand-independent
+      catalog used to populate "available models" selectors before any brand or
+      market is configured. Falls back to an empty list if the upstream endpoint
+      is unavailable. Org access is enforced; IMS authentication is required.
+    operationId: listSerenityOrgModels
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Models retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityModelListResponse' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-org-languages:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: List the supported Semrush language catalog (org-level)
+    description: |
+      Returns the languages Semrush AIO supports (`GET /v1/languages`), so the
+      UI only offers languages the gateway accepts (an unsupported language is
+      rejected at create time). Each item carries the catalog `id` (nullable)
+      and the English `name` used as the resolution key. Tolerates a 404/405
+      from the upstream by returning an empty list. Org access is enforced; IMS
+      authentication is required.
+    operationId: listSerenityOrgLanguages
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Languages retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityLanguageListResponse' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found.
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-url-inspector-filter-dimensions:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Filter dimensions for the Serenity URL Inspector dashboard
+    description: |
+      Returns the option universe for the URL Inspector Brand/Region/Topic/
+      Category/Intent/Origin filter dropdowns, sourced from the Semrush Brands,
+      Markets, and Topics elements (not from Adobe Postgres). Unlike the
+      cascading `/brand-presence/filter-dimensions` endpoint, this read is not
+      itself filtered by any of the dimensions it returns — it defines what
+      those dropdowns can show.
+
+      `topics`/`categories`/`page_intents`/`origins` are derived from the same
+      underlying Topics element response, split apart by their `topic__`/
+      `category__`/`intent__`/`source__` tag prefix. Any other tag prefix Semrush
+      introduces later (e.g. `type__branded`) surfaces automatically as an extra
+      array property keyed by that prefix. Bare prefix declarations with no
+      value (e.g. a lone `category` row) are ignored — see
+      `SerenityUrlInspectorFilterDimensions`.
+    operationId: listSerenityUrlInspectorFilterDimensions
+    security:
+      - ims_key: []
+    parameters:
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope brands/topics to. Accepts a Semrush Elements model
+          name directly, or a SpaceCat/UI platform code (translated
+          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: projectId
+        in: query
+        required: false
+        description: Semrush project UUID to scope the Topics element to a specific market.
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Filter dimensions retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityUrlInspectorFilterDimensions' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-brand-presence-sentiment-overview:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Per-week brand sentiment for the Serenity brand presence dashboard
+    description: |
+      Returns per-week brand sentiment (positive/neutral/negative percentages)
+      sourced from the Semrush Sentiment element (not Adobe Postgres), rolled up
+      from daily rows into ISO weeks. Emits the legacy `sentiment-overview`
+      contract verbatim so the existing chart consumes it drop-in — absolute
+      values differ from the Postgres-backed legacy endpoint, but the shape and
+      `sentiment[]` ordering/colors are identical.
+
+      Brand-scoped via the brand's Semrush sub-workspace (resolved from `:brandId`);
+      `region` (when not `all`) is resolved to a Semrush `project_id` server-side,
+      `category` becomes a `category__<label>` tag, and `model`/`platform` are
+      translated to a Semrush model server-side.
+    operationId: listSerenityBrandPresenceSentimentOverview
+    security:
+      - ims_key: []
+    parameters:
+      - name: startDate
+        in: query
+        required: true
+        description: Inclusive range start (YYYY-MM-DD). Range must not exceed 366 days.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: true
+        description: Inclusive range end (YYYY-MM-DD). Range must not exceed 366 days.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope sentiment to. Accepts a Semrush Elements model name
+          directly, or a SpaceCat/UI platform code (translated server-side).
+          Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: region
+        in: query
+        required: false
+        description: |
+          UI region code (e.g. `US`) resolved server-side to a Semrush
+          `project_id`. `all` or omitted → aggregate across the brand's markets.
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: |
+          Category label sent to Semrush as a `category__<label>` tag. `category`
+          is accepted as an alias.
+        schema: { type: string }
+    responses:
+      '200':
+        description: Weekly sentiment retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityBrandPresenceSentimentOverview' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or no Semrush market resolves for the requested region.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not available (required to resolve the brand's Semrush workspace before the element call).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-brand-presence-stats:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Aggregated Brand Presence KPI stats for a brand
+    description: |
+      Elements-backed equivalent of the Postgres-RPC `/brand-presence/stats`
+      endpoint. Returns rolled-up KPI numbers (total executions, average
+      visibility score, total mentions, total citations) for the selected date
+      range, sourced from the Semrush Total Executions, Mentions, Visibility,
+      and Citations elements. Optionally includes per-week trend data
+      (`trends`) for sparklines, split backward from `endDate` into up to 8
+      7-day weeks.
+
+      The effective `[startDate, endDate]` range (after defaulting) must not
+      exceed 56 days (8 weeks) — matching the Brand Presence date picker's
+      maximum selectable range and the trends fan-out cap; a wider range 400s.
+
+      `categoryId`/`categoryIds`, `topicIds`, `origin`, `userIntent`, and
+      `promptBranding` are accepted by the reference Postgres-backed endpoint
+      but are not yet supported here — the Elements API has no confirmed
+      filter equivalent for them today; they are currently no-ops.
+    operationId: getSerenityBrandPresenceStats
+    security:
+      - ims_key: []
+    parameters:
+      - name: startDate
+        in: query
+        required: false
+        description: Range start (YYYY-MM-DD). Defaults to 28 days before today.
+        schema: { type: string, format: date }
+      - name: start_date
+        in: query
+        required: false
+        description: Snake_case alias for `startDate`.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: Range end (YYYY-MM-DD). Defaults to today.
+        schema: { type: string, format: date }
+      - name: end_date
+        in: query
+        required: false
+        description: Snake_case alias for `endDate`.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope stats to. Accepts a Semrush Elements model name
+          directly, or a SpaceCat/UI platform code (translated server-side).
+          Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: siteId
+        in: query
+        required: false
+        description: Must resolve to the same brand as `:brandId`; 400 if it belongs to a different brand. Used only as a cross-check — does not itself narrow the Semrush query.
+        schema: { type: string, format: uuid }
+      - name: site_id
+        in: query
+        required: false
+        description: Snake_case alias for `siteId`.
+        schema: { type: string, format: uuid }
+      - name: regionCode
+        in: query
+        required: false
+        description: |
+          One region+language code (e.g. `US`). Resolves to a single Semrush
+          project via the Markets element; 404 if it doesn't match any of the
+          brand's markets. When omitted, aggregates across every project the
+          brand owns.
+        schema: { type: string }
+      - name: region_code
+        in: query
+        required: false
+        description: Snake_case alias for `regionCode`.
+        schema: { type: string }
+      - name: region
+        in: query
+        required: false
+        description: Alias for `regionCode`.
+        schema: { type: string }
+      - name: showTrends
+        in: query
+        required: false
+        description: When truthy (`true`/`1`), includes the weekly `trends` array.
+        schema: { type: string }
+      - name: show_trends
+        in: query
+        required: false
+        description: Snake_case alias for `showTrends`.
+        schema: { type: string }
+    responses:
+      '200':
+        description: Brand Presence stats retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityBrandPresenceStats' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, `regionCode` doesn't match any Semrush market, or (when no `regionCode` is given) the brand has no Semrush projects configured at all.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-market-tracking-trends:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Weekly Market Tracking Trends for the Brand Presence Competitor Comparison chart
+    description: |
+      Returns a weekly time series of mentions and citations for the tracked
+      brand and each of its competitors, sourced from two Semrush Elements
+      (Trends Mentions/Visibility + Market Tracking citations) — not from Adobe
+      Postgres. Competitors are the brand's tracked Semrush benchmarks; they are
+      returned automatically (no competitor list input). Each entry is one ISO
+      week; the brand's own totals are at the top level and each competitor is an
+      entry in `competitors`. See `SerenityMarketTrackingTrends`.
+
+      Date range is optional and defaults to a 28-day trailing window. Both
+      `startDate` and `endDate` must be supplied together or not at all — a
+      half-supplied range falls back to the full default as a unit. The resolved
+      span is capped at 366 days (400 otherwise).
+    operationId: listSerenityMarketTrackingTrends
+    security:
+      - ims_key: []
+    parameters:
+      - name: startDate
+        in: query
+        required: false
+        description: |
+          Range start (`YYYY-MM-DD`). Alias `start_date`. Defaults to 28 days
+          before today. Must be supplied together with `endDate` (else both are
+          ignored and the default range is used).
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: Range end (`YYYY-MM-DD`). Alias `end_date`. Defaults to today.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope the trends to. Accepts a Semrush Elements model name
+          directly, or a SpaceCat/UI platform code (translated server-side).
+          Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: regionCode
+        in: query
+        required: false
+        description: |
+          One region+language code (e.g. `US`), resolved to a single Semrush
+          project. Aliases `region_code`, `region`. `all` or absent aggregates
+          across every project the brand owns.
+        schema: { type: string }
+      - name: siteId
+        in: query
+        required: false
+        description: |
+          Optional cross-check: must resolve to the same brand as `:brandId`
+          (400 otherwise). Alias `site_id`. Does not itself narrow the query.
+        schema: { type: string }
+    responses:
+      '200':
+        description: Weekly market tracking trends retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarketTrackingTrends' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }

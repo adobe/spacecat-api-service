@@ -17,6 +17,9 @@ import { CDN_TYPES } from '../controllers/llmo/llmo-utils.js';
 import {
   AEM_CS_FASTLY_CNAME_PATTERNS,
   AEM_CS_FASTLY_IPS,
+  detectAemCsFastlyWafSimpleProxy,
+  EDGE_OPTIMIZE_USER_AGENT,
+  UA_ROUTING_HEADER,
 } from './cdn-detection.js';
 
 // Per-CDN strategies for edge optimize routing.
@@ -42,8 +45,6 @@ export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-m
 // Gives the CDN API time to propagate before Tokowaka detects the change.
 export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
 
-const EDGE_OPTIMIZE_USER_AGENT = 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0';
-const UA_ROUTING_HEADER = 'x-edgeoptimize-request-id';
 const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
 
@@ -67,6 +68,20 @@ export function getHostnameWithoutWww(url, log) {
     log.error(`Error getting hostname from URL ${url}: ${error.message}`);
     throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
   }
+}
+
+/**
+ * Returns true when a site baseURL contains a non-root pathname (e.g. https://example.com/docs).
+ *
+ * @param {string} baseURL - The site base URL.
+ * @returns {boolean} True if the URL has pathname, false otherwise (including unparseable URLs).
+ */
+export function hasSubpath(baseURL) {
+  if (!isValidUrl(baseURL)) {
+    return false;
+  }
+  const { pathname } = new URL(baseURL);
+  return pathname !== '/';
 }
 
 /**
@@ -210,16 +225,14 @@ async function checkHost(host, log) {
 }
 
 /**
- * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly)
- * by checking DNS CNAME and A records.
+ * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly),
+ * including sites where a WAF or reverse proxy hides the Fastly CNAME (Case 0).
  *
- * Returns 'aem-cs-fastly' if the domain resolves to the known CS Fastly
- * CNAME or IP addresses, otherwise returns null. Unlike the broader
- * detectCdnForDomain in cdn-detection.js, this function is AEM-CS-Fastly-only
- * and is meant to be called from edge-routing code paths that branch
- * exclusively on AEM-CS tenancy.
+ * Tries a cheap DNS check first (CNAME + A records). If DNS does not confirm
+ * AEM CS Fastly — e.g. because a WAF CNAME is visible instead — falls back to
+ * the full CDN detector which runs Phase 1.5 HTTP probes for the WAF proxy case.
  *
- * Never throws — DNS failures are treated as undetected.
+ * Returns 'aem-cs-fastly' or null. Never throws.
  *
  * @param {string} domain - Hostname to check (e.g. 'example.com')
  * @returns {Promise<string|null>} 'aem-cs-fastly' or null
@@ -227,9 +240,14 @@ async function checkHost(host, log) {
 export async function detectAemCsFastlyForDomain(domain, log) {
   try {
     log?.info(`[edge-routing-utils] Detecting AEM-CS Fastly for domain ${domain}`);
-    return await checkHost(domain, log);
+    const dnsResult = await checkHost(domain, log);
+    if (dnsResult) {
+      return dnsResult;
+    }
+    // DNS missed — a WAF or reverse proxy may be hiding AEM CS Fastly.
+    // Run Phase 1.5 HTTP probes directly (no Phase 2 — we only care about AEM CS).
+    return await detectAemCsFastlyWafSimpleProxy(domain, log);
   } catch (err) {
-    // DNS errors are treated as undetected — never break callers
     log?.error('detectAemCsFastlyForDomain error', err);
   }
   return null;

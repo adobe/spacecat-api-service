@@ -31,6 +31,7 @@ import {
   isNonEmptyObject,
   canonicalizeUrl,
   composeBaseURL,
+  getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -38,16 +39,98 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { SiteDto } from '../dto/site.js';
+import { SiteIdentityDto } from '../dto/site-identity.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
+import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
+import { detectedCdnPatchGuard } from '../support/detected-cdn-validation.js';
+import { updateRumConfig } from '../support/rum-config-service.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
+import {
+  ensureSiteEntitlementAndEnrollment,
+  logSiteOrphanedAfterCreate,
+  resolveProductCode,
+} from '../support/tier-provisioning.js';
+import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
+import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
+
+/**
+ * Builds the standard resolve-site success payload.
+ */
+async function buildResolveData(org, site, context) {
+  const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+  return {
+    organization: OrganizationDto.toJSON(org),
+    site: SiteDto.toJSON(site),
+    isSummitPlgEnabled,
+  };
+}
+
+/**
+ * Resolves the org's per-product default site from config.defaults, validating it belongs
+ * to the org and is enrolled. Returns the resolved data object or null to fall through
+ * to getFirstEnrollment().
+ * @param {object} org - Organization model instance.
+ * @param {string} productCode - Product code from x-product header.
+ * @param {object} context - Request context.
+ * @param {object} ctx - Controller context (provides dataAccess.Site and log).
+ * @param {object} accessControlUtil - Access control utility for admin access checks.
+ * @returns {Promise<object|null>} Resolved data or null.
+ */
+// eslint-disable-next-line max-params
+export async function resolveOrgDefaultSite(org, productCode, context, ctx, accessControlUtil) {
+  const { dataAccess: { Site }, log } = ctx;
+  try {
+    const defaultSiteId = org.getConfig()?.getDefaults()?.[productCode]?.siteId;
+    if (!hasText(defaultSiteId) || !isValidUUID(defaultSiteId)) {
+      return null;
+    }
+
+    const defaultSite = await Site.findById(defaultSiteId);
+    if (!defaultSite) {
+      log.warn(
+        `[resolveSite] stale config.defaults entry: site ${defaultSiteId} not found for org ${org.getId()} product ${productCode}`,
+      );
+      return null;
+    }
+    if (defaultSite.getOrganizationId() !== org.getId()) {
+      log.warn(
+        `[resolveSite] config.defaults cross-org mismatch: site ${defaultSiteId} belongs to org ${defaultSite.getOrganizationId()}, not ${org.getId()} — falling back`,
+      );
+      return null;
+    }
+
+    const siteTierClient = await TierClient.createForSite(context, defaultSite, productCode);
+    const { entitlement, enrollments } = await siteTierClient.getAllEnrollment();
+
+    if (!entitlement || !enrollments?.length) {
+      return null;
+    }
+
+    const isVisibleTier = CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+    if (!isVisibleTier && !accessControlUtil.hasAdminAccess()) {
+      return null;
+    }
+
+    return buildResolveData(org, defaultSite, context);
+  } catch (e) {
+    log.warn(
+      `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
+      e,
+    );
+    return null;
+  }
+}
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -63,6 +146,9 @@ const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 500;
+const DEFAULT_LIMIT = 100;
+const SEARCH_DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 500;
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -268,7 +354,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, Organization, Site,
+    Audit, Organization, PlgOnboarding, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -287,41 +373,80 @@ function SitesController(ctx, log, env) {
    *
    * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
    *
+   * Write-time tier provisioning: when a site is newly created, it ensures org entitlement and
+   * site enrollment via TierClient using the existing tier when present, otherwise FREE_TRIAL.
+   * Idempotent re-POSTs do not run provisioning.
+   * Provisioning failures return 500 with `event=site_orphaned_after_create`.
+   *
    * @param {object} context - Request context containing site data
    * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
    */
   const createSite = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create new sites');
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    if (!isAdmin) {
+      const s2sResult = await accessControlUtil.hasS2SCapability(CAP_SITE_CREATE);
+      if (!s2sResult.allowed) {
+        log.info(`[acl] Denied POST /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
+        return forbidden('Only admins can create new sites');
+      }
     }
     if (!hasText(context.data?.baseURL)) {
       return badRequest('Base URL required');
     }
+    const { productCode, error: productCodeError } = resolveProductCode(context);
+    if (productCodeError) {
+      return badRequest(productCodeError);
+    }
+    let site;
+    let status;
     try {
       const baseURL = composeBaseURL(context.data.baseURL);
       const existingSite = await Site.findByBaseURL(baseURL);
       if (existingSite) {
         // Idempotent behavior: return existing site with 200 (not 409)
         log.info(`Site already exists for baseURL: ${baseURL}, returning existing site ${existingSite.getId()}`);
-        return createResponse(SiteDto.toJSON(existingSite), 200);
+        site = existingSite;
+        status = 200;
+      } else {
+        site = await Site.create({
+          organizationId: env.DEFAULT_ORGANIZATION_ID,
+          ...context.data,
+          baseURL, // override with normalized value
+        });
+        updateRumConfig(site, context).catch((e) => {
+          log.warn(`[sites] RUM config update failed for ${site.getBaseURL()}: ${e.message}`);
+        });
+        status = 201;
       }
-      const site = await Site.create({
-        organizationId: env.DEFAULT_ORGANIZATION_ID,
-        ...context.data,
-        baseURL, // override with normalized value
-      });
-      return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {
       log.error(`Error creating site: ${error.message}`, error);
       return internalServerError('Failed to create site');
     }
+
+    if (productCode && status === 201) {
+      try {
+        await ensureSiteEntitlementAndEnrollment(context, site, productCode, log);
+      } catch (error) {
+        logSiteOrphanedAfterCreate(log, site, productCode, error);
+        return internalServerError('Failed to ensure entitlement/enrollment for site');
+      }
+    }
+
+    return createResponse(SiteDto.toJSON(site), status);
   };
 
   /**
-   * Gets all sites. Accessible to admin callers (legacy admin path) and to S2S
-   * consumers that hold the `site:readAll` capability - see
+   * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
+   * and to S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
-   * @returns {Promise<Response>} Array of sites response.
+   *
+   * Optional `baseUrlContains` query param: when provided (3-256 chars after trim),
+   * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
+   * `{ sites, pagination: { limit, offset, hasMore, baseUrlContains } }` response. The
+   * trimmed query is echoed back in `pagination.baseUrlContains` so a client can confirm
+   * its search was applied even if it hits an older deployment that ignores the param.
+   * LIKE wildcards in the input are escaped so callers cannot inject their own wildcards.
+   * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
     const requestId = context?.invocation?.id || 'unknown';
@@ -336,24 +461,175 @@ function SitesController(ctx, log, env) {
       return forbidden('Forbidden: admin access or site:readAll capability required');
     }
 
-    // TODO: implement proper pagination or filtering to stay under AWS Lambda
-    // response size limits (6MB). Currently excluding the two non customer facing orgs as
-    // a temporary workaround to avoid 413 responses.
-    const EXCLUDED_ORG_IDS = [
-      env.DEFAULT_ORGANIZATION_ID,
-      env.ORGANIZATION_ID_FRIENDS_FAMILY,
-    ];
+    const limitParam = context?.data?.limit;
+    const cursor = context?.data?.cursor || null;
 
-    const all = await Site.all({}, { fetchAllPages: true });
-    const sites = all
-      .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toListJSON(site));
+    // Optional substring search by base URL. Runs after the authz check (so
+    // unauthorized callers still get 403) and before the cursor/legacy branches.
+    const baseUrlContains = context?.data?.baseUrlContains;
+    if (hasText(baseUrlContains) && hasText(cursor)) {
+      // The public search path paginates via offset, not the client cursor;
+      // accepting both would silently discard the cursor and mislead the client
+      // into thinking cursor pagination is active. Reject the combination explicitly.
+      return badRequest('cursor is not supported with baseUrlContains; use offset');
+    }
+    if (hasText(baseUrlContains)) {
+      const q = baseUrlContains.trim();
+      if (q.length < 3) {
+        return badRequest('baseUrlContains must be at least 3 characters');
+      }
+      if (q.length > 256) {
+        return badRequest('baseUrlContains exceeds maximum length');
+      }
+
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : SEARCH_DEFAULT_LIMIT;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+
+      const offsetParam = context?.data?.offset;
+      const offset = hasText(offsetParam) ? parseInt(offsetParam, 10) : 0;
+      if (!Number.isInteger(offset) || offset < 0) {
+        return badRequest('offset must be a non-negative integer');
+      }
+
+      // Escape LIKE special chars so user input cannot inject its own wildcards.
+      const escaped = q.replace(/([\\%_])/g, '\\$1');
+
+      // The data-access layer paginates by an offset-encoded cursor (postgrest.utils
+      // encodeCursor); it exposes no public `offset` option, so we build the same
+      // shape here. If a direct offset option is ever added upstream, switch to it.
+      const offsetCursor = Buffer.from(JSON.stringify({ offset }), 'utf-8').toString('base64');
+
+      // Fetch one extra row to detect whether more results exist beyond the limit.
+      // The data-access `where` builder passes (attrs, op): `attrs` maps model
+      // fields to DB columns, `op` carries the operators. (NOT `s => s.ilike(...)`.)
+      let rows;
+      try {
+        rows = await Site.all({}, {
+          where: (attr, op) => op.ilike(attr.baseURL, `%${escaped}%`),
+          limit: effectiveLimit + 1,
+          cursor: offsetCursor,
+          order: 'asc',
+        });
+      } catch (e) {
+        // Re-throw so the framework still returns a 500 — the point here is a
+        // searchable, prefixed log line, not swallowing the error.
+        log.error(`[sites][baseUrlContains] query failed requestId=${requestId}`, e);
+        throw e;
+      }
+      let list;
+      if (Array.isArray(rows)) {
+        list = rows;
+      } else if (Array.isArray(rows?.data)) {
+        list = rows.data;
+      } else {
+        log.warn(`[sites][baseUrlContains] unexpected Site.all shape; returning empty requestId=${requestId}`);
+        list = [];
+      }
+      const hasMore = list.length > effectiveLimit;
+      const sites = list.slice(0, effectiveLimit).map((site) => SiteDto.toListJSON(site));
+
+      if (s2sResult.allowed) {
+        log.info(`[s2s-readall] GET /sites (baseUrlContains) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+      }
+
+      // Unconditional observability for both admin and S2S paths. Never log the raw
+      // query value (URLs may be sensitive) — only its length and result counts.
+      log.info(`[sites][baseUrlContains] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
+
+      const { list: projectedSites, error: fieldsError } = applyFieldProjection(
+        sites,
+        context?.data?.fields,
+      );
+      if (fieldsError) {
+        return badRequest(fieldsError);
+      }
+
+      // Echo the trimmed query in the pagination so a new client can confirm its
+      // search was actually applied. An older deployment that ignores `baseUrlContains`
+      // but still honors `limit` would return the cursor envelope with unfiltered
+      // sites and no `baseUrlContains` echo — letting clients detect the version skew.
+      return ok({
+        sites: projectedSites,
+        pagination: {
+          limit: effectiveLimit, offset, hasMore, baseUrlContains: q,
+        },
+      });
+    }
+
+    const paginated = hasText(limitParam) || hasText(cursor);
+
+    if (cursor !== null) {
+      if (typeof cursor !== 'string') {
+        return badRequest('cursor must be a string');
+      }
+      if (cursor.length > 256) {
+        return badRequest('cursor exceeds maximum length');
+      }
+    }
+
+    let sites;
+    let responseBody;
+
+    if (paginated) {
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+
+      const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
+      if (!Array.isArray(results?.data)) {
+        log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+        sites = [];
+        responseBody = {
+          sites,
+          pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
+        };
+      } else {
+        sites = results.data.map((site) => SiteDto.toListJSON(site));
+        responseBody = {
+          sites,
+          pagination: {
+            limit: effectiveLimit,
+            // `|| null` (not `??`) so an empty-string cursor normalizes to null,
+            // staying consistent with `hasMore: !!results.cursor` below.
+            cursor: results.cursor || null,
+            hasMore: !!results.cursor,
+          },
+        };
+      }
+    } else {
+      // TODO: remove this legacy branch once Coralogix shows zero hits on
+      // [sites][legacy-shape] for 30 consecutive days.
+      // legacy: no limit/cursor params -> flat array for backwards comp.
+      // keep the default + friends-and-family exclusion on this path to stay
+      // under the 6MB Lambda response limit until consumers migrate to pagination.
+      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || (isAdmin ? 'admin-bypass' : 'unknown-s2s')}`);
+      const excludedOrgIds = [
+        env.DEFAULT_ORGANIZATION_ID,
+        env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      ];
+      const all = await Site.all({}, { fetchAllPages: true });
+      sites = all
+        .filter((site) => !excludedOrgIds.includes(site.getOrganizationId()))
+        .map((site) => SiteDto.toListJSON(site));
+      responseBody = sites;
+    }
 
     if (s2sResult.allowed) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
-    return ok(sites);
+    const { list, error } = applyFieldProjection(sites, context?.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    responseBody = Array.isArray(responseBody) ? list : { ...responseBody, sites: list };
+
+    return ok(responseBody);
   };
 
   /**
@@ -373,7 +649,11 @@ function SitesController(ctx, log, env) {
 
     const sites = (await Site.allByDeliveryType(deliveryType))
       .map((site) => SiteDto.toJSON(site));
-    return ok(sites);
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -450,7 +730,11 @@ function SitesController(ctx, log, env) {
         const audit = await site.getLatestAuditByAuditType(auditType);
         return SiteDto.toJSON(site, audit);
       }));
-    return ok(result);
+    const { list, error } = applyFieldProjection(result, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -534,6 +818,60 @@ function SitesController(ctx, log, env) {
     }
 
     return ok(SiteDto.toJSON(site));
+  };
+
+  /**
+   * Gets the minimal routing identity for a single site: its id, owning org ids
+   * (internal `organizationId` + `imsOrgId`), baseURL, and deliveryType.
+   *
+   * This is a readAll-class route, not a tenant-scoped one. It exists so a platform
+   * S2S consumer that only holds a site UUID can resolve the site's `imsOrgId` and mint
+   * a customer-scoped token - the `site -> organization` join it cannot perform without
+   * already being scoped. Access mirrors `GET /sites` (admin bypass + `site:readAll`),
+   * NOT `hasAccess(site)`. It exposes strictly less than the bulk `GET /sites` a
+   * `site:readAll` holder can already enumerate. See `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Site identity response.
+   */
+  const getIdentity = async (context) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold site:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /sites/:siteId/identity - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or site:readAll capability required');
+    }
+
+    const siteId = context.params?.siteId;
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    // Resolve imsOrgId via the site -> organization join (the entire value-add of this
+    // route). A site without an organization, an orphaned organizationId, or an org
+    // without an imsOrgId all yield imsOrgId: null with a 200 - the site identity still
+    // exists; it is up to the consumer to treat null as "cannot scope".
+    const organizationId = site.getOrganizationId();
+    const organization = organizationId ? await Organization.findById(organizationId) : null;
+    const imsOrgId = organization ? organization.getImsOrgId() : null;
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites/:siteId/identity granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} siteId=${siteId} requestId=${requestId}`);
+    } else if (isAdmin) {
+      // This is a cross-tenant readAll-class route; log admin access for auditability too.
+      log.info(`[acl] GET /sites/:siteId/identity granted via admin bypass siteId=${siteId} requestId=${requestId}`);
+    }
+
+    return ok(SiteIdentityDto.toJSON(site, imsOrgId));
   };
 
   const getBrandProfile = async (context) => {
@@ -661,6 +999,56 @@ function SitesController(ctx, log, env) {
       return badRequest('Request body required');
     }
 
+    // A site's URL is immutable once it backs a Semrush-managed brand. That brand's
+    // tracked domain lives on its Semrush projects/markets, which have no
+    // domain-update path (the domain is set only at project-create time), so
+    // letting the SpaceCat site URL drift would desync the site from its Semrush
+    // projects. Only the URL is gated here — every other site field stays editable.
+    // The brand lookup runs only when a URL change is actually requested, so the
+    // common patch path (no baseURL) pays no extra query.
+    //
+    // TODO (~2026-07-07): Semrush is expected to support changing a project's
+    // primary URL — which is its main (own-brand, `main_brand: true`) benchmark
+    // domain, see ensureOwnBrandBenchmark in support/serenity/brand-urls.js — in
+    // ~2 weeks (heads-up received 2026-06-23). Once available, relax this guard to
+    // propagate the new URL to each market's main benchmark (and republish) instead
+    // of blocking the edit.
+    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+      const postgrestClient = context.dataAccess?.services?.postgrestClient;
+      if (postgrestClient?.from) {
+        // Two ways a site can back a Semrush-managed brand, both immutable:
+        //  - the brand's OWN primary site (brands.site_id) — getBrandBySite, or
+        //  - a Semrush market mirror linked via brand_sites (type='serenity'),
+        //    which a serenity brand shell (no brands.site_id) reaches ONLY here.
+        // The lookups can throw on a transient PostgREST error; map that to a 5xx
+        // rather than letting it escape this catch-less handler as an opaque 500.
+        let attachedToSemrushBrand = false;
+        try {
+          const attachedBrand = await getBrandBySite(
+            site.getOrganizationId(),
+            site.getId(),
+            postgrestClient,
+            log,
+          );
+          attachedToSemrushBrand = hasText(attachedBrand?.semrushSubWorkspaceId)
+            || await isSemrushMarketMirrorSite(
+              site.getOrganizationId(),
+              site.getId(),
+              postgrestClient,
+            );
+        } catch (lookupError) {
+          log.error('updateSite: failed to resolve Semrush-brand attachment for URL-immutability guard', {
+            siteId: site.getId(),
+            error: lookupError?.message,
+          });
+          return internalServerError('Could not verify whether this site URL is editable; please retry');
+        }
+        if (attachedToSemrushBrand) {
+          return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
+        }
+      }
+    }
+
     let updates = false;
     if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.getIsLive()) {
       site.toggleLive();
@@ -675,6 +1063,16 @@ function SitesController(ctx, log, env) {
     if (hasText(requestBody.organizationId)
       && requestBody.organizationId !== site.getOrganizationId()) {
       return forbidden('Updating organization ID is not allowed');
+    }
+
+    // A projectId references a project record that is itself scoped to an
+    // organizationId. Allowing ad-hoc projectId patches here lets a site point
+    // at a project in a different org, which hides the site from the org's site
+    // picker (SITES-46200). Re-parenting must go through controlled flows
+    // (e.g. PATCH /projects/:projectId), so reject it here like organizationId.
+    if (hasText(requestBody.projectId)
+      && requestBody.projectId !== site.getProjectId()) {
+      return forbidden('Updating project ID is not allowed');
     }
 
     if (requestBody.name !== site.getName()) {
@@ -709,6 +1107,23 @@ function SitesController(ctx, log, env) {
           ...existingConfig.auditTargetURLs,
           ...requestBody.config.auditTargetURLs,
         };
+      }
+      // Deep-merge `llmo` so a partial llmo patch (e.g. { brand } from a lossy
+      // list-DTO round-trip) does not wipe sibling fields like cdnBucketConfig,
+      // questions, cdnlogsFilter, etc. Callers wanting to remove an llmo field
+      // must use the dedicated partial endpoints (e.g. /llmo/cdn-bucket-config).
+      if (requestBody.config?.llmo && existingConfig?.llmo) {
+        merged.llmo = {
+          ...existingConfig.llmo,
+          ...requestBody.config.llmo,
+        };
+      }
+      // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
+      // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
+      // which then re-fails validation on every read.
+      const detectedCdnResult = detectedCdnPatchGuard(requestBody.config, badRequest);
+      if (detectedCdnResult?.error) {
+        return detectedCdnResult.error;
       }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
@@ -767,11 +1182,6 @@ function SitesController(ctx, log, env) {
     }
 
     // Handle localization fields
-    if (requestBody.projectId !== site.getProjectId() && isValidUUID(requestBody.projectId)) {
-      site.setProjectId(requestBody.projectId);
-      updates = true;
-    }
-
     if (isBoolean(requestBody.isPrimaryLocale)
         && requestBody.isPrimaryLocale !== site.getIsPrimaryLocale()) {
       site.setIsPrimaryLocale(requestBody.isPrimaryLocale);
@@ -965,15 +1375,22 @@ function SitesController(ctx, log, env) {
         ),
       ]);
 
+      // Locale-specific sites (e.g. https://example.com/de) have no RUM domain key
+      // of their own — `domain` resolves to the main domain. Narrow the RUM result
+      // to the locale subtree by its path prefix; null for whole-domain sites.
+      const pathPrefix = getBaseURLPathPrefix(site.getBaseURL());
+
       // Fetch current and previous RUM metrics in parallel
       const [current, previous] = await Promise.all([
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: thirtyDaysAgo.toISOString(),
           endTime: todayUTC.toISOString(),
         }),
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: sixtyDaysAgo.toISOString(),
           endTime: thirtyDaysAgo.toISOString(),
         }),
@@ -1109,6 +1526,146 @@ function SitesController(ctx, log, env) {
       log.error(`Error updating CDN logs config for site ${siteId}: ${error.message}`);
       return badRequest('Failed to update CDN logs config');
     }
+  };
+
+  /**
+   * GET /sites/:siteId/config/scraper
+   *
+   * Returns just the per-site scraper configuration. Symmetric with the
+   * PATCH endpoint below — same narrow `{ siteId, scraperConfig }` shape
+   * so a caller writing then reading sees an identical envelope, and the
+   * full site config (which may include unrelated secrets such as
+   * `tokowakaConfig.apiKey`) is never echoed to a caller that only needs
+   * `scraperConfig`.
+   *
+   * Returns `scraperConfig: {}` when nothing is persisted yet, so callers
+   * don't need to handle a separate "missing" case.
+   */
+  const getScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid site ID');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can read its sites');
+      }
+
+      // Defensive optional chain: `??` only protects the innermost return value.
+      // `getConfig()` itself can be null (matches `getBrandProfile` precedent on
+      // sites without a persisted config row), and `getScraperConfig` may not
+      // exist on Config objects produced by older `@adobe/spacecat-shared-data-
+      // access` versions if a deploy ever drifts. Either way, treat it as the
+      // documented "nothing persisted" case.
+      const raw = site.getConfig()?.getScraperConfig?.();
+      if (raw === null) {
+        // `undefined` is the normal "never written" case the JSDoc documents.
+        // `null` specifically means the field was explicitly cleared or that
+        // the persisted row went through an out-of-band edit — surface it so
+        // a post-hoc forensics pass can tell the two apart, but do not change
+        // the response shape callers depend on.
+        log.warn(`[getScraperConfig] site ${siteId} returned null scraperConfig (treating as empty)`);
+      }
+
+      return ok({
+        siteId: site.getId(),
+        scraperConfig: raw ?? {},
+      });
+    } catch (error) {
+      log.error(`Error getting scraper config for site ${siteId}: ${error.message}`, error);
+      throw error;
+    }
+  };
+
+  /**
+   * PATCH /sites/:siteId/config/scraper
+   *
+   * Replaces the entire `scraperConfig` on the site. Passing
+   * `scraperConfig: {}` clears any previously stored configuration.
+   * To preserve unrelated fields, callers must merge client-side.
+   *
+   * Header shape validation (RFC 7230 token names, no CR/LF in values,
+   * length caps, reserved-name denylist) lives in the
+   * `@adobe/spacecat-shared-data-access` `scraperConfig` Joi schema.
+   * Bad payloads surface as a `Configuration validation error` thrown
+   * by `siteConfig.updateScraperConfig(...)`; we catch and return 400.
+   */
+  const updateScraperConfig = async (context) => {
+    const siteId = context.params?.siteId;
+    const { scraperConfig } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid site ID');
+    }
+
+    if (!isObject(scraperConfig)) {
+      return badRequest('Scraper config required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
+    }
+
+    let updatedSite;
+    try {
+      const siteConfig = site.getConfig();
+      siteConfig.updateScraperConfig(scraperConfig);
+
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
+
+      updatedSite = await site.save();
+    } catch (error) {
+      // Joi/shared rejection -> 400 (client can fix payload).
+      // Anything else -> propagate so the framework returns 5xx (transient/infra).
+      if (error?.message?.startsWith('Configuration validation error')) {
+        log.warn(`Scraper config validation failed for site ${siteId}: ${error.message}`);
+        // Joi echoes the offending value into the message; if a caller submits
+        // CR/LF (or other control chars) in a header value those would get
+        // copied into the `x-error` response header by `badRequest`, where
+        // Node's HTTP layer rejects them and the framework returns 500.
+        // Strip Unicode "Other, Control" chars so the rejection itself stays
+        // a clean 400. `\p{Cc}` covers C0 (0x00-0x1F) + DEL (0x7F) + C1
+        // (0x80-0x9F) without putting literal control chars in the source
+        // (which would trip the `no-control-regex` lint rule).
+        const safeMessage = error.message.replace(/\p{Cc}+/gu, ' ');
+        return badRequest(safeMessage);
+      }
+      log.error(
+        `Error updating scraper config for site ${siteId} (headers=${
+          Object.keys(scraperConfig.headers || {}).join(',')
+        }): ${error.message}`,
+        error,
+      );
+      throw error;
+    }
+
+    log.info(
+      `Scraper config updated for site ${siteId} (headers=${
+        Object.keys(scraperConfig.headers || {}).join(',')
+      })`,
+    );
+    // Narrow response: do not echo unrelated site config (which may contain
+    // secrets like tokowakaConfig.apiKey) back to a caller that only wrote
+    // scraperConfig. Read the persisted value back from the saved entity so
+    // any sanitization the shared Joi schema performs (defaults, trims,
+    // unknown-field stripping) is reflected in the response.
+    return ok({
+      siteId: updatedSite.getId(),
+      scraperConfig: updatedSite.getConfig().getScraperConfig(),
+    });
   };
 
   const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
@@ -1253,6 +1810,20 @@ function SitesController(ctx, log, env) {
       { 'x-error': message },
     );
 
+    const isOrgWaitingForIpAllowlisting = async (org) => {
+      if (productCode !== ASO_PRODUCT_CODE) {
+        return false;
+      }
+      try {
+        const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
+        const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
+        return Array.isArray(records) && records.some((r) => r.getStatus() === waitingStatus);
+      } catch (e) {
+        log.warn('[resolveSite] PlgOnboarding lookup failed, treating as not waiting', e);
+        return false;
+      }
+    };
+
     // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
     // independent of which org's data is being requested via organizationId/imsOrg.
     // We translate it to a Spacecat UUID once, up front, so the per-path remap can
@@ -1272,13 +1843,98 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    const facs = context.attributes?.facs;
+    // FACS federal grant: if the JWT carries <product>/can_view, the caller has an
+    // org-wide federal view capability — no state-layer filter needed.
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    // Whether the per-site state-layer filter applies. Cross-product bypass:
+    // only filter when the current product ReBAC-scopes `site` (ASO). Under
+    // LLMO, `site` is not a ReBAC resource (LLMO scopes `brand`), so the state
+    // layer holds no per-site grants and filtering would wrongly hide sites.
+    const facsSiteFilterActive = facs?.enabled
+      && !hasFACSCapability
+      && isFacsRebacResource(facs.product, 'site');
+
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
     //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
-    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    //           OrganizationDto, SiteDto, facs, facsSiteFilterActive — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
+      const args = [org, productCode, context, ctx, accessControlUtil];
+
+      // FACS path: state-layer filter active — find first site the caller can actually view.
+      if (facsSiteFilterActive) {
+        const unavailable = requirePostgrestForFacsMappings(context);
+        if (unavailable) {
+          return unavailable;
+        }
+
+        const viewable = await listViewableResourceIds(
+          context.dataAccess.services.postgrestClient,
+          {
+            imsOrgId: org.getImsOrgId(),
+            product: facs.product,
+            resourceType: 'site',
+            subjectId: facs.subjectId,
+          },
+        );
+
+        // Check admin-configured default site first; only use it if the caller can view it.
+        const defaultData = await resolveOrgDefaultSite(...args);
+        if (defaultData && viewable.has(defaultData.site.id)) {
+          return ok({ data: defaultData });
+        }
+
+        // Scan all enrolled sites and return the first one the caller can view.
+        const tierClient = TierClient.createForOrg(context, org, productCode);
+        const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+
+        if (!entitlement) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            failureDetails,
+          );
+        }
+
+        if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+          if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+            return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+          }
+          log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+        }
+
+        const firstViewableEnrollment = enrollments?.find((e) => viewable.has(e.getSiteId()));
+        if (!firstViewableEnrollment) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        const firstViewableSite = await Site.findById(firstViewableEnrollment.getSiteId());
+        if (!firstViewableSite) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        return ok({ data: await buildResolveData(org, firstViewableSite, context) });
+      }
+
+      // Non-FACS path (admin / internal / JWT federal grant / LD-off): existing logic.
+      const defaultData = await resolveOrgDefaultSite(...args);
+      if (defaultData) {
+        return ok({ data: defaultData });
+      }
+
       const tierClient = TierClient.createForOrg(context, org, productCode);
       const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+      // Internal caller viewing a customer with no customer-visible entitlement
+      // (none yet, or PRE_ONBOARD) who is mid-PLG-onboarding (WAITING_FOR_IP_ALLOWLISTING):
+      // preserve no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+      const hasCustomerVisibleEntitlement = entitlement
+        && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+      if (callerIsInternal && !hasCustomerVisibleEntitlement
+        && await isOrgWaitingForIpAllowlisting(org)) {
+        log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for org=${org.getId()}`);
+        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+      }
 
       if (!entitlement) {
         if (callerIsInternal) {
@@ -1296,14 +1952,7 @@ function SitesController(ctx, log, env) {
 
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
-        const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-        return ok({
-          data: {
-            organization: OrganizationDto.toJSON(org),
-            site: SiteDto.toJSON(enrolledSite),
-            isSummitPlgEnabled,
-          },
-        });
+        return ok({ data: await buildResolveData(org, enrolledSite, context) });
       }
 
       return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
@@ -1332,11 +1981,21 @@ function SitesController(ctx, log, env) {
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
               // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
-              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
-              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              // - No customer-visible entitlement (none, or PRE_ONBOARD) + WAITING:
+              //   return no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+              // - No entitlement + not WAITING: return site_not_enrolled
+              // - Non-customer tier + not WAITING: skip tier check, let enrollment decide
               //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
               // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
               // Customer callers are completely unaffected by this block.
+              const hasCustomerVisibleEntitlement = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (callerIsInternal && !hasCustomerVisibleEntitlement
+                && await isOrgWaitingForIpAllowlisting(organization)) {
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for siteId=${siteId}`);
+                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+              }
+
               if (!entitlement) {
                 if (callerIsInternal) {
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
@@ -1356,14 +2015,26 @@ function SitesController(ctx, log, env) {
                 return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
               }
 
-              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-              return ok({
-                data: {
-                  organization: OrganizationDto.toJSON(organization),
-                  site: SiteDto.toJSON(site),
-                  isSummitPlgEnabled,
-                },
-              });
+              if (facsSiteFilterActive) {
+                const unavailable = requirePostgrestForFacsMappings(context);
+                if (unavailable) {
+                  return unavailable;
+                }
+                const viewable = await listViewableResourceIds(
+                  context.dataAccess.services.postgrestClient,
+                  {
+                    imsOrgId: organization.getImsOrgId(),
+                    product: facs.product,
+                    resourceType: 'site',
+                    subjectId: facs.subjectId,
+                  },
+                );
+                if (!viewable.has(site.getId())) {
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                }
+              }
+
+              return ok({ data: await buildResolveData(organization, site, context) });
             }
           }
         }
@@ -1470,9 +2141,12 @@ function SitesController(ctx, log, env) {
     getAllByDeliveryType,
     getAllByEnrollmentAndTier,
     getByID,
+    getIdentity,
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getScraperConfig,
+    updateScraperConfig,
     getPageCitabilityCounts,
     getTopPages,
     resolveSite,

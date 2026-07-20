@@ -78,7 +78,10 @@ function defaultSortFn(groupA, groupB) {
 const OPPORTUNITY_STRATEGIES = {
   // Groups suggestions by target URL (url_to) so all backlinks pointing to the
   // same broken URL are granted as a single unit. The group rank is the highest
-  // rank among its items, since higher rank = top priority opportunity.
+  // traffic_domain score among its items (0-100 authority score from SEO provider),
+  // since higher rank = top priority opportunity.
+  // Groups are sorted by rank descending so the most authoritative broken URLs
+  // are granted first. Tie-breaks by first item's ID ascending for determinism.
   'broken-backlinks': {
     groupFn: (suggestions) => {
       const groups = new Map();
@@ -98,6 +101,17 @@ const OPPORTUNITY_STRATEGIES = {
           () => Math.max(...items.map(getSuggestionRank)),
         ),
       );
+    },
+    sortFn: (groupA, groupB) => {
+      const rankDiff = groupB.getRank() - groupA.getRank();
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      const a = groupA.items[0];
+      const b = groupB.items[0];
+      const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
+      const idB = typeof b?.getId === 'function' ? b.getId() : (b?.id ?? '');
+      return idA.localeCompare(idB);
     },
   },
   // For PLG customers, CWV grants are limited to the top 3 pages by page views
@@ -345,20 +359,33 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const newSuggestions = await Suggestion
     .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
   const newSuggestionIds = newSuggestions.map((s) => s.getId());
-  if (!newSuggestionIds.length) {
-    return;
-  }
 
   const { grantedIds, grantIds, notGrantedIds } = await SuggestionGrant
     .splitSuggestionsByGrantStatus(newSuggestionIds);
 
-  const existingToken = await Token.findBySiteIdAndTokenType(siteId, tokenType);
+  let token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
   const collections = { Suggestion, SuggestionGrant, Token };
   const ids = { siteId, tokenType, oppType };
 
-  const { token, didRevoke } = existingToken
-    ? await handleExistingTokenCycle(collections, ids, existingToken)
-    : await handleNewTokenCycle(collections, ids, { grantedIds, grantIds, newSuggestions });
+  let didRevoke = false;
+  if (token) {
+    ({ token, didRevoke } = await handleExistingTokenCycle(collections, ids, token));
+  } else {
+    try {
+      const prevToken = await Token.findLastCreatedBySiteIdAndTokenType(siteId, tokenType);
+      if (prevToken) {
+        // Side-effect only: revoke stale grants from previous cycle
+        await handleExistingTokenCycle(collections, ids, prevToken);
+      }
+    } catch {
+      // previous-cycle lookup/cleanup failure must not block new token creation
+    }
+    if (!newSuggestionIds.length) {
+      return;
+    }
+    const grants = { grantedIds, grantIds, newSuggestions };
+    ({ token, didRevoke } = await handleNewTokenCycle(collections, ids, grants));
+  }
 
   if (!token || token.getRemaining() <= 0) {
     return;

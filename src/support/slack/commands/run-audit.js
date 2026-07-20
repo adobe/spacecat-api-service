@@ -10,7 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { isNonEmptyArray, isNonEmptyObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  isNonEmptyArray,
+  isNonEmptyObject,
+  isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import BaseCommand from './base.js';
@@ -27,6 +31,12 @@ import { triggerAuditForSite } from '../../utils.js';
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
+const PRERENDER_MODES = {
+  ALL: 'all',
+  AI_ONLY: 'ai-only',
+  AI_ONLY_CURRENT: 'ai-only-current',
+  AI_ONLY_MISSING: 'ai-only-missing',
+};
 const ALL_AUDITS = [
   'apex',
   'cwv',
@@ -96,13 +106,26 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for NEW/FIXED suggestions missing an AI summary.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [key:value ...]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current|ai-only-missing] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
   const { Configuration, Site } = dataAccess;
+
+  const buildEffectiveData = (baseData, mode) => {
+    if (mode !== PRERENDER_MODES.ALL
+      && mode !== PRERENDER_MODES.AI_ONLY
+      && mode !== PRERENDER_MODES.AI_ONLY_CURRENT
+      && mode !== PRERENDER_MODES.AI_ONLY_MISSING) {
+      return baseData;
+    }
+    return JSON.stringify({
+      ...(baseData ? JSON.parse(baseData) : {}),
+      mode,
+    });
+  };
 
   const parsePrerenderUrlsFromCsv = async (files, botToken, say) => {
     if (files.length > 1) {
@@ -150,20 +173,23 @@ function RunAuditCommand(context) {
       }
 
       if (auditType === 'all') {
-        // const enabledAudits = configuration.getEnabledAuditsForSite(site);
-        const enabledAudits = ALL_AUDITS.filter(
-          (audit) => configuration.isHandlerEnabledForSite(audit, site),
-        );
-
-        if (!isNonEmptyArray(enabledAudits)) {
-          await say(`:warning: No audits configured for site \`${baseURL}\``);
-          return;
-        }
+        const auditTypesToRun = ALL_AUDITS;
 
         await Promise.all(
-          enabledAudits.map(async (enabledAuditType) => {
+          auditTypesToRun.map(async (enabledAuditType) => {
             try {
-              await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
+              // Skip audit types explicitly disabled for this site (deny-list).
+              if (configuration.isHandlerDisabledForSite(enabledAuditType, site)) {
+                log.info(`Skipping audit ${enabledAuditType} for site ${baseURL}: explicitly disabled.`);
+                return;
+              }
+              await triggerAuditForSite(
+                site,
+                enabledAuditType,
+                undefined,
+                slackContext,
+                context,
+              );
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
@@ -171,10 +197,6 @@ function RunAuditCommand(context) {
           }),
         );
       } else {
-        if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-          await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-          return;
-        }
         const handler = configuration.getHandlers()?.[auditType];
         // Exit early with error if handler has no product codes configured
         if (!isNonEmptyArray(handler?.productCodes)) {
@@ -182,13 +204,16 @@ function RunAuditCommand(context) {
           return;
         }
 
-        // Check entitlements for all product codes
+        // Check site enrollment for all product codes. We check `siteEnrollment`
+        // (not `entitlement`) for parity with the audit worker's downstream gate
+        // (see audit-utils#checkProductCodeEntitlements). Org-level entitlement
+        // alone is insufficient — the specific site must be enrolled.
         const entitlementChecks = await Promise.all(
           handler.productCodes.map(async (productCode) => {
             try {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const tierResult = await tierClient.checkValidEntitlement();
-              return tierResult.entitlement || false;
+              return tierResult.siteEnrollment || false;
             } catch (error) {
               context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
               return false;
@@ -196,13 +221,25 @@ function RunAuditCommand(context) {
           }),
         );
 
-        // Block audit if site has no entitlement for any of the product codes
-        if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+        // Block audit if site has no enrollment for any of the product codes
+        if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
           await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
           return;
         }
 
-        await triggerAuditForSite(site, auditType, auditData, slackContext, context);
+        // Block audit if the handler is explicitly disabled for this site (deny-list).
+        if (configuration.isHandlerDisabledForSite(auditType, site)) {
+          await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
+          return;
+        }
+
+        await triggerAuditForSite(
+          site,
+          auditType,
+          auditData,
+          slackContext,
+          context,
+        );
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -222,23 +259,20 @@ function RunAuditCommand(context) {
         return;
       }
 
-      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-        return;
-      }
-
       const handler = configuration.getHandlers()?.[auditType];
       if (!isNonEmptyArray(handler?.productCodes)) {
         await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
         return;
       }
 
+      // Check site enrollment for all product codes (see runAuditForSite for rationale
+      // on using `siteEnrollment` instead of `entitlement`).
       const entitlementChecks = await Promise.all(
         handler.productCodes.map(async (productCode) => {
           try {
             const tierClient = await TierClient.createForSite(context, site, productCode);
             const tierResult = await tierClient.checkValidEntitlement();
-            return tierResult.entitlement || false;
+            return tierResult.siteEnrollment || false;
           } catch (error) {
             context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
             return false;
@@ -246,12 +280,25 @@ function RunAuditCommand(context) {
         }),
       );
 
-      if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+      if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
         await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
         return;
       }
 
-      await triggerAuditForSite(site, auditType, auditData, slackContext, context, { urls });
+      // Block audit if the handler is explicitly disabled for this site (deny-list).
+      if (configuration.isHandlerDisabledForSite(auditType, site)) {
+        await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
+        return;
+      }
+
+      await triggerAuditForSite(
+        site,
+        auditType,
+        auditData,
+        slackContext,
+        context,
+        { urls },
+      );
       await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -287,9 +334,18 @@ function RunAuditCommand(context) {
         [baseURLInputArg] = positionalArgs;
         auditTypeInputArg = keywords.audit;
 
-        // Build audit data from remaining keywords (excluding 'audit')
+        // Build audit data from remaining keywords (excluding 'audit').
+        // 'mode' is also excluded here ONLY for prerender — prerender does its own
+        // suggestion selection/batching on the API side (see PRERENDER_MODES /
+        // buildEffectiveData below) and re-injects a normalized `mode` value itself.
+        // Other audit types (e.g. toc's mode:ai-only, LLMO-6167) have no API-side
+        // selection logic of their own — mode must pass through untouched so the
+        // audit-worker can act on it directly.
         const auditDataKeywords = { ...keywords };
         delete auditDataKeywords.audit;
+        if (auditTypeInputArg === PRERENDER) {
+          delete auditDataKeywords.mode;
+        }
 
         auditDataInputArg = Object.keys(auditDataKeywords).length > 0
           ? JSON.stringify(auditDataKeywords)
@@ -311,21 +367,46 @@ function RunAuditCommand(context) {
       }
 
       const auditType = auditTypeInputArg || LHS_MOBILE;
-      const isPrerenderCsvRun = hasValidBaseURL && hasFiles && auditType === PRERENDER;
+      const prerenderMode = keywords.mode;
+
+      const hasPrerenderMode = auditType === PRERENDER
+        && (prerenderMode === PRERENDER_MODES.ALL
+          || prerenderMode === PRERENDER_MODES.AI_ONLY
+          || prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT
+          || prerenderMode === PRERENDER_MODES.AI_ONLY_MISSING);
+      const isPrerenderCsvRun = hasValidBaseURL
+        && hasFiles && auditType === PRERENDER;
+
+      // mode:all or mode:ai-only without CSV → fetch URLs from suggestions
+      const isSuggestionRun = hasValidBaseURL
+        && !hasFiles && hasPrerenderMode;
 
       if (hasValidBaseURL && hasFiles && !isPrerenderCsvRun) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
 
-      if (isPrerenderCsvRun) {
+      if (isSuggestionRun) {
+        const MODE_LABELS = {
+          [PRERENDER_MODES.ALL]: 'all',
+          [PRERENDER_MODES.AI_ONLY]: 'AI-only',
+          [PRERENDER_MODES.AI_ONLY_CURRENT]: 'AI-only-current',
+          [PRERENDER_MODES.AI_ONLY_MISSING]: 'AI-only-missing',
+        };
+        const modeLabel = MODE_LABELS[prerenderMode];
+        const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
+        await say(`:adobe-run: Triggering ${PRERENDER} audit for ${baseURL} (${modeLabel} mode).`);
+        await runAuditForSite(baseURL, PRERENDER, effectiveData, slackContext);
+      } else if (isPrerenderCsvRun) {
         const urls = await parsePrerenderUrlsFromCsv(files, botToken, say);
         if (!urls) {
           return;
         }
 
-        await say(`:adobe-run: Triggering ${auditType} audit for site ${baseURL} with ${urls.length} URLs.`);
-        await runPrerenderAuditForUrls(baseURL, auditType, auditDataInputArg, urls, slackContext);
+        const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
+        await say(`:adobe-run: Triggering ${PRERENDER} audit`
+          + ` for site ${baseURL} with ${urls.length} URLs.`);
+        await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);
       } else if (hasFiles) {
         const [, auditTypeInput, auditData] = ['', baseURLInputArg, auditTypeInputArg];
         const csvAuditType = auditTypeInput || LHS_MOBILE;

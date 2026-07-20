@@ -1,12 +1,15 @@
 site-opportunities:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunities
     summary: |
       Retrieve a list of all opportunities for a specific site
     tags:
       - opportunities
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of opportunities
@@ -71,12 +74,15 @@ site-opportunities-by-status:
       required: true
       schema:
         type: string
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitiesByStatus
     summary: |
       Retrieve opportunities for a specific site filtered by status
     tags:
       - opportunities
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of opportunities filtered by status
@@ -103,6 +109,7 @@ site-opportunity:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunity
     summary: |
@@ -197,6 +204,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionView'
     - $ref: './parameters.yaml#/suggestionStatus'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestions
     summary: |
@@ -218,6 +226,8 @@ site-opportunity-suggestions:
       **Note:** For paginated results, use the `/paged` endpoints. Status filtering is only available on this non-paginated endpoint or the dedicated `/by-status` endpoints.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of suggestions
@@ -278,6 +288,7 @@ site-opportunity-suggestions-by-status:
       schema:
         type: string
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatus
     summary: |
@@ -286,6 +297,8 @@ site-opportunity-suggestions-by-status:
       Returns suggestions filtered by status with optional field projection using the view parameter.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of suggestions filtered by status
@@ -314,6 +327,7 @@ site-opportunity-suggestions-paged:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPaged
     summary: |
@@ -324,6 +338,8 @@ site-opportunity-suggestions-paged:
       Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions
@@ -353,6 +369,7 @@ site-opportunity-suggestions-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsPagedWithCursor
     summary: |
@@ -363,6 +380,8 @@ site-opportunity-suggestions-paged-with-cursor:
       Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions
@@ -396,6 +415,7 @@ site-opportunity-suggestions-by-status-paged:
         type: string
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPaged
     summary: |
@@ -405,6 +425,8 @@ site-opportunity-suggestions-by-status-paged:
       Supports field projection using the view parameter to reduce response size.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions filtered by status
@@ -439,6 +461,7 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPagedWithCursor
     summary: |
@@ -448,6 +471,8 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
       Supports field projection using the view parameter to reduce response size.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions filtered by status
@@ -478,6 +503,14 @@ site-opportunity-suggestions-status:
     operationId: updateSiteOpportunitySuggestionsStatus
     summary: |
       Update the status of one or multiple suggestions in one transaction
+    description: |
+      Updates the status of one or more suggestions in a single bulk transaction. Returns
+      a 207 multi-status response with per-item success or failure details.
+
+      **S2S access:** S2S consumers registered with the `suggestion:write` capability may
+      call this endpoint. The admin-only gate for `REJECTED` status transitions is bypassed
+      for S2S callers holding this capability; all other validations (site membership,
+      opportunity lookup, valid status transition) apply unchanged.
     tags:
       - opportunity-suggestions
     requestBody:
@@ -598,7 +631,7 @@ site-opportunity-suggestions-edge-deploy:
                           type: integer
                         autoCovered:
                           type: integer
-                          description: Number of additional suggestions auto-marked as deployed by domain-wide config
+                          description: Number of additional suggestions auto-marked as deployed by domain-wide or path-level config
                         message:
                           type: string
                           description: Present when autoCovered > 0
@@ -646,11 +679,18 @@ site-opportunity-suggestions-edge-deploy:
                       enum: [GENERATING_BASELINE]
                     geoExperimentPhase:
                       type: string
-                      enum: [pre_analysis_submitted]
+                      enum: [initiated]
+                      description: >-
+                        Initial phase of the newly created experiment. The
+                        experimentation engine advances it through prompt
+                        generation, pre-analysis, deployment, and post-analysis.
                     prePhaseScheduleId:
-                      type: string
+                      type: [string, 'null']
                       format: uuid
-                      description: DRS schedule ID for the pre-analysis phase
+                      description: >-
+                        Always null from this endpoint. The DRS pre-analysis
+                        schedule is created later by the experimentation engine,
+                        not at edge-deploy time.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -711,8 +751,22 @@ site-geo-experiment:
     summary: Get geo experiment details
     description: |
       Returns the full details of a geo experiment, including prompts (fetched from S3).
+      When called with `includeInsights=true`, the impact-measurement insights JSON is
+      also fetched from S3 and returned in the `insights` field.
     tags:
       - geo-experiments
+    parameters:
+      - name: includeInsights
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+            - 'true'
+            - 'false'
+        description: |
+          When `true`, include the impact-measurement insights (ExperimentInsights)
+          fetched from S3. Omitted from the response otherwise.
     responses:
       '200':
         description: Geo experiment details
@@ -744,6 +798,14 @@ site-geo-experiment:
                             items:
                               type: string
                       description: Prompts from S3, or null if not yet available
+                    insights:
+                      type:
+                        - object
+                        - 'null'
+                      description: |
+                        Impact-measurement insights (ExperimentInsights) fetched from S3.
+                        Only present when the request sets `includeInsights=true`; null when
+                        insights do not exist yet or the S3 fetch fails.
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -785,6 +847,8 @@ GeoExperiment:
         - deployment_completed
         - post_analysis_submitted
         - post_analysis_done
+        - impact_measurement_started
+        - impact_measurement_done
     siteId:
       type: string
       format: uuid
@@ -813,6 +877,13 @@ GeoExperiment:
         - string
         - 'null'
       description: S3 key of the uploaded prompts JSON file
+    insightsLocation:
+      type:
+        - string
+        - 'null'
+      description: |
+        S3 key of the impact-measurement insights JSON (ExperimentInsights). Null until
+        impact measurement completes. Fetch the object via `includeInsights=true`.
     metadata:
       type:
         - object
@@ -873,6 +944,11 @@ site-opportunity-suggestions-auto-fix:
       is true (for assess or assess-urls), the worker runs only checks that do not require
       AEM CS access and does not need a valid promise token; when omitted or false, behavior
       is unchanged (full assessment with AEM when possible).
+
+      **S2S access:** S2S consumers registered with the `fixEntity:create` capability may
+      call this endpoint. The `auto_fix` IMS user-profile scope check is bypassed for S2S
+      callers; all other validations (site ownership, opportunity lookup, handler enablement)
+      apply unchanged.
     tags:
       - opportunity-suggestions
     requestBody:
@@ -950,15 +1026,14 @@ site-opportunity-suggestions-auto-fix:
                       type: array
                       x-experimental: true
                       description: |
-                        Experimental (meta-tags only). Optional override for fix-target grouping.
-                        When provided, suggestions
-                        are grouped by the given relationshipContext.fixTargetPageId instead of
-                        by each suggestion's detected page URL. The worker applies the fix to
-                        the specified page directly. Typically populated by the UI when the
-                        page-relationship dialog resolves a source (blueprint/language-master)
-                        page.
+                        Experimental (meta-tags and alt-text). Optional override for fix-target grouping.
+                        When provided, suggestions are grouped by the given relationshipContext
+                        instead of by each suggestion's detected page URL. The worker applies
+                        the fix according to the fixTargetMode: either at the source
+                        (blueprint/language-master) page or locally on the inheriting page.
 
-                        Effective only for AEM CS meta-tags autofix on the Content API path.
+                        Effective only for AEM CS autofix on the Content API path for
+                        meta-tags and alt-text opportunity types.
                         If meta-tags are routed to PSS (for example, disableContentApiForMetaTags=true),
                         this field is accepted but ignored.
 
@@ -981,33 +1056,39 @@ site-opportunity-suggestions-auto-fix:
                             description: |
                               Experimental relationship metadata forwarded to the autofix worker.
                               Required for relationship-aware grouping.
-                              When fixTargetMode is source, appliedOnPagePath should be provided.
-                              Effective only on the AEM CS Content API path for meta-tags;
+                              fixTargetMode is required. When fixTargetMode is "source",
+                              appliedOnPagePath should be provided.
+                              Effective on the AEM CS Content API path for meta-tags and alt-text;
                               ignored when meta-tags are handled via PSS.
                             additionalProperties: false
                             required:
-                              - fixTargetPageId
+                              - fixTargetMode
                             properties:
                               fixTargetPageId:
                                 type: string
                                 minLength: 1
                                 description: |
-                                  Page identifier to apply this group to. For relationship-source
-                                  flows this is typically the source page ID resolved by the UI.
-                                  Used only on Content API meta-tags execution path.
+                                  Page identifier to apply this group to. Required when
+                                  fixTargetMode is "local" (the local page's content ID).
+                                  Optional when fixTargetMode is "source" (the worker resolves
+                                  the source page from suggestion data). When provided for
+                                  source mode, this is the source page ID resolved by the UI.
                                 example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
                               fixTargetMode:
                                 type: string
                                 enum: [source, local]
                                 description: |
-                                  Whether this group is being fixed at source or locally.
-                                  Used for Content API relationship-aware meta-tags flow.
+                                  Required. Whether this group is being fixed at source or locally.
+                                  "source" means the fix is applied to the blueprint/language-master
+                                  page; "local" means the fix is applied to the local inheriting page.
+                                  Used for Content API relationship-aware meta-tags and alt-text flows.
                               cancelInheritance:
                                 type: boolean
                                 description: |
                                   Experimental. Optional. When true, indicates the fix is intentionally
                                   applied at a local inheriting page and inheritance should remain cancelled.
-                                  Currently applied for Content API title/description flows only.
+                                  For meta-tags (title/description), cancels page-level property inheritance.
+                                  For alt-text, cancels component-level inheritance on the image component.
                               appliedOnPagePath:
                                 type: string
                                 minLength: 1
@@ -1019,7 +1100,6 @@ site-opportunity-suggestions-auto-fix:
                             - '2eb0ae0d-baa8-4668-abf5-8b22ef75b95f'
                             - '85d87ee0-5818-419a-863f-dcb90630ba11'
                           relationshipContext:
-                            fixTargetPageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
                             fixTargetMode: source
                             appliedOnPagePath: /content/wknd/language-masters/en/adventures/bali-surf-camp
                     customData:
@@ -1065,6 +1145,7 @@ site-opportunity-suggestion:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionId'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunitySuggestion
     summary: |
@@ -1150,6 +1231,106 @@ site-opportunity-suggestion:
         $ref: './responses.yaml#/404'
       '429':
         $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestion-backoffice-reviews:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+  post:
+    operationId: createBackofficeReview
+    summary: |
+      Capture an ESE review verdict for a suggestion (Backoffice feedback loop)
+    description: |
+      Records a single human-review feedback event for the suggestion as part of
+      the Learning Agent feedback loop (SITES-43974). `source` is bound to
+      `backoffice` by this route and must not be supplied in the body. `eventId`
+      is a mandatory client-supplied idempotency key (UUID v4) — a duplicate POST
+      with the same `eventId` collapses to a no-op and returns 200 with the
+      existing review. Customer-derived fields are secret-scrubbed and the
+      markdown is sanitised server-side before storage; raw patches are not
+      echoed in the response.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - eventId
+              - verdict
+            properties:
+              eventId:
+                type: string
+                format: uuid
+                description: Client-supplied idempotency key (UUID v4), retained across retries.
+              verdict:
+                type: string
+                enum: [up, down]
+                description: The reviewer's verdict (translated server-side to a positive/negative signal).
+              detailMarkdown:
+                type: string
+                maxLength: 8192
+                description: Optional ESE rationale (markdown). Required on reject by the UI; sanitised + 8 KB cap server-side.
+              guidanceMarkdown:
+                type: string
+                maxLength: 65536
+                description: >-
+                  AI-generated issue context (title + description) for the reviewed issue.
+                  Gives the Learning Agent "what the issue was" alongside the generated
+                  patch (previousFix) and the review. Sanitised + 64 KB cap server-side.
+              feedbackSubjectId:
+                type: string
+                maxLength: 200
+                description: >-
+                  Optional SpaceCat-internal id of the sub-item this review is about
+                  within the suggestion (e.g. a CWV issue id), so the Backoffice can group
+                  per-issue "previous feedback" when issues share one suggestionId.
+                  Independent of the Fix-entity issue id. Not exported to S3.
+              rejectionCategory:
+                type: string
+                enum: [product_bug, bad_recommendation, other]
+                description: Optional category on a reject.
+              stateTransition:
+                type: string
+                description: The accompanying suggestion state transition, e.g. PENDING_VALIDATION->REJECTED or EDIT.
+              previousFix:
+                type: object
+                description: Patch snapshot at review time (secret-scrubbed server-side).
+              editedFix:
+                type: object
+                description: ESE-edited patch when supplied (optional; secret-scrubbed server-side).
+    responses:
+      '201':
+        description: Review recorded
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '200':
+        description: Idempotent no-op — a review with this eventId already exists
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '413':
+        description: detail_markdown exceeds the 8 KB limit
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -1265,10 +1446,68 @@ site-opportunity-suggestion-fixes:
     security:
       - ims_key: [ ]
 
+site-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
+    - name: status
+      description: Optional fix status to filter by (e.g. `PENDING`, `FAILED`).
+      in: query
+      required: false
+      schema:
+        type: string
+    - name: limit
+      description: |
+        Maximum number of fixes to return. The aggregation spans every opportunity
+        belonging to the site, so the result set is capped to bound response size
+        and downstream user-name enrichment cost.
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 200
+        example: 200
+  get:
+    operationId: getSiteFixes
+    summary: |
+      Retrieve all fixes for a site, across every opportunity
+    description: |
+      Aggregates fixes across every opportunity belonging to the site, avoiding the need to
+      enumerate opportunities and fetch fixes per-opportunity. Optionally filtered by status.
+      Capped by `limit` (default 200, max 1000).
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of fixes
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixes
     summary: |
@@ -1282,6 +1521,8 @@ site-opportunity-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':
@@ -1460,6 +1701,7 @@ site-opportunity-fix-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/fixId'
+    - $ref: './parameters.yaml#/locale'
   get:
     operationId: getSiteOpportunityFixSuggestions
     summary: |
@@ -1473,6 +1715,8 @@ site-opportunity-fix-suggestions:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':

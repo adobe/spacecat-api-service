@@ -71,6 +71,17 @@ describe('LLMO Onboarding Functions', () => {
       upsert: defaultUpsert,
     });
 
+    // Default brands lookup (LLMO-5556 collision check) — no existing brand,
+    // so onboarding proceeds to write the initial brand. Tests can override
+    // .withArgs('brands') to simulate an existing same-name brand.
+    const brandsMaybeSingle = sinon.stub().resolves({ data: null, error: null });
+    const brandsEq2 = sinon.stub().returns({ maybeSingle: brandsMaybeSingle });
+    const brandsEq1 = sinon.stub().returns({ eq: brandsEq2 });
+    const brandsSelect = sinon.stub().returns({ eq: brandsEq1 });
+    mockDataAccess.services.postgrestClient.from.withArgs('brands').returns({
+      select: brandsSelect,
+    });
+
     // Create mock log
     mockLog = {
       info: sinon.stub(),
@@ -121,7 +132,22 @@ describe('LLMO Onboarding Functions', () => {
           getId: sandbox.stub().returns('enrollment123'),
         },
       }),
+      // Default the tier read to PAID so the full-flow V2 onboarding tests keep
+      // exercising the recurring-schedule prompt-suggestion path (tier gate).
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: { getTier: sandbox.stub().returns('PAID') },
+      }),
       revokeSiteEnrollment: sandbox.stub().resolves(),
+    }),
+  });
+
+  // TierClient mock resolving a specific LLMO tier via checkValidEntitlement,
+  // for the prompt-suggestion tier-gate tests.
+  const createMockTierClientForTier = (tier, sandbox = sinon) => ({
+    createForSite: sandbox.stub().returns({
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: { getTier: sandbox.stub().returns(tier) },
+      }),
     }),
   });
 
@@ -187,12 +213,14 @@ describe('LLMO Onboarding Functions', () => {
       isConfigured = true,
       submitJob = sandbox.stub().resolves({ job_id: 'test-brandalf-job-123' }),
       submitPromptGenerationJob = sandbox.stub().resolves({ job_id: 'test-drs-job-123' }),
+      createSchedule = sandbox.stub().resolves({ scheduleId: 'test-schedule-123', alreadyExisted: false }),
     } = options;
 
     const instance = {
       isConfigured: sandbox.stub().returns(isConfigured),
       submitJob,
       submitPromptGenerationJob,
+      createSchedule,
     };
 
     return {
@@ -225,14 +253,16 @@ describe('LLMO Onboarding Functions', () => {
       '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
         Entitlement: {
           PRODUCT_CODES: { LLMO: 'LLMO' },
-          TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          TIERS: { FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID' },
         },
       },
     };
 
-    if (mockTierClient) {
-      deps['@adobe/spacecat-shared-tier-client'] = { default: mockTierClient };
-    }
+    // Default the tier client to a PAID reader so the recurring-schedule
+    // prompt-suggestion path (tier gate) is exercised unless a test overrides it.
+    deps['@adobe/spacecat-shared-tier-client'] = {
+      default: mockTierClient || createMockTierClientForTier('PAID'),
+    };
 
     if (sharePointClient) {
       deps['@adobe/spacecat-helix-content-sdk'] = { createFrom: sinon.stub().resolves(sharePointClient) };
@@ -308,79 +338,192 @@ describe('LLMO Onboarding Functions', () => {
     });
   };
 
+  describe('settleWithin', () => {
+    let settleWithin;
+
+    before(async () => {
+      ({ settleWithin } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {}));
+    });
+
+    it('resolves to the value when the promise settles within the timeout', async () => {
+      expect(await settleWithin(Promise.resolve('detected'), 1000, null)).to.equal('detected');
+    });
+
+    it('resolves to the fallback when the promise rejects (non-fatal)', async () => {
+      expect(await settleWithin(Promise.reject(new Error('boom')), 1000, null)).to.equal(null);
+    });
+
+    it('resolves to the fallback when the promise exceeds the timeout', async () => {
+      const slow = new Promise((resolve) => {
+        setTimeout(() => resolve('late'), 200);
+      });
+      expect(await settleWithin(slow, 20, 'fallback')).to.equal('fallback');
+    });
+  });
+
   describe('generateDataFolder', () => {
-    it('should generate correct data folder name for production environment', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    let generateDataFolder;
 
-      // Test parameters
-      const baseURL = 'https://test.com';
-      const env = 'prod';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('test-com');
-    }).timeout(5000);
-
-    it('should generate correct data folder name for development environment', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test parameters
-      const baseURL = 'https://test.com';
-      const env = 'dev';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('dev/test-com');
+    before(async () => {
+      ({ generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {}));
     });
 
-    it('should handle complex domain names correctly', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test with a complex domain
-      const baseURL = 'https://my-awesome-site.example.com';
-      const env = 'dev';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('dev/my-awesome-site-example-com');
+    it('should generate correct data folder name for production environment', () => {
+      expect(generateDataFolder('https://test.com', 'prod')).to.equal('test-com');
     });
 
-    it('should handle domains with special characters', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test with special characters
-      const baseURL = 'https://test-site.example.com:8080';
-      const env = 'prod';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result - should extract hostname and replace special chars with hyphens
-      expect(result).to.equal('test-site-example-com');
+    it('should generate correct data folder name for development environment', () => {
+      expect(generateDataFolder('https://test.com', 'dev')).to.equal('dev/test-com');
     });
 
-    it('should use default env as dev when not specified', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    it('should handle complex domain names correctly', () => {
+      expect(generateDataFolder('https://my-awesome-site.example.com', 'dev'))
+        .to.equal('dev/my-awesome-site-example-com');
+    });
 
-      // Test parameters without env (should default to 'dev')
-      const baseURL = 'https://test.com';
+    it('should strip port from folder name', () => {
+      expect(generateDataFolder('https://test-site.example.com:8080', 'prod'))
+        .to.equal('test-site-example-com');
+    });
 
-      // Call the function
-      const result = generateDataFolder(baseURL);
+    it('should produce the same folder name for URLs differing only by port', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com:8443/kings', 'prod'));
+    });
 
-      // Verify result
-      expect(result).to.equal('dev/test-com');
+    it('should use default env as dev when not specified', () => {
+      expect(generateDataFolder('https://test.com')).to.equal('dev/test-com');
+    });
+
+    it('should generate unique folder names for subpath sites on the same domain', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal('nba-comzskings');
+      expect(generateDataFolder('https://nba.com/lakers', 'prod')).to.equal('nba-comzslakers');
+      expect(generateDataFolder('https://nba.com/kings', 'dev')).to.equal('dev/nba-comzskings');
+    });
+
+    it('should produce the same folder name for root domain with or without trailing slash', () => {
+      expect(generateDataFolder('https://nba.com', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/', 'prod'));
+    });
+
+    it('should produce the same folder name for subpath with or without trailing slash', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings/', 'prod'));
+    });
+
+    it('should generate correct folder name for nested subpaths', () => {
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-comzsuszskings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-comzsuszskings');
+    });
+
+    it('should keep the path boundary distinguishable from a sanitized dash (LLMO-5859)', () => {
+      // The `zs` boundary marker is distinct from the `-` that punctuation
+      // sanitizes to, so a real path split is not confused with an in-segment dash:
+      // `/us/kings` (two segments) differs from `/us-kings` (one segment).
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-comzsuszskings');
+      expect(generateDataFolder('https://nba.com/us-kings', 'prod')).to.equal('nba-comzsus-kings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us-kings', 'prod'));
+    });
+
+    it('should still collapse separator variants within a single segment (lossy sanitize)', () => {
+      // Sanitization remains lossy inside one segment, so punctuation-only variants
+      // of the same segment collapse -- an inherent limit unchanged from before.
+      const expected = 'nba-comzsus-kings';
+      expect(generateDataFolder('https://nba.com/us-kings', 'prod')).to.equal(expected);
+      expect(generateDataFolder('https://nba.com/us..kings', 'prod')).to.equal(expected);
+      expect(generateDataFolder('https://nba.com/us--kings', 'prod')).to.equal(expected);
+    });
+
+    it('should still separate same-host sites with genuinely different paths', () => {
+      // The real LLMO-4186 case: different path content -> different folders.
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/lakers', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/eu/kings', 'prod'));
+    });
+
+    it('should distinguish a hostname with consecutive non-alnum chars from a host/subpath split', () => {
+      // `nba--com` (host; `--` collapses to `-`) -> `nba-com`, whereas `nba` + `/com`
+      // -> `nbazscom`. The `zs` boundary keeps these distinct (single-dash could not).
+      expect(generateDataFolder('https://nba--com/', 'prod')).to.equal('nba-com');
+      expect(generateDataFolder('https://nba/com', 'prod')).to.equal('nbazscom');
+      expect(generateDataFolder('https://nba--com/', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba/com', 'prod'));
+    });
+
+    it('should self-escape the marker letter `z` in hosts and segments (LLMO-5859)', () => {
+      // A literal `z` is doubled so it can never be read as a boundary token.
+      expect(generateDataFolder('https://amazon.com', 'prod')).to.equal('amazzon-com');
+      expect(generateDataFolder('https://nba.com/zone', 'prod')).to.equal('nba-comzszzone');
+      // A segment that literally spells the boundary token stays unambiguous.
+      expect(generateDataFolder('https://nba.com/zs', 'prod')).to.equal('nba-comzszzs');
+      expect(generateDataFolder('https://nba.com/zs', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/z/s', 'prod'));
+      // Host starting with the marker letter, immediately adjacent to the boundary.
+      expect(generateDataFolder('https://zsecurity.com/page', 'prod')).to.equal('zzsecurity-comzspage');
+    });
+
+    it('should never emit the Helix-reserved `--` in a folder name (LLMO-5859)', () => {
+      // Helix 400s any resource path containing `--`, so the derivation must never
+      // produce it -- including for hosts or paths that themselves contain `--`.
+      const urls = [
+        'https://nba.com',
+        'https://nba.com/kings',
+        'https://nba.com/us/kings',
+        'https://nba--com/double/dash/host',
+        'https://nba.com/us--kings',
+        'https://nba.com/a/b/c/d',
+      ];
+      urls.forEach((url) => {
+        expect(generateDataFolder(url, 'prod'), `prod: ${url}`).to.not.include('--');
+        expect(generateDataFolder(url, 'dev'), `dev: ${url}`).to.not.include('--');
+      });
+    });
+
+    it('should handle malformed percent-encoded path segments without throwing', () => {
+      expect(() => generateDataFolder('https://a.com/%FF', 'prod')).to.not.throw();
+      // `%FF` is not valid UTF-8, so decode is skipped and the raw segment is
+      // sanitized to `ff`; assert the concrete result to catch regressions.
+      expect(generateDataFolder('https://a.com/%FF', 'prod')).to.equal('a-comzsff');
+    });
+
+    it('should normalize percent-encoded path segments', () => {
+      expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/könig', 'prod'));
+      expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
+        .to.match(/^nba-comzs/);
+    });
+
+    it('should case-fold path segments so /Kings and /kings resolve to the same folder', () => {
+      expect(generateDataFolder('https://nba.com/Kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should handle double slashes in paths correctly', () => {
+      expect(generateDataFolder('https://nba.com//kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should ignore query strings and URL fragments', () => {
+      expect(generateDataFolder('https://nba.com/kings?utm=foo', 'prod'))
+        .to.equal('nba-comzskings');
+      expect(generateDataFolder('https://nba.com/kings#section', 'prod'))
+        .to.equal('nba-comzskings');
+    });
+
+    it('should drop degenerate path segments that sanitize to empty', () => {
+      expect(generateDataFolder('https://nba.com/-/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should throw on a malformed base URL', () => {
+      expect(() => generateDataFolder('not a url', 'prod')).to.throw(TypeError);
+    });
+
+    it('should throw when baseURL has no hostname', () => {
+      expect(() => generateDataFolder('file:///etc/passwd', 'prod'))
+        .to.throw(TypeError, 'hostname is required');
     });
   });
 
@@ -1201,6 +1344,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockSite = {
         getOrganizationId: sinon.stub().returns('old-org-123'),
         setOrganizationId: sinon.stub(),
+        getSiteEnrollments: sinon.stub().resolves([]),
         save: sinon.stub().resolves(),
       };
 
@@ -1220,6 +1364,70 @@ describe('LLMO Onboarding Functions', () => {
       // queries Site.allByOrganizationId, otherwise a legacy site moved into a
       // brand-new org would be misclassified as v2.
       expect(mockSite.save).to.have.been.calledOnce;
+    }).timeout(5000);
+
+    it('should throw when existing site has different org and active enrollments', async () => {
+      const { createOrFindSite } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: sinon.stub(),
+        },
+      });
+
+      const mockSite = {
+        getOrganizationId: sinon.stub().returns('other-org-789'),
+        setOrganizationId: sinon.stub(),
+        getSiteEnrollments: sinon.stub().resolves([{ getId: () => 'enroll-1' }]),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      const context = { dataAccess: mockDataAccess };
+
+      await expect(
+        createOrFindSite('https://example.com', 'new-org-456', context),
+      ).to.be.rejectedWith('belongs to org other-org-789 with active enrollments and cannot be moved to org new-org-456');
+
+      expect(mockSite.setOrganizationId).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should throw when getSiteEnrollments returns non-array', async () => {
+      const { createOrFindSite } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: sinon.stub(),
+        },
+      });
+
+      const mockSite = {
+        getOrganizationId: sinon.stub().returns('other-org-789'),
+        setOrganizationId: sinon.stub(),
+        getSiteEnrollments: sinon.stub().resolves(null),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      const context = { dataAccess: mockDataAccess };
+
+      await expect(
+        createOrFindSite('https://example.com', 'new-org-456', context),
+      ).to.be.rejectedWith('Unable to verify enrollments for site https://example.com');
+
+      expect(mockSite.setOrganizationId).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
     });
 
     it('should not update organization ID when existing site has same organization', async () => {
@@ -1254,6 +1462,343 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.not.have.been.called;
       expect(mockSite.save).to.not.have.been.called;
+    });
+  });
+
+  describe('performLlmoOnboarding — siteOnly (LLMO-5606)', () => {
+    // Builds a DRS client mock whose instance stubs we keep references to, so we
+    // can assert the brand/prompt-gen path was never entered (createFrom uncalled).
+    const buildTrackableDrsClient = () => {
+      const submitJob = sinon.stub().resolves({ job_id: 'should-not-run' });
+      const submitPromptGenerationJob = sinon.stub().resolves({ job_id: 'should-not-run' });
+      const createFrom = sinon.stub().returns({
+        isConfigured: sinon.stub().returns(true),
+        submitJob,
+        submitPromptGenerationJob,
+      });
+      return {
+        mockDrsClient: { createFrom }, createFrom, submitJob, submitPromptGenerationJob,
+      };
+    };
+
+    const buildSiteMocks = () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('site-only-org'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const siteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+        getBrandProfile: sinon.stub().returns(null),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site-only-site'),
+        getConfig: sinon.stub().returns(siteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+      return {
+        mockOrganization, siteConfig, mockSite, mockConfiguration,
+      };
+    };
+
+    it('v2: stands up the site but skips brand + prompt-gen; keeps config + brandalf flag', async () => {
+      const {
+        mockOrganization, siteConfig, mockSite, mockConfiguration,
+      } = buildSiteMocks();
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // feature_flags: read (mode resolution) + upsert (brandalf enable) tracking
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const {
+        mockDrsClient, createFrom, submitJob, submitPromptGenerationJob,
+      } = buildTrackableDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-x' });
+
+      const { performLlmoOnboarding: onboard } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboard({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteOnly: true,
+      }, context);
+
+      // Site stood up, base config written
+      expect(result.siteId).to.equal('site-only-site');
+      expect(result.organizationId).to.equal('site-only-org');
+      expect(siteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
+      expect(mockSite.save).to.have.been.called;
+
+      // Always-run path preserved: v2 customer config + brandalf flag
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+      expect(upsertStub).to.have.been.calledOnce;
+
+      // "Nothing brand / nothing DRS": brand activation + prompt-gen never ran
+      expect(mockUpsertBrand).to.not.have.been.called;
+      expect(createFrom).to.not.have.been.called;
+      expect(submitJob).to.not.have.been.called;
+      expect(submitPromptGenerationJob).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWithMatch('skipping brand activation and prompt generation');
+
+      // llmo-customer-analysis is neither enabled nor triggered; llm-error-pages is both
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llm-error-pages', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('wikipedia-analysis', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.not.have.been.calledWith('llmo-customer-analysis', mockSite);
+
+      expect(context.sqs.sendMessage).to.have.been.calledWith('audit-queue', sinon.match({ type: 'llm-error-pages' }));
+      expect(context.sqs.sendMessage).to.have.been.calledWith('audit-queue', sinon.match({ type: 'wikipedia-analysis' }));
+      expect(context.sqs.sendMessage).to.not.have.been.calledWith('audit-queue', sinon.match({ type: 'llmo-customer-analysis' }));
+    });
+
+    it('v1: skips the DRS prompt-generation job and the v2 customer config', async () => {
+      const {
+        mockOrganization, mockSite, mockConfiguration,
+      } = buildSiteMocks();
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const {
+        mockDrsClient, createFrom, submitPromptGenerationJob,
+      } = buildTrackableDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-x' });
+
+      const { performLlmoOnboarding: onboard } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      await onboard({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteOnly: true,
+      }, context);
+
+      // v1 mode: no v2 customer config; site-only: no DRS prompt generation
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
+      expect(createFrom).to.not.have.been.called;
+      expect(submitPromptGenerationJob).to.not.have.been.called;
+      expect(mockUpsertBrand).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWithMatch('skipping brand activation and prompt generation');
+    });
+
+    it('rolls back SharePoint folder + enrollment when a step fails mid-flight (siteOnly)', async () => {
+      const { mockOrganization, mockSite } = buildSiteMocks();
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      // enableAudits runs after org/site/entitlement/SharePoint are provisioned;
+      // fail it to drive the catch's cleanup (deleteSharePointFolder + revokeEnrollment)
+      // then rethrow — exercising the real rollback on the siteOnly branch.
+      mockDataAccess.Configuration.findLatest.rejects(new Error('config boom'));
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const tierInstance = mockTierClient.createForSite();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      // folderExists: true so the cleanup's deleteSharePointFolder (which guards on
+      // folder.exists()) actually deletes; copyFilesToSharepoint tolerates it (skips
+      // creation), so it doesn't change the failure point.
+      const { mockClient: sharePointClient, mockFolder } = createMockSharePointClient(
+        sinon,
+        { folderExists: true },
+      );
+      const mockOctokit = createMockOctokit();
+      const { mockDrsClient } = buildTrackableDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboard } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      let thrown;
+      try {
+        await onboard({
+          domain: 'example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'ABC123@AdobeOrg',
+          siteOnly: true,
+        }, context);
+      } catch (e) {
+        thrown = e;
+      }
+
+      expect(thrown, 'onboarding should rethrow the mid-flight failure').to.exist;
+      // Cleanup ran: SharePoint folder deleted + site enrollment revoked.
+      expect(mockFolder.delete).to.have.been.called;
+      expect(tierInstance.revokeSiteEnrollment).to.have.been.called;
+    });
+
+    it('enqueues exactly one publish message and survives a failed publish enqueue (siteOnly)', async () => {
+      const { mockOrganization, mockSite, mockConfiguration } = buildSiteMocks();
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const { mockDrsClient } = buildTrackableDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboard } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const PUBLISH = 'trigger:llmo-onboarding-publish';
+      // Fail ONLY the publish enqueue; the audit-trigger enqueues resolve normally.
+      const sendMessage = sinon.stub().callsFake((url, msg) => (
+        msg.type === PUBLISH ? Promise.reject(new Error('sqs down')) : Promise.resolve()
+      ));
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage },
+      };
+
+      const result = await onboard({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteOnly: true,
+      }, context);
+
+      // Onboarding completes despite the failed publish enqueue (swallowed + warned).
+      expect(result.siteId).to.equal('site-only-site');
+      const publishCalls = sendMessage.getCalls().filter((c) => c.args[1]?.type === PUBLISH);
+      expect(publishCalls).to.have.lengthOf(1);
+      expect(mockLog.warn).to.have.been.calledWithMatch(PUBLISH);
     });
   });
 
@@ -1323,7 +1868,12 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Fake timers (not mockSetTimeoutImmediate) so the settleWithin-wrapped tier
+      // lookup resolves via its fast PAID promise before its 5s cap — an
+      // immediate-firing timer would defeat the race and mis-route to the trial
+      // (one-shot) path. Long best-effort timers (override detect, schedule
+      // registration) are still fast-forwarded by tickAsync below.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1365,7 +1915,16 @@ describe('LLMO Onboarding Functions', () => {
         imsOrgId: 'ABC123@AdobeOrg',
       };
 
-      const result = await performLlmoOnboardingWithMocks(params, context);
+      let result;
+      try {
+        const pending = performLlmoOnboardingWithMocks(params, context);
+        // Fast-forward every best-effort settleWithin timer, flushing microtasks
+        // between ticks so the fast-resolving stubs (tier, DRS) win their races.
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
       expect(mockDrsClient.createFrom().submitJob).to.have.been.calledWith(
         sinon.match({
@@ -1591,6 +2150,431 @@ describe('LLMO Onboarding Functions', () => {
       // Brandalf job should still be submitted
       expect(mockDrsClient.createFrom().submitJob)
         .to.have.been.called;
+    });
+
+    it('skips the initial brand write when the brand name already exists on a different site (LLMO-5556)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Feature flag postgrest mock
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // Existing brand with the same name already points at a DIFFERENT site.
+      const brandsMaybeSingle = sinon.stub().resolves({
+        data: { id: 'existing-brand-1', site_id: 'other-site-999' },
+        error: null,
+      });
+      const brandsEq2 = sinon.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const brandsEq1 = sinon.stub().returns({ eq: brandsEq2 });
+      const brandsSelect = sinon.stub().returns({ eq: brandsEq1 });
+      mockDataAccess.services.postgrestClient.from.withArgs('brands').returns({
+        select: brandsSelect,
+      });
+
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+        context,
+      );
+
+      // Onboarding still completes
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      // The existing brand's primary site is NOT touched
+      expect(mockUpsertBrand).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        'already exists with a different primary site',
+      );
+    });
+
+    it('fails closed and skips the brand write when the existing-brand lookup errors (LLMO-5556)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // Brand lookup returns a PostgREST error (does not throw).
+      const brandsMaybeSingle = sinon.stub().resolves({
+        data: null,
+        error: { message: 'connection reset' },
+      });
+      const brandsEq2 = sinon.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const brandsEq1 = sinon.stub().returns({ eq: brandsEq2 });
+      const brandsSelect = sinon.stub().returns({ eq: brandsEq1 });
+      mockDataAccess.services.postgrestClient.from.withArgs('brands').returns({
+        select: brandsSelect,
+      });
+
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+        context,
+      );
+
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(mockUpsertBrand).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        'failed to look up existing brand',
+      );
+    });
+
+    it('writes the initial brand when an existing same-name brand has no primary site yet', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // Existing brand exists by name but has no primary site (site_id null) —
+      // the write should proceed so the upsert sets it.
+      const brandsMaybeSingle = sinon.stub().resolves({
+        data: { id: 'existing-brand-1', site_id: null },
+        error: null,
+      });
+      const brandsEq2 = sinon.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const brandsEq1 = sinon.stub().returns({ eq: brandsEq2 });
+      const brandsSelect = sinon.stub().returns({ eq: brandsEq1 });
+      mockDataAccess.services.postgrestClient.from.withArgs('brands').returns({
+        select: brandsSelect,
+      });
+
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+        context,
+      );
+
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(mockUpsertBrand).to.have.been.calledOnce;
+      expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
+    });
+
+    it('writes the initial brand on a same-site re-onboard (existing brand points at this site)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // Existing brand already points at THIS site (same-site re-onboard) — no
+      // collision, so the write proceeds; upsertBrand's own guard keeps site_id.
+      const brandsMaybeSingle = sinon.stub().resolves({
+        data: { id: 'existing-brand-1', site_id: 'site123' },
+        error: null,
+      });
+      const brandsEq2 = sinon.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const brandsEq1 = sinon.stub().returns({ eq: brandsEq2 });
+      const brandsSelect = sinon.stub().returns({ eq: brandsEq1 });
+      mockDataAccess.services.postgrestClient.from.withArgs('brands').returns({
+        select: brandsSelect,
+      });
+
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+        context,
+      );
+
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(mockUpsertBrand).to.have.been.calledOnce;
+      expect(mockLog.warn).to.not.have.been.calledWithMatch('already exists with a different primary site');
     });
 
     it('should include detectedCdn in result when CDN is detected', async () => {
@@ -3028,7 +4012,9 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // NB: do NOT mock setTimeout to fire immediately here — override detection is
+      // now timeboxed via settleWithin(), and an immediate-firing timer would trip
+      // the timeout before the (instant, mocked) detection wins the race.
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -3323,6 +4309,39 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
+  describe('triggerBrandalfOnboardingJob region plumbing (LLMO-5645)', () => {
+    const baseArgs = {
+      organizationId: 'org123',
+      siteId: 'site123',
+      imsOrgId: 'ABC123@AdobeOrg',
+      brandName: 'Test Brand',
+      companyWebsite: 'https://example.com',
+      onboardingMode: 'v2',
+      log: { info: () => {}, debug: () => {}, error: () => {} },
+    };
+
+    it('forwards the operator-selected market in the DRS job parameters', async () => {
+      const { triggerBrandalfOnboardingJob } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const submitJob = sinon.stub().resolves({ job_id: 'job-1' });
+
+      await triggerBrandalfOnboardingJob({ ...baseArgs, region: 'US', drsClient: { submitJob } });
+
+      const { parameters } = submitJob.firstCall.args[0];
+      expect(parameters.region).to.equal('US');
+      expect(parameters.prompt_type).to.equal('brandalf');
+    });
+
+    it('omits region from the DRS job parameters when no market was selected', async () => {
+      const { triggerBrandalfOnboardingJob } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const submitJob = sinon.stub().resolves({ job_id: 'job-1' });
+
+      await triggerBrandalfOnboardingJob({ ...baseArgs, drsClient: { submitJob } });
+
+      const { parameters } = submitJob.firstCall.args[0];
+      expect(parameters).to.not.have.property('region');
+    });
+  });
+
   describe('buildInitialCustomerConfigV2', () => {
     it('builds a single active brand config for onboarding', async () => {
       const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
@@ -3352,6 +4371,22 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
+    });
+
+    it('seeds the operator-selected market in place of the gl placeholder (LLMO-5645)', async () => {
+      const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      const result = buildInitialCustomerConfigV2({
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        region: 'US',
+        updatedBy: 'tester@example.com',
+      });
+
+      const [brand] = result.customer.brands;
+      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['US'] }]);
     });
   });
 
@@ -3550,6 +4585,41 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith(
         'Added site site-123 as brand "New Brand" to existing V2 config for organization org-123',
       );
+    });
+
+    it('seeds the operator market when appending a brand to an existing config (LLMO-5645)', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'existing-brand', v1SiteId: 'other-site-456', name: 'Other Brand' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        region: 'US',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      const newBrand = result.customer.brands[1];
+      expect(newBrand.regions).to.deep.equal(['US']);
+      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['US'] }]);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
     });
 
     it('deduplicates brand ID when colliding with existing brand', async () => {
@@ -4717,6 +5787,565 @@ describe('LLMO Onboarding Functions', () => {
         },
       };
       expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
+    });
+  });
+
+  describe('prompt-suggestion schedule registration (Phase 3)', () => {
+    let onboardingModule;
+    let sandbox;
+
+    before(async function loadOnboardingModule() {
+      // Cold esmock load of the onboarding module (which pulls in many deps) can
+      // exceed the 2000ms default on a first, un-warmed run.
+      this.timeout(30000);
+      onboardingModule = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    });
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    const buildDrsClient = (createScheduleImpl, submitJobImpl) => ({
+      isConfigured: sandbox.stub().returns(true),
+      createSchedule: createScheduleImpl
+        || sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
+      submitJob: submitJobImpl
+        || sandbox.stub().resolves({ job_id: 'job-1' }),
+    });
+
+    const buildLog = () => ({
+      info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
+    });
+
+    // providerId+cadence live in ONE place (PROMPT_SUGGESTION_PIPELINES). This
+    // literal mirrors it; the first test asserts the module table matches, so a
+    // drift is caught here rather than silently changing behavior.
+    const PIPELINES = [
+      ['prompt_generation_semrush', 'twice_monthly'],
+      ['prompt_generation_agentic_traffic', 'twice_monthly'],
+      ['prompt_generation_synthetic_personas', 'quarterly'],
+    ];
+
+    it('declares each provider+cadence exactly once in PROMPT_SUGGESTION_PIPELINES', () => {
+      expect(onboardingModule.PROMPT_SUGGESTION_PIPELINES.map(
+        ({ providerId, cadence }) => [providerId, cadence],
+      )).to.deep.equal(PIPELINES);
+    });
+
+    PIPELINES.forEach(([providerId, cadence]) => {
+      it(`registerPromptSuggestionSchedule registers a ${cadence} schedule for ${providerId} with an immediate first run (paying)`, async () => {
+        const drsClient = buildDrsClient();
+        const result = await onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', isPaying: true, log: buildLog(), say: sandbox.stub(),
+        });
+
+        expect(drsClient.createSchedule).to.have.been.calledOnce;
+        expect(drsClient.submitJob).to.not.have.been.called;
+        const arg = drsClient.createSchedule.firstCall.args[0];
+        expect(arg).to.deep.include({
+          siteId: 'site-123',
+          cadence,
+          enableBrandPresence: false,
+          triggerImmediately: true,
+        });
+        expect(arg.providerIds).to.deep.equal([providerId]);
+        // DRS derives the tenant key from siteId and rejects caller imsOrgId — never thread it.
+        expect(arg).to.not.have.property('imsOrgId');
+        expect(arg).to.not.have.property('orgId');
+        expect(result).to.deep.equal({ scheduleId: 'sched-1', alreadyExisted: false });
+      });
+
+      it(`registerPromptSuggestionSchedule submits a one-time run (no schedule) for ${providerId} on a trial site`, async () => {
+        const drsClient = buildDrsClient();
+        const log = buildLog();
+        const result = await onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', isPaying: false, log, say: sandbox.stub(),
+        });
+
+        // Trial → one-shot submitJob, NO recurring schedule.
+        expect(drsClient.createSchedule).to.not.have.been.called;
+        expect(drsClient.submitJob).to.have.been.calledOnce;
+        expect(drsClient.submitJob.firstCall.args[0]).to.deep.equal({
+          provider_id: providerId,
+          source: 'onboarding',
+          priority: 'HIGH',
+          parameters: { siteId: 'site-123' },
+        });
+        expect(result).to.deep.equal({ job_id: 'job-1' });
+        expect(log.info).to.have.been.calledWithMatch(/Submitted one-time DRS/);
+      });
+
+      it(`registerPromptSuggestionSchedule skips (no createSchedule/submitJob) for ${providerId} when the DRS client is not configured`, async () => {
+        const drsClient = buildDrsClient();
+        drsClient.isConfigured.returns(false);
+        const log = buildLog();
+
+        const result = await onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', isPaying: true, log, say: sandbox.stub(),
+        });
+
+        expect(drsClient.createSchedule).to.not.have.been.called;
+        expect(drsClient.submitJob).to.not.have.been.called;
+        expect(result).to.equal(null);
+        expect(log.debug).to.have.been.calledWithMatch(providerId);
+      });
+
+      it(`registerPromptSuggestionSchedule propagates a schedule-registration failure for ${providerId} (not swallowed)`, async () => {
+        const err = new Error('DRS POST /schedules failed: 500');
+        const drsClient = buildDrsClient(sandbox.stub().rejects(err));
+
+        await expect(onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', isPaying: true, log: buildLog(), say: sandbox.stub(),
+        })).to.be.rejectedWith('DRS POST /schedules failed: 500');
+      });
+
+      it(`registerPromptSuggestionSchedule propagates a one-shot submit failure for ${providerId} (trial, not swallowed)`, async () => {
+        const err = new Error('DRS POST /jobs failed: 500');
+        const drsClient = buildDrsClient(undefined, sandbox.stub().rejects(err));
+
+        await expect(onboardingModule.registerPromptSuggestionSchedule({
+          drsClient, providerId, cadence, siteId: 'site-123', isPaying: false, log: buildLog(), say: sandbox.stub(),
+        })).to.be.rejectedWith('DRS POST /jobs failed: 500');
+      });
+    });
+
+    it('registerPromptSuggestionSchedule logs the alreadyExisted branch', async () => {
+      const drsClient = buildDrsClient(
+        sandbox.stub().resolves({ scheduleId: 'sched-9', alreadyExisted: true }),
+      );
+      const log = buildLog();
+
+      await onboardingModule.registerPromptSuggestionSchedule({
+        drsClient,
+        providerId: 'prompt_generation_semrush',
+        cadence: 'twice_monthly',
+        siteId: 'site-123',
+        isPaying: true,
+        log,
+        say: sandbox.stub(),
+      });
+
+      // Assert the full context is logged, not just the 'already existed' suffix,
+      // so a silent degradation of the log line (dropping scheduleId/providerId)
+      // is caught.
+      expect(log.info).to.have.been.calledWithMatch(/already existed/);
+      expect(log.info).to.have.been.calledWithMatch(/sched-9/);
+      expect(log.info).to.have.been.calledWithMatch(/prompt_generation_semrush/);
+    });
+
+    it('registerPromptSuggestionSchedules resolves to a completion sentinel on success (paying)', async () => {
+      // The caller distinguishes "finished" from a settleWithin timeout by this
+      // sentinel (timeout resolves to the null fallback instead).
+      const drsClient = buildDrsClient(
+        sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
+      );
+      const result = await onboardingModule.registerPromptSuggestionSchedules({
+        drsClient,
+        siteId: 'site-123',
+        isPaying: true,
+        log: buildLog(),
+        say: sandbox.stub(),
+      });
+      expect(result).to.deep.equal({ completed: true });
+      // Paying → recurring schedule per pipeline, no one-shot submits.
+      expect(drsClient.createSchedule).to.have.been.calledThrice;
+      expect(drsClient.submitJob).to.not.have.been.called;
+    });
+
+    it('registerPromptSuggestionSchedules submits one-time runs (no schedules) for a trial site', async () => {
+      const drsClient = buildDrsClient();
+      const result = await onboardingModule.registerPromptSuggestionSchedules({
+        drsClient,
+        siteId: 'site-123',
+        isPaying: false,
+        log: buildLog(),
+        say: sandbox.stub(),
+      });
+      expect(result).to.deep.equal({ completed: true });
+      // Trial → one-shot submitJob per pipeline, no recurring schedules.
+      expect(drsClient.submitJob).to.have.been.calledThrice;
+      expect(drsClient.createSchedule).to.not.have.been.called;
+    });
+
+    it('registerPromptSuggestionSchedules resolves to the sentinel when DRS is not configured', async () => {
+      const drsClient = buildDrsClient(sandbox.stub());
+      drsClient.isConfigured = sandbox.stub().returns(false);
+      const result = await onboardingModule.registerPromptSuggestionSchedules({
+        drsClient, siteId: 'site-123', isPaying: true, log: buildLog(), say: sandbox.stub(),
+      });
+      expect(result).to.deep.equal({ completed: true });
+      expect(drsClient.createSchedule).to.not.have.been.called;
+      expect(drsClient.submitJob).to.not.have.been.called;
+    });
+  });
+
+  describe('activateBrandAndGeneratePrompts — V2 prompt-suggestion schedules', () => {
+    let sandbox;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    const buildV2Context = () => {
+      const brandsMaybeSingle = sandbox.stub().resolves({ data: null, error: null });
+      const eqName = sandbox.stub().returns({ maybeSingle: brandsMaybeSingle });
+      const eqOrg = sandbox.stub().returns({ eq: eqName });
+      const select = sandbox.stub().returns({ eq: eqOrg });
+      const postgrestClient = { from: sandbox.stub().returns({ select }) };
+      const log = {
+        info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
+      };
+      return {
+        log,
+        dataAccess: { services: { postgrestClient } },
+      };
+    };
+
+    const buildV2Params = (context) => ({
+      onboardingMode: 'v2',
+      organization: { getId: sandbox.stub().returns('org-123') },
+      site: { getId: sandbox.stub().returns('site-123') },
+      siteConfig: { getFetchConfig: sandbox.stub().returns({}) },
+      brandName: 'Test Brand',
+      imsOrgId: 'ABC123@AdobeOrg',
+      baseURL: 'https://example.com',
+      context,
+      say: sandbox.stub(),
+    });
+
+    it('registers all three prompt-suggestion schedules after the Brandalf trigger', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const instance = mockDrsClient.createFrom();
+      expect(instance.submitJob).to.have.been.calledOnce; // Brandalf fired first
+      expect(instance.createSchedule).to.have.been.calledThrice;
+      // Schedules register AFTER the Brandalf submit (not in parallel before it).
+      expect(instance.createSchedule).to.have.been.calledAfter(instance.submitJob);
+      const providerIds = instance.createSchedule.getCalls().map((c) => c.args[0].providerIds[0]);
+      expect(providerIds).to.have.members([
+        'prompt_generation_semrush',
+        'prompt_generation_agentic_traffic',
+        'prompt_generation_synthetic_personas',
+      ]);
+    });
+
+    it('submits one-time runs (no schedules) for a FREE_TRIAL site', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockTierClient: createMockTierClientForTier('FREE_TRIAL', sandbox),
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const instance = mockDrsClient.createFrom();
+      // Trial → NO recurring schedules; one on-demand submit per pipeline.
+      expect(instance.createSchedule).to.not.have.been.called;
+      // submitJob = 1 Brandalf + 3 one-shot pipeline runs.
+      expect(instance.submitJob.callCount).to.equal(4);
+      const oneShotCalls = instance.submitJob.getCalls()
+        .filter((c) => c.args[0].source === 'onboarding' && c.args[0].parameters?.siteId === 'site-123');
+      const providerIds = oneShotCalls.map((c) => c.args[0].provider_id);
+      expect(providerIds).to.have.members([
+        'prompt_generation_semrush',
+        'prompt_generation_agentic_traffic',
+        'prompt_generation_synthetic_personas',
+      ]);
+    });
+
+    it('defaults to one-time runs (trial) and WARNs when the tier cannot be read', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      // TierClient whose entitlement lookup throws → tier indeterminate.
+      const failingTierClient = {
+        createForSite: sandbox.stub().returns({
+          checkValidEntitlement: sandbox.stub().rejects(new Error('tier lookup boom')),
+        }),
+      };
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockTierClient: failingTierClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const instance = mockDrsClient.createFrom();
+      // Fail-safe: no recurring schedule for a site of unknown paying status.
+      expect(instance.createSchedule).to.not.have.been.called;
+      expect(instance.submitJob.callCount).to.equal(4); // Brandalf + 3 one-shots
+      const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
+      expect(warnLogs.some((m) => m.includes('Failed to read LLMO tier for site site-123'))).to.be.true;
+    });
+
+    it('defaults to one-time runs (trial) and WARNs when no entitlement exists', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const noEntitlementTierClient = {
+        createForSite: sandbox.stub().returns({
+          checkValidEntitlement: sandbox.stub().resolves({}),
+        }),
+      };
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockTierClient: noEntitlementTierClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const instance = mockDrsClient.createFrom();
+      expect(instance.createSchedule).to.not.have.been.called;
+      expect(instance.submitJob.callCount).to.equal(4);
+      const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
+      expect(warnLogs.some((m) => m.includes('Could not determine LLMO tier for site site-123'))).to.be.true;
+    });
+
+    it('logs a schedule-registration failure at ERROR with context but still completes onboarding', async () => {
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 500;
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        createSchedule: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      // Must resolve (onboarding succeeds) despite every schedule registration failing.
+      await activateBrandAndGeneratePrompts(params);
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      const semrushLog = errorLogs.find((m) => m.includes('prompt_generation_semrush'));
+      expect(semrushLog, 'expected an ERROR log for the failed semrush schedule').to.be.a('string');
+      expect(semrushLog).to.include('site_id=site-123');
+      expect(semrushLog).to.include('status=500');
+      // All three providers are surfaced, none swallowed. Filter by the
+      // schedule-failure message instead of asserting a bare calledThrice, so an
+      // unrelated future ERROR log in V2 onboarding does not break this test.
+      const scheduleFailureLogs = errorLogs.filter((m) => m.includes('Failed to run/register DRS'));
+      expect(scheduleFailureLogs).to.have.lengthOf(3);
+      // Paying path → the wording reads "(schedule)", the failing createSchedule branch.
+      expect(semrushLog).to.include('(schedule)');
+      // Operator gets a Slack warning per failed schedule (manual-trigger signal).
+      expect(params.say).to.have.been.calledWithMatch(/Failed to run\/register DRS .*\(schedule\)/);
+      // Brandalf still fired — the schedule failures did not abort onboarding.
+      expect(mockDrsClient.createFrom().submitJob).to.have.been.calledOnce;
+    });
+
+    it('logs status=unknown when a schedule-registration failure carries no HTTP status', async () => {
+      const err = new Error('network down'); // no .status attached
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        createSchedule: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('status=unknown'))).to.be.true;
+    });
+
+    it('isolates a single pipeline failure: the other two register, exactly one ERROR, onboarding completes', async () => {
+      // One provider's createSchedule rejects; the other two resolve. The
+      // per-item try/catch must isolate the failure — 2 schedules registered,
+      // exactly 1 ERROR log, and onboarding still completes.
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 503;
+      const createSchedule = sandbox.stub();
+      createSchedule
+        .withArgs(sinon.match((a) => a.providerIds[0] === 'prompt_generation_agentic_traffic'))
+        .rejects(err);
+      createSchedule.resolves({ scheduleId: 'sched-ok', alreadyExisted: false });
+
+      const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      await activateBrandAndGeneratePrompts(params);
+
+      const instance = mockDrsClient.createFrom();
+      // All three were attempted; two resolved, one rejected.
+      expect(instance.createSchedule).to.have.been.calledThrice;
+      // Exactly one ERROR — the failing agentic-traffic pipeline, not the others.
+      expect(context.log.error).to.have.been.calledOnce;
+      const errorLog = context.log.error.firstCall.args[0];
+      expect(errorLog).to.include('prompt_generation_agentic_traffic');
+      expect(errorLog).to.include('status=503');
+      // Onboarding still completed (Brandalf fired, resolve did not throw).
+      expect(instance.submitJob).to.have.been.calledOnce;
+    });
+
+    it('does not abort onboarding when DrsClient.createFrom throws (best-effort contract)', async () => {
+      // A malformed context / SDK regression must not 500 onboarding: createFrom
+      // throwing is treated as "DRS unavailable" — no Brandalf, no schedules, but
+      // onboarding resolves.
+      const createFromErr = new Error('DRS client init boom');
+      const mockDrsClient = { createFrom: sandbox.stub().throws(createFromErr) };
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      // Resolves (does not reject) despite createFrom throwing.
+      await activateBrandAndGeneratePrompts(params);
+
+      expect(mockDrsClient.createFrom).to.have.been.calledOnce;
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('DRS client creation failed'))).to.be.true;
+      expect(params.say).to.have.been.calledWithMatch(/DRS client unavailable/);
+    });
+
+    it('warns when schedule registration times out (settleWithin fallback)', async () => {
+      // createSchedule never settles → settleWithin resolves to its null fallback
+      // after the timeout; the caller must surface a WARN + Slack signal so a hung
+      // DRS is visible (the per-pipeline catch blocks never fire on a pending call).
+      const clock = sandbox.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const createSchedule = sandbox.stub().returns(new Promise(() => {})); // never settles
+        const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+        const { activateBrandAndGeneratePrompts } = await esmock(
+          '../../../src/controllers/llmo/llmo-onboarding.js',
+          createCommonEsmockDependencies({
+            mockDrsClient,
+            mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+          }),
+        );
+        const context = buildV2Context();
+        const params = buildV2Params(context);
+        const pending = activateBrandAndGeneratePrompts(params);
+        // Advance past every pending timer (schedule-registration + any sibling
+        // settleWithin), flushing microtasks between ticks.
+        await clock.tickAsync(60000);
+        await pending;
+
+        const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
+        expect(warnLogs.some((m) => m.includes('schedule registration timed out'))).to.be.true;
+        expect(params.say).to.have.been.calledWithMatch(/schedule registration timed out/);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('defaults to the trial (one-shot) path when the tier lookup times out', async () => {
+      // isPayingLlmoSite hits a hung tier service: the entitlement promise is
+      // pending (not rejected), so isPayingLlmoSite's internal try/catch never
+      // fires. The settleWithin(TIER_LOOKUP_TIMEOUT_MS) cap must fall back to
+      // false (trial) → one-shot submitJob per pipeline, no recurring schedules.
+      const clock = sandbox.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const mockDrsClient = createMockDrsClient(sandbox);
+        const hangingTierClient = {
+          createForSite: sandbox.stub().returns({
+            // never settles → forces the settleWithin timeout branch
+            checkValidEntitlement: sandbox.stub().returns(new Promise(() => {})),
+          }),
+        };
+        const { activateBrandAndGeneratePrompts } = await esmock(
+          '../../../src/controllers/llmo/llmo-onboarding.js',
+          createCommonEsmockDependencies({
+            mockDrsClient,
+            mockTierClient: hangingTierClient,
+            mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+          }),
+        );
+        const context = buildV2Context();
+        const params = buildV2Params(context);
+        const pending = activateBrandAndGeneratePrompts(params);
+        // Advance past the tier-lookup cap (and any sibling settleWithin timers),
+        // flushing microtasks between ticks.
+        await clock.tickAsync(60000);
+        await pending;
+
+        const instance = mockDrsClient.createFrom();
+        // Timed-out tier lookup → treated as trial: no recurring schedule, one-shot
+        // submitJob per pipeline (plus the Brandalf submit).
+        expect(instance.createSchedule).to.not.have.been.called;
+        expect(instance.submitJob.callCount).to.equal(4);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('logs a trial one-shot submit failure with "(one-shot run)" wording', async () => {
+      // Trial path: the per-pipeline failure is a submitJob (one-shot), not a
+      // createSchedule — the log/Slack wording must reflect that branch.
+      const err = new Error('DRS POST /jobs failed');
+      err.status = 502;
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        submitJob: sandbox.stub().rejects(err),
+      });
+      const { activateBrandAndGeneratePrompts } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockTierClient: createMockTierClientForTier('FREE_TRIAL', sandbox),
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const params = buildV2Params(context);
+      await activateBrandAndGeneratePrompts(params);
+
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      const oneShotLogs = errorLogs.filter((m) => m.includes('Failed to run/register DRS') && m.includes('(one-shot run)'));
+      // All three trial pipelines surfaced the one-shot failure, none swallowed.
+      expect(oneShotLogs).to.have.lengthOf(3);
+      expect(params.say).to.have.been.calledWithMatch(/Failed to run\/register DRS .*\(one-shot run\)/);
     });
   });
 });

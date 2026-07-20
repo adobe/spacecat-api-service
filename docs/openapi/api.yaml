@@ -77,6 +77,11 @@ tags:
     description: Site URL tracking and management operations
   - name: sentiment
     description: Brand sentiment analysis topics and guidelines management
+  - name: ai-visibility
+    description: AI Visibility endpoints – proxy to Semrush gRPC for brand visibility, competitor gaps, topic research, and prompt analysis
+  - name: state-access-mappings
+    description: |
+      Hybrid permission model — state-layer access mappings + capability views.
 
 paths:
   /audits/latest/{auditType}:
@@ -125,6 +130,10 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/activate:
+    $ref: './brands-v2-api.yaml#/v2-brand-for-org-activate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/status:
+    $ref: './brands-v2-api.yaml#/v2-brand-status-for-org'
   /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org-site'
   /v2/orgs/{spaceCatId}/categories:
@@ -141,6 +150,38 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{semrushPromptId}:
+    $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
+    $ref: './serenity-api.yaml#/v2-serenity-markets'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
+    $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
+    $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
+    $ref: './serenity-api.yaml#/v2-serenity-models'
+  /v2/orgs/{spaceCatId}/serenity/models:
+    $ref: './serenity-api.yaml#/v2-serenity-org-models'
+  /v2/orgs/{spaceCatId}/serenity/languages:
+    $ref: './serenity-api.yaml#/v2-serenity-org-languages'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/activate:
+    $ref: './serenity-api.yaml#/v2-serenity-activate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/deactivate:
+    $ref: './serenity-api.yaml#/v2-serenity-deactivate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/filter-dimensions:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/market-tracking-trends:
+    $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-stats'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -160,6 +201,22 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /organizations/{organizationId}/task-management/connections:
+    $ref: './task-management-api.yaml#/task-management-connections'
+  /organizations/{organizationId}/task-management/connections/{connectionId}:
+    $ref: './task-management-api.yaml#/task-management-connection-by-id'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/projects:
+    $ref: './task-management-api.yaml#/task-management-connection-projects'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/issue-types:
+    $ref: './task-management-api.yaml#/task-management-connection-issue-types'
+  /organizations/{organizationId}/task-management/tickets:
+    $ref: './task-management-api.yaml#/task-management-tickets'
+  /organizations/{organizationId}/task-management/{provider}/tickets:
+    $ref: './task-management-api.yaml#/task-management-create-ticket'
+  /organizations/{organizationId}/suggestions/{suggestionId}/ticket:
+    $ref: './task-management-api.yaml#/ticket-by-suggestion'
+  /organizations/{organizationId}/opportunities/{opportunityId}/tickets:
+    $ref: './task-management-api.yaml#/tickets-by-opportunity'
   /organizations/{organizationId}/projects:
     $ref: './organizations-api.yaml#/organization-projects'
   /organizations/{organizationId}/projects/{projectId}/sites:
@@ -180,6 +237,10 @@ paths:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
+  /sites/detect/jobs:
+    $ref: './site-detection-api.yaml#/site-detection-jobs'
+  /sites/detect/jobs/{jobId}:
+    $ref: './site-detection-api.yaml#/site-detection-job-status'
   /tools/scrape/jobs:
     $ref: './scrape-api.yaml#/create-scrape-job'
   /tools/scrape/jobs/{jobId}:
@@ -214,6 +275,8 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
+  /sites/{siteId}/identity:
+    $ref: './site-api.yaml#/site-identity'
   /sites/{siteId}/audits:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/audits/{auditType}:
@@ -226,6 +289,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/bot-blocker:
     $ref: './bot-blocker-api.yaml#/bot-blocker'
+  /sites/{siteId}/entitlements:
+    $ref: './entitlements-api.yaml#/ensure-entitlement-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
@@ -234,6 +299,8 @@ paths:
     $ref: './sites-api.yaml#/site-brand-profile'
   /sites/{siteId}/config/cdn-logs:
     $ref: './site-api.yaml#/site-cdn-logs-config'
+  /sites/{siteId}/config/scraper:
+    $ref: './site-api.yaml#/site-scraper-config'
   /sites/{siteId}/page-relationships/search:
     $ref: './site-api.yaml#/site-page-relationships-search'
   /sites/{siteId}/opportunities:
@@ -258,6 +325,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion-fixes'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/backoffice-reviews:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion-backoffice-reviews'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
@@ -276,6 +345,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
     $ref: './scrape-api.yaml#/get-files'
+  /config/{service}/redirects.txt:
+    $ref: './aso-overlay-api.yaml#/get-aso-redirects'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
@@ -290,6 +361,14 @@ paths:
     $ref: './url-store-api.yaml#/url-store-get'
   /sites/{siteId}/url-store/delete:
     $ref: './url-store-api.yaml#/url-store-delete'
+  /sites/{siteId}/agentic-categories:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-list'
+  /sites/{siteId}/agentic-categories/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-categories-one'
+  /sites/{siteId}/agentic-page-types:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
+  /sites/{siteId}/agentic-page-types/{name}:
+    $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
@@ -426,6 +505,8 @@ paths:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/{siteId}/fixes:
+    $ref: './site-opportunities.yaml#/site-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
@@ -464,6 +545,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-data-with-type'
   /sites/{siteId}/llmo/data/{sheetType}/{week}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-data-with-type-and-week'
+  /sites/{siteId}/llmo/data/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-datasource'
+  /sites/{siteId}/llmo/data/{sheetType}/{dataSource}/row:
+    $ref: './llmo-api.yaml#/llmo-data-row-with-type'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
@@ -490,12 +575,47 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-user-agent'
   /sites/{siteId}/agentic-traffic/by-url:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-url'
+  /sites/{siteId}/agentic-traffic/hits-by-urls:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-hits-by-urls'
+  /sites/{siteId}/agentic-traffic/urls/export:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-urls-export'
+  /sites/{siteId}/agentic-traffic/urls/export/{exportId}:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-urls-export-status'
   /sites/{siteId}/agentic-traffic/filter-dimensions:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-filter-dimensions'
   /sites/{siteId}/agentic-traffic/weeks:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  # Referral Traffic PG
+  /sites/{siteId}/referral-traffic/has-data:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-has-data'
+  /sites/{siteId}/referral-traffic/filter-dimensions:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-filter-dimensions'
+  /sites/{siteId}/referral-traffic/kpis:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-kpis'
+  /sites/{siteId}/referral-traffic/trend:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-trend'
+  /sites/{siteId}/referral-traffic/by-platform:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-platform'
+  /sites/{siteId}/referral-traffic/by-region:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-region'
+  /sites/{siteId}/referral-traffic/by-page-intent:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-page-intent'
+  /sites/{siteId}/referral-traffic/by-url:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-url'
+  /sites/{siteId}/referral-traffic/by-url-trend:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-url-trend'
+  /sites/{siteId}/referral-traffic/by-device:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-by-device'
+  /sites/{siteId}/referral-traffic/business-impact:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-business-impact'
+  /sites/{siteId}/referral-traffic/weeks:
+    $ref: './llmo-api.yaml#/llmo-referral-traffic-weeks'
+  /org/{spaceCatId}/brands/{brandId}/fanout-report:
+    $ref: './fanout-report-api.yaml#/fanout-report'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/filter-dimensions:
+    $ref: './llmo-api.yaml#/brand-presence-filter-dimensions'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/prompt-execution-status:
     $ref: './llmo-api.yaml#/brand-presence-prompt-execution-status'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/stats:
@@ -532,6 +652,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-bucket-config'
   /llmo/onboard:
     $ref: './llmo-api.yaml#/llmo-onboard'
+  /v2/orgs/{spaceCatId}/llmo/onboard-site:
+    $ref: './llmo-api.yaml#/llmo-onboard-site'
   /sites/{siteId}/llmo/offboard:
     $ref: './llmo-api.yaml#/llmo-offboard'
   /sites/{siteId}/llmo/opportunities-reviewed:
@@ -546,12 +668,66 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-bootstrap-url'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/connect:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-connect'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/distributions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-distributions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/prerequisites:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-prerequisites'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/origins:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-origins'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/behaviors:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-behaviors'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-origin:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-origin'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-function:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-function'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-cache:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-cache'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-lambda:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-lambda'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/lambda-status:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-lambda-status'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-associations:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-associations'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/verify:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-verify'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/plan:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
     $ref: './llmo-api.yaml#/llmo-probe-edge-optimize'
   /sites/{siteId}/llmo/edge-optimize-routing:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/config:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-config'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/accounts:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-accounts'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-zones'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/config:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-config'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/properties:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-properties'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/plan:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activate:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activate'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activation-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activation-status'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:
@@ -576,6 +752,103 @@ paths:
     $ref: './guidelines-api.yaml#/sentiment-config'
   /sites/{siteId}/tokens/by-type/{tokenType}:
     $ref: './tokens-api.yaml#/site-token-by-type'
+
+  # AI Visibility
+  /llmo/ai-visibility/brands/stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-stats'
+  /llmo/ai-visibility/brands/topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-topics'
+  /llmo/ai-visibility/brands/prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-prompts'
+  /llmo/ai-visibility/brands/cited-pages:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-cited-pages'
+  /llmo/ai-visibility/brands/topic-opportunities:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-topic-opportunities'
+  /llmo/ai-visibility/brands/top-brands:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-top-brands'
+  /llmo/ai-visibility/brands/cited-sources:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-cited-sources'
+  /llmo/ai-visibility/brands/source-opportunities:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-source-opportunities'
+  /llmo/ai-visibility/brands/competitors:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-competitors'
+  /llmo/ai-visibility/competitors/metrics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-metrics'
+  /llmo/ai-visibility/meta:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-meta'
+  /llmo/ai-visibility/prompts/responses/latest:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses-latest'
+  /llmo/ai-visibility/prompts/responses:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses'
+  /llmo/ai-visibility/topics/research/stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-stats'
+  /llmo/ai-visibility/topics/research:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research'
+  /llmo/ai-visibility/topics/stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-stats'
+  /llmo/ai-visibility/topics/research/prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-prompts'
+  /llmo/ai-visibility/topics/research/brands:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
+  /llmo/ai-visibility/topics/research/source-domains:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
+  /llmo/ai-visibility/v1/brand/stats-by-llm:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
+  /llmo/ai-visibility/v1/brand/stats-by-country:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-country'
+  /llmo/ai-visibility/v1/topic/brand-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
+  /llmo/ai-visibility/v1/topic/brand-topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics-export'
+  /llmo/ai-visibility/v1/topic/brand-topics-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics-totals'
+  /llmo/ai-visibility/v1/topic/gap-topics:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics'
+  /llmo/ai-visibility/v1/topic/gap-topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-export'
+  /llmo/ai-visibility/v1/topic/gap-topics-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-totals'
+  /llmo/ai-visibility/v1/prompt/brand-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
+  /llmo/ai-visibility/v1/prompt/brand-prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts-export'
+  /llmo/ai-visibility/v1/prompt/gap-prompts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts'
+  /llmo/ai-visibility/v1/prompt/gap-prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
+  /llmo/ai-visibility/v1/prompt/gap-prompts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-totals'
+  /llmo/ai-visibility/v1/prompt/prompt-response:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
+  /llmo/ai-visibility/v1/source/gap-source-domains:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains'
+  /llmo/ai-visibility/v1/source/gap-source-domains-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-export'
+  /llmo/ai-visibility/v1/source/gap-source-domains-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-totals'
+  /llmo/ai-visibility/v1/prompt-research/prompts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-prompts-export'
+  /llmo/ai-visibility/v1/prompt-research/brands-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-brands-export'
+  /llmo/ai-visibility/v1/prompt-research/source-domains-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-source-domains-export'
+  /llmo/ai-visibility/v1/prompt-research/topics-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-topics-export'
+  /llmo/ai-visibility/v1/meta/meta:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-meta-meta'
+
+  /state/access-mappings:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings'
+  /state/access-mappings/history:
+    $ref: './state-access-mappings-api.yaml#/state-access-mappings-history'
+  /state/access-mappings/{id}:
+    $ref: './state-access-mappings-api.yaml#/state-access-mapping-by-id'
+  /product/capabilities:
+    $ref: './state-access-mappings-api.yaml#/product-capabilities'
+  /user/capabilities/{resourceId}:
+    $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
+  /organizations/{organizationId}/permission/audit-logs:
+    $ref: './state-access-mappings-api.yaml#/permission-audit-logs'
 
 components:
   securitySchemes:
@@ -609,6 +882,11 @@ components:
       in: header
       name: X-Hub-Signature-256
       description: 'HMAC-SHA256 signature of the request body, provided by GitHub on webhook delivery'
+    aso_overlay_api_key:
+      type: apiKey
+      in: header
+      name: X-ASO-API-Key
+      description: 'Static key the AEM dispatcher presents to fetch ASO redirect overlays from /config/*'
   schemas:
     $ref: './schemas.yaml'
   examples:

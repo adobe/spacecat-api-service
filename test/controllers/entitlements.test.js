@@ -58,12 +58,23 @@ describe('Entitlements Controller', () => {
     },
   ];
 
+  const siteId = '777e4567-e89b-12d3-a456-426614174001';
+
+  const mockSite = {
+    getId: () => siteId,
+    getBaseURL: () => 'https://example.com',
+    getOrganizationId: () => organizationId,
+  };
+
   const mockDataAccess = {
     Organization: {
       findById: sandbox.stub().resolves(mockOrganization),
     },
     Entitlement: {
       allByOrganizationId: sandbox.stub().resolves(mockEntitlements),
+    },
+    Site: {
+      findById: sandbox.stub().resolves(mockSite),
     },
   };
 
@@ -99,6 +110,7 @@ describe('Entitlements Controller', () => {
     // Reset stubs
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
     mockDataAccess.Entitlement.allByOrganizationId = sandbox.stub().resolves(mockEntitlements);
+    mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
 
     // Store reference to the mock instance for test manipulation
     mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
@@ -609,6 +621,339 @@ describe('Entitlements Controller', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('Invalid tier');
+    });
+  });
+
+  describe('createSiteEntitlement', () => {
+    const mockCreatedEntitlement = {
+      getId: () => 'entitlement-site-123',
+      getOrganizationId: () => organizationId,
+      getProductCode: () => 'ASO',
+      getTier: () => 'FREE_TRIAL',
+      getQuotas: () => ({ llmo_trial_prompts: 200 }),
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'admin@example.com',
+    };
+
+    const mockCreatedSiteEnrollment = {
+      getId: () => 'enrollment-456',
+      getSiteId: () => siteId,
+      getEntitlementId: () => 'entitlement-site-123',
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'admin@example.com',
+    };
+
+    const mockTierClient = {
+      createEntitlement: sandbox.stub().resolves({
+        entitlement: mockCreatedEntitlement,
+        siteEnrollment: mockCreatedSiteEnrollment,
+      }),
+    };
+
+    beforeEach(() => {
+      // Reset TierClient mock — createForSite returns a TierClient pre-bound
+      // to (site, org, product).
+      sandbox.stub(TierClient, 'createForSite').resolves(mockTierClient);
+      mockTierClient.createEntitlement = sandbox.stub().resolves({
+        entitlement: mockCreatedEntitlement,
+        siteEnrollment: mockCreatedSiteEnrollment,
+      });
+    });
+
+    it('should ensure entitlement + site enrollment for admin user with ASO product', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(201);
+
+      const body = await result.json();
+      expect(body).to.have.property('entitlement');
+      expect(body).to.have.property('siteEnrollment');
+
+      expect(body.entitlement).to.include({
+        id: 'entitlement-site-123',
+        organizationId,
+        productCode: 'ASO',
+        tier: 'FREE_TRIAL',
+      });
+      expect(body.siteEnrollment).to.include({
+        id: 'enrollment-456',
+        siteId,
+        entitlementId: 'entitlement-site-123',
+      });
+
+      expect(TierClient.createForSite).to.have.been.calledWith(
+        context,
+        mockSite,
+        'ASO',
+      );
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    });
+
+    it('should default to FREE_TRIAL tier when tier is not in payload', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'LLMO' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(201);
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    });
+
+    it('should pass through PAID tier from payload', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO', tier: 'PAID' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(201);
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('PAID');
+    });
+
+    it('should support ACO product code', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ACO' },
+        log: { error: sinon.stub() },
+      };
+
+      await entitlementController.createSiteEntitlement(context);
+
+      expect(TierClient.createForSite).to.have.been.calledWith(
+        context,
+        mockSite,
+        'ACO',
+      );
+    });
+
+    it('should return bad request for invalid site ID', async () => {
+      const context = {
+        params: { siteId: 'not-a-uuid' },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Site ID required');
+    });
+
+    it('should return bad request when productCode is missing', async () => {
+      const context = {
+        params: { siteId },
+        data: {},
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid product code');
+      expect(body.message).to.include('LLMO');
+      expect(body.message).to.include('ASO');
+      expect(body.message).to.include('ACO');
+    });
+
+    it('should return bad request when data is absent entirely', async () => {
+      const context = {
+        params: { siteId },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid product code');
+    });
+
+    it('should return bad request for invalid productCode value', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'BOGUS' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid product code');
+      expect(body.message).to.not.include('BOGUS');
+    });
+
+    it('should return bad request for non-string productCode', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 42 },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid product code');
+    });
+
+    it('should return bad request for invalid tier', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO', tier: 'BOGUS_TIER' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid tier');
+      expect(body.message).to.include('FREE_TRIAL');
+      expect(body.message).to.include('PAID');
+    });
+
+    it('should return bad request for non-string tier', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO', tier: 7 },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid tier');
+    });
+
+    it('should return bad request for null tier', async () => {
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO', tier: null },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid tier');
+    });
+
+    it('should return forbidden when user is not admin', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'user@example.com' }) },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only admins can ensure entitlements for a site');
+
+      // Restore default
+      mockAccessControlUtil.hasAdminAccess.returns(true);
+    });
+
+    it('should return not found when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Site not found');
+    });
+
+    it('should return internal server error when TierClient.createForSite fails', async () => {
+      const tierClientError = new Error('TierClient.createForSite failed');
+      TierClient.createForSite.rejects(tierClientError);
+
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Failed to ensure entitlement for site');
+
+      expect(context.log.error).to.have.been.calledWith(
+        `Error ensuring entitlement for site ${siteId}: ${tierClientError.message}`,
+      );
+    });
+
+    it('should return internal server error when TierClient.createEntitlement fails', async () => {
+      const createErr = new Error('createEntitlement failed');
+      mockTierClient.createEntitlement.rejects(createErr);
+
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Failed to ensure entitlement for site');
+
+      expect(context.log.error).to.have.been.calledWith(
+        `Error ensuring entitlement for site ${siteId}: ${createErr.message}`,
+      );
+    });
+
+    it('should return internal server error when Site.findById fails', async () => {
+      const siteErr = new Error('Site lookup failed');
+      mockDataAccess.Site.findById.rejects(siteErr);
+
+      const context = {
+        params: { siteId },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createSiteEntitlement(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Failed to ensure entitlement for site');
+
+      expect(context.log.error).to.have.been.calledWith(
+        `Error ensuring entitlement for site ${siteId}: ${siteErr.message}`,
+      );
     });
   });
 });

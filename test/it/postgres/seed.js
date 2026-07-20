@@ -13,7 +13,10 @@
 /* eslint-disable no-await-in-loop */
 import { execSync } from 'child_process';
 
+import { POSTGREST_WRITER_JWT } from '../shared/postgrest-jwt.js';
 import { organizations } from './seed-data/organizations.js';
+import { facsAccessMappingAuditEvents } from './seed-data/facs-access-mapping-audit-events.js';
+import { facsAccessMappings } from './seed-data/facs-access-mappings.js';
 import { sites } from './seed-data/sites.js';
 import { audits } from './seed-data/audits.js';
 import { opportunities } from './seed-data/opportunities.js';
@@ -34,7 +37,14 @@ import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
 import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
 import { brands } from './seed-data/brands.js';
+import { brandSites } from './seed-data/brand-sites.js';
 import { projectionAudits } from './seed-data/projection-audits.js';
+import { featureFlags } from './seed-data/feature-flags.js';
+import { prompts } from './seed-data/prompts.js';
+import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
+import { taskManagementConnections } from './seed-data/task-management-connections.js';
+import { tickets } from './seed-data/tickets.js';
+import { ticketSuggestions } from './seed-data/ticket-suggestions.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -46,14 +56,21 @@ const POSTGRES_DB = 'mysticat';
  * (Bulk inserts require uniform keys across all objects - PGRST102 - and seed
  * data has optional fields, so we insert individually but parallelize across tables.)
  */
-async function insertRows(table, rows) {
+async function insertRows(table, rows, { asWriter = false } = {}) {
+  // Most tables grant INSERT to postgrest_anon (default), so the unauthenticated
+  // seed works. Append-only audit tables revoke anon INSERT (writer-only), so
+  // pass { asWriter: true } to seed them with the postgrest_writer JWT.
+  const headers = {
+    'Content-Type': 'application/json',
+    Prefer: 'return=minimal',
+  };
+  if (asWriter) {
+    headers.Authorization = `Bearer ${POSTGREST_WRITER_JWT}`;
+  }
   for (const row of rows) {
     const res = await fetch(`${POSTGREST_URL}/${table}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
+      headers,
       body: JSON.stringify(row),
     });
 
@@ -75,13 +92,15 @@ async function insertRows(table, rows) {
  *
  * site_ims_org_accesses.organization_id and target_organization_id reference
  * organizations with ON DELETE RESTRICT, so grants must be cleared before
- * deleting organizations. access_grant_logs uses TEXT columns (no FK) but
- * is cleared for test isolation.
+ * deleting organizations. access_grant_logs and facs_access_mappings use TEXT
+ * columns (no FK to organizations) but are cleared for test isolation.
  */
 function clearData() {
   execSync(
     `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -c "`
     + 'DELETE FROM access_grant_logs;'
+    + 'DELETE FROM facs_access_mappings;'
+    + 'DELETE FROM facs_access_mapping_audit_events;'
     + 'DELETE FROM site_ims_org_accesses;'
     + 'DELETE FROM plg_onboardings;'
     + 'DELETE FROM consumers;'
@@ -89,6 +108,50 @@ function clearData() {
     + 'DELETE FROM projection_audit;'
     + 'DELETE FROM organizations;'
     + '"',
+    { stdio: 'pipe', timeout: 10_000 },
+  );
+}
+
+const REFERRAL_SOURCE_TABLES = {
+  optel: 'referral_traffic_optel',
+  cdn: 'referral_traffic_cdn',
+  adobe_analytics: 'referral_traffic_adobe_analytics',
+  ga4: 'referral_traffic_ga4',
+  cja: 'referral_traffic_cja',
+};
+
+/**
+ * Seeds referral-traffic source *presence* for the has-data IT.
+ *
+ * Clears all five `referral_traffic_*` tables, then inserts one minimal row per
+ * requested source so `GET /sites/:siteId/referral-traffic/has-data` reports
+ * exactly those sources (in the backend's resolution-priority order).
+ *
+ * Rows go into an on-demand far-future (2099) partition: the has-data lower
+ * bound accepts them, and a 2099 range can't collide with the image's real
+ * monthly partitions. Runs as the `postgres` superuser via psql to bypass
+ * PostgREST role grants + partition routing.
+ *
+ * Keep siteId/source inputs trusted constants only (canonical seed UUIDs and
+ * the whitelisted source-to-table map), never request-derived values.
+ *
+ * @param {string} siteId  Site the rows belong to (a canonical seed UUID).
+ * @param {Array<'optel'|'cdn'|'adobe_analytics'|'ga4'|'cja'>} sources Sources to
+ *   mark present; pass [] to clear all five (test cleanup).
+ */
+export function seedReferralPresence(siteId, sources = []) {
+  const statements = [
+    ...Object.values(REFERRAL_SOURCE_TABLES).map((t) => `DELETE FROM ${t};`),
+    ...sources.flatMap((source) => {
+      const table = REFERRAL_SOURCE_TABLES[source];
+      return [
+        `CREATE TABLE IF NOT EXISTS ${table}_itseed PARTITION OF ${table} FOR VALUES FROM ('2099-01-01') TO ('2099-02-01');`,
+        `INSERT INTO ${table} (site_id, traffic_date, url_path, pageviews) VALUES ('${siteId}', '2099-01-15', '/it-seed', 1);`,
+      ];
+    }),
+  ];
+  execSync(
+    `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -v ON_ERROR_STOP=1 -c "${statements.join(' ')}"`,
     { stdio: 'pipe', timeout: 10_000 },
   );
 }
@@ -109,6 +172,8 @@ async function seed() {
     insertRows('async_jobs', asyncJobs),
     insertRows('consumers', consumers),
     insertRows('projection_audit', projectionAudits),
+    insertRows('facs_access_mapping_audit_events', facsAccessMappingAuditEvents, { asWriter: true }),
+    insertRows('facs_access_mappings', facsAccessMappings),
   ]);
 
   // Level 1a: depend on organizations
@@ -116,14 +181,20 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
-    insertRows('brands', brands),
+    // feature_flags grants INSERT to postgrest_writer only (SELECT to anon), so
+    // seed it with the writer JWT — same as the append-only audit tables.
+    insertRows('feature_flags', featureFlags, { asWriter: true }),
+    insertRows('task_management_connections', taskManagementConnections),
   ]);
 
   // Level 1b: depend on projects
   await insertRows('sites', sites);
 
   // Level 2: depend on sites
+  // brands.site_id → sites.id, and chk_active_brand_has_site_id requires an
+  // active brand to carry a site_id, so brands must seed after sites.
   await Promise.all([
+    insertRows('brands', brands),
     insertRows('audits', audits),
     insertRows('opportunities', opportunities),
     insertRows('site_enrollments', siteEnrollments),
@@ -135,16 +206,33 @@ async function seed() {
     insertRows('sentiment_topics', sentimentTopics),
   ]);
 
-  // Level 3: depend on opportunities, audits, topics
+  // Level 3: depend on opportunities, audits, topics, brands + sites
   await Promise.all([
     insertRows('suggestions', suggestions),
     insertRows('fix_entities', fixes),
     insertRows('audit_urls', auditUrls),
     insertRows('sentiment_guidelines', sentimentGuidelines),
+    insertRows('brand_sites', brandSites),
+    insertRows('tickets', tickets),
   ]);
 
-  // Level 4: depend on fix_entities + suggestions
-  await insertRows('fix_entity_suggestions', fixEntitySuggestions);
+  // Level 4: depend on fix_entities + suggestions + tickets
+  await Promise.all([
+    insertRows('fix_entity_suggestions', fixEntitySuggestions),
+    insertRows('ticket_suggestions', ticketSuggestions),
+  ]);
+}
+
+/**
+ * Optional per-test fixture: a prompt carrying an `intent` plus a
+ * brand_presence_executions row referencing it. NOT part of the baseline seed —
+ * other suites (e.g. categories-prompts) count prompts under ORG_1/BRAND_1 and
+ * assume an empty baseline, so this is seeded only by the topic-prompts IT after
+ * resetPostgres(). Cleared by the next suite's clearData (organizations CASCADE).
+ */
+export async function seedBrandPresenceIntentFixture() {
+  await insertRows('prompts', prompts); // FK: BPE.prompt_id → prompts.id
+  await insertRows('brand_presence_executions', brandPresenceExecutions);
 }
 
 /**
