@@ -257,8 +257,11 @@ describe('createElementsService', () => {
         }]));
     });
 
+    // Enrichment requires exactly one projectId (single slice).
+    const ENRICH = { enrichUserIntent: true, projectIds: ['proj-a'] };
+
     it('stamps each row with its own intent (base + one call per intent value)', async () => {
-      const result = await service.getPrompts('ws-1', { enrichUserIntent: true });
+      const result = await service.getPrompts('ws-1', ENRICH);
       const byPrompt = Object.fromEntries(result.prompts.map((p) => [p.prompt, p.userIntent]));
       expect(byPrompt['p-comm']).to.equal('commercial');
       expect(byPrompt['p-info']).to.equal('');
@@ -268,29 +271,52 @@ describe('createElementsService', () => {
     });
 
     it('does not enrich or make extra calls without the flag', async () => {
-      const result = await service.getPrompts('ws-1', {});
+      const result = await service.getPrompts('ws-1', { projectIds: ['proj-a'] });
       const promptCalls = transport.fetchElement.getCalls()
         .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
       expect(promptCalls).to.have.length(1);
       expect(result.prompts[0]).to.not.have.property('userIntent');
     });
 
-    it('ANDs intent__X with any pre-existing tag filter', async () => {
-      await service.getPrompts('ws-1', { enrichUserIntent: true, tags: ['type__branded'] });
-      const commercialCall = transport.fetchElement.getCalls()
-        .find((c) => c.args[1] === ELEMENT_IDS.PROMPTS
-          && c.args[2]?.filters?.advanced?.filters
-            ?.some((f) => f.col === 'tags' && f.val === 'intent__Commercial'));
-      const tagVals = commercialCall.args[2].filters.advanced.filters
-        .filter((f) => f.col === 'tags').map((f) => f.val);
-      expect(tagVals).to.include.members(['type__branded', 'intent__Commercial']);
+    it('skips enrichment when not scoped to exactly one projectId', async () => {
+      const result = await service.getPrompts('ws-1', { enrichUserIntent: true, projectIds: ['proj-a', 'proj-b'] });
+      const promptCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      expect(promptCalls).to.have.length(1);
+      expect(result.prompts[0]).to.not.have.property('userIntent');
+    });
+
+    it('joins on (prompt, prompt_topic) so identical text under different topics is labeled independently', async () => {
+      // Deterministic setup for this scenario only (unstubbed intent calls → empty).
+      transport.fetchElement.reset();
+      // Same prompt text in two topics → two distinct rows with different intents.
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(rawWith([
+        {
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Sofas', volume: 5,
+        },
+        {
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Recliners', volume: 5,
+        },
+      ]));
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
+        .resolves(rawWith([{
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Sofas', volume: 5,
+        }]));
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Navigational'))
+        .resolves(rawWith([{
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Recliners', volume: 5,
+        }]));
+      const result = await service.getPrompts('ws-1', ENRICH);
+      const byTopic = Object.fromEntries(result.prompts.map((p) => [p.prompt_topic, p.userIntent]));
+      expect(byTopic.Sofas).to.equal('commercial');
+      expect(byTopic.Recliners).to.equal('navigational');
     });
 
     it('is non-fatal: a failing intent call degrades to blank userIntent', async () => {
       transport.fetchElement
         .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
         .rejects(new Error('intent call failed'));
-      const result = await service.getPrompts('ws-1', { enrichUserIntent: true });
+      const result = await service.getPrompts('ws-1', ENRICH);
       expect(result.count).to.equal(2);
       result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
     });

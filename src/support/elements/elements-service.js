@@ -62,8 +62,9 @@ const STATS_TRENDS_WEEK_CONCURRENCY = 4;
  * payload builders and response transformers.
  *
  * @param {object} transport - Elements transport created by createElementsTransport().
+ * @param {object} [log] - Optional logger (`{ warn }`) for non-fatal degradation paths.
  */
-export function createElementsService(transport) {
+export function createElementsService(transport, log) {
   return {
     /**
      * Fetches filter dimensions for the URL Inspector dashboard.
@@ -137,14 +138,23 @@ export function createElementsService(transport) {
     /**
      * Fetches the prompts matching the given filters, plus their count.
      *
-     * When `params.enrichUserIntent` is set, each returned row also carries its
-     * OWN intent (`userIntent`) — the intent isn't a column on the PROMPTS
-     * element, so it's derived with one `intent__<value>`-filtered call per
-     * Semrush intent (run in parallel), joined back to the base rows by prompt
-     * text. Enrichment is NON-FATAL: if the intent calls fail, rows are returned
-     * with `userIntent: ''` rather than failing the whole request. The base call
-     * itself still propagates on failure. Without the flag, behavior + upstream
-     * call count are unchanged.
+     * When `params.enrichUserIntent` is set (and the query is scoped to exactly
+     * one `projectId` — see below), each returned row also carries its OWN intent
+     * (`userIntent`). The intent isn't a column on the PROMPTS element, so it's
+     * derived with one `intent__<value>`-filtered call per Semrush intent, run in
+     * parallel and joined back to the base rows.
+     *
+     * Enrichment is non-fatal per intent value: each call catches its own failure
+     * and contributes nothing, so one failing intent drops only that intent's rows.
+     * The base call still propagates on failure. Without the flag, response shape
+     * and upstream call count are unchanged.
+     *
+     * SINGLE-SLICE ONLY: the join key is `(prompt, prompt_topic)` — the strongest
+     * identifier the element row exposes (it carries no `semrushPromptId`, geo, or
+     * language). That tuple is unique only WITHIN one project (= one geo+language
+     * slice), so enrichment is skipped unless exactly one `projectId` is requested;
+     * across markets the same text could map to different intents and no row field
+     * could disambiguate it. (A stable per-row id from upstream would lift this.)
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Filter parameters (model/platform, tags, projectIds,
@@ -152,19 +162,22 @@ export function createElementsService(transport) {
      * @returns {Promise<{count: number, prompts: object[]}>} `{ count, prompts }`.
      */
     async getPrompts(workspaceId, params) {
+      const { enrichUserIntent, ...promptParams } = params ?? {};
       const basePromise = transport
-        .fetchElement(workspaceId, ELEMENT_IDS.PROMPTS, buildPromptsPayload(params))
+        .fetchElement(workspaceId, ELEMENT_IDS.PROMPTS, buildPromptsPayload(promptParams))
         .then(transformPromptsResponse);
 
-      if (!params?.enrichUserIntent) {
+      // Enrich only when opted in AND scoped to a single slice (see the join-key
+      // note above); otherwise return the base rows unchanged.
+      if (!enrichUserIntent || (promptParams.projectIds ?? []).length !== 1) {
         return basePromise;
       }
 
-      // Fire the base call + one intent-filtered call per intent value in
-      // parallel (~one extra round-trip of latency). Enrichment is non-fatal
-      // PER intent value: each call catches its own failure and contributes an
-      // empty result, so one failing intent drops only that intent's rows — not
-      // the whole enrichment.
+      // `(prompt, prompt_topic)` join key — unique within the single requested slice.
+      const rowKey = (row) => `${row?.prompt ?? ''} ${row?.prompt_topic ?? ''}`;
+
+      // Base call + one intent-filtered call per intent value, in parallel
+      // (~one extra round-trip). Each intent call degrades independently.
       const intentPromise = mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
@@ -174,10 +187,11 @@ export function createElementsService(transport) {
             const raw = await transport.fetchElement(
               workspaceId,
               ELEMENT_IDS.PROMPTS,
-              buildPromptsPayload({ ...params, tags: [...(params.tags ?? []), `intent__${value}`] }),
+              buildPromptsPayload({ ...promptParams, tags: [...(promptParams.tags ?? []), `intent__${value}`] }),
             );
             return { key, rows: transformPromptsResponse(raw).prompts };
-          } catch {
+          } catch (e) {
+            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`, { workspaceId, error: e?.message });
             return { key, rows: [] };
           }
         },
@@ -185,23 +199,20 @@ export function createElementsService(transport) {
 
       const [base, intentResults] = await Promise.all([basePromise, intentPromise]);
 
-      // prompt text → own intent. A prompt carries exactly one intent tag, so
-      // it appears in at most one filtered result.
-      const intentByPrompt = new Map();
+      // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
+      // tag, so within a single slice it appears in at most one filtered result.
+      const intentByRow = new Map();
       for (const { key, rows } of intentResults) {
         for (const row of rows) {
-          if (row?.prompt != null) {
-            intentByPrompt.set(row.prompt, key);
-          }
+          intentByRow.set(rowKey(row), key);
         }
       }
 
-      // Preserve the base response's `count` (may be a server-reported total)
-      // rather than substituting the local row count on the enriched path.
       const prompts = base.prompts.map((p) => ({
         ...p,
-        userIntent: intentByPrompt.get(p.prompt) ?? '',
+        userIntent: intentByRow.get(rowKey(p)) ?? '',
       }));
+      // `count` mirrors the base response (currently equals the row count).
       return { count: base.count, prompts };
     },
 

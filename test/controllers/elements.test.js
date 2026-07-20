@@ -639,6 +639,14 @@ describe('ElementsController', () => {
       });
     });
 
+    it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
+      const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listPrompts(ctx);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.enrichUserIntent).to.equal(true);
+    });
+
     it('resolves the brand uuid via resolveBrandUuid before querying', async () => {
       const ctx = fakeContext({ url: promptsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);

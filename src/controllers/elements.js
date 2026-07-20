@@ -391,7 +391,7 @@ export default function ElementsController(context, log, env) {
 
   async function buildService(ctx) {
     const imsToken = await resolveElementsImsToken(ctx);
-    return createElementsService(createElementsTransport({ env, imsToken }));
+    return createElementsService(createElementsTransport({ env, imsToken }), log);
   }
 
   /**
