@@ -18,6 +18,16 @@ import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
 import { assertPermittedSource } from './prompt-sources.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
+import { canonicalizeSource } from './serenity/prompt-tags.js';
+
+// The SQL expression that canonicalizes `prompts.source` (source-dimension.md
+// §3.1: `lower(replace(source, '_', '-'))`). Both the `source` list filter and
+// the `source` sort key run through it so the two spellings of a producer
+// (`citation_attempt` / `citation-attempt`) filter and order together. The plain
+// `idx_prompts_source` btree cannot serve it; WP-S4 adds the matching
+// `idx_prompts_source_canonical` expression index. Mirrors `canonicalizeSource`'s
+// transform in SQL — the two must not drift.
+const SOURCE_CANONICAL_SQL = "lower(replace(source, '_', '-'))";
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
 // live in `./intent.js` so the LLM intent classifier can reuse them without an
@@ -427,6 +437,11 @@ const SORT_COLUMN_MAP = {
   origin: 'origin',
   status: 'status',
   updatedAt: 'updated_at',
+  // `source` sorts on the CANONICAL form, not the raw column — the label lives in
+  // elmo and the server has never seen it, so ordering is on the slug and the two
+  // drift spellings order together (source-dimension.md §3.1). An object form
+  // marks it as a SQL expression rather than a bare column or a foreign-table sort.
+  source: { expression: SOURCE_CANONICAL_SQL },
 };
 
 function mapRowToPrompt(row) {
@@ -455,7 +470,13 @@ function mapRowToPrompt(row) {
     // fail-loud choice over a fabricated `human`; unlike `source`/`status`, whose
     // fallbacks are cosmetic, an origin fallback is a correctness hazard.
     origin: row.origin,
-    source: row.source || 'config',
+    // Second derivation boundary (source-dimension.md §3.1): the v2 read surface
+    // returns the CANONICAL slug, so elmo's badge — which keys on the API's value —
+    // resolves (`agentic_traffic` → `agentic-traffic`). A value that fails the guard
+    // (empty, `:`, over-long, root-shadowing) returns the RAW string rather than
+    // null: the grid must still show the operator what is stored. `?? 'config'` only
+    // guards a nullish column (in-memory/test rows); the DB column is NOT NULL.
+    source: canonicalizeSource(row.source) ?? row.source ?? 'config',
     intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -502,7 +523,8 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
- * @param {string} [params.source] - Filter by source (e.g. gsc, semrush, base_url, config)
+ * @param {string} [params.source] - Filter by source, matched on the CANONICAL
+ * form (source-dimension.md §3.1): `citation-attempt` also matches `citation_attempt`.
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
  * status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
@@ -606,7 +628,10 @@ export async function listPrompts({
     const sortCol = SORT_COLUMN_MAP[sort];
     if (sortCol) {
       const ascending = order === 'asc';
-      if (sortCol.includes('(')) {
+      if (typeof sortCol === 'object') {
+        // A SQL expression (e.g. the canonical `source` fold), ordered directly.
+        baseQuery = baseQuery.order(sortCol.expression, { ascending });
+      } else if (sortCol.includes('(')) {
         const [foreignTable, col] = sortCol.replace(')', '').split('(');
         baseQuery = baseQuery.order(col, { ascending, foreignTable });
       } else {
@@ -633,7 +658,12 @@ export async function listPrompts({
     }
 
     if (hasText(source)) {
-      baseQuery = baseQuery.eq('source', source);
+      // Filter on the CANONICAL form so `citation-attempt` matches rows stored as
+      // `citation_attempt` too (source-dimension.md §3.1). The incoming value is
+      // folded with the same transform as the column, and matched against the SQL
+      // expression rather than the raw column.
+      const wantedSource = String(source).trim().toLowerCase().replace(/_/g, '-');
+      baseQuery = baseQuery.eq(SOURCE_CANONICAL_SQL, wantedSource);
     }
 
     if (hasText(region)) {
@@ -1103,6 +1133,9 @@ export async function updatePromptById({
   }
 
   const patch = { updated_by: updatedBy };
+  // `source` is deliberately NOT patchable (source-dimension.md §1 item 6): a
+  // prompt's producer is fixed at creation, and the dimension has no write surface.
+  // A caller-supplied `updates.source` is ignored rather than written.
   if (updates.prompt !== undefined) {
     patch.text = updates.prompt;
   }
