@@ -531,6 +531,64 @@ describe('serenity tag-tree', () => {
       const res = await resolveClosedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'ai', fakeLog());
       expect(res.computedId).to.equal(TAG_IDS.originAi);
       expect(res.valueTagIds).to.have.members([TAG_IDS.originAi, TAG_IDS.originHuman]);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+
+  // A MID-RENAME project (legacy `source` root carrying ai/human, no `origin`):
+  // ensureDimensionRoots adopts `source` as authorship and leaves the producing
+  // `source` key undefined. The server-owned resolve paths must fail LOUD rather
+  // than let an undefined root id degrade into a stranded root-level create.
+  describe('source root distinctness guard (mid-rename, WP-O6-gated)', () => {
+    const midRenameLevels = () => ({
+      '': [
+        { id: 'root-category', name: 'category', children_count: 0 },
+        { id: 'root-intent', name: 'intent', children_count: 5 },
+        { id: 'root-source', name: 'source', children_count: 2 },
+        { id: 'root-type', name: 'type', children_count: 2 },
+      ],
+      'root-source': [
+        { id: 'legacy-ai', name: 'ai', parent_id: 'root-source' },
+        { id: 'legacy-human', name: 'human', parent_id: 'root-source' },
+      ],
+    });
+
+    it('ensureDimensionRoots leaves the producing `source` key undefined', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(midRenameLevels()),
+        createProjectTags: sinon.stub(),
+      };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      expect(roots.get('origin')).to.equal('root-source');
+      expect(roots.get('source')).to.equal(undefined);
+    });
+
+    it('ensureServerOwnedValue(source) throws a clear 502 and issues NO root-level create', async () => {
+      const createProjectTags = sinon.stub();
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(midRenameLevels()),
+        createProjectTags,
+      };
+      const err = await ensureServerOwnedValue(transport, WS, PROJECT, 'source', 'config', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/source dimension root not provisioned/);
+      expect(createProjectTags).to.not.have.been.called;
+    });
+
+    it('resolveClosedValueInjection(source) — the injector path — throws and creates nothing', async () => {
+      const createProjectTags = sinon.stub();
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(midRenameLevels()),
+        createProjectTags,
+      };
+      const err = await resolveClosedValueInjection(transport, WS, PROJECT, 'source', 'config', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/source dimension root not provisioned/);
+      expect(createProjectTags).to.not.have.been.called;
     });
   });
 

@@ -2155,6 +2155,49 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
     ]);
   });
 
+  // Defense-in-depth: on a MID-RENAME project the `source` root still means
+  // authorship, so ensureDimensionRoots leaves the producing `source` key
+  // undefined. The create-path source injection must FAIL LOUD rather than let an
+  // undefined root id degrade into a stranded root-level `config` tag. (This state
+  // is externally gated out of prod by the WP-O6 deploy gate; the guard is what
+  // makes a gate bypass fail visibly instead of corrupting the tree.)
+  it('create fails loud (no stranded root-level tag) when the source root is unprovisioned (mid-rename)', async () => {
+    const dataAccess = makeDataAccess([project()]);
+    const createProjectTags = sinon.stub();
+    const transport = {
+      // Legacy `source` root (ai/human), no `origin` root → source key undefined.
+      listProjectTags: makeListProjectTagsStub({
+        '': [
+          { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-source', name: 'source', children_count: 2 },
+          { id: 'root-type', name: 'type', children_count: 2 },
+        ],
+        'root-source': [
+          { id: 'legacy-ai', name: 'ai', parent_id: 'root-source' },
+          { id: 'legacy-human', name: 'human', parent_id: 'root-source' },
+        ],
+      }),
+      createProjectTags,
+      createPromptsByIds: sinon.stub().resolves({ page: 1, total: 1, items: [{ id: 's', name: 'x' }] }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'best shoes', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog());
+
+    // The input fails cleanly with the clear guard error; nothing is written.
+    expect(result.created).to.have.lengthOf(0);
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+    expect(transport.createPromptsByIds).to.not.have.been.called;
+    // Crucially: no root-level create ever minted a stranded `config` root.
+    expect(createProjectTags).to.not.have.been.called;
+  });
+
   // Gate 7: editing a prompt must not relabel it. The stored origin the caller
   // echoes back (`ai`) rides through the replace-mode tag write untouched — it is
   // never re-derived to `human`, and `origin/human` is never injected on update.
