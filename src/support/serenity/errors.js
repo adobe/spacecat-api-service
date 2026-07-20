@@ -12,8 +12,9 @@
 
 // @ts-check
 
+import { ErrorWithStatusCode } from '../utils.js';
 import { SerenityTransportError } from './rest-transport.js';
-import { recordMeteredQuotaClassifier } from './allocation-metrics.js';
+import { recordMeteredQuotaClassifier, recordRejection } from './allocation-metrics.js';
 
 /**
  * Recognises an upstream "already gone" response — the signal that an
@@ -153,4 +154,29 @@ export const ERROR_CODES = Object.freeze({
   // Transient: a transfer never cleared the async `workspace not ready` lock — retryable, NOT
   // pool exhaustion (distinct from ORG_POOL_EXHAUSTED so the operator/client isn't misled).
   WORKSPACE_BUSY: 'workspaceBusy',
+  // Case-1 quota rejection (serenity-docs#72 §2): the disguised-405 signal classified by
+  // isMeteredQuota, surfaced via toQuotaExceededError. Distinct from ORG_POOL_EXHAUSTED /
+  // BRAND_AI_LIMIT (the allocator-ON tokens) so a client need not tell them apart, but a caller
+  // debugging a specific rejection still can from the log line at the throw site.
+  QUOTA_EXCEEDED: 'quotaExceeded',
 });
+
+/**
+ * Case-1 quota rejection (serenity-docs#72 §2): the brand's flat pre-carved sub-workspace
+ * allocation is exhausted — the allocator-OFF path production runs today, or the allocator-ON
+ * path's per-child ceiling isn't the cause but the disguised 405 still surfaced. Maps the
+ * classified {@link isMeteredQuota} signal to the same customer-facing contract as
+ * `orgPoolExhausted` / `brandAiLimit` (409, stable token), so a caller never needs to
+ * distinguish them — see `ERROR_CODES.QUOTA_EXCEEDED`.
+ *
+ * Client-facing message is deliberately generic — no internal ids, no upstream body — matching
+ * the `orgPoolExhausted`/`brandAiLimit` factories in resource-manager.js. Callers should log the
+ * upstream detail themselves before throwing this (see the markets-subworkspace.js call sites).
+ * @returns {ErrorWithStatusCode}
+ */
+export function toQuotaExceededError() {
+  recordRejection('quotaExceeded'); // dashboard-only — expected under normal pool load
+  const e = new ErrorWithStatusCode('AI resource allocation quota exceeded', 409);
+  e.code = ERROR_CODES.QUOTA_EXCEEDED;
+  return e;
+}
