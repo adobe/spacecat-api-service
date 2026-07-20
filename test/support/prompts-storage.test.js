@@ -1585,6 +1585,48 @@ describe('prompts-storage', () => {
       expect(result.prompts[0].source).to.equal('gsc');
     });
 
+    it('reactivating a deleted `ai` prompt preserves the stored origin, not the incoming `human` (origin-dimension.md §3 item 3)', async () => {
+      // The reactivation (deleted-match) branch must NOT re-derive origin: a
+      // deleted `ai`-authored row reactivated by a USER-principal write (which
+      // carries the derived `human`) must keep its stored `ai`. Re-deriving would
+      // silently relabel every reactivated model-written prompt as human.
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-1o', text: 'Reactivate me', regions: ['us'], status: 'deleted', source: 'gsc', origin: 'ai',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'del-1o', prompt: 'Reactivate me', regions: ['us'], source: 'semrush', origin: 'human',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(updateStub.firstCall.args[0].origin).to.equal('ai');
+      expect(result.prompts[0].origin).to.equal('ai');
+    });
+
     it('reactivates a deleted prompt matched by text+regions without inserting', async () => {
       const deletedRow = {
         id: 'row-uuid', prompt_id: 'del-2', text: 'Same text', regions: ['us'], status: 'deleted', source: 'gsc',

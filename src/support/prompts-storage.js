@@ -445,10 +445,15 @@ function mapRowToPrompt(row) {
     name: row.name,
     regions: row.regions || [],
     status: row.status || 'active',
-    // Return the stored `origin` verbatim, no `|| 'human'` fallback: origin is
-    // NOT NULL in production (zero NULLs in 265,980 rows, origin-dimension.md
-    // §2.3), and a fallback would silently mislabel a model-written prompt as
-    // human-authored were a NULL ever inserted.
+    // Return the stored `origin` verbatim — deliberately NO `|| 'human'` AND no
+    // `?? 'human'` fallback (origin-dimension.md §WP-O2b item 4 / §2.3).
+    // INVARIANT: `prompts.origin` is NOT NULL in production (zero NULLs in
+    // 265,980 rows, §2.3). Any fallback — including nullish-coalescing, which
+    // masks NULL exactly as `||` masks it for a NULL — would silently mislabel a
+    // model-written (`ai`) prompt as `human` were a NULL ever present, the exact
+    // corruption this dimension exists to prevent. Surfacing the raw value is the
+    // fail-loud choice over a fabricated `human`; unlike `source`/`status`, whose
+    // fallbacks are cosmetic, an origin fallback is a correctness hazard.
     origin: row.origin,
     source: row.source || 'config',
     intent: row.intent ?? null,

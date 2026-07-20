@@ -277,6 +277,13 @@ export async function publishAffected(
  * (update) so the two write paths can't silently diverge on what counts as
  * a valid tag id.
  *
+ * This cap bounds the CALLER-supplied tags only. The server-derived dimension
+ * tags (`type`, `origin`) are injected downstream by {@link makePromptTagInjector}
+ * AFTER this sanitize, and are intentionally EXEMPT from the user-facing cap — a
+ * write may therefore carry up to `MAX_TAG_IDS` + 2 ids. They must never be
+ * dropped to fit the cap: a prompt missing its `type`/`origin` tag is invisible
+ * to that dimension's filter.
+ *
  * @param {unknown} raw
  * @returns {string[]}
  */
