@@ -33,9 +33,12 @@ import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtur
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the two standard values (source=ai,
-// intent=Informational); the third tag is the per-prompt computed `type`.
+// Every generated prompt carries the two standard values (origin=ai,
+// intent=Informational) plus the producing `source/semrush` value; the last tag
+// is the per-prompt computed `type`. Order matches the write site:
+// [...standardIds, sourceId, typeId].
 const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
+const GENERATED_IDS = [...STANDARD_IDS, TAG_IDS.sourceSemrush];
 
 const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';
@@ -608,8 +611,8 @@ describe('markets-subworkspace handlers', () => {
       // grouped by computed type, one upstream call per group, because
       // createPromptsByIds carries ONE shared tag_ids array per call.
       expect(transport.createPromptsByIds).to.have.been.calledTwice;
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['best running shoes'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['top trail shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['best running shoes'], [...GENERATED_IDS, TAG_IDS.typeNonBranded]);
+      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['top trail shoes'], [...GENERATED_IDS, TAG_IDS.typeBranded]);
       expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
       // Models are STAGED (no inner publish) — only the single final publish runs,
       // so a quota 405 can never escape mid-flow from the model-set commit.
@@ -722,13 +725,13 @@ describe('markets-subworkspace handlers', () => {
         WS,
         'new-proj',
         ['Best ACME running shoes', 'top trail sneakers from zoom'],
-        [...STANDARD_IDS, TAG_IDS.typeBranded],
+        [...GENERATED_IDS, TAG_IDS.typeBranded],
       );
       expect(transport.createPromptsByIds).to.have.been.calledWithExactly(
         WS,
         'new-proj',
         ['most comfortable sandals'],
-        [...STANDARD_IDS, TAG_IDS.typeNonBranded],
+        [...GENERATED_IDS, TAG_IDS.typeNonBranded],
       );
     });
 
@@ -1445,7 +1448,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // 'adobe shoes' contains 'adobe' → branded (null alias was dropped, not used).
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'new-proj', ['adobe shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'new-proj', ['adobe shoes'], [...GENERATED_IDS, TAG_IDS.typeBranded]);
   });
 
   // Line 115 truthy branch: body.name is provided and valid — String(body.name) is used
@@ -1544,8 +1547,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(res.status).to.equal(201);
     // Needles = ['b','real'] (the '' element was coerced + filtered out).
     // 'real deal' contains 'real' → branded; 'plain text' → non-branded.
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['real deal'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['real deal'], [...GENERATED_IDS, TAG_IDS.typeBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...GENERATED_IDS, TAG_IDS.typeNonBranded]);
   });
 
   // The two guards below both fire when the tag tree, freshly provisioned, still

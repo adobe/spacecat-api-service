@@ -20,7 +20,7 @@ import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 import { resolveTypeValueInjection, resolveClosedValueInjection } from '../tag-tree.js';
-import { DIMENSION, ORIGIN_VALUE } from '../prompt-tags.js';
+import { DIMENSION, ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -402,11 +402,21 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  *     stripping without injecting would leave the prompt invisible to the
  *     dimension's filter — both are illegal, so the update path does neither.
  *
+ * **`source`** — the PRODUCING SYSTEM (source-dimension.md), and like `origin` it
+ * is a fact about CREATION, not a classification, so it carries the same asymmetry:
+ *   - on CREATE (`sourceValue` set — the constant `config` for this proxy dialog,
+ *     the value the same prompt gets in Postgres on the v2 path), any caller-supplied
+ *     tag id beneath the `source` root is stripped (by RESOLVED ID, never by name — a
+ *     customer category may legitimately be called `gsc`) and the derived value
+ *     injected. The dimension has no client write surface;
+ *   - on UPDATE (`sourceValue` unset) the injector leaves source ALONE — a prompt's
+ *     producer is fixed at creation.
+ *
  * Resolution ({@link resolveTypeValueInjection} / {@link resolveClosedValueInjection},
  * two tag-tree reads per distinct value per project — the root level plus the
  * root's children) is memoized for the request, so a bulk create fans out over
- * the distinct computed values rather than over the items. The origin value is
- * constant per request, so its resolution is memoized per project.
+ * the distinct computed values rather than over the items. The origin and source
+ * values are constant per request, so each resolution is memoized per project.
  *
  * Resolution resolves or throws, so a server tag is always attached; it is never
  * dropped, and a resolution failure aborts the write (which is free — the upstream
@@ -417,8 +427,9 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * @param {string} semrushWorkspaceId
  * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
  * @param {object} [log]
- * @param {{ originValue?: string }} [options] - `originValue` is the derived
- *   `origin` to inject on CREATE; omit it on UPDATE so origin is left untouched.
+ * @param {{ originValue?: string, sourceValue?: string }} [options] - `originValue`
+ *   / `sourceValue` are the derived `origin` / `source` to inject on CREATE; omit
+ *   each on UPDATE so that dimension is left untouched.
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
  *   tagIds: string[] }) =>
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
@@ -430,11 +441,13 @@ export function makePromptTagInjector(
   log,
   options = {},
 ) {
-  const { originValue } = options;
+  const { originValue, sourceValue } = options;
   /** @type {Map<string, Promise<{ computedId: string, typeTagIds: string[] }>>} */
   const typeCache = new Map();
   /** @type {Map<string, Promise<{ computedId: string, valueTagIds: string[] }>>} */
   const originCache = new Map();
+  /** @type {Map<string, Promise<{ computedId: string, valueTagIds: string[] }>>} */
+  const sourceCache = new Map();
   return async function injectComputedTags(projectId, input) {
     let { tagIds } = input;
 
@@ -471,6 +484,26 @@ export function makePromptTagInjector(
           log,
         );
         originCache.set(projectId, pending);
+      }
+      const { computedId, valueTagIds } = await pending;
+      tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
+    }
+
+    // source — CREATE only, same asymmetry as origin. `sourceValue` unset means
+    // UPDATE: leave the producer alone (fixed at creation). Stripped by resolved id
+    // beneath the `source` root, never by name (a category may be `gsc`).
+    if (sourceValue) {
+      let pending = sourceCache.get(projectId);
+      if (!pending) {
+        pending = resolveClosedValueInjection(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          DIMENSION.SOURCE,
+          sourceValue,
+          log,
+        );
+        sourceCache.set(projectId, pending);
       }
       const { computedId, valueTagIds } = await pending;
       tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
@@ -586,12 +619,14 @@ export async function handleCreatePrompts(
   // (origin-dimension.md §3). Any caller-supplied origin tag id is stripped and
   // this value injected; on the twin AI-generation path a service producer stamps
   // `ai` via STANDARD_PROMPT_TAG_VALUES instead (that path does not run here).
+  // The producing `source` is the constant `config` — this human create dialog is
+  // what the same prompt gets in Postgres on the v2 path (source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {

@@ -591,10 +591,18 @@ function BrandsController(ctx, log, env) {
       // queue consumer, re-ordered middleware) must not silently gain service
       // privilege — hence `!authType → user`, and a non-function `getType` resolves
       // to `undefined` (→ user) rather than throwing.
+      //
+      // `source` (the producing system) has NO write surface (source-dimension.md
+      // §1 item 6): a caller-supplied `source` is ignored, so a v2 create becomes
+      // the store's `config` default (item 5, gate §6.4/§6.6). It is dropped here
+      // rather than passed to upsertPrompts, whose `source: p.source || 'config'`
+      // write-side default stays load-bearing for the internal writers that DO set
+      // it. `updatePromptById` likewise never patches source (producer is fixed at
+      // creation).
       const { authInfo } = context.attributes ?? {};
       const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
       const isUserPrincipal = !authType || authType === 'jwt' || authType === 'ims';
-      const derivedPrompts = prompts.map((p) => ({
+      const derivedPrompts = prompts.map(({ source: _, ...p }) => ({
         ...p,
         origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
       }));

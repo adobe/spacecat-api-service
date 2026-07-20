@@ -20,7 +20,7 @@ import {
   ensureChildren,
   ensureDimensionRoots,
   provisionDimensionTree,
-  ensureClosedValue,
+  ensureServerOwnedValue,
   resolveTypeValueInjection,
   resolveClosedValueInjection,
   findTagsInTree,
@@ -256,13 +256,17 @@ describe('serenity tag-tree', () => {
   });
 
   describe('ensureDimensionRoots', () => {
-    it('resolves all four roots without creating them when they exist', async () => {
+    it('resolves all five roots without creating them when they exist', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.deep.equal(['category', 'intent', 'origin', 'type']);
+      // Membership, not a count — a further open root is contemplated (source-dimension.md).
+      expect([...roots.keys()]).to.include.members(['category', 'intent', 'origin', 'type', 'source']);
+      // The producing-system `source` root resolves (the fixture's `source` root is
+      // not authorship), distinct from the `origin` root.
+      expect(roots.get('source')).to.equal(TAG_IDS.sourceRoot);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
@@ -272,8 +276,10 @@ describe('serenity tag-tree', () => {
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
       expect(createProjectTags).to.have.been.calledOnce;
       expect(createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', 'intent', 'origin', 'type']);
+        .to.deep.equal(['category', 'intent', 'origin', 'type', 'source']);
       expect(roots.get('type')).to.equal('created::type');
+      // A fresh project mints the producing-system `source` root outright.
+      expect(roots.get('source')).to.equal('created::source');
     });
 
     it('adopts a legacy `source` authorship root in place, minting no second `origin`', async () => {
@@ -439,7 +445,7 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub();
       const transport = { listProjectTags, createProjectTags: sinon.stub() };
       const { roots, values } = await provisionDimensionTree(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.have.members(['category', 'intent', 'origin', 'type']);
+      expect([...roots.keys()]).to.include.members(['category', 'intent', 'origin', 'type', 'source']);
       expect(values.get('origin')?.get('ai')).to.equal(TAG_IDS.originAi);
       expect(values.get('type')?.get('branded')).to.equal(TAG_IDS.typeBranded);
       // The open `category` root is provisioned but its children are customer content.
@@ -448,13 +454,13 @@ describe('serenity tag-tree', () => {
     });
   });
 
-  describe('ensureClosedValue', () => {
+  describe('ensureServerOwnedValue', () => {
     it('resolves an existing value and reports created:false', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const res = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
+      const res = await ensureServerOwnedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
       expect(res).to.deep.equal({
         id: TAG_IDS.originAi, rootId: TAG_IDS.originRoot, created: false,
       });
@@ -470,7 +476,7 @@ describe('serenity tag-tree', () => {
           { id: 'made-ai', name: 'ai', parent_id: TAG_IDS.originRoot },
         ]),
       };
-      const res = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
+      const res = await ensureServerOwnedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
       expect(res).to.deep.equal({
         id: 'made-ai', rootId: TAG_IDS.originRoot, created: true,
       });
@@ -482,7 +488,7 @@ describe('serenity tag-tree', () => {
         // The create echoes nothing, so no root id is ever learned.
         createProjectTags: sinon.stub().resolves([]),
       };
-      const err = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog())
+      const err = await ensureServerOwnedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);

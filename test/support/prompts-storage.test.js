@@ -453,7 +453,7 @@ describe('prompts-storage', () => {
       };
     }
 
-    it('applies the source filter as an exact match when source is provided', async () => {
+    it('filters source on the CANONICAL form so drift spellings match (source-dimension.md §3.1)', async () => {
       const eqCalls = [];
       await listPrompts({
         organizationId: ORG_ID,
@@ -461,7 +461,22 @@ describe('prompts-storage', () => {
         source: 'gsc',
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      expect(eqCalls).to.deep.include({ column: 'source', value: 'gsc' });
+      // The filter runs through the canonical SQL expression, not the bare column,
+      // so a request for `gsc` matches on `lower(replace(source,'_','-'))`.
+      expect(eqCalls).to.deep.include({ column: "lower(replace(source, '_', '-'))", value: 'gsc' });
+    });
+
+    it('folds an underscore filter value to its canonical hyphen form before matching', async () => {
+      const eqCalls = [];
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        source: 'CITATION_ATTEMPT',
+        postgrestClient: makeEqRecordingClient(eqCalls),
+      });
+      expect(eqCalls).to.deep.include({
+        column: "lower(replace(source, '_', '-'))", value: 'citation-attempt',
+      });
     });
 
     it('does not apply a source filter when source is omitted', async () => {
@@ -471,7 +486,7 @@ describe('prompts-storage', () => {
         brandId: BRAND_UUID,
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      expect(eqCalls.some((c) => c.column === 'source')).to.equal(false);
+      expect(eqCalls.some((c) => c.column.includes('source'))).to.equal(false);
     });
 
     it('uses explicit limit and page values', async () => {
@@ -3325,6 +3340,71 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.items[0].source).to.equal('sheet');
+    });
+
+    it('canonicalizes source on read (2nd derivation boundary — agentic_traffic → agentic-traffic)', async () => {
+      const rowWithSource = { ...sampleRow, source: 'agentic_traffic' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('agentic-traffic');
+    });
+
+    it('returns the RAW stored value when it fails the canonical guard (grid still shows it)', async () => {
+      const rowWithSource = { ...sampleRow, source: 'has:colon' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('has:colon');
+    });
+
+    it('sorts source on the canonical SQL expression, not the bare column', async () => {
+      const orderCalls = [];
+      const recordingChain = (result) => {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          neq: () => chain,
+          or: () => chain,
+          contains: () => chain,
+          overlaps: () => chain,
+          in: () => chain,
+          order: (column, opts) => {
+            orderCalls.push({ column, opts });
+            return chain;
+          },
+          range: () => thenable(result),
+          maybeSingle: () => thenable(result),
+          single: () => thenable(result),
+          then: (resolve) => resolve(result),
+        };
+        return chain;
+      };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? recordingChain({ data: { id: BRAND_UUID }, error: null })
+          : recordingChain({ data: [], error: null, count: 0 })),
+      };
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        sort: 'source',
+        order: 'asc',
+        postgrestClient: client,
+      });
+      expect(orderCalls[0]).to.deep.equal({
+        column: "lower(replace(source, '_', '-'))", opts: { ascending: true },
+      });
     });
   });
 
