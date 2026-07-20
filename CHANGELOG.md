@@ -1,3 +1,10 @@
+# [1.669.0](https://github.com/adobe/spacecat-api-service/compare/v1.668.1...v1.669.0) (2026-07-20)
+
+
+### Features
+
+* **llmo-akamai:** CUSTOM-default OAE onboarding (PUT deploy + caching/scope gates) ([#2850](https://github.com/adobe/spacecat-api-service/issues/2850)) ([e67e9c5](https://github.com/adobe/spacecat-api-service/commit/e67e9c5ea699e2ff501c02c2ff458c85b36c76bc)), closes [Hi#Level](https://github.com/Hi/issues/Level) [adobe/spacecat-shared#1825](https://github.com/adobe/spacecat-shared/issues/1825)
+
 ## [1.668.1](https://github.com/adobe/spacecat-api-service/compare/v1.668.0...v1.668.1) (2026-07-20)
 
 
