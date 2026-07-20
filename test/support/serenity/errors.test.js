@@ -146,6 +146,12 @@ describe('serenity error classification', () => {
       expect(isPoolExhausted(peErr(422, 'insufficient available units'))).to.be.true;
     });
 
+    it('isPoolExhausted: a null/empty body is not a match (bodyText falsy-body path)', () => {
+      // unwrap normalises an empty upstream body to null; bodyText must yield '' → no match.
+      expect(isPoolExhausted(err(422, null))).to.be.false;
+      expect(isPoolExhausted(peErr(422, null))).to.be.false;
+    });
+
     it('isWorkspaceNotReady: only the transient 422 lock', () => {
       expect(isWorkspaceNotReady(err(422, { message: 'workspace not ready' }))).to.be.true;
       expect(isWorkspaceNotReady(err(422, { message: 'insufficient available units' }))).to.be.false;
