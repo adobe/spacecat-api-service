@@ -242,7 +242,7 @@ function BrandsController(ctx, log, env) {
     // Not a Semrush transport error: an app-level ErrorWithStatusCode (has `.status`), or a bare
     // Error whose safe message passes through. `err` is unwrapTransportCause's `unknown` return;
     // mirror the original any-typed access to `.status`/`.message` on the (unwrapped) error.
-    const appErr = /** @type {any} */ (err);
+    const appErr = /** @type {{ status?: number; message?: string }} */ (err);
     if (appErr.status) {
       return createResponse({ message: appErr.message }, appErr.status, {
         [HEADER_ERROR]: appErr.message,

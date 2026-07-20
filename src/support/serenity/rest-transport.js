@@ -70,6 +70,9 @@ export class SerenityTransportError extends Error {
  * timeout → "request failed", raw network → the original error's own message).
  */
 export function redactUpstreamMessage(e) {
+  // NOTE: this mirrors errors.js `unwrapTransportCause` inline ON PURPOSE — importing it here
+  // would create an errors.js ↔ rest-transport.js cycle (errors.js imports SerenityTransportError
+  // from this file). Extracting the shared helper to a leaf module is a follow-up. Keep in sync.
   const err = e instanceof ProjectEngineApiError && e.status === undefined && e.cause != null
     ? e.cause
     : e;
