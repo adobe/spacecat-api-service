@@ -2302,6 +2302,7 @@ describe('LlmoCloudFrontController', () => {
       expect(body.created).to.equal(true);
       expect(body.deliveryId).to.equal('del-1');
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      expect(assumeConnectorRoleStub.firstCall.args[0].externalId).to.equal(TEST_IMS_ORG_ID);
       const callArgs = createCdnLogDeliveryStub.firstCall.args[1];
       expect(callArgs.provider).to.equal('cloudfront');
       expect(callArgs.resourceId).to.equal('E2EXAMPLE123');
@@ -2466,6 +2467,7 @@ describe('LlmoCloudFrontController', () => {
       expect(body.failed).to.equal(0);
       expect(body.distributions).to.have.length(2);
       expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      expect(assumeConnectorRoleStub.firstCall.args[0].externalId).to.equal(TEST_IMS_ORG_ID);
       expect(listDistributionsStub.calledOnce).to.equal(true);
       expect(createCdnLogDeliveryStub.callCount).to.equal(2);
     });

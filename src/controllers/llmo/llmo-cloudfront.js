@@ -1172,14 +1172,14 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'enable CDN log forwarding');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'enable CDN log forwarding');
       if (error) {
         return error;
       }
@@ -1257,13 +1257,13 @@ function LlmoCloudFrontController(ctx) {
     const { Site, Organization } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
+    const { accountId, error: credError } = validateCloudfrontCredentials(context);
     if (credError) {
       return credError;
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'rescan CDN log delivery');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'rescan CDN log delivery');
       if (error) {
         return error;
       }
