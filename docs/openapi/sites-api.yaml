@@ -199,6 +199,7 @@ sites:
           type: integer
           minimum: 0
           example: 0
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: |
@@ -244,6 +245,7 @@ sites:
 sites-by-delivery-type:
   parameters:
     - $ref: './parameters.yaml#/deliveryType'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - site
@@ -269,6 +271,7 @@ sites-by-delivery-type:
 sites-with-latest-audit:
   parameters:
     - $ref: './parameters.yaml#/auditType'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - site
@@ -296,6 +299,7 @@ sites-with-latest-audit:
 sites-for-organization:
   parameters:
     - $ref: './parameters.yaml#/organizationId'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - organization

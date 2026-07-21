@@ -601,7 +601,78 @@ describe('StateAccessMappingsController', () => {
       expect(ctx.log.warn.called).to.be.true;
     });
 
-    it('returns 409 when an active duplicate exists', async () => {
+    it('upserts on active duplicate: overwrites capabilities and returns 200', async () => {
+      const existing = makeRow({ id: 'pre-existing-id' });
+      const updated = makeRow({
+        id: 'pre-existing-id',
+        granted_capabilities: ['llmo/can_configure', 'llmo/can_view'],
+      });
+      const updateStub = sinon.stub().resolves(updated);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([existing]),
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({
+        body: { ...validBody, grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.id).to.equal('pre-existing-id');
+      // The existing row is updated by id with the request's capability set
+      // (plus the auto-injected can_view baseline).
+      expect(updateStub.calledOnce).to.be.true;
+      expect(updateStub.firstCall.args[1].id).to.equal('pre-existing-id');
+      expect(updateStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['llmo/can_configure', 'llmo/can_view']);
+    });
+
+    it('audits an update_capabilities (allow) event on upsert', async () => {
+      const existing = makeRow({ id: 'pre-existing-id' });
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([existing]),
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(existing),
+      });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(200);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        product: 'LLMO',
+        operation: 'update_capabilities',
+        outcome: 'allow',
+        mappingId: 'pre-existing-id',
+      });
+    });
+
+    it('returns 409 with null id when conflict lookup misses', async () => {
+      const updateStub = sinon.stub().resolves(null);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([]),
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(409);
+      expect(body.id).to.equal(null);
+      // No row id to update — the upsert update is never attempted.
+      expect(updateStub.called).to.be.false;
+    });
+
+    it('returns 409 when the row is revoked between conflict and update', async () => {
       const existing = makeRow({ id: 'pre-existing-id' });
       const { Controller } = await loadController({
         createFacsAccessMappings: sinon.stub().resolves({
@@ -609,27 +680,14 @@ describe('StateAccessMappingsController', () => {
           skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
         }),
         listFacsAccessMappings: sinon.stub().resolves([existing]),
+        // RPC finds no active row (raced revoke) → returns null.
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(null),
       });
       const ctx = makeContext({ body: validBody });
       const res = await Controller(ctx).createMapping(ctx);
-      expect(res.status).to.equal(409);
       const body = await res.json();
+      expect(res.status).to.equal(409);
       expect(body.id).to.equal('pre-existing-id');
-    });
-
-    it('returns 409 with null id when conflict lookup misses', async () => {
-      const { Controller } = await loadController({
-        createFacsAccessMappings: sinon.stub().resolves({
-          created: [],
-          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
-        }),
-        listFacsAccessMappings: sinon.stub().resolves([]),
-      });
-      const ctx = makeContext({ body: validBody });
-      const res = await Controller(ctx).createMapping(ctx);
-      const body = await res.json();
-      expect(res.status).to.equal(409);
-      expect(body.id).to.equal(null);
     });
 
     it('returns 500 when the helper throws', async () => {
@@ -1151,18 +1209,80 @@ describe('StateAccessMappingsController', () => {
       expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
     });
 
-    it('admin may grant can_manage_users', async () => {
+    it('a FACS-layer manager may grant can_manage_users', async () => {
       const created = makeRow({ granted_capabilities: ['llmo/can_manage_users'] });
       const { Controller } = await loadController({
         createFacsAccessMappings: sinon.stub().resolves({ created: [created], skipped: [] }),
       });
       const ctx = makeContext({
-        facsPermissions: [],
-        isAdmin: true,
+        // FACS-layer can_manage_users holder (not an internal admin) — the only
+        // caller permitted to grant can_manage_users (hybrid-model §8.3).
+        facsPermissions: ['llmo/can_manage_users'],
+        isAdmin: false,
         body: { ...manageBody, grantedCapabilities: ['llmo/can_manage_users'] },
       });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(201);
+    });
+  });
+
+  describe('internal admins may not write (create/update) mappings', () => {
+    const adminWriteBody = {
+      subjectType: 'user',
+      subjectId: 'someone@AdobeID',
+      resourceType: 'brand',
+      resourceId: VALID_UUID_RES,
+      grantedCapabilities: ['llmo/can_view'],
+    };
+
+    it('createMapping returns 403 for an internal admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        body: adminWriteBody,
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      // The block short-circuits before any DB write.
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('patchMapping returns 403 for an internal admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('deleteMapping (revoke access) returns 403 for an internal admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        pathParams: { id: VALID_UUID_MAPPING },
+      });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('an internal admin who also holds FACS can_manage_users is still blocked from create', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: ['llmo/can_manage_users'],
+        isAdmin: true,
+        body: adminWriteBody,
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
     });
   });
 

@@ -126,6 +126,21 @@ describe('AsoOverlayKeyHandler', () => {
     expect(authInfo.getType()).to.equal('aso_overlay_key');
   });
 
+  it('accepts the AEM CS preview-tier -prev suffix', async () => {
+    // AEM CS preview pods send AEM_SERVICE=cm-pN-eN-prev; this regex must
+    // stay in lockstep with RedirectsController's SERVICE_RE so the auth
+    // layer doesn't silently 401 preview traffic before the controller
+    // can strip and resolve to the canonical overlay.
+    const authInfo = await handler.checkAuth(
+      makeRequest({ 'x-aso-api-key': API_KEY }),
+      makeContext({
+        pathInfo: { method: 'GET', suffix: '/config/cm-p154709-e1629980-prev/redirects.txt' },
+      }),
+    );
+    expect(authInfo).to.not.be.null;
+    expect(authInfo.getType()).to.equal('aso_overlay_key');
+  });
+
   describe('dual-key rotation overlap', () => {
     const PREVIOUS_KEY = 'old-aso-key-being-rotated';
 

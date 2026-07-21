@@ -142,6 +142,19 @@ export async function handleCreatePromptsSubworkspace(
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
 
+  // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
+  // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
+  // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
+  // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
+  // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
+  // under). No-op when the flag is OFF.
+  const headroom = createHeadroomGuard(
+    transport,
+    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    log,
+  );
+  await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
+
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
@@ -165,7 +178,15 @@ export async function handleCreatePromptsSubworkspace(
     try {
       // Unified layer: strip any caller-supplied type + inject the computed one.
       const typed = await injectComputedType(projectId, input);
-      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
+      // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
+      // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
+      // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
+      // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
+      // own per-item try/catch below still isolates a surviving failure to this one item.
+      const semrushPromptId = await headroom.retryOnQuota(
+        () => createOnePrompt(transport, workspaceId, projectId, typed),
+        { callSite: 'createOnePrompt' },
+      );
       return {
         created: {
           semrushPromptId,
@@ -208,21 +229,18 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
-  // PROMPT metering seam: the just-created prompts are drafted synchronously across the affected
-  // projects of THIS child; size headroom from `used + drafted` (includeDrafted, staleness-immune)
-  // before the publish. One workspace-level top-up covers all affected projects (the allocation is
-  // per sub-workspace, not per project). No-op when the flag is OFF; skipped when nothing was
-  // created so the OFF path and the empty path issue zero headroom reads.
-  if (affectedProjectIds.length > 0) {
-    const headroom = createHeadroomGuard(
-      transport,
-      { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
-      log,
-    );
-    await headroom.ensure({}, { includeDrafted: true });
-  }
-
-  const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
+  // LLMO-6190 item 4: route each project's publish through `headroom.retryOnQuota` — a bounded
+  // top-up+retry if it STILL 405s as a disguised metered-quota rejection despite the pre-write
+  // sizing above (e.g. a raced concurrent write on the same child). `publishAffected` nests this
+  // per-project, so a surviving 405 after the retry still lands in `publishErrors` for that project
+  // rather than throwing. `headroom` is always defined (a genuine no-op when the flag is OFF).
+  const publishErrors = await publishAffected(
+    transport,
+    workspaceId,
+    affectedProjectIds,
+    log,
+    (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
+  );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
   for (const pubErr of publishErrors) {

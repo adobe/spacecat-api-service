@@ -18,7 +18,8 @@ import {
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
@@ -163,26 +164,33 @@ function mapError(e, log) {
       status,
     );
   }
-  if (e instanceof SerenityTransportError) {
-    log.error('Serenity upstream error', e);
-    if (e.status === 401 || e.status === 403) {
-      // Do NOT echo e.message here: the transport error message embeds the full
+  // A Project Engine call now throws ProjectEngineApiError directly (LLMO-6386, adaptPE retired).
+  // On its no-HTTP-response path (per-attempt timeout / exhausted network / a missing-IMS-token
+  // 401) the status is `undefined` and the original throw is carried as `.cause` — the retired
+  // adaptPE boundary used to rethrow that cause, so unwrap it here to keep the mapping below
+  // yielding the SAME HTTP code (auth → 401, timeout → 502, raw network → 500). A bare undefined
+  // status would otherwise flatten all three to 502, silently regressing the auth response.
+  const err = unwrapTransportCause(e);
+  if (isSemrushTransportError(err)) {
+    log.error('Serenity upstream error', err);
+    if (err.status === 401 || err.status === 403) {
+      // Do NOT echo err.message here: the transport error message embeds the full
       // gateway URL (internal host + workspace/project UUIDs). Return a generic
       // message and keep the detail to the log.error above (matches the 502 branch).
       return createResponse(
-        { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
-        e.status,
+        { error: errorTokenForStatus(err.status), message: 'Upstream authorization failed' },
+        err.status,
       );
     }
-    if (e.status === 409) {
+    if (err.status === 409) {
       // An upstream refusal of a conflicting write (e.g. a prompt rename onto a
       // sibling prompt's exact text — serenity-docs#63) is the caller's to act
       // on, not an upstream outage: surface the status and the `conflict` token
       // instead of flattening it into the generic 502. Message stays redacted
       // for the same reason as the 401/403 branch above.
       return createResponse(
-        { error: errorTokenForStatus(e.status), message: 'Upstream rejected the request as a conflict' },
-        e.status,
+        { error: errorTokenForStatus(err.status), message: 'Upstream rejected the request as a conflict' },
+        err.status,
       );
     }
     return createResponse({
@@ -190,7 +198,7 @@ function mapError(e, log) {
       message: 'Upstream request failed',
     }, 502);
   }
-  log.error('Serenity controller error', e);
+  log.error('Serenity controller error', err);
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,
@@ -213,7 +221,9 @@ function mapError(e, log) {
  * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
  * we forward is validated AGAIN by the real Semrush gateway on every upstream
  * call (it rejects an invalid/expired/forged token with 401/403, which the
- * transport surfaces as a SerenityTransportError). This local check is only a
+ * transport surfaces as a typed Semrush error — ProjectEngineApiError for a
+ * Project Engine call, SerenityTransportError for a User Manager one — both
+ * classified by isSemrushTransportError). This local check is only a
  * fail-fast + shape guard so we do not forward a token Semrush will obviously
  * reject; it never substitutes for the upstream's own validation.
  *
@@ -775,7 +785,10 @@ function SerenityController(context, log, env) {
           log,
           // Narrowed to the one model the mapping-row helpers touch — see the
           // create-market call site above for the same rationale.
-          { dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject } },
+          {
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+          },
         )
         : handleDeleteMarket(
           transport,
@@ -1113,7 +1126,9 @@ function SerenityController(context, log, env) {
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
-          { dynamicAllocation: dynamicAllocationEnabled(ctx) },
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+          },
         );
         let bareSucceeded = true;
         if (typeof brand.setStatus === 'function') {
@@ -1208,7 +1223,9 @@ function SerenityController(context, log, env) {
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
-        { dynamicAllocation: dynamicAllocationEnabled(ctx) },
+        {
+          dynamicAllocation: dynamicAllocationEnabled(ctx),
+        },
       );
       const results = [];
       for (const m of markets) {
@@ -1465,14 +1482,15 @@ function SerenityController(context, log, env) {
 
   /**
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
-   * (design flow 6): delete every project and release the allocation back to
-   * the parent pool, then DISCONNECT the brand by clearing its
-   * semrush_sub_workspace_id pointer. The sub-workspace itself is NEVER deleted
-   * (deletion is forbidden — upstream deprovisioning is Semrush CS's act); it
-   * is left empty and unowned. Clearing the pointer flips the brand back to
-   * flat mode, so a future activate allocates a fresh sub-workspace. Sets
-   * brands.status = 'pending'. No-op decommission (still 200) for a brand with
-   * no sub-workspace.
+   * (design flow 6): delete every project and lower the allocation to a small non-zero floor,
+   * returning the surplus to the parent pool, then DISCONNECT the brand by clearing its
+   * semrush_sub_workspace_id pointer. The sub-workspace itself is never deleted — production never
+   * deletes a sub-workspace (upstream deprovisioning is Semrush CS's act) — it is left empty,
+   * unowned, and minimally resourced (LLMO-6189 — a to-zero transfer is a silent gateway no-op, so
+   * lowering to a non-zero floor is the only reliable way to actually reclaim the surplus).
+   * Clearing the pointer flips the brand back to flat mode, so a future
+   * activate allocates a fresh sub-workspace. Sets brands.status = 'pending'.
+   * No-op decommission (still 200) for a brand with no sub-workspace.
    */
   const deactivate = async (ctx) => {
     try {
@@ -1495,9 +1513,9 @@ function SerenityController(context, log, env) {
               (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
           },
         );
-        // Disconnect the brand from the now-emptied sub-workspace. The
-        // sub-workspace is kept (never deleted); clearing the pointer is what
-        // returns the brand to flat mode. Invalidate the resolver cache HERE —
+        // Disconnect the brand from the now-emptied, floor-lowered sub-workspace (never
+        // deleted); clearing the pointer is what returns the brand to flat mode.
+        // Invalidate the resolver cache HERE —
         // before the save — so that even if save() throws, the resolver can't
         // keep routing to the already-emptied sub-workspace for the full
         // positive-TTL window (the upstream is empty the moment decommission
