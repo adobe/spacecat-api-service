@@ -153,4 +153,8 @@ export const ERROR_CODES = Object.freeze({
   // Transient: a transfer never cleared the async `workspace not ready` lock — retryable, NOT
   // pool exhaustion (distinct from ORG_POOL_EXHAUSTED so the operator/client isn't misled).
   WORKSPACE_BUSY: 'workspaceBusy',
+  // Publish-after-populate (LLMO-5492): a publish rejected because the workspace
+  // has no `ai.projects` quota (Semrush's disguised metered 405). PERMANENT —
+  // alert, do not retry — distinct from the transient publish failures.
+  PUBLISH_QUOTA_EXHAUSTED: 'publishQuotaExhausted',
 });

@@ -498,6 +498,12 @@ export async function mapLimit(items, limit, mapper) {
  * Each input must carry `(geoTargetId, languageCode, text, tags?)`. Inputs
  * are grouped by slice; the matching BrandSemrushProject row resolves the
  * upstream project; publish runs once per affected project at the end.
+ *
+ * `publish` (default true — the standalone-endpoint contract) commits the new
+ * prompts to the live project. Set it false when the caller batches its own
+ * publish afterwards (LLMO-5492 publish-after-populate: finalize pushes prompts
+ * + models and publishes each project once) — an intermediate publish would
+ * either go live half-populated or, on a model-less draft, throw.
  */
 export async function handleCreatePrompts(
   transport,
@@ -507,6 +513,7 @@ export async function handleCreatePrompts(
   body,
   log,
   classifyPromptType,
+  { publish = true } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -607,20 +614,24 @@ export async function handleCreatePrompts(
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
 
-  const publishErrors = await publishAffected(
-    transport,
-    semrushWorkspaceId,
-    affectedProjectIds,
-    log,
-  );
-  // publishAffected returns already-redacted { projectId, message } records;
-  // pubErr is a record, not a raw error, so pubErr.message is safe to surface.
-  for (const pubErr of publishErrors) {
-    failed.push({
-      text: '',
-      status: 502,
-      message: `publish: ${pubErr.message}`,
-    });
+  // publish:false — the caller (finalize) batches a single publish after models
+  // are also set, so skip the per-create publish here.
+  if (publish) {
+    const publishErrors = await publishAffected(
+      transport,
+      semrushWorkspaceId,
+      affectedProjectIds,
+      log,
+    );
+    // publishAffected returns already-redacted { projectId, message } records;
+    // pubErr is a record, not a raw error, so pubErr.message is safe to surface.
+    for (const pubErr of publishErrors) {
+      failed.push({
+        text: '',
+        status: 502,
+        message: `publish: ${pubErr.message}`,
+      });
+    }
   }
 
   return { created, skipped, failed };

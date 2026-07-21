@@ -19,6 +19,7 @@ import { createSerenityTransport, SerenityTransportError } from './rest-transpor
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { deleteAllProjects, releaseFullAllocation } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
+import { isSerenityDeferPublishEnabled } from './defer-publish-active.js';
 
 // Re-exported for callers/tests that drive brand provisioning. The tag
 // vocabularies themselves live in `prompt-tags.js` (single source of truth).
@@ -208,14 +209,21 @@ export async function provisionBrandSubworkspace(context, {
         brandAliases,
         brandUrlSources,
         competitors,
+        // LLMO-5492 publish-after-populate: when the defer-publish flag is ON,
+        // leave the project a DRAFT ('skip') so a later finalize step pushes the
+        // DRS-generated prompts + models and publishes once. Flag OFF (default)
+        // preserves the inline-publish behavior byte-for-byte:
         // A project with neither models nor generated prompts would publish
         // "empty units", which Semrush rejects with a disguised quota 405
         // (workspace doc §5). Tolerate that by leaving it a draft (best-effort)
         // instead of failing the whole create; a project that has models OR
         // prompts has real units and must publish (require).
-        publishMode: (Array.isArray(modelIds) && modelIds.length > 0) || generateTopics
-          ? 'require'
-          : 'best-effort',
+        // eslint-disable-next-line no-nested-ternary
+        publishMode: isSerenityDeferPublishEnabled(context.env)
+          ? 'skip'
+          : (((Array.isArray(modelIds) && modelIds.length > 0) || generateTopics)
+            ? 'require'
+            : 'best-effort'),
       },
     );
   } catch (e) {
