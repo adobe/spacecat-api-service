@@ -49,6 +49,7 @@ import {
   getPromptStats,
   resolveBrandUuid,
   findPromptsBlockingRegionRemoval,
+  deriveV2PromptOrigin,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -572,10 +573,36 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
+      // `origin` is derived from the request PRINCIPAL, never trusted from the
+      // body (origin-dimension.md §3): a user (IMS/JWT) write is `human`, body
+      // ignored; a service principal (e.g. DRS via admin x-api-key, whose auth
+      // type is neither `ims` nor `jwt`) is believed. The auth type is read from
+      // the per-request context — the same source as `updatedBy` above — so it
+      // reflects the actual caller. Stamp it here so the store writes the derived
+      // value on insert; on update the stored origin is preserved (upsertPrompts)
+      // and never patched (updatePromptById).
+      //
+      // Fail SAFE to the least-privileged (USER) principal: an ABSENT or
+      // indeterminate auth type must NEVER fall through to the privileged service
+      // path that honours a body-supplied `origin`. Only a KNOWN non-user auth
+      // type (jwt/ims are user; anything else, e.g. DRS admin x-api-key, is
+      // service) is trusted as a service principal. `authWrapper` blocks
+      // unauthenticated requests today, but a future unwrapped caller (an internal
+      // queue consumer, re-ordered middleware) must not silently gain service
+      // privilege — hence `!authType → user`, and a non-function `getType` resolves
+      // to `undefined` (→ user) rather than throwing.
+      const { authInfo } = context.attributes ?? {};
+      const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
+      const isUserPrincipal = !authType || authType === 'jwt' || authType === 'ims';
+      const derivedPrompts = prompts.map((p) => ({
+        ...p,
+        origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
+      }));
+
       const { created, updated, prompts: outPrompts } = await upsertPrompts({
         organizationId: spaceCatId,
         brandUuid,
-        prompts,
+        prompts: derivedPrompts,
         postgrestClient,
         updatedBy,
         classifyIntent: classifyIntent ?? undefined,

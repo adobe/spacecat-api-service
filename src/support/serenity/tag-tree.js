@@ -572,10 +572,60 @@ export async function ensureClosedValue(
 }
 
 /**
+ * Resolves the id-based injection of a server-computed value into a prompt write,
+ * for any CLOSED dimension (`type`, `origin`, `intent`). Returns the wanted value's
+ * id plus EVERY id under that dimension's root, so the caller can strip any
+ * caller-supplied tag id beneath the SAME root before injecting the resolved one.
+ *
+ * The strip set is every id under the dimension's root, NOT a name match: a tag's
+ * dimension is its root ancestor, so a customer category legitimately named
+ * `branded` or `ai` (the collision the model spec's fixture proves survivable) is
+ * NOT in this set and is left untouched. The authorship root is resolved
+ * tolerantly by {@link ensureDimensionRoots}, so `DIMENSION.ORIGIN` addresses
+ * whichever physical root (`origin` or a legacy `source`) the project carries.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} dimension - a CLOSED dimension (`type` / `origin` / `intent`).
+ * @param {string} wantValue - the bare value to inject (must be in that dimension's
+ *   fixed vocabulary).
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string, valueTagIds: string[] }>} `computedId` is
+ *   always resolved — {@link ensureChildren} throws rather than leave a hole, so a
+ *   prompt can never be written with the server-computed tag missing. `valueTagIds`
+ *   is every id under the dimension's root (the strip set).
+ */
+export async function resolveClosedValueInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  dimension,
+  wantValue,
+  log,
+) {
+  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+  const rootId = rootIdOf(roots, dimension);
+  const { byName } = await ensureChildren(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    rootId,
+    [wantValue],
+    log,
+  );
+  return {
+    computedId: /** @type {string} */ (byName.get(wantValue)),
+    valueTagIds: [...byName.values()],
+  };
+}
+
+/**
  * Resolves the id-based injection of a server-computed `type` value into a
- * prompt write. Returns the wanted value's id plus EVERY id under the `type`
- * root, so the caller can strip any caller-supplied `type` tag id (the client
- * must never set the value itself).
+ * prompt write. Thin wrapper over {@link resolveClosedValueInjection} preserving
+ * the `type`-specific return key. Returns the wanted value's id plus EVERY id
+ * under the `type` root, so the caller can strip any caller-supplied `type` tag
+ * id (the client must never set the value itself).
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
@@ -593,18 +643,13 @@ export async function resolveTypeValueInjection(
   wantValue,
   log,
 ) {
-  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const typeRootId = rootIdOf(roots, DIMENSION.TYPE);
-  const { byName } = await ensureChildren(
+  const { computedId, valueTagIds } = await resolveClosedValueInjection(
     transport,
     semrushWorkspaceId,
     projectId,
-    typeRootId,
-    [wantValue],
+    DIMENSION.TYPE,
+    wantValue,
     log,
   );
-  return {
-    computedId: /** @type {string} */ (byName.get(wantValue)),
-    typeTagIds: [...byName.values()],
-  };
+  return { computedId, typeTagIds: valueTagIds };
 }
