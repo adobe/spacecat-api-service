@@ -1449,6 +1449,14 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 404 when the organization is not found', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl(), org: undefined });
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(404);
+    });
+
     it('propagates upstream errors through mapError', async () => {
       serviceStub.getPrompts.rejects(new MockElementsTransportError(503, 'upstream down'));
       const ctx = promptsCountCtx();
