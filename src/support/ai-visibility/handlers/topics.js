@@ -19,7 +19,7 @@ import { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/
 import { SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   num, brandTarget, parseLimitOffset, resolveCountry, resolveCountryForFts,
-  optionalLlmFromQuery, llmToEngine,
+  optionalLlmFromQuery, requiredLlmFromQuery, llmToEngine,
   sourceDomainsByTopicFtsRows,
   LLM_ENUM, FTS_LLMS, TOPIC_INTENT_SLUG,
   settledValueOrElse, resolveTopicIds, buildTextFilterQl,
@@ -441,51 +441,27 @@ export async function handleTopicsResearch(sp, clients) {
   if (sort.error) { return sort.error; }
   const order = { by: sort.by, direction: sort.direction };
   const dimensionFilterQl = buildTextFilterQl(sp.get('textFilter'), 'topic');
-  const llm = optionalLlmFromQuery(sp);
-  if (llm) {
-    const pair = await Promise.allSettled([
-      countTopicRowsByTopicsByFtsPaging(country, q, llm, clients, { dimensionFilterQl }),
-      clients.topicClient.topicsByFTS({
-        country, llm, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
-      }),
-    ]);
-    const listTotal = settledValueOrElse(pair[0], 0);
-    if (pair[1].status !== 'fulfilled') {
-      throw pair[1].reason;
-    }
-    const raw = pair[1].value;
-    // Single-engine view: the row already carries this engine's volume/promptsCount.
-    const data = (raw.topics || []).map((t) => ({
-      topic: t.name,
-      topicId: String(t.id),
-      topicVolume: num(t.volume),
-      promptsCount: num(t.promptsCount),
-      relevanceScore: num(t.relevanceScore),
-    }));
-    return {
-      status: 200,
-      body: {
-        data, total: listTotal, offset, limit,
-      },
-    };
-  }
-  // All-models view: source rows from a single topicsByFTS(ALL) call — each row already
-  // carries the correct aggregate volume/promptsCount/relevanceScore. The old per-engine
-  // fan-out + dedup kept the *first engine's* per-topic values, surfacing a per-engine
-  // volume/count (e.g. 999) instead of the ALL-level total (199,302) — LLMO-6323.
-  const pairAll = await Promise.allSettled([
+  // One path for single-engine and all-models: when the client omits `engine` it resolves
+  // to LLM_ENUM.ALL. topicsByFTS + topicsByFTSTotals at that llm already return the correct
+  // per-topic volume/promptsCount/relevanceScore and a matching total — no per-engine
+  // fan-out or paging. (The old all-models fan-out+dedup kept the first engine's per-topic
+  // values, surfacing a per-engine volume/count (e.g. 999) instead of the ALL-level total,
+  // 199,302 — LLMO-6323. Verified topicsByFTSTotals(llm) == the prior paged count per engine.)
+  const llm = requiredLlmFromQuery(sp);
+  const filter = dimensionFilterQl ? { dimensionFilterQl } : {};
+  const pair = await Promise.allSettled([
     clients.topicClient.topicsByFTSTotals({
-      country, llm: LLM_ENUM.ALL, query: q, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
+      country, llm, query: q, ...filter,
     }),
     clients.topicClient.topicsByFTS({
-      country, llm: LLM_ENUM.ALL, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
+      country, llm, query: q, order, range: { limit, offset }, ...filter,
     }),
   ]);
-  if (pairAll[1].status !== 'fulfilled') {
-    throw pairAll[1].reason;
+  if (pair[1].status !== 'fulfilled') {
+    throw pair[1].reason;
   }
-  const total = num(settledValueOrElse(pairAll[0], { total: 0 }).total);
-  const data = (pairAll[1].value.topics || []).map((t) => ({
+  const total = num(settledValueOrElse(pair[0], { total: 0 }).total);
+  const data = (pair[1].value.topics || []).map((t) => ({
     topic: t.name,
     topicId: String(t.id),
     topicVolume: num(t.volume),

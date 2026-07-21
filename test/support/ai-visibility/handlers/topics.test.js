@@ -351,6 +351,25 @@ describe('AI Visibility – topics handlers', () => {
       expect(res.body.data[0].topicId).to.equal('1');
     });
 
+    it('single engine: promptsCount + total come from the row / topicsByFTSTotals (no backfill)', async () => {
+      clients.topicClient.topicsByFTS.resolves({
+        topics: [{
+          id: '1', name: 'T1', volume: 100, promptsCount: 42, relevanceScore: 90,
+        }],
+      });
+      clients.topicClient.topicsByFTSTotals.resolves({ total: 42 });
+      const sp = new URLSearchParams('searchQuery=test&engine=chatgpt');
+      const res = await handleTopicsResearch(sp, clients);
+      // Native row promptsCount is authoritative now (the promptsByTopicIDsTotal backfill is gone).
+      expect(res.body.data[0].promptsCount).to.equal(42);
+      expect(res.body.data[0].topicVolume).to.equal(100);
+      expect(res.body.total).to.equal(42);
+      expect(clients.promptClient.promptsByTopicIDsTotal.called).to.equal(false);
+      // Unified path resolves the specific engine (not ALL) for both calls.
+      expect(clients.topicClient.topicsByFTS.lastCall.args[0].llm).to.equal(LLM_ENUM.CHAT_GPT);
+      expect(clients.topicClient.topicsByFTSTotals.lastCall.args[0].llm).to.equal(LLM_ENUM.CHAT_GPT);
+    });
+
     it('single LLM throws when topicsByFTS list rejects', async () => {
       clients.topicClient.topicsByFTS.callsFake(({ range }) => {
         if (range?.limit === 1000) { return Promise.resolve({ topics: [] }); }
