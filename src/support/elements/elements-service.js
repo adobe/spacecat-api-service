@@ -172,10 +172,12 @@ export function createElementsService(transport) {
      * element (f4153af8…), transformed into the legacy Brand Presence
      * `sentiment-overview` contract `{ weeklyTrends: [...] }`.
      *
-     * Single call (like getCitedDomains, not a per-project fan-out): the element returns
-     * an aggregate daily sentiment breakdown that we roll up to ISO weeks. Region scoping,
-     * when requested, is a top-level `project_id` on the payload (resolved by the controller
-     * via resolveRegionProjectId); region=all/absent → the brand's whole sub-workspace.
+     * Single call (like getCitedDomains, not a per-project fan-out): with
+     * `auto_bucketing: 'week'` the element returns weekly sentiment buckets directly
+     * (server-side, honoring the requested date range) — no daily→weekly rollup here.
+     * Region scoping, when requested, is a `CBF_project` (Semrush project id) advanced
+     * filter (resolved by the controller via resolveRegionProjectId); region=all/absent →
+     * the brand's whole sub-workspace.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, startDate, endDate, category,
