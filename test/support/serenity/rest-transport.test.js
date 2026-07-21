@@ -720,6 +720,33 @@ describe('Semrush REST transport', () => {
       expect(body).to.not.have.property('sort_dir');
       expect(body.search).to.equal('photoshop');
     });
+
+    it('forwards sort + order on the with-metadata list path (LLMO-6289)', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {
+        sort: 'metadata.updated_at',
+        order: 'desc',
+      });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body.sort).to.equal('metadata.updated_at');
+      expect(body.order).to.equal('desc');
+    });
+
+    it('omits sort/order entirely when no sort is requested (byte-for-byte legacy call)', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, { page: 1 });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body).to.not.have.property('sort');
+      expect(body).to.not.have.property('order');
+    });
   });
 
   describe('createPromptsByIds', () => {

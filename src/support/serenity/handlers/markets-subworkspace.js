@@ -19,6 +19,7 @@ import {
   ERROR_CODES, isUpstreamGone, isMeteredQuota, toQuotaExceededError,
 } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
+import { buildCreateMetadata } from './prompts.js';
 import {
   resolveLocation,
   resolveLanguageId,
@@ -190,7 +191,7 @@ function validateCreateBody(body) {
  * there is no correct parent to create them below. Generated prompts therefore
  * arrive uncategorized and are categorized later (adobe/serenity-docs#44).
  *
- * Writes are id-based: `createPromptsByIds` takes ONE shared `tag_ids` array per
+ * Writes are id-based: `createPromptsWithMetadata` takes ONE shared `tag_ids` array per
  * call, so the texts are partitioned by their resolved tag-id set — which, with
  * topics gone, is exactly two groups (branded and non-branded). Identical text
  * collapses to one entry per group.
@@ -214,12 +215,14 @@ function validateCreateBody(body) {
  *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
  *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
  *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
- *   LLMO-6190): the metered write is `createPromptsByIds` below, NOT publish — front it BEFORE the
- *   write loop, sized on the real prompt count now that it's known (`texts.size`), not an estimate.
+ *   LLMO-6190): the metered write is `createPromptsWithMetadata` below, NOT publish — front it
+ *   BEFORE the write loop, sized on the real prompt count now known (`texts.size`), not estimated.
+ * @param {string} callerId - resolved caller id (see `resolveCallerId`) stamped as
+ *   `created_by`/`updated_by` on every generated prompt (LLMO-6289).
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned,
-}, log, headroom) {
+}, log, headroom, callerId) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
   if (Array.isArray(raw)) {
@@ -255,7 +258,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     return { topicCount: 0, promptCount: 0 };
   }
 
-  // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
+  // Resolve every tag id we are about to attach. `createPromptsWithMetadata` is ATOMIC on
   // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
   // `provisionDimensionTree` resolved every closed value or threw a 502, so the
   // standard values and the whole `type` vocabulary are present here by construction.
@@ -279,6 +282,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
 
   await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
+  // STAMP (LLMO-6289): AI-generated prompts are created through the v3
+  // metadata-carrying write, `created_* = updated_* = now / callerId`. One
+  // metadata object per batch (same instant for every text in the group).
+  const metadata = buildCreateMetadata(callerId);
   for (const [value, items] of byTypeValue) {
     // `branded` / `non-branded` are the classifier's only outputs and both are in
     // the `type` vocabulary provisioned above.
@@ -288,8 +295,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
     // eslint-disable-next-line no-await-in-loop
     await headroom.retryOnQuota(
-      () => transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]),
-      { callSite: 'createPromptsByIds' },
+      () => transport.createPromptsWithMetadata(
+        workspaceId,
+        projectId,
+        items.map((name) => ({ name, metadata })),
+        [...standardIds, typeId],
+      ),
+      { callSite: 'createPromptsWithMetadata' },
     );
   }
   return { topicCount: selected.length, promptCount: texts.size };
@@ -357,6 +369,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
  *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
  *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
+ * @param {string} [options.callerId='unknown'] - resolved caller id (see
+ *   `resolveCallerId`) stamped as `created_by`/`updated_by` on any AI-generated
+ *   prompt this create attaches (LLMO-6289). Defaults to the `unknown` sentinel
+ *   so a caller that omits it never writes an empty author.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -376,6 +392,7 @@ export async function handleCreateMarketSubworkspace(
     publishMode = 'require',
     dataAccess = null,
     dynamicAllocation = false,
+    callerId = 'unknown',
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -508,6 +525,7 @@ export async function handleCreateMarketSubworkspace(
       },
       log,
       headroom,
+      callerId,
     );
   }
 

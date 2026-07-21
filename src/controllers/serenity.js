@@ -29,6 +29,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
+  resolveCallerId,
 } from '../support/serenity/handlers/prompts.js';
 import {
   handleListMarkets,
@@ -521,6 +522,10 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      // CORRECTNESS-CRITICAL (LLMO-6289): resolve the caller identity ONCE, from
+      // the request's auth profile — NEVER from the bearer forwarded upstream —
+      // and thread it into every write below to stamp created_*/updated_*.
+      const callerId = resolveCallerId(ctx);
       const result = auth.mode === 'subworkspace'
         ? await handleCreatePromptsSubworkspace(
           transport,
@@ -528,6 +533,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          callerId,
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
@@ -541,6 +547,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          callerId,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -561,6 +568,9 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      // Caller identity for the updated_* stamp — resolved from the auth profile,
+      // never the forwarded upstream bearer (LLMO-6289).
+      const callerId = resolveCallerId(ctx);
       const result = auth.mode === 'subworkspace'
         ? await handleUpdatePromptSubworkspace(
           transport,
@@ -569,6 +579,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          callerId,
         )
         : await handleUpdatePrompt(
           transport,
@@ -579,6 +590,7 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          callerId,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -723,6 +735,9 @@ function SerenityController(context, log, env) {
             // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
             // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            // Caller identity for the created_* stamp on any generated prompt
+            // (LLMO-6289) — from the auth profile, never the upstream bearer.
+            callerId: resolveCallerId(ctx),
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link) keyed on the
@@ -1227,6 +1242,10 @@ function SerenityController(context, log, env) {
           dynamicAllocation: dynamicAllocationEnabled(ctx),
         },
       );
+      // Caller identity for the created_* stamp on generated prompts, resolved
+      // ONCE for the whole activate batch (LLMO-6289) — from the auth profile,
+      // never the forwarded upstream bearer.
+      const callerId = resolveCallerId(ctx);
       const results = [];
       for (const m of markets) {
         const createBody = {
@@ -1276,6 +1295,7 @@ function SerenityController(context, log, env) {
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
               // JIT units pool = the org parent passed positionally above; not duplicated here.
               dynamicAllocation: dynamicAllocationEnabled(ctx),
+              callerId,
             },
           );
         } catch (e) {

@@ -46,11 +46,11 @@ function makeTransport(overrides = {}) {
     listProjects: sinon.stub().resolves({ items: [proj()] }),
     listProjectTags: makeListProjectTagsStub(),
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
-    createPromptsByIds: sinon.stub().resolves({
+    createPromptsWithMetadata: sinon.stub().resolves({
       page: 1, total: 1, items: [{ id: 'new-prompt', name: 'p' }],
     }),
     deletePromptsByIds: sinon.stub().resolves(null),
-    renamePrompt: sinon.stub().callsFake(
+    patchPrompt: sinon.stub().callsFake(
       (ws, pid, promptId, newName) => Promise.resolve(
         { id: promptId, name: newName, is_updated: true },
       ),
@@ -63,6 +63,22 @@ function makeTransport(overrides = {}) {
 
 // A classifier over BARE `type` values, matching the flat-mode twin.
 const classifyByBrandMention = (text) => (/\bacme\b/i.test(text) ? 'branded' : 'non-branded');
+
+// Matchers for the v3 metadata write shapes (LLMO-6289), mirroring the flat-mode
+// twin's test helpers. `by` is undefined when a test omits callerId.
+const createItemMatch = (name, by) => sinon.match({
+  name,
+  metadata: sinon.match({
+    created_at: sinon.match.string,
+    created_by: by,
+    updated_at: sinon.match.string,
+    updated_by: by,
+  }),
+});
+const patchTextMatch = (name, by) => sinon.match({
+  name,
+  metadata: sinon.match({ updated_at: sinon.match.string, updated_by: by }),
+});
 
 describe('prompts-subworkspace handlers', () => {
   afterEach(() => sinon.restore());
@@ -103,6 +119,10 @@ describe('prompts-subworkspace handlers', () => {
           path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
         }],
         tagMap: { 'Running Shoes': TAG_IDS.categoryRunningShoes },
+        createdAt: null,
+        createdBy: null,
+        updatedAt: null,
+        updatedBy: null,
       }]);
       expect(result).to.include({ total: 1, page: 1, limit: 50 });
       expect(transport.listPromptsByTags).to.have.been.calledWith(WS, 'p-us-en');
@@ -154,14 +174,14 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1']);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', undefined)], ['tag-1']);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
     it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
-      // The metered write is createPromptsByIds itself (Rainer, live-verified) — a disguised-quota
-      // 405 fires there, before any publish. getWorkspaceResources must be read (and, if it were
-      // needed, a top-up transferred) before the first createPromptsByIds call, not after.
+      // The metered write is createPromptsWithMetadata itself (Rainer, live-verified) — a
+      // disguised-quota 405 fires there, before any publish. getWorkspaceResources must be read (if
+      // needed, a top-up transferred) before the first createPromptsWithMetadata call, not after.
       const transport = makeTransport({
         getWorkspaceResources: sinon.stub().resolves({
           product_resources: {
@@ -177,11 +197,11 @@ describe('prompts-subworkspace handlers', () => {
         prompts: [{
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
-      }, log, undefined, { dynamicAllocation: true, parentWorkspaceId: 'parent-ws' });
+      }, log, undefined, undefined, { dynamicAllocation: true, parentWorkspaceId: 'parent-ws' });
       expect(result.created).to.have.length(1);
       expect(transport.getWorkspaceResources).to.have.been.calledOnceWith(WS);
       expect(transport.getWorkspaceResources)
-        .to.have.been.calledBefore(transport.createPromptsByIds);
+        .to.have.been.calledBefore(transport.createPromptsWithMetadata);
     });
 
     // A tag NAME cannot address a nested tag, so a `tags` key is rejected
@@ -196,7 +216,7 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(0);
       expect(result.skipped).to.have.length(1);
-      expect(transport.createPromptsByIds).to.not.have.been.called;
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
     });
 
     it('injects the computed type tag id from the classifier (serenity-docs#31, twin of the flat-mode layer)', async () => {
@@ -212,10 +232,10 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.created[0].tagIds).to.deep.equal([
         TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
       ]);
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        ['is Acme good?'],
+        [createItemMatch('is Acme good?', undefined)],
         [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
       );
     });
@@ -230,7 +250,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.created).to.have.length(0);
       expect(result.skipped).to.have.length(1);
       expect(transport.listProjects).to.have.been.calledOnce;
-      expect(transport.createPromptsByIds).to.not.have.been.called;
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
     });
 
     it('400s on an empty prompts array', async () => {
@@ -260,7 +280,7 @@ describe('prompts-subworkspace handlers', () => {
       // the per-item failed.message must be redacted, never echoed to the client.
       const leak = 'Semrush POST https://gw.internal/workspaces/ws/projects/p/prompts failed: 500';
       const transport = makeTransport({
-        createPromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, leak)),
+        createPromptsWithMetadata: sinon.stub().rejects(new SerenityTransportError(500, leak)),
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
@@ -276,7 +296,7 @@ describe('prompts-subworkspace handlers', () => {
 
     it('defaults a statusless create failure to status 500', async () => {
       const transport = makeTransport({
-        createPromptsByIds: sinon.stub().rejects(new Error('no status')),
+        createPromptsWithMetadata: sinon.stub().rejects(new Error('no status')),
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
         prompts: [{
@@ -310,14 +330,14 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.status).to.equal(200);
       // The id is preserved — the edit is in place, never a re-create.
       expect(result.body.semrushPromptId).to.equal('old-id');
-      expect(transport.renamePrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', 'new');
+      expect(transport.patchPrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', patchTextMatch('new', undefined));
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         [{ id: 'old-id', references: ['tag-1'], replace: true }],
       );
       expect(transport.deletePromptsByIds).to.not.have.been.called;
-      expect(transport.createPromptsByIds).to.not.have.been.called;
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
@@ -332,7 +352,7 @@ describe('prompts-subworkspace handlers', () => {
 
     it('404s promptNotFound when the upstream rename 404s (no tag write)', async () => {
       const transport = makeTransport({
-        renamePrompt: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
+        patchPrompt: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
       });
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
@@ -375,7 +395,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.status).to.equal(200);
       expect(result.body.semrushPromptId).to.equal('old-id');
       expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
-      expect(transport.renamePrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', 'new');
+      expect(transport.patchPrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', patchTextMatch('new', undefined));
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
@@ -425,7 +445,7 @@ describe('prompts-subworkspace handlers', () => {
 
     it('re-throws a rename 409 (text collision) with no tag write and no publish', async () => {
       const transport = makeTransport({
-        renamePrompt: sinon.stub().rejects(new SerenityTransportError(409, 'conflict')),
+        patchPrompt: sinon.stub().rejects(new SerenityTransportError(409, 'conflict')),
       });
       await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'a sibling\'s text', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
@@ -436,7 +456,7 @@ describe('prompts-subworkspace handlers', () => {
 
     it('re-throws a non-404 rename failure (no tag write)', async () => {
       const transport = makeTransport({
-        renamePrompt: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+        patchPrompt: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
       await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
@@ -453,10 +473,10 @@ describe('prompts-subworkspace handlers', () => {
       await expect(handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
       }, warnLog)).to.be.rejectedWith(/tag write boom/);
-      expect(transport.renamePrompt).to.have.been.calledOnce;
+      expect(transport.patchPrompt).to.have.been.calledOnce;
       expect(transport.publishProject).to.not.have.been.called;
       expect(warnLog.warn).to.have.been.calledOnceWith(
-        'updatePromptTagsByIds failed after a successful rename — text updated, tags stale',
+        'updatePromptTagsByIds failed after a successful text/metadata PATCH — text updated, tags stale',
         { semrushPromptId: 'old-id', projectId: 'p-us-en', error: 'tag write boom' },
       );
     });
@@ -657,11 +677,11 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
     ).to.be.rejectedWith(/non-empty/);
   });
 
-  // `createPromptsByIds` resolves without an `items` array → semrushPromptId
+  // `createPromptsWithMetadata` resolves without an `items` array → semrushPromptId
   // degrades to '' rather than the literal string "undefined".
-  it('handleCreatePromptsSubworkspace: semrushPromptId is empty string when createPromptsByIds returns no items', async () => {
+  it('handleCreatePromptsSubworkspace: semrushPromptId is empty string when createPromptsWithMetadata returns no items', async () => {
     const transport = makeTransport({
-      createPromptsByIds: sinon.stub().resolves({}),
+      createPromptsWithMetadata: sinon.stub().resolves({}),
     });
     const result = await handleCreatePromptsSubworkspace(transport, WS, {
       prompts: [{

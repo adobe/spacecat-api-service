@@ -11017,6 +11017,34 @@ SerenityPrompt:
         Present on a create/update response
         (`SerenityCreatePromptsResponse.created`, the `updateSerenityPrompt`
         200); absent on `GET /serenity/prompts` list items, which carry `tags`.
+    createdAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        RFC 3339 UTC timestamp the prompt was first created, from the
+        server-owned authorship metadata. Present on `GET /serenity/prompts`
+        list items; null for a prompt created before authorship stamping (an
+        un-backfilled prompt).
+    createdBy:
+      type: [string, 'null']
+      maxLength: 100
+      description: |
+        Opaque id of the caller that created the prompt (an IMS user id, or the
+        literal `unknown` when the author could not be resolved). Resolve to a
+        display name via the userDetails lookup. Null for an un-backfilled prompt.
+    updatedAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        RFC 3339 UTC timestamp of the prompt's last in-place edit (its text or
+        tags). Equal to `createdAt` for a never-edited prompt. Null for an
+        un-backfilled prompt.
+    updatedBy:
+      type: [string, 'null']
+      maxLength: 100
+      description: |
+        Opaque id of the caller that last edited the prompt (or the literal
+        `unknown`). Null for an un-backfilled prompt.
 
 SerenityPromptTag:
   type: object

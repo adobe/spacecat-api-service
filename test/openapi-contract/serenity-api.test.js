@@ -109,12 +109,19 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
         tagMap: { 'topic-a': 't-1' },
+        // Authorship metadata fields (LLMO-6289) on a list item.
+        createdAt: '2026-07-01T00:00:00Z',
+        createdBy: 'user-a',
+        updatedAt: '2026-07-02T00:00:00Z',
+        updatedBy: 'unknown',
       }],
       total: 1,
       page: 1,
       limit: 50,
     },
-    query: { geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'] },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'], sort: 'metadata.updated_at', order: 'desc',
+    },
   },
   createSerenityPrompts: {
     expectedStatus: 200,

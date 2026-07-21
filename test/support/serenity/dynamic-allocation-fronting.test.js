@@ -82,7 +82,7 @@ function makeTransport(overrides = {}) {
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     getWorkspaceResources,
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
-    createPromptsByIds: sinon.stub().resolves({ items: [{ id: 'prompt-1' }] }),
+    createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'prompt-1' }] }),
     listAiModels: sinon.stub().resolves({ items: [] }),
     listGlobalAiModels: sinon.stub().resolves({ items: [] }),
     addAiModel: sinon.stub().resolves(null),
@@ -184,6 +184,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType (tag-dimension path — not under test here)
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
@@ -202,6 +203,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: false, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
@@ -357,6 +359,7 @@ describe('dynamic-allocation — enforcement choke point', () => {
         },
         log,
         undefined, // classifyPromptType
+        undefined, // callerId (LLMO-6289)
         { dynamicAllocation: true, parentWorkspaceId: MASTER },
       ),
     },
@@ -541,6 +544,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
       },
       log,
       undefined,
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     // The retry succeeded, so the create is NOT recorded as a publish failure.
