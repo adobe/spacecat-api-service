@@ -313,11 +313,15 @@ export function isServerOwnedDimension(dimension) {
  * `canonicalizeSource` (read/tag-write boundary) and the v2 list `source` filter
  * fold (prompts-storage.js) route through it so the spellings can never drift.
  *
- * @param {string} value - a `source` value (already known to be a string).
+ * Coerces with `String()` so a non-string filter value (e.g. a query param parsed
+ * as a number/array) folds instead of throwing; `canonicalizeSource` already
+ * guards the type before calling, so the coercion is a no-op on that path.
+ *
+ * @param {unknown} value - a `source` value.
  * @returns {string} the folded value.
  */
 export function foldSourceValue(value) {
-  return value.trim().toLowerCase().replace(/_/g, '-');
+  return String(value).trim().toLowerCase().replace(/_/g, '-');
 }
 
 /**
