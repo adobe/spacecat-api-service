@@ -81,6 +81,27 @@ v2-serenity-prompts:
           Maximum 50 ids; excess values are silently truncated (same pattern
           as the `limit` cap). This matches the server-side `MAX_TAG_IDS`
           constant in `handlers/prompts.js`.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [metadata.created_at, metadata.updated_at]
+        description: |
+          Sort the page by a server-owned authorship timestamp. Restricted to
+          `metadata.created_at` (Created) or `metadata.updated_at` (Last
+          modified) — any other value is a 400. Omitted leaves the upstream
+          default (unsorted) ordering. Requires the with-metadata list path.
+      - name: order
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+        description: |
+          Sort direction for `sort`; defaults to `desc` (newest first). Ignored
+          when `sort` is omitted.
     responses:
       '200':
         description: Prompts retrieved successfully.

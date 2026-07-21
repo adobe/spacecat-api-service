@@ -246,6 +246,9 @@ describe('provisionBrandSubworkspace', () => {
       // subworkspace write path (LLMO-6190).
       dynamicAllocation: false,
       ceiling: undefined,
+      // Caller identity for the created_* stamp (LLMO-6289); the test context
+      // has no auth profile → the `unknown` sentinel.
+      callerId: 'unknown',
     });
     // The stub drives the sub-workspace title off the brand's display name.
     expect(brandStub.getName()).to.equal('Acme');

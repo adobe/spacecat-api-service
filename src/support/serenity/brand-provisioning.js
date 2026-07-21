@@ -23,6 +23,7 @@ import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.
 import { computeWriteDeadline } from './intent-classification.js';
 import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from './dynamic-allocation-active.js';
 import { resolveCanonicalDefaultModelIds } from './default-models.js';
+import { resolveCallerId } from './handlers/prompts.js';
 
 // Brand-create generation policy (tunable). Keep the top N generated topics by
 // search volume; brand-topics returns up to 10 topics x up to 100 prompts each,
@@ -278,6 +279,11 @@ export async function provisionBrandSubworkspace(context, {
         ceiling,
         brandCollection: context?.dataAccess?.Brand,
         onWorkspaceCreated: (id) => { createdWorkspaceId = id; },
+        // Caller identity for the created_* stamp on generated prompts (LLMO-6289),
+        // resolved from the request auth profile — never the forwarded upstream
+        // bearer. This create runs before the brand row exists; the caller
+        // (brands.js POST /brands) is the human/service provisioning the brand.
+        callerId: resolveCallerId(context),
       },
     );
   } catch (e) {

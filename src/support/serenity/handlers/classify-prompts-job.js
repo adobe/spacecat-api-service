@@ -139,7 +139,10 @@ async function createAndClassify(context, job, transport, metadata) {
   const {
     dataAccess, env, log,
   } = context;
-  const { brandId, semrushWorkspaceId } = metadata;
+  // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
+  // controller, carried through the async job so classified-on-create prompts are
+  // stamped with the human/service that submitted them, not the job runner.
+  const { brandId, semrushWorkspaceId, callerId = 'unknown' } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
@@ -188,6 +191,7 @@ async function createAndClassify(context, job, transport, metadata) {
         semrushWorkspaceId,
         projectId,
         typed,
+        callerId,
       );
       const intentPending = intentByText.get(input.text) === null;
       return {

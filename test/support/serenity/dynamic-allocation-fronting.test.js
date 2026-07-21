@@ -82,7 +82,7 @@ function makeTransport(overrides = {}) {
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     getWorkspaceResources,
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
-    createPromptsByIds: sinon.stub().resolves({ items: [{ id: 'prompt-1' }] }),
+    createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'prompt-1' }] }),
     listAiModels: sinon.stub().resolves({ items: [] }),
     listGlobalAiModels: sinon.stub().resolves({ items: [] }),
     addAiModel: sinon.stub().resolves(null),
@@ -187,6 +187,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       undefined, // classifyPromptType (tag-dimension path — not under test here)
       undefined, // env
       undefined, // writeDeadline
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
@@ -207,6 +208,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       undefined, // classifyPromptType
       undefined, // env
       undefined, // writeDeadline
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: false, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
@@ -237,6 +239,7 @@ describe('dynamic-allocation fronting — create-prompts', () => {
         undefined, // classifyPromptType
         undefined, // env
         undefined, // writeDeadline
+        undefined, // callerId (LLMO-6289)
         { dynamicAllocation: true, parentWorkspaceId: MASTER, ceiling: { prompts: 50 } },
       );
     } catch (e) {
@@ -401,6 +404,7 @@ describe('dynamic-allocation — enforcement choke point', () => {
         undefined, // classifyPromptType
         undefined, // env
         undefined, // writeDeadline
+        undefined, // callerId (LLMO-6289)
         { dynamicAllocation: true, parentWorkspaceId: MASTER },
       ),
     },
@@ -636,6 +640,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
       undefined,
       undefined,
       undefined,
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     // The retry succeeded, so the create is NOT recorded as a publish failure.
@@ -719,12 +724,12 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
   });
 
   it('create-market with generateTopics: createPromptsByIds 405s once then a bounded top-up+retry succeeds', async () => {
-    const createPromptsByIds = sinon.stub();
-    createPromptsByIds.onFirstCall().rejects(quota405());
-    createPromptsByIds.onSecondCall().resolves({ items: [{ id: 'prompt-1' }] });
+    const createPromptsWithMetadata = sinon.stub();
+    createPromptsWithMetadata.onFirstCall().rejects(quota405());
+    createPromptsWithMetadata.onSecondCall().resolves({ items: [{ id: 'prompt-1' }] });
     const t = makeTransport({
       listProjects: sinon.stub().resolves({ items: [] }),
-      createPromptsByIds,
+      createPromptsWithMetadata,
       getBrandTopics: sinon.stub().resolves({
         items: [{ topic: 't1', volume: 10, prompts: ['what is Acme?'] }],
       }),
@@ -745,7 +750,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
       },
     );
     expect(res.status).to.equal(201);
-    expect(t.createPromptsByIds).to.have.been.calledTwice;
+    expect(t.createPromptsWithMetadata).to.have.been.calledTwice;
   });
 
   it('create-prompts, concurrent batch: each item independently recovers from its own 405 — per-item-keyed stub, not a flat call-index', async () => {
@@ -754,8 +759,8 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
     // overall and skip its own retry path). Keying on identity guarantees EVERY item's first
     // attempt 405s once and its second succeeds, regardless of interleaving.
     const attemptsByText = new Map();
-    const createPromptsByIds = sinon.stub().callsFake(async (wsId, projectId, texts) => {
-      const key = texts[0];
+    const createPromptsWithMetadata = sinon.stub().callsFake(async (wsId, projectId, items) => {
+      const key = items[0].name;
       const attempt = (attemptsByText.get(key) ?? 0) + 1;
       attemptsByText.set(key, attempt);
       if (attempt === 1) {
@@ -765,7 +770,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
     });
     const t = makeTransport({
       listProjects: sinon.stub().resolves({ items: [proj()] }),
-      createPromptsByIds,
+      createPromptsWithMetadata,
     });
     const result = await handleCreatePromptsSubworkspace(
       t,
@@ -787,6 +792,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
       undefined, // classifyPromptType
       undefined, // env
       undefined, // writeDeadline
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(result.failed).to.deep.equal([]);
@@ -799,8 +805,8 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
     // Deterministic per-key state — 'recovers' 405s once then succeeds, 'fails-hard' always throws
     // a non-quota error that must never be retried.
     let recoversAttempt = 0;
-    const stub = sinon.stub().callsFake(async (wsId, projectId, texts) => {
-      const [text] = texts;
+    const stub = sinon.stub().callsFake(async (wsId, projectId, items) => {
+      const [{ name: text }] = items;
       if (text === 'recovers') {
         recoversAttempt += 1;
         if (recoversAttempt === 1) {
@@ -812,7 +818,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
     });
     const t = makeTransport({
       listProjects: sinon.stub().resolves({ items: [proj()] }),
-      createPromptsByIds: stub,
+      createPromptsWithMetadata: stub,
     });
     const result = await handleCreatePromptsSubworkspace(
       t,
@@ -831,6 +837,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
       undefined, // classifyPromptType
       undefined, // env
       undefined, // writeDeadline
+      undefined, // callerId (LLMO-6289)
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(result.created).to.have.lengthOf(1);
