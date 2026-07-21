@@ -17,7 +17,6 @@ import sinonChai from 'sinon-chai';
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 
 import {
-  adaptPE,
   createSerenityTransport,
   SerenityTransportError,
   redactUpstreamMessage,
@@ -96,11 +95,18 @@ describe('Semrush REST transport', () => {
   });
 
   describe('auth + base URL', () => {
-    it('throws SerenityTransportError(401) when imsToken is missing on a call', async () => {
+    it('surfaces a missing-imsToken 401 as a ProjectEngineApiError wrapping the auth cause on a PE call', async () => {
+      // LLMO-6386: a Project Engine call throws ProjectEngineApiError directly. The shared
+      // authToken getter still throws SerenityTransportError(401) on a missing token, but that
+      // now happens inside the facade's auth middleware, so it is surfaced as the facade's
+      // no-HTTP-response ProjectEngineApiError (status undefined) carrying the 401 as `.cause`.
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: '' });
-      const promise = transport.publishProject(WORKSPACE_ID, PROJECT_ID);
-      await expect(promise).to.be.rejectedWith(SerenityTransportError);
-      await expect(promise).to.be.rejectedWith(/Missing IMS bearer token/);
+      const err = await transport.publishProject(WORKSPACE_ID, PROJECT_ID).catch((e) => e);
+      expect(err).to.be.instanceOf(ProjectEngineApiError);
+      expect(err.status).to.equal(undefined);
+      expect(err.cause).to.be.instanceOf(SerenityTransportError);
+      expect(err.cause.status).to.equal(401);
+      expect(err.cause.message).to.match(/Missing IMS bearer token/);
     });
 
     it('sends Authorization: Bearer <ims> — no cookie, no Auth-Data-Jwt, no User-Agent', async () => {
@@ -286,15 +292,20 @@ describe('Semrush REST transport', () => {
       expect(call.url).to.include('pid%3Fwith%23hash');
     });
 
-    it('re-throws non-abort fetch errors verbatim (network error, not timeout)', async () => {
+    it('preserves a non-abort fetch error (network error, not timeout) as the PE facade cause', async () => {
+      // createTimeoutFetch re-throws a non-AbortError verbatim; on a PE call (publishProject) the
+      // facade then surfaces it as a status-undefined ProjectEngineApiError carrying the original
+      // network error as `.cause` (LLMO-6386), rather than the raw error escaping directly.
       const netErr = Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' });
       fetchStub.rejects(netErr);
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-      await expect(transport.publishProject(WORKSPACE_ID, PROJECT_ID))
-        .to.be.rejectedWith(/ECONNRESET/);
+      const err = await transport.publishProject(WORKSPACE_ID, PROJECT_ID).catch((e) => e);
+      expect(err).to.be.instanceOf(ProjectEngineApiError);
+      expect(err.status).to.equal(undefined);
+      expect(err.cause).to.equal(netErr);
     });
 
-    it('aborts with SerenityTransportError(504) on fetch timeout', async () => {
+    it('aborts with a 504 SerenityTransportError cause (wrapped in ProjectEngineApiError) on a PE fetch timeout', async () => {
       // fetch never resolves; the transport's AbortController should fire.
       fetchStub.callsFake((_input, init) => new Promise((resolve, reject) => {
         init.signal.addEventListener('abort', () => {
@@ -319,8 +330,11 @@ describe('Semrush REST transport', () => {
         // fires. A synchronous tick would fire against a not-yet-registered timer.
         await clock.tickAsync(20_000); // safely past the 15s default timeout
         const err = await promise.catch((e) => e);
-        expect(err).to.be.instanceOf(SerenityTransportError);
-        expect(err.status).to.equal(504);
+        // PE path: createTimeoutFetch's 504 SerenityTransportError is the facade's `.cause`.
+        expect(err).to.be.instanceOf(ProjectEngineApiError);
+        expect(err.status).to.equal(undefined);
+        expect(err.cause).to.be.instanceOf(SerenityTransportError);
+        expect(err.cause.status).to.equal(504);
       } finally {
         clock.restore();
         global.setTimeout = realSetTimeout;
@@ -446,7 +460,8 @@ describe('Semrush REST transport', () => {
       await clock.tickAsync(60_000);
       const err = await promise;
 
-      expect(err).to.be.instanceOf(SerenityTransportError);
+      // createProject is a Project Engine call → ProjectEngineApiError (LLMO-6386).
+      expect(err).to.be.instanceOf(ProjectEngineApiError);
       expect(err.status).to.equal(500);
       expect(fetchStub.callCount).to.equal(1);
     }));
@@ -515,7 +530,7 @@ describe('Semrush REST transport', () => {
       const err = await promise;
 
       expect(fetchStub.callCount).to.equal(3);
-      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err).to.be.instanceOf(ProjectEngineApiError);
       expect(err.status).to.equal(429);
     }));
 
@@ -578,8 +593,11 @@ describe('Semrush REST transport', () => {
       await clock.tickAsync(20_000); // past the 15s per-attempt timeout, once
       const err = await promise;
 
-      expect(err).to.be.instanceOf(SerenityTransportError);
-      expect(err.status).to.equal(504);
+      // PE path: the 504 SerenityTransportError is carried as the facade error's `.cause`.
+      expect(err).to.be.instanceOf(ProjectEngineApiError);
+      expect(err.status).to.equal(undefined);
+      expect(err.cause).to.be.instanceOf(SerenityTransportError);
+      expect(err.cause.status).to.equal(504);
       expect(fetchStub.callCount).to.equal(1);
     }));
 
@@ -597,7 +615,7 @@ describe('Semrush REST transport', () => {
   });
 
   describe('non-2xx upstream', () => {
-    it('throws SerenityTransportError carrying status and parsed body', async () => {
+    it('throws ProjectEngineApiError carrying status and parsed body (PE call)', async () => {
       fetchStub.resolves(fetchFail(502, { code: 'gateway_timeout' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -605,7 +623,7 @@ describe('Semrush REST transport', () => {
         await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
         expect.fail('should have thrown');
       } catch (err) {
-        expect(err).to.be.instanceOf(SerenityTransportError);
+        expect(err).to.be.instanceOf(ProjectEngineApiError);
         expect(err.status).to.equal(502);
         expect(err.body).to.deep.equal({ code: 'gateway_timeout' });
       }
@@ -642,7 +660,7 @@ describe('Semrush REST transport', () => {
         await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
         expect.fail('should have thrown');
       } catch (err) {
-        expect(err).to.be.instanceOf(SerenityTransportError);
+        expect(err).to.be.instanceOf(ProjectEngineApiError);
         expect(err.status).to.equal(500);
         expect(err.body).to.equal(null);
       }
@@ -722,12 +740,15 @@ describe('Semrush REST transport', () => {
       expect(result.items).to.deep.equal([{ id: 'new-prompt', name: 'What is Acrobat?' }]);
     });
 
-    it('surfaces an upstream 500 (unresolvable tag id) as a SerenityTransportError', async () => {
+    it('surfaces an upstream 500 (unresolvable tag id) as a ProjectEngineApiError', async () => {
       fetchStub.resolves(fetchFail(500, { message: 'unknown tag id: bogus' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await expect(transport.createPromptsByIds(WORKSPACE_ID, PROJECT_ID, ['x'], ['bogus']))
-        .to.be.rejected.then((err) => expect(err.status).to.equal(500));
+        .to.be.rejected.then((err) => {
+          expect(err).to.be.instanceOf(ProjectEngineApiError);
+          expect(err.status).to.equal(500);
+        });
     });
   });
 
@@ -759,13 +780,13 @@ describe('Semrush REST transport', () => {
       expect(result).to.deep.equal({ id: 'p1', name: 'Next text', is_updated: true });
     });
 
-    it('surfaces the upstream 409 (text collision) as a SerenityTransportError(409)', async () => {
+    it('surfaces the upstream 409 (text collision) as a ProjectEngineApiError(409)', async () => {
       fetchStub.resolves(fetchFail(409, { message: 'conflict' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await expect(transport.renamePrompt(WORKSPACE_ID, PROJECT_ID, 'p1', 'A sibling\'s text'))
         .to.be.rejected.then((err) => {
-          expect(err).to.be.instanceOf(SerenityTransportError);
+          expect(err).to.be.instanceOf(ProjectEngineApiError);
           expect(err.status).to.equal(409);
         });
     });
@@ -1044,12 +1065,12 @@ describe('Semrush REST transport', () => {
       expect(call.body).to.equal(undefined);
     });
 
-    it('throws SerenityTransportError(404) on upstream not-found so callers can treat it as idempotent', async () => {
+    it('throws ProjectEngineApiError(404) on upstream not-found so callers can treat it as idempotent', async () => {
       fetchStub.resolves(fetchFail(404, { message: 'not found' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       const promise = transport.deleteProject(WORKSPACE_ID, PROJECT_ID);
-      await expect(promise).to.be.rejectedWith(SerenityTransportError);
+      await expect(promise).to.be.rejectedWith(ProjectEngineApiError);
       try {
         await promise;
       } catch (e) {
@@ -1233,12 +1254,13 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.called).to.equal(false);
     });
 
-    it('surfaces an upstream 404 as a SerenityTransportError', async () => {
+    it('surfaces an upstream 404 as a ProjectEngineApiError', async () => {
       fetchStub.resolves(fetchFail(404, { message: 'not found' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await expect(transport.updateProjectTag(WORKSPACE_ID, PROJECT_ID, 'ghost', { name: 'X', parentId: 'root-1' }))
         .to.be.rejected.then((err) => {
+          expect(err).to.be.instanceOf(ProjectEngineApiError);
           expect(err.status).to.equal(404);
           expect(err.body).to.deep.equal({ message: 'not found' });
         });
@@ -1535,9 +1557,46 @@ describe('Semrush REST transport', () => {
         expect(redactUpstreamMessage(e)).to.equal('Upstream request failed');
       });
 
+      // LLMO-6386: a Project Engine failure now surfaces as ProjectEngineApiError, whose message
+      // embeds the service name + method + status ("Project Engine POST request failed with status
+      // 405"); it must be redacted to the same generic string, never echoed to the client.
+      it('redacts a ProjectEngineApiError by status (401/403 → auth failed, else request failed)', () => {
+        expect(redactUpstreamMessage(new ProjectEngineApiError(401, 'GET', null)))
+          .to.equal('Upstream authorization failed');
+        expect(redactUpstreamMessage(new ProjectEngineApiError(403, 'POST', null)))
+          .to.equal('Upstream authorization failed');
+        expect(redactUpstreamMessage(new ProjectEngineApiError(405, 'POST', '<html>405</html>')))
+          .to.equal('Upstream request failed');
+      });
+
+      it('never leaks the raw "Project Engine ..." message of a ProjectEngineApiError', () => {
+        const e = new ProjectEngineApiError(500, 'POST', { code: 'boom' });
+        expect(redactUpstreamMessage(e)).to.equal('Upstream request failed');
+        expect(redactUpstreamMessage(e)).to.not.match(/Project Engine/);
+      });
+
+      it('unwraps a status-undefined ProjectEngineApiError to its cause before redacting (auth 401)', () => {
+        // Timeout/auth/network PE failure: redact by the wrapped cause's status, matching the
+        // retired adaptPE boundary — a missing-token 401 cause still reads "authorization failed".
+        const authCause = new SerenityTransportError(401, 'Missing IMS bearer token');
+        expect(redactUpstreamMessage(new ProjectEngineApiError(undefined, 'POST', null, { cause: authCause })))
+          .to.equal('Upstream authorization failed');
+        const timeoutCause = new SerenityTransportError(504, 'timed out');
+        expect(redactUpstreamMessage(new ProjectEngineApiError(undefined, 'GET', null, { cause: timeoutCause })))
+          .to.equal('Upstream request failed');
+      });
+
       it('returns e.message unchanged for a plain (non-transport) Error', () => {
         const e = new Error('safe app error message');
         expect(redactUpstreamMessage(e)).to.equal('safe app error message');
+      });
+
+      it('returns the raw network cause message for a status-undefined ProjectEngineApiError wrapping a plain Error', () => {
+        // A raw network error carried as cause is not a Semrush transport type, so (as before the
+        // adaptPE boundary was retired) its own message passes through.
+        const netCause = new Error('fetch failed');
+        expect(redactUpstreamMessage(new ProjectEngineApiError(undefined, 'GET', null, { cause: netCause })))
+          .to.equal('fetch failed');
       });
 
       it('returns undefined when called with null (e?.message is undefined)', () => {
@@ -1545,14 +1604,16 @@ describe('Semrush REST transport', () => {
       });
     });
 
-    describe('unwrap error/data/null fallback (line 159)', () => {
+    describe('local unwrap error/data/null fallback (User Manager / brand-topics path)', () => {
       it('falls through to data then null when the non-2xx error body parses to JSON null', async () => {
-        // openapi-fetch parses a JSON `null` error body to `error === null`
-        // (nullish), so `error ?? data ?? null` evaluates the `data` operand
-        // (also nullish here) and finally the `null` literal — exercising both
-        // right-hand operands of the coalescing chain. (A `''` error body would
-        // short-circuit at `error` since '' is not nullish, which is why the
-        // empty-body test does not reach these branches.)
+        // This exercises the transport's LOCAL `unwrap` — used only by the User Manager (`users.*`)
+        // and brand-topics (`projectsRaw`) paths, which still throw SerenityTransportError
+        // (LLMO-6386 leaves them unchanged). createSubworkspace is a POST (not retried on 5xx), so
+        // a single attempt reaches unwrap. openapi-fetch parses a JSON `null` error body to
+        // `error === null` (nullish), so `error ?? data ?? null` evaluates the `data` operand (also
+        // nullish here) and finally the `null` literal — exercising both right-hand operands of the
+        // coalescing chain. (A `''` error body would short-circuit at `error` since '' is not
+        // nullish, which is why the empty-body test does not reach these branches.)
         fetchStub.resolves(new Response('null', {
           status: 500,
           headers: { 'content-type': 'application/json' },
@@ -1560,30 +1621,33 @@ describe('Semrush REST transport', () => {
         const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
         try {
-          await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
+          await transport.createSubworkspace(PARENT_WS, 'Adobe Express', { ai: { projects: 1, prompts: 1 } });
           expect.fail('should have thrown');
         } catch (err) {
           expect(err).to.be.instanceOf(SerenityTransportError);
           expect(err.status).to.equal(500);
-          // error(null) ?? data(undefined) ?? null → null; line 163 keeps null.
+          // error(null) ?? data(undefined) ?? null → null; unwrap keeps null.
           expect(err.body).to.equal(null);
         }
       });
     });
 
-    describe('createTimeoutFetch re-throws a non-abort error via the wrapped fetch (line 135)', () => {
-      it('propagates a non-AbortError rejection from the wrapped fetch unchanged', async () => {
-        // Drive the timeout-fetch catch with a rejection whose name is NOT
-        // 'AbortError' so the `if` guard is false and `throw e` re-raises the
-        // original error verbatim (no 504 mapping).
+    describe('createTimeoutFetch re-throws a non-abort error via the wrapped fetch', () => {
+      it('propagates a non-AbortError rejection from the wrapped fetch as the facade error cause', async () => {
+        // Drive the timeout-fetch catch with a rejection whose name is NOT 'AbortError' so the
+        // `if` guard is false and `throw e` re-raises the original error verbatim (no 504 mapping).
+        // On a PE call (publishProject) that raw error is not an HTTP response, so the facade
+        // surfaces it as a status-undefined ProjectEngineApiError carrying it as `.cause`
+        // (LLMO-6386); the original error is preserved unchanged there.
         const boom = Object.assign(new Error('EPIPE'), { name: 'TypeError', code: 'EPIPE' });
         fetchStub.rejects(boom);
         const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
         const err = await transport.publishProject(WORKSPACE_ID, PROJECT_ID).catch((e) => e);
-        expect(err).to.equal(boom);
-        expect(err).to.not.be.instanceOf(SerenityTransportError);
-        expect(err.message).to.equal('EPIPE');
+        expect(err).to.be.instanceOf(ProjectEngineApiError);
+        expect(err.status).to.equal(undefined);
+        expect(err.cause).to.equal(boom);
+        expect(err.cause.message).to.equal('EPIPE');
       });
     });
 
@@ -1604,49 +1668,5 @@ describe('Semrush REST transport', () => {
         expect(params.get('country')).to.equal('');
       });
     });
-  });
-});
-
-describe('adaptPE (Project Engine boundary adapter)', () => {
-  it('passes a resolved value through unchanged', async () => {
-    expect(await adaptPE(Promise.resolve({ ok: 1 }))).to.deep.equal({ ok: 1 });
-  });
-
-  it('maps an HTTP ProjectEngineApiError to SerenityTransportError (status + body preserved)', async () => {
-    const body = { message: 'nope' };
-    let err;
-    try {
-      await adaptPE(Promise.reject(new ProjectEngineApiError(404, 'GET', body)));
-    } catch (e) { err = e; }
-    expect(err).to.be.instanceOf(SerenityTransportError);
-    expect(err.status).to.equal(404);
-    expect(err.body).to.deep.equal(body);
-  });
-
-  it('rethrows the original cause on the no-response path (timeout/auth/network)', async () => {
-    const cause = new SerenityTransportError(504, 'timed out');
-    let err;
-    try {
-      await adaptPE(Promise.reject(new ProjectEngineApiError(undefined, 'GET', null, { cause })));
-    } catch (e) { err = e; }
-    expect(err).to.equal(cause);
-  });
-
-  it('defensive fallback: wraps as SerenityTransportError(502) when cause is absent', async () => {
-    let err;
-    try {
-      await adaptPE(Promise.reject(new ProjectEngineApiError(undefined, 'GET', null)));
-    } catch (e) { err = e; }
-    expect(err).to.be.instanceOf(SerenityTransportError);
-    expect(err.status).to.equal(502);
-  });
-
-  it('rethrows a non-ProjectEngineApiError unchanged', async () => {
-    const other = new Error('boom');
-    let err;
-    try {
-      await adaptPE(Promise.reject(other));
-    } catch (e) { err = e; }
-    expect(err).to.equal(other);
   });
 });

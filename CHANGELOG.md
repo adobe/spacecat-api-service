@@ -1,3 +1,24 @@
+# [1.672.0](https://github.com/adobe/spacecat-api-service/compare/v1.671.0...v1.672.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= projection to GET /organizations/{organizationId}/sites ([#2856](https://github.com/adobe/spacecat-api-service/issues/2856)) ([10b30c2](https://github.com/adobe/spacecat-api-service/commit/10b30c2884485af445fa22f44c8a962dfcf4b1c8)), closes [#2840](https://github.com/adobe/spacecat-api-service/issues/2840)
+
+# [1.671.0](https://github.com/adobe/spacecat-api-service/compare/v1.670.0...v1.671.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** tolerant origin/source authorship-root resolver; rename source→origin (LLMO-6274) ([#2862](https://github.com/adobe/spacecat-api-service/issues/2862)) ([cad46af](https://github.com/adobe/spacecat-api-service/commit/cad46af2b700b1ad5dcadd175ad14f799b9e1f99))
+
+# [1.670.0](https://github.com/adobe/spacecat-api-service/compare/v1.669.0...v1.670.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** adopt the shared Project Engine facade + typed errors via a boundary adapter (LLMO-6379) ([#2863](https://github.com/adobe/spacecat-api-service/issues/2863)) ([5c9773c](https://github.com/adobe/spacecat-api-service/commit/5c9773ca73124ad851afd49d3ac8217b099e9675)), closes [spacecat-shared#1823](https://github.com/spacecat-shared/issues/1823)
+
 # [1.669.0](https://github.com/adobe/spacecat-api-service/compare/v1.668.1...v1.669.0) (2026-07-20)
 
 
