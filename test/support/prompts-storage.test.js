@@ -438,7 +438,10 @@ describe('prompts-storage', () => {
           or: () => chain,
           contains: () => chain,
           overlaps: () => chain,
-          in: () => chain,
+          in: (column, values) => {
+            eqCalls.push({ column, values });
+            return chain;
+          },
           range: () => thenable(result),
           maybeSingle: () => thenable(result),
           single: () => thenable(result),
@@ -453,7 +456,7 @@ describe('prompts-storage', () => {
       };
     }
 
-    it('filters source on the CANONICAL form so drift spellings match (source-dimension.md §3.1)', async () => {
+    it('filters source on the raw column across both drift spellings (WP-S2 interim)', async () => {
       const eqCalls = [];
       await listPrompts({
         organizationId: ORG_ID,
@@ -461,12 +464,12 @@ describe('prompts-storage', () => {
         source: 'gsc',
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      // The filter runs through the canonical SQL expression, not the bare column,
-      // so a request for `gsc` matches on `lower(replace(source,'_','-'))`.
-      expect(eqCalls).to.deep.include({ column: "lower(replace(source, '_', '-'))", value: 'gsc' });
+      // Matched on the raw `source` column (stock PostgREST can't evaluate an inline
+      // canonical expression). `gsc` has no `_`/`-` variance, so a single-value `.in`.
+      expect(eqCalls).to.deep.include({ column: 'source', values: ['gsc'] });
     });
 
-    it('folds an underscore filter value to its canonical hyphen form before matching', async () => {
+    it('folds an underscore filter value and matches BOTH the hyphen and underscore forms', async () => {
       const eqCalls = [];
       await listPrompts({
         organizationId: ORG_ID,
@@ -474,8 +477,10 @@ describe('prompts-storage', () => {
         source: 'CITATION_ATTEMPT',
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
+      // Folded to canonical, then matched on both spellings so a request for the
+      // displayed `citation-attempt` still finds rows stored as `citation_attempt`.
       expect(eqCalls).to.deep.include({
-        column: "lower(replace(source, '_', '-'))", value: 'citation-attempt',
+        column: 'source', values: ['citation-attempt', 'citation_attempt'],
       });
     });
 
@@ -3368,7 +3373,7 @@ describe('prompts-storage', () => {
       expect(result.items[0].source).to.equal('has:colon');
     });
 
-    it('sorts source on the canonical SQL expression, not the bare column', async () => {
+    it('sorts source on the raw column (WP-S2 interim; WP-S4 moves it to source_canonical)', async () => {
       const orderCalls = [];
       const recordingChain = (result) => {
         const chain = {
@@ -3403,7 +3408,7 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(orderCalls[0]).to.deep.equal({
-        column: "lower(replace(source, '_', '-'))", opts: { ascending: true },
+        column: 'source', opts: { ascending: true },
       });
     });
   });
