@@ -50,9 +50,12 @@ function makeTransport(overrides = {}) {
       page: 1, total: 1, items: [{ id: 'new-prompt', name: 'p' }],
     }),
     deletePromptsByIds: sinon.stub().resolves(null),
+    // Production passes the combined v3 body `{ name, metadata }` as the 4th arg
+    // (not a bare string), so the stub reads `body.name` — matching the real
+    // signature, not a shape that would mask a mismatch.
     patchPrompt: sinon.stub().callsFake(
-      (ws, pid, promptId, newName) => Promise.resolve(
-        { id: promptId, name: newName, is_updated: true },
+      (ws, pid, promptId, body) => Promise.resolve(
+        { id: promptId, name: body?.name ?? '', is_updated: true },
       ),
     ),
     updatePromptTagsByIds: sinon.stub().resolves(null),
@@ -146,6 +149,74 @@ describe('prompts-subworkspace handlers', () => {
         .to.be.rejectedWith(/geoTargetId/);
     });
 
+    // sort/order forwarding (LLMO-6289) — the subworkspace twin resolves its
+    // project via the live listing (not the DB), so its forwarding path is
+    // independently testable from the flat-mode twin in prompts.test.js.
+    it('maps item.metadata to the DTO authorship fields', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{
+            id: 'q1',
+            name: 'a prompt',
+            metadata: {
+              created_at: '2026-07-01T00:00:00Z',
+              created_by: 'user-a',
+              updated_at: '2026-07-02T00:00:00Z',
+              updated_by: 'user-b',
+            },
+          }],
+          total: 1,
+        }),
+      });
+      const result = await handleListPromptsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
+      expect(result.items[0]).to.include({
+        createdAt: '2026-07-01T00:00:00Z',
+        createdBy: 'user-a',
+        updatedAt: '2026-07-02T00:00:00Z',
+        updatedBy: 'user-b',
+      });
+    });
+
+    it('forwards a valid sort/order to the transport list call', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+      });
+      await handleListPromptsSubworkspace(transport, WS, {
+        geoTargetId: 2840, languageCode: 'en', sort: 'metadata.updated_at', order: 'asc',
+      }, log);
+      const [, , body] = transport.listPromptsByTags.firstCall.args;
+      expect(body.sort).to.equal('metadata.updated_at');
+      expect(body.order).to.equal('asc');
+    });
+
+    it('400s a sort field outside the allow-list before any upstream call', async () => {
+      const transport = makeTransport({ listPromptsByTags: sinon.stub() });
+      await expect(handleListPromptsSubworkspace(transport, WS, {
+        geoTargetId: 2840, languageCode: 'en', sort: 'text',
+      }, log)).to.be.rejectedWith(/sort must be one of/);
+      expect(transport.listPromptsByTags).to.not.have.been.called;
+    });
+
+    it('400s an invalid order before any upstream call', async () => {
+      const transport = makeTransport({ listPromptsByTags: sinon.stub() });
+      await expect(handleListPromptsSubworkspace(transport, WS, {
+        geoTargetId: 2840, languageCode: 'en', sort: 'metadata.created_at', order: 'sideways',
+      }, log)).to.be.rejectedWith(/order must be one of/);
+      expect(transport.listPromptsByTags).to.not.have.been.called;
+    });
+
+    it('forwards neither sort nor order on an unsorted read', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({ items: [], total: 0 }),
+      });
+      await handleListPromptsSubworkspace(transport, WS, {
+        geoTargetId: 2840, languageCode: 'en',
+      }, log);
+      const [, , body] = transport.listPromptsByTags.firstCall.args;
+      expect(body.sort).to.equal(undefined);
+      expect(body.order).to.equal(undefined);
+    });
+
     it('uses the upstream total when a full page is returned', async () => {
       const transport = makeTransport({
         listPromptsByTags: sinon.stub().resolves({
@@ -176,6 +247,16 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', undefined)], ['tag-1']);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
+    });
+
+    it('stamps a REAL resolved callerId as created_* (full stamping path, not the undefined default)', async () => {
+      const transport = makeTransport();
+      await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, undefined, 'caller-42');
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1']);
     });
 
     it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
@@ -339,6 +420,21 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.deletePromptsByIds).to.not.have.been.called;
       expect(transport.createPromptsWithMetadata).to.not.have.been.called;
       expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('stamps a REAL resolved callerId as updated_* via the combined PATCH (created_* untouched)', async () => {
+      const transport = makeTransport();
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+      }, log, undefined, 'caller-42');
+      expect(result.status).to.equal(200);
+      expect(transport.patchPrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', patchTextMatch('new', 'caller-42'));
+      // The combined PATCH carries NO created_* (merge-patch keeps them); the tag
+      // PUT carries references only, no metadata.
+      const body = transport.patchPrompt.firstCall.args[3];
+      expect(body.metadata).to.not.have.property('created_at');
+      expect(body.metadata).to.not.have.property('created_by');
+      expect(transport.updatePromptTagsByIds.firstCall.args[2][0]).to.not.have.property('metadata');
     });
 
     it('404s marketNotFound when the slice has no project', async () => {
