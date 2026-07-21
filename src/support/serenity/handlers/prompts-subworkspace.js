@@ -185,9 +185,18 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip any caller-supplied type + inject the computed one.
+      // Unified layer: strip any caller-supplied type/origin + inject the
+      // computed type and the derived origin (`human`).
       const typed = await injectComputedTags(projectId, input);
-      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
+      // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
+      // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
+      // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
+      // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
+      // own per-item try/catch below still isolates a surviving failure to this one item.
+      const semrushPromptId = await headroom.retryOnQuota(
+        () => createOnePrompt(transport, workspaceId, projectId, typed),
+        { callSite: 'createOnePrompt' },
+      );
       return {
         created: {
           semrushPromptId,
@@ -240,7 +249,7 @@ export async function handleCreatePromptsSubworkspace(
     workspaceId,
     affectedProjectIds,
     log,
-    (fn) => headroom.retryOnQuota(fn),
+    (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
   );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.

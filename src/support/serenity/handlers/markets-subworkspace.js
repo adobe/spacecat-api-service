@@ -209,7 +209,8 @@ function validateCreateBody(body) {
  *   already-provisioned dimension tree. The caller provisions it unconditionally,
  *   so re-resolving it here would read the whole taxonomy a second time per request.
  * @param {object} log - logger.
- * @param {{ ensure: Function }} headroom - the caller's headroom guard (createHeadroomGuard) —
+ * @param {{ ensure: Function, retryOnQuota: Function }} headroom - the caller's headroom guard
+ *   (createHeadroomGuard) —
  *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
  *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
  *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
@@ -282,8 +283,14 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     // `branded` / `non-branded` are the classifier's only outputs and both are in
     // the `type` vocabulary provisioned above.
     const typeId = /** @type {string} */ (typeValues.get(value));
+    // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
+    // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
+    // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
     // eslint-disable-next-line no-await-in-loop
-    await transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]);
+    await headroom.retryOnQuota(
+      () => transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]),
+      { callSite: 'createPromptsByIds' },
+    );
   }
   return { topicCount: selected.length, promptCount: texts.size };
 }
@@ -438,9 +445,15 @@ export async function handleCreateMarketSubworkspace(
     // PROJECT metering seam: ensure one project of headroom before creating a new project (no-op
     // when the flag is OFF). Not needed on the adopt-existing-draft branch above (no new project).
     await headroom.ensure({ projects: 1 });
-    const createResp = await transport.createProject(
-      workspaceId,
-      buildCreateProjectBody(body, location, languageId, aliasNames),
+    // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
+    // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
+    // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
+    const createResp = await headroom.retryOnQuota(
+      () => transport.createProject(
+        workspaceId,
+        buildCreateProjectBody(body, location, languageId, aliasNames),
+      ),
+      { callSite: 'createProject' },
     );
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
@@ -589,11 +602,14 @@ export async function handleCreateMarketSubworkspace(
   let published = false;
   if (publishMode === 'require') {
     try {
-      await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
+      await headroom.retryOnQuota(
+        () => transport.publishProject(workspaceId, projectId),
+        { callSite: 'publishProject' },
+      );
       published = true;
     } catch (e) {
       // Case 1 (serenity-docs#72 §2): the brand carve is exhausted (allocator OFF — production
-      // today), or `retryOnQuota`'s bounded top-up+retry (LLMO-6190 item 4) still didn't clear
+      // today), or `retryOnQuota`'s bounded poll-retry (LLMO-6190 follow-up) still didn't clear
       // the disguised quota 405. Classify via `isMeteredQuota` (body-SHAPE check, not bare
       // status — MysticatBot review) so a genuine app-level 405 Method-Not-Allowed (JSON body)
       // is never mistaken for a quota rejection and hidden behind the wrong error token; this
@@ -611,7 +627,10 @@ export async function handleCreateMarketSubworkspace(
     }
   } else if (publishMode === 'best-effort') {
     try {
-      await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
+      await headroom.retryOnQuota(
+        () => transport.publishProject(workspaceId, projectId),
+        { callSite: 'publishProject' },
+      );
       published = true;
     } catch (e) {
       if (isMeteredQuota(e)) {
@@ -983,10 +1002,10 @@ export async function handleUpdateModelsSubworkspace(
     modelIds,
     { geoTargetId, languageCode },
     log,
-    // LLMO-6190 item 4: bounded top-up+retry if the sync's publish 405s as a disguised
+    // LLMO-6190 follow-up: bounded poll-retry if the sync's publish 405s as a disguised
     // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
     // when OFF.
-    { wrapPublish: (fn) => headroom.retryOnQuota(fn) },
+    { wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }) },
   );
 
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then
