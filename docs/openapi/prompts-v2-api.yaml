@@ -254,6 +254,11 @@ v2-prompts-by-brand-and-id:
     tags:
       - customer-config
     summary: Update a single prompt
+    description: >-
+      Updates a single prompt. `origin` is NOT patchable — it is fixed by the
+      writer that created the row and is never re-derived on update
+      (origin-dimension.md §3 item 3); an `origin` in the body is ignored,
+      leaving the stored value untouched.
     operationId: updatePromptByBrandAndId
     security:
       - ims_key: [ ]

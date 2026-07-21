@@ -154,7 +154,9 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1']);
+      // A create is a user-authenticated write: the derived `origin` (`human`) is
+      // stamped alongside the caller's tags (origin-dimension.md §3).
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1', TAG_IDS.originHuman]);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
@@ -210,13 +212,13 @@ describe('prompts-subworkspace handlers', () => {
         }],
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         ['is Acme good?'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman],
       );
     });
 
