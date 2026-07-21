@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
-import { parseShowTrends } from '../../src/controllers/elements.js';
+import { parseShowTrends, parseUserIntent } from '../../src/controllers/elements.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -635,7 +635,16 @@ describe('ElementsController', () => {
         platform: undefined,
         tags: ['type__branded', 'category__Brand'],
         projectIds: ['proj-a', 'proj-b'],
+        enrichUserIntent: false,
       });
+    });
+
+    it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
+      const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listPrompts(ctx);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.enrichUserIntent).to.equal(true);
     });
 
     it('resolves the brand uuid via resolveBrandUuid before querying', async () => {
@@ -1185,6 +1194,34 @@ describe('ElementsController', () => {
     it('returns false when both keys are absent', () => {
       expect(parseShowTrends({})).to.equal(false);
       expect(parseShowTrends(undefined)).to.equal(false);
+    });
+  });
+
+  // ─── parseUserIntent ──────────────────────────────────────────────────────
+  // Opt-in flag for per-prompt intent enrichment on the brand-presence prompts
+  // endpoint. Same boolean-parse semantics as parseShowTrends.
+
+  describe('parseUserIntent', () => {
+    it('returns true for the boolean true and the number 1', () => {
+      expect(parseUserIntent({ userIntent: true })).to.equal(true);
+      expect(parseUserIntent({ userIntent: 1 })).to.equal(true);
+    });
+
+    it('returns true for the string "true"/"1" (any case/whitespace)', () => {
+      expect(parseUserIntent({ userIntent: 'TRUE' })).to.equal(true);
+      expect(parseUserIntent({ userIntent: '  1  ' })).to.equal(true);
+    });
+
+    it('falls back to user_intent when userIntent is absent', () => {
+      expect(parseUserIntent({ user_intent: 'true' })).to.equal(true);
+    });
+
+    it('returns false for "false", unrelated strings, 0, and absent keys', () => {
+      expect(parseUserIntent({ userIntent: 'false' })).to.equal(false);
+      expect(parseUserIntent({ userIntent: 'yes' })).to.equal(false);
+      expect(parseUserIntent({ userIntent: 0 })).to.equal(false);
+      expect(parseUserIntent({})).to.equal(false);
+      expect(parseUserIntent(undefined)).to.equal(false);
     });
   });
 });
