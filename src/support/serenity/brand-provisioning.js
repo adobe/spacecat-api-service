@@ -15,7 +15,8 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../utils.js';
-import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
+import { createSerenityTransport } from './rest-transport.js';
+import { isSemrushTransportError } from './errors.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { deleteAllProjects, releaseFullAllocation } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
@@ -223,7 +224,7 @@ export async function provisionBrandSubworkspace(context, {
     // A bare upstream 405 is Semrush's disguised quota rejection (a prompt write
     // or publish that exceeds the child's metered quota — workspace doc §5).
     // Surface it as a clear "Quota exceeded" instead of the cryptic 405/nginx body.
-    if (e instanceof SerenityTransportError && e.status === 405) {
+    if (isSemrushTransportError(e) && e.status === 405) {
       throw new ErrorWithStatusCode('Quota exceeded', 409);
     }
     throw e;

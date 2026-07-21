@@ -65,7 +65,8 @@ import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
-import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
@@ -226,17 +227,28 @@ function BrandsController(ctx, log, env) {
     // workspace/project UUIDs); never echo it to the client (body or x-error
     // header). Return a generic message and keep the detail to the log. Mirrors
     // the serenity controller's mapError hygiene.
-    if (error instanceof SerenityTransportError) {
-      const status = (error.status === 401 || error.status === 403) ? error.status : 502;
+    //
+    // A Project Engine call throws ProjectEngineApiError directly (LLMO-6386, adaptPE retired). On
+    // its no-HTTP-response path (timeout / exhausted network / missing-IMS-token 401) status is
+    // `undefined` and the original throw is carried as `.cause`; unwrap it — exactly as the retired
+    // adaptPE boundary rethrew that cause — so the auth 401 keeps mapping to 401 rather than
+    // flattening to the generic 502. See unwrapTransportCause (errors.js).
+    const err = unwrapTransportCause(error);
+    if (isSemrushTransportError(err)) {
+      const status = (err.status === 401 || err.status === 403) ? err.status : 502;
       const message = status === 502 ? 'Upstream request failed' : 'Upstream authorization failed';
       return createResponse({ message }, status, { [HEADER_ERROR]: message });
     }
-    if (error.status) {
-      return createResponse({ message: error.message }, error.status, {
-        [HEADER_ERROR]: error.message,
+    // Not a Semrush transport error: an app-level ErrorWithStatusCode (has `.status`), or a bare
+    // Error whose safe message passes through. `err` is unwrapTransportCause's `unknown` return;
+    // mirror the original any-typed access to `.status`/`.message` on the (unwrapped) error.
+    const appErr = /** @type {{ status?: number; message?: string }} */ (err);
+    if (appErr.status) {
+      return createResponse({ message: appErr.message }, appErr.status, {
+        [HEADER_ERROR]: appErr.message,
       });
     }
-    return internalServerError(error.message);
+    return internalServerError(appErr.message);
   }
 
   function validateBrandGuidanceFields(brandData = {}) {

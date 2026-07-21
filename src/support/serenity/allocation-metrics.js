@@ -133,7 +133,7 @@ export function recordPoolFreeRatio(dim, free, total) {
 }
 
 /**
- * @param {'orgPoolExhausted'|'brandAiLimit'|'workspaceBusy'} reason
+ * @param {'orgPoolExhausted'|'brandAiLimit'|'workspaceBusy'|'quotaExceeded'} reason
  * @returns {void}
  */
 export function recordRejection(reason) {

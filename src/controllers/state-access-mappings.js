@@ -454,6 +454,26 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * Blocks internal admins from **mutating** state-layer bindings — create,
+   * update (PATCH), and delete/revoke (DELETE empties the capability set).
+   * Grants must originate from a real FACS-layer or state-layer
+   * `can_manage_users` holder in the customer org so every mutation carries an
+   * accountable `created_by` / `updated_by` — an internal admin identity is a
+   * platform-operator bypass (see `callerHasFacsManageUsers`), not an org
+   * manager, and must never author or revoke customer ReBAC grants. Reads
+   * (list / history / capabilities / audit) are unaffected.
+   *
+   * @param {object} ctx
+   * @returns {Response|null} `forbidden` when the caller is an internal admin.
+   */
+  function blockInternalAdminWrite(ctx) {
+    if (ctx.attributes?.authInfo?.isAdmin?.()) {
+      return forbidden('Internal admins may not create, update, or delete access mappings');
+    }
+    return null;
+  }
+
+  /**
    * Read-scope rule for list / history (hybrid-model §3, mac-state-layer):
    * **org-wide reads admit FACS-layer `can_manage_users` only**. An org-wide
    * manager reads anything in the org; a state-layer manager must scope the read
@@ -651,6 +671,10 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
+    const adminBlock = blockInternalAdminWrite(ctx);
+    if (adminBlock) {
+      return adminBlock;
+    }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
     if (gateErr) {
@@ -820,6 +844,10 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
+    const adminBlock = blockInternalAdminWrite(ctx);
+    if (adminBlock) {
+      return adminBlock;
+    }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
     if (gateErr) {
@@ -919,6 +947,10 @@ function StateAccessMappingsController(context) {
     const pre = preamble(ctx);
     if (pre.error) {
       return pre.error;
+    }
+    const adminBlock = blockInternalAdminWrite(ctx);
+    if (adminBlock) {
+      return adminBlock;
     }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
