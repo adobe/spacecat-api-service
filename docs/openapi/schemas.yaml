@@ -7857,6 +7857,14 @@ V2BrandInput:
       type: array
       items:
         $ref: '#/V2BrandCompetitor'
+    baseSiteId:
+      type: string
+      format: uuid
+      description: >-
+        Id of the brand's primary SpaceCat Site — an existing onboarded site or one
+        onboarded inline. Written to `brands.site_id` as the brand's primary-URL
+        anchor. Sent on every create (a Serenity brand is anchored by BOTH its
+        sub-workspace and this primary Site).
 
 V2BrandUpdateInput:
   type: object
@@ -11280,25 +11288,27 @@ SerenityMarketDetail:
 SerenityActivateRequest:
   type: object
   description: |
-    Activates a brand into sub-workspace mode: ensures the brand's own
-    Semrush sub-workspace exists (creating + resourcing it on first call),
-    then per supplied market creates-or-resumes a draft and publishes it once.
+    Activates a brand into sub-workspace mode.
 
-    All fields are optional. A pending (draft) brand activated from the wizard
-    sends an EMPTY body `{}` and every value is read from its stashed
-    `pending_semrush_provisioning` (primary URL, markets, generatePrompts). A
-    reactivation of an already-live brand re-supplies them in the body (the body
-    wins when present; there is no stored market memory otherwise). When no
-    primary URL/domain is available at all, a sub-workspace-only brand is
-    activated (no project). With a domain but no market, a single US/EN fallback
-    project is provisioned.
+    A PENDING (draft) brand activates SUB-WORKSPACE-ONLY: it ensures the brand's
+    own Semrush sub-workspace and flips the brand active, with NO project. The
+    wizard's approve sends an EMPTY body `{}`; any `markets`/`brandDomain` (or the
+    legacy `pending_semrush_provisioning` stash) are IGNORED for provisioning. The
+    brand is anchored by its primary site (`brands.site_id`, set at create), and
+    markets are added afterwards from the Markets tab.
+
+    An ALREADY-ACTIVE brand (reactivation / onboarding API) provisions the markets
+    supplied in the body: per market it creates-or-resumes a draft project and
+    publishes it once. With a `brandDomain` but no `markets`, a single US/EN
+    fallback project is provisioned. An active brand is never downgraded on a
+    partial failure (207 Multi-Status). All fields are optional.
   properties:
     generatePrompts:
       type: boolean
       description: >-
-        Whether to generate topics/prompts for the provisioned project(s).
-        Overrides the stashed value; defaults to the stash (else false). Requires
-        a primary URL/domain (a project) — true with no domain is rejected (400).
+        Whether to generate topics/prompts for a supplied market's project
+        (already-active brand only). Ignored for a pending brand, which activates
+        sub-workspace-only with no project.
     brandDomain:
       type: string
       description: Primary domain for the brand's upstream projects.
@@ -11337,10 +11347,8 @@ SerenityActivateRequest:
             items:
               type: string
             description: >-
-              Optional AI model (LLM) ids to attach to this market's project.
-              When omitted here, the markets stashed on the pending brand supply
-              them (a draft activated from the wizard carries per-market LLMs in
-              pending_semrush_provisioning).
+              Optional AI model (LLM) ids to attach to this market's project
+              (already-active brand reactivation).
 
 SerenityActivateResponse:
   type: object
