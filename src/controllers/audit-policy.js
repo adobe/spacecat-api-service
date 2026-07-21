@@ -123,13 +123,19 @@ export default function AuditPolicyController() {
     inclusions: { field: 'manualUrls', max: MAX_MANUAL_URLS },
   };
 
-  // returns a string error message, or null when valid
-  function validateMutateBody(b) {
+  // returns a string error message, or null when valid. `maxValues` rejects an
+  // oversized `values` array up front, before the per-element scan below and
+  // before any read/compute work - the post-computeNewArray cap check alone
+  // still lets an attacker force a large parse/validate/Set-allocate cycle.
+  function validateMutateBody(b, maxValues) {
     if (!isObject(b)) {
       return 'request body must be a JSON object';
     }
     if (!Array.isArray(b.values) || b.values.length === 0) {
       return 'values must be a non-empty array';
+    }
+    if (b.values.length > maxValues) {
+      return `values array exceeds the maximum of ${maxValues} entries`;
     }
     if (b.values.some((s) => typeof s !== 'string' || s.length > MAX_ELEMENT_LEN)) {
       return `values entries must be strings <= ${MAX_ELEMENT_LEN} chars`;
@@ -172,7 +178,7 @@ export default function AuditPolicyController() {
     }
 
     const body = context.data || {};
-    const invalid = validateMutateBody(body);
+    const invalid = validateMutateBody(body, config.max);
     if (invalid) {
       return badRequest(invalid);
     }

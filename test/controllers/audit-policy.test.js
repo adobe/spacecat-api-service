@@ -269,6 +269,17 @@ describe('AuditPolicyController — exclusions add/remove', () => {
     expect(client.rpc).to.not.have.been.called;
   });
 
+  it('values array longer than the resource cap is rejected before reading the current row (resource-exhaustion guard)', async () => {
+    const client = buildSequencedClient({ selectQueue: [], rpcQueue: [] });
+    const controller = loadController();
+    const oversized = Array.from({ length: 201 }, (_, i) => `/g${i}/*`);
+    const res = await controller.addExclusions(buildContext({
+      client, data: { values: oversized, reason: 'too many at once' },
+    }));
+    expect(res.status).to.equal(400);
+    expect(client.rpc).to.not.have.been.called;
+  });
+
   it('missing reason -> 400', async () => {
     const controller = loadController();
     const res = await controller.addExclusions(buildContext({
@@ -519,6 +530,18 @@ describe('AuditPolicyController — inclusions add/remove', () => {
     }));
     expect(res.status).to.equal(400);
     expect(client.rpc).to.not.have.been.called;
+  });
+
+  it('request-level values-array guard uses the manualUrls cap (2000): 201 entries is under cap and proceeds to read the current row', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [{ data: { ...ROW_V5, version: 6 }, error: null }],
+    });
+    const controller = loadController();
+    const values = Array.from({ length: 201 }, (_, i) => `https://example.com/p${i}`);
+    const res = await controller.addInclusions(buildContext({ client, data: { values, reason: 'bulk add' } }));
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledOnce;
   });
 
   it('inclusion URL containing ../ in its path is still accepted (path-traversal check is exclusions-only)', async () => {
