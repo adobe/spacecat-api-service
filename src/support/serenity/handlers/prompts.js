@@ -533,7 +533,18 @@ export function parseUpdatePromptBody(body) {
       },
     };
   }
-  const text = String(body.text);
+  // Mirror the create contract (`normalizePromptInput`): empty or whitespace-only
+  // text is rejected here rather than passed on to `renamePrompt`, where it would
+  // be classified and written as a blank prompt. `|| ''` also coerces a falsy
+  // non-string (`null`, `0`, `false`) to empty, matching create exactly.
+  const text = String(body.text || '').trim();
+  if (!text) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: 'invalidRequest', message: 'text must be a non-empty string' },
+    };
+  }
   const tagIds = sanitizeTagIds(body.tagIds);
   if (tagIds.length === 0) {
     return {
@@ -819,10 +830,19 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
-  // Recompute the type AND intent tags from the NEW text BEFORE the delete: the
-  // unified layer (tree read / on-demand tag create / LLM classify) must not run
-  // between delete and create, so a classification failure aborts cleanly with
+  // Recompute the type AND intent tags from the NEW text BEFORE the rename: the
+  // unified layer (tree read / on-demand tag create / LLM classify) must run
+  // before any upstream write, so a classification failure aborts cleanly with
   // the old prompt still present (serenity-docs#31, #32).
+  //
+  // This runs UNCONDITIONALLY, even when the PATCH does not change the text. The
+  // upstream provider has no GET-by-id and the handler is not sent the old text
+  // (the body is the full next state — see the docblock above), so it cannot
+  // know whether the text actually changed. `renamePrompt`'s `is_updated: false`
+  // reports a no-op only AFTER the rename, too late to gate a classify that has
+  // to run first for failure-safety. Skipping the reclassification would require
+  // the client to send the old text — a contract change deliberately out of
+  // scope here (keep the edit path a single straight line).
   const injectComputedType = makeTypeInjector(
     transport,
     semrushWorkspaceId,

@@ -339,7 +339,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        [{ id: 'old-id', references: ['tag-1'], replace: true }],
+        [{ id: 'old-id', references: ['tag-1', TAG_IDS.intentInformational], replace: true }],
       );
       expect(transport.deletePromptsByIds).to.not.have.been.called;
       expect(transport.createPromptsByIds).to.not.have.been.called;
@@ -398,10 +398,15 @@ describe('prompts-subworkspace handlers', () => {
         text: 'new', tagIds: ['tag-cat-1', '', undefined], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(200);
-      expect(result.body.semrushPromptId).to.equal('new-prompt-by-id');
+      // The id is preserved — the edit is in place, never a re-create.
+      expect(result.body.semrushPromptId).to.equal('old-id');
       expect(result.body.tagIds).to.deep.equal(['tag-cat-1', TAG_IDS.intentInformational]);
-      expect(transport.deletePromptsByIds).to.have.been.calledWith(WS, 'p-us-en', ['old-id']);
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['new'], ['tag-cat-1', TAG_IDS.intentInformational]);
+      expect(transport.renamePrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', 'new');
+      expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        [{ id: 'old-id', references: ['tag-cat-1', TAG_IDS.intentInformational], replace: true }],
+      );
     });
 
     it('400s when the slice key is invalid', async () => {
@@ -436,8 +441,15 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        ['now mentions Acme'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.intentInformational],
+        [{
+          id: 'old-id',
+          references: [
+            TAG_IDS.categoryRunningShoes,
+            TAG_IDS.typeBranded,
+            TAG_IDS.intentInformational,
+          ],
+          replace: true,
+        }],
       );
     });
 

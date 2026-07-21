@@ -1004,6 +1004,49 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('invalidRequest');
   });
 
+  // Mirror of the create-path contract (normalizePromptInput trims + rejects
+  // empty): an edit must not slip an empty prompt past validation into the
+  // rename, where it would be classified and written blank.
+  it('400s when text is an empty string', async () => {
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: '', tagIds: ['tag-1'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/non-empty/);
+  });
+
+  it('400s when text is whitespace-only', async () => {
+    const dataAccess = makeDataAccess([]);
+
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: '   ', tagIds: ['tag-1'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/non-empty/);
+  });
+
   it('edits text+tagIds in place (rename + replace-mode tag write), id unchanged', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
@@ -1013,10 +1056,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
-      deletePromptsByIds: sinon.stub().resolves(),
-      createPromptsByIds: sinon.stub().resolves({
-        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }], existing_count: 0,
-      }),
+      renamePrompt: sinon.stub().resolves({ id: 'sem-1', name: 'next', is_updated: true }),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -1041,8 +1082,53 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       text: 'next',
       tagIds: ['tag-cat-1', TAG_IDS.intentInformational],
     });
-    expect(transport.deletePromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['sem-1']);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['tag-cat-1', TAG_IDS.intentInformational]);
+    expect(transport.renamePrompt).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', 'sem-1', 'next');
+    // Replace-mode tag write with the injector's full output (caller tag + intent).
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [{ id: 'sem-1', references: ['tag-cat-1', TAG_IDS.intentInformational], replace: true }],
+    );
+  });
+
+  // Guards the documented always-reclassify invariant: an unchanged-text edit
+  // comes back from rename as `is_updated: false`, but the handler still writes
+  // the (re-classified) tag set and publishes — it has no old text and upstream
+  // has no GET-by-id, so it cannot short-circuit. A future "optimization" that
+  // skips the tag write on is_updated:false would break this and fail here.
+  it('still writes tags + publishes when rename reports is_updated:false (no-op text)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      renamePrompt: sinon.stub().resolves({ id: 'sem-1', name: 'same', is_updated: false }),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'same', tagIds: ['tag-cat-1'],
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(200);
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [{ id: 'sem-1', references: ['tag-cat-1', TAG_IDS.intentInformational], replace: true }],
+    );
+    expect(transport.publishProject).to.have.been.called;
   });
 
   it('drops falsy tagIds entries on PATCH before the tag write', async () => {
@@ -1054,10 +1140,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
-      deletePromptsByIds: sinon.stub().resolves(),
-      createPromptsByIds: sinon.stub().resolves({
-        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }], existing_count: 0,
-      }),
+      renamePrompt: sinon.stub().resolves({ id: 'sem-1', name: 'next', is_updated: true }),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -1074,7 +1158,11 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     );
 
     expect(result.body.tagIds).to.deep.equal(['keep', TAG_IDS.intentInformational]);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep', TAG_IDS.intentInformational]);
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [{ id: 'sem-1', references: ['keep', TAG_IDS.intentInformational], replace: true }],
+    );
   });
 
   it('drops malformed tagIds entries on PATCH like validateParentIdFormat does for parentId', async () => {
@@ -1086,10 +1174,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
-      deletePromptsByIds: sinon.stub().resolves(),
-      createPromptsByIds: sinon.stub().resolves({
-        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'next' }],
-      }),
+      renamePrompt: sinon.stub().resolves({ id: 'sem-1', name: 'next', is_updated: true }),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
       publishProject: sinon.stub().resolves(),
     };
     const tooLong = 'x'.repeat(201);
@@ -1110,7 +1196,11 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     );
 
     expect(result.body.tagIds).to.deep.equal(['keep', TAG_IDS.intentInformational]);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['next'], ['keep', TAG_IDS.intentInformational]);
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [{ id: 'sem-1', references: ['keep', TAG_IDS.intentInformational], replace: true }],
+    );
   });
 
   it('400s when tagIds sanitizes to empty (every entry malformed)', async () => {
@@ -1220,14 +1310,14 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(project);
 
-    // The prompt-gone 404 is gated by isUpstreamGone which requires
-    // SerenityTransportError specifically. A generic Error with .status=404
-    // must NOT trip the promptNotFound path.
+    // The prompt-gone 404 is gated by isUpstreamGone, which requires a
+    // SerenityTransportError. A rename that reports the prompt is gone maps to
+    // promptNotFound and never reaches the tag write.
     const err = new SerenityTransportError(404, 'not found');
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
-      deletePromptsByIds: sinon.stub().rejects(err),
-      createPromptsByIds: sinon.stub(),
+      renamePrompt: sinon.stub().rejects(err),
+      updatePromptTagsByIds: sinon.stub(),
     };
 
     const result = await handleUpdatePrompt(
@@ -1247,6 +1337,37 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(transport.updatePromptTagsByIds).to.have.callCount(0);
   });
 
+  // The negative of the case above: isUpstreamGone requires a
+  // SerenityTransportError, so a generic Error carrying .status=404 must NOT be
+  // treated as promptNotFound — it propagates like any other upstream failure.
+  it('generic Error with status 404 → throws (not promptNotFound)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    const err = Object.assign(new Error('plain 404'), { status: 404 });
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      renamePrompt: sinon.stub().rejects(err),
+      updatePromptTagsByIds: sinon.stub(),
+    };
+
+    await expect(handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['tag-1'],
+      },
+      fakeLog(),
+    )).to.be.rejectedWith(/plain 404/);
+    expect(transport.updatePromptTagsByIds).to.have.callCount(0);
+  });
+
   // The collision contract (serenity-docs#63 decision 2): a rename onto a
   // sibling prompt's exact text is refused upstream with 409 and NOTHING has
   // mutated — the handler propagates it untouched so the controller's mapError
@@ -1261,8 +1382,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const err = new SerenityTransportError(409, 'conflict');
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
-      deletePromptsByIds: sinon.stub().resolves(),
-      createPromptsByIds: sinon.stub().resolves({}), // no items
+      renamePrompt: sinon.stub().rejects(err),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -1291,8 +1412,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const err = Object.assign(new Error('upstream 503'), { status: 503 });
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
-      deletePromptsByIds: sinon.stub().rejects(err),
-      createPromptsByIds: sinon.stub().resolves({ items: [{ id: 'should-not-happen' }] }),
+      renamePrompt: sinon.stub().rejects(err),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
     };
 
     await expect(handleUpdatePrompt(
@@ -1322,8 +1443,8 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     const tagErr = Object.assign(new Error('tag write boom'), { status: 500 });
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
-      deletePromptsByIds: sinon.stub().resolves(),
-      createPromptsByIds: sinon.stub().rejects(createErr),
+      renamePrompt: sinon.stub().resolves({ id: 'sem-1', name: 'x', is_updated: true }),
+      updatePromptTagsByIds: sinon.stub().rejects(tagErr),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -1989,7 +2110,11 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         'proj-us-en',
         [{
           id: 'old-id',
-          references: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+          references: [
+            TAG_IDS.categoryRunningShoes,
+            TAG_IDS.typeBranded,
+            TAG_IDS.intentInformational,
+          ],
           replace: true,
         }],
       );
