@@ -58,6 +58,8 @@ function defaultDateRange() {
  *  - Region scoping → `CBF_project` (Semrush project id) inside an `or` block within
  *    `advanced` (NOT a top-level `project_id`, which this element ignores).
  *  - `category` (when present) → the namespaced tag `category__<label>` on `CBF_tags`.
+ *  - Cited Domains' `comparison_data_formatting: 'union'` and top-level `project_id` are
+ *    intentionally NOT sent — this element ignores both (confirmed via the MFE probe).
  *  - Brand scoping comes from the request targeting the brand's sub-workspace (resolved in
  *    the controller); the MFE also passes `CBF_brand` (name), but the sub-workspace already
  *    scopes to the brand, so we don't duplicate it here.
