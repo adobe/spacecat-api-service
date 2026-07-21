@@ -6510,6 +6510,12 @@ V2PromptListResponse:
 V2Prompt:
   type: object
   description: A prompt with brand, category, and topic enrichment
+  # FIX (MysticatBot suggestion): `origin` is required (non-nullable) in the
+  # response — it is NOT NULL in production and `mapRowToPrompt` returns it
+  # verbatim with no fallback (origin-dimension.md §2.3 / §3 item 4), so
+  # SDK-generated types must reflect it as always-present, never optional.
+  required:
+    - origin
   properties:
     id:
       type: string

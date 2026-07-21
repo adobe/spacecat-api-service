@@ -1216,6 +1216,53 @@ describe('Brands Controller', () => {
       expect(insertStub.firstCall.args[0][0].origin).to.equal('ai');
     });
 
+    // FIX (MysticatBot nit): direct controller coverage of the fail-safe branch
+    // (`!authType → user`, brands.js:584). An ABSENT or indeterminate auth type
+    // must NEVER reach the privileged service path — a body-asserted `origin: 'ai'`
+    // is coerced to `human`. Previously this branch was only exercised indirectly
+    // via the `deriveV2PromptOrigin` unit tests, not through the controller wiring.
+    [
+      { label: 'authInfo entirely absent (attributes: {})', attributes: {} },
+      { label: 'authInfo present but getType is not a function', attributes: { authInfo: { profile: {} } } },
+    ].forEach(({ label, attributes }) => {
+      it(`createPromptsByBrand fails safe to human when ${label} (gate 5 fail-safe)`, async () => {
+        const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+        const insertStub = sandbox.stub()
+          .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+          if (table === 'llmo_customer_config') {
+            chain.maybeSingle = sandbox.stub()
+              .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          return chain;
+        });
+
+        const response = await brandsController.createPromptsByBrand({
+          ...context,
+          attributes,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          // A body-asserted `ai` must NOT be honoured for an unattributable caller.
+          data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(201);
+        expect(insertStub.firstCall.args[0][0].origin).to.equal('human');
+      });
+    });
+
     it('createPromptsByBrand returns 400 when prompts not an array', async () => {
       const response = await brandsController.createPromptsByBrand({
         ...context,
