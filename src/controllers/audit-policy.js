@@ -150,6 +150,19 @@ export default function AuditPolicyController() {
     return null;
   }
 
+  // Catches literal '../' and '..\', plus percent-encoded forms (e.g. '..%2f') by also
+  // checking the decoded value. Malformed % escapes fall back to the raw-value check only -
+  // decodeURIComponent failing isn't itself evidence of traversal.
+  function containsPathTraversal(v) {
+    let decoded = v;
+    try {
+      decoded = decodeURIComponent(v);
+    } catch {
+      // leave decoded === v
+    }
+    return [v, decoded].some((s) => s.includes('../') || s.includes('..\\'));
+  }
+
   // add = set-union (preserves existing order, appends new values in call order);
   // remove = set-difference. Both are no-ops for elements already in the target state,
   // which is what makes retrying this operation safe (§3.2 of the design doc).
@@ -182,7 +195,11 @@ export default function AuditPolicyController() {
     if (invalid) {
       return badRequest(invalid);
     }
-    if (resourceKey === 'exclusions' && body.values.some((v) => v.includes('../'))) {
+    // Only the add path introduces new content the downstream audit engine will evaluate;
+    // remove is a pure set-difference filter, so a stored '../' value is harmless there and
+    // must stay removable (a caller cleaning up a value written before this check existed
+    // shouldn't be blocked from doing so).
+    if (resourceKey === 'exclusions' && mode === 'add' && body.values.some(containsPathTraversal)) {
       return badRequest("exclusionGlobs entries must not contain path-traversal sequences ('../')");
     }
 

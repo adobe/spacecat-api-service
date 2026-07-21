@@ -302,7 +302,14 @@ AuditPolicyMutateRequest:
       type: array
       minItems: 1
       items: { type: string, maxLength: 2048 }
-      description: Exclusion globs or manually-declared URLs to add or remove, one call may carry many.
+      description: >-
+        Exclusion globs or manually-declared URLs to add or remove, one call may carry many.
+        The maximum array length is resource-dependent and enforced server-side (not
+        expressible as a single `maxItems` here, since this schema is shared by both
+        resources): up to 200 entries per request against the `exclusions`/`exclusions/delete`
+        endpoints, and up to 2000 against the `inclusions`/`inclusions/delete` endpoints,
+        matching the `exclusionGlobs`/`manualUrls` caps on the `AuditPolicy` resource itself.
+        A request exceeding the applicable cap returns `400`.
     reason: { type: string, minLength: 1, maxLength: 2000 }
     note: { type: [string, 'null'], maxLength: 2000 }
 

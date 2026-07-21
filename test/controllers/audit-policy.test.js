@@ -474,11 +474,57 @@ describe('AuditPolicyController — exclusions add/remove', () => {
       rpcQueue: [],
     });
     const controller = loadController();
-    const res = await controller.removeExclusions(buildContext({
+    const res = await controller.addExclusions(buildContext({
       client, data: { values: ['/checkout/*', '../etc/passwd'], reason: 'r' },
     }));
     expect(res.status).to.equal(400);
     expect(client.rpc).to.not.have.been.called;
+  });
+
+  it('exclusion glob containing a percent-encoded path-traversal sequence (..%2f) -> 400', async () => {
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({
+      data: { values: ['/checkout/..%2fadmin/*'], reason: 'r' },
+    }));
+    expect(res.status).to.equal(400);
+    const body = await res.json();
+    expect(body.message).to.match(/path-traversal/);
+  });
+
+  it('exclusion glob containing a backslash path-traversal sequence (..\\) -> 400', async () => {
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({
+      data: { values: ['\\checkout\\..\\admin\\*'], reason: 'r' },
+    }));
+    expect(res.status).to.equal(400);
+  });
+
+  it('exclusion glob with malformed percent-encoding is still checked against the raw value, not rejected by the decode step itself', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [{ data: { ...ROW_V5, version: 6 }, error: null }],
+    });
+    const controller = loadController();
+    const res = await controller.addExclusions(buildContext({
+      client, data: { values: ['/checkout/100%off/*'], reason: 'r' },
+    }));
+    expect(res.status).to.equal(200);
+  });
+
+  it('removeExclusions allows a stored ../ value through unchanged (remove is a pure filter, harmless to the audit engine)', async () => {
+    const row = { ...ROW_V5, exclusion_globs: ['/checkout/*', '../etc/passwd'] };
+    const client = buildSequencedClient({
+      selectQueue: [{ data: row, error: null }],
+      rpcQueue: [{ data: { ...row, version: 6, exclusion_globs: ['/checkout/*'] }, error: null }],
+    });
+    const controller = loadController();
+    const res = await controller.removeExclusions(buildContext({
+      client, data: { values: ['../etc/passwd'], reason: 'clean up legacy value' },
+    }));
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_exclusion_globs: ['/checkout/*'],
+    }));
   });
 });
 
