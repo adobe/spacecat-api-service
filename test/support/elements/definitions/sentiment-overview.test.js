@@ -69,7 +69,7 @@ describe('sentiment-overview definitions', () => {
 
     it('translates a UI platform code to the Semrush model', () => {
       const modelBlock = buildSentimentOverviewPayload({ model: 'openai' }).filters.advanced.filters[0];
-      expect(modelBlock.filters[0].val).to.equal('gpt-5');
+      expect(modelBlock.filters[0].val).to.equal('chatgpt-paid');
     });
 
     it('includes CBF_project (in an or-block) when projectId is provided', () => {
