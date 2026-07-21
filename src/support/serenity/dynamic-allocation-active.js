@@ -12,8 +12,11 @@
 
 // @ts-check
 
-import { ensureAiHeadroom, requireWorkspaceId } from './resource-manager.js';
+import {
+  ensureAiHeadroom, requireWorkspaceId, DEFAULT_BRAND_AI_CEILING,
+} from './resource-manager.js';
 import { withResourceLock } from './resource-lock.js';
+import { isMeteredQuota } from './errors.js';
 
 /**
  * The GLOBAL kill-switch for dynamic (just-in-time) Semrush AI resource allocation
@@ -45,6 +48,9 @@ export function isDynamicAllocationEnabled(env) {
  * @property {(need?: import('./resource-manager.js').Dims,
  *   opts?: { includeDrafted?: boolean }) => Promise<{ toppedUp: boolean }>} ensure
  *   the choke point every subworkspace metered-write path calls before its metered op.
+ * @property {(fn: () => Promise<any>) => Promise<any>} retryOnQuota wraps a metered
+ *   publish/write call with ONE bounded recovery cycle for the disguised metered-quota 405
+ *   (LLMO-6190 item 4 — see {@link import('./errors.js').isMeteredQuota}).
  */
 
 /**
@@ -62,26 +68,33 @@ export function isDynamicAllocationEnabled(env) {
  *   exactly the failure mode a kill-switch rollout must not have.
  * - Flag ON with both ids present: `ensure` serializes per child (see {@link withResourceLock}) and
  *   tops up just-in-time via the FAIL-FAST {@link ensureAiHeadroom} (one transfer, no poll; 503 if
- *   still settling).
+ *   still settling). The per-brand `ceiling` defaults to {@link DEFAULT_BRAND_AI_CEILING} (a
+ *   PLACEHOLDER, effectively non-enforcing — see its doc) when the caller doesn't pass one, so the
+ *   ceiling-enforcement PATH is always in force even though no real product number exists yet.
  *
  * @param {any} transport - Serenity transport.
  * @param {object} opts
  * @param {boolean} opts.enabled - the global kill-switch value for this request.
  * @param {string} [opts.subWorkspaceId] - the sub-workspace being written to (`auth.workspaceId`).
  * @param {string} [opts.parentWorkspaceId] - the org parent workspace (`auth.parentWorkspaceId`).
- * @param {import('./resource-manager.js').Blocks} [opts.ceiling] - per-brand ceiling (optional).
+ * @param {import('./resource-manager.js').Blocks} [opts.ceiling] - per-brand ceiling (default
+ *   {@link DEFAULT_BRAND_AI_CEILING} — a placeholder; pass an explicit value to override once a
+ *   real per-brand number exists).
  * @param {import('./resource-manager.js').Blocks} [opts.blocks] - grace blocks (optional).
  * @param {any} [log]
  * @returns {HeadroomGuard}
  */
 export function createHeadroomGuard(transport, {
-  enabled, subWorkspaceId, parentWorkspaceId, ceiling, blocks,
+  enabled, subWorkspaceId, parentWorkspaceId, ceiling = DEFAULT_BRAND_AI_CEILING, blocks,
 }, log) {
   if (!enabled) {
-    // Disabled path: a genuine no-op, byte-for-byte the pre-PR behavior.
+    // Disabled path: a genuine no-op, byte-for-byte the pre-PR behavior. retryOnQuota is likewise a
+    // pure passthrough — zero extra transport calls, since flag OFF has no top-up mechanism to
+    // recover with (a retry would just hit the same 405 again).
     return {
       enabled: false,
       ensure: async () => ({ toppedUp: false }),
+      retryOnQuota: (fn) => fn(),
     };
   }
   // Flag ON: the ids are required from here on — fail loud (throw) rather than silently no-op.
@@ -90,13 +103,36 @@ export function createHeadroomGuard(transport, {
   // params for tsc, which cannot narrow a destructured variable through a plain function call.
   const childId = /** @type {string} */ (subWorkspaceId);
   const parentId = /** @type {string} */ (parentWorkspaceId);
+  const ensure = (need = {}, { includeDrafted = false } = {}) => withResourceLock(
+    childId,
+    () => ensureAiHeadroom(transport, {
+      subWorkspaceId: childId, parentWorkspaceId: parentId, need, ceiling, blocks, includeDrafted,
+    }, log),
+  );
   return {
     enabled: true,
-    ensure: (need = {}, { includeDrafted = false } = {}) => withResourceLock(
-      childId,
-      () => ensureAiHeadroom(transport, {
-        subWorkspaceId: childId, parentWorkspaceId: parentId, need, ceiling, blocks, includeDrafted,
-      }, log),
-    ),
+    ensure,
+    // Bounded recovery for the disguised metered-quota 405 (serenity-docs#22 / LLMO-6190 item 4): a
+    // publish/write can still 405 as a metered-quota rejection even after a pre-publish `ensure`
+    // (e.g. the read that sized the top-up was itself stale, or `includeDrafted` under-counted an
+    // upstream-side draft). On THAT specific signal (`isMeteredQuota`), re-read the child's real
+    // headroom and top up to cover it (`ensure({}, {includeDrafted:true})` — same shape as the
+    // create-market/create-prompts sizing, reusing the SAME per-child lock as `ensure`), then retry
+    // `fn` EXACTLY once. Any other error — or a second failure after the retry, of any kind —
+    // propagates untouched: this is a single bounded cycle, never a loop.
+    retryOnQuota: async (fn) => {
+      try {
+        return await fn();
+      } catch (e) {
+        if (!isMeteredQuota(e)) {
+          throw e;
+        }
+        log?.warn?.('SERENITY_ALLOC metered-405 on publish — one bounded top-up+retry', {
+          subWorkspaceId: childId,
+        });
+        await ensure({}, { includeDrafted: true });
+        return fn();
+      }
+    },
   };
 }

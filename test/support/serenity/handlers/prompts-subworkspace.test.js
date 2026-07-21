@@ -158,6 +158,32 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
     });
 
+    it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
+      // The metered write is createPromptsByIds itself (Rainer, live-verified) — a disguised-quota
+      // 405 fires there, before any publish. getWorkspaceResources must be read (and, if it were
+      // needed, a top-up transferred) before the first createPromptsByIds call, not after.
+      const transport = makeTransport({
+        getWorkspaceResources: sinon.stub().resolves({
+          product_resources: {
+            ai: {
+              resources: {
+                projects: { used: 0, total: 10 }, prompts: { used: 0, total: 100 },
+              },
+            },
+          },
+        }),
+      });
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, undefined, { dynamicAllocation: true, parentWorkspaceId: 'parent-ws' });
+      expect(result.created).to.have.length(1);
+      expect(transport.getWorkspaceResources).to.have.been.calledOnceWith(WS);
+      expect(transport.getWorkspaceResources)
+        .to.have.been.calledBefore(transport.createPromptsByIds);
+    });
+
     // A tag NAME cannot address a nested tag, so a `tags` key is rejected
     // rather than silently writing a phantom root tag (twin of the flat-mode
     // contract).

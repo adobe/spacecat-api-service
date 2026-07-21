@@ -29,6 +29,7 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS, getEntitledProductCodes } from '../support/utils.js';
@@ -401,7 +402,12 @@ function OrganizationsController(ctx, env) {
       }
     }
 
-    return ok([...visibleOwnSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
+    const sites = [...visibleOwnSites, ...delegatedSites].map((site) => SiteDto.toJSON(site));
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
