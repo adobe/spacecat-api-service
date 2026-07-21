@@ -1,3 +1,15 @@
+# [1.674.0](https://github.com/adobe/spacecat-api-service/compare/v1.673.3...v1.674.0) (2026-07-21)
+
+
+### Bug Fixes
+
+* **deps:** trigger prod deploy for spacecat-shared-data-access 4.11.0 (LLMO-6401) ([#2879](https://github.com/adobe/spacecat-api-service/issues/2879)) ([038e4da](https://github.com/adobe/spacecat-api-service/commit/038e4da8ec872b1fabc1ab7e9bd7b387da22dbe6))
+
+
+### Features
+
+* **serenity:** derive + inject prompt origin server-side — WP-O2b (LLMO-6275) ([#2866](https://github.com/adobe/spacecat-api-service/issues/2866)) ([331071f](https://github.com/adobe/spacecat-api-service/commit/331071f3abea736dc41bc46cd1a4a5ff9cd3162f)), closes [#2825](https://github.com/adobe/spacecat-api-service/issues/2825) [#2867](https://github.com/adobe/spacecat-api-service/issues/2867)
+
 ## [1.673.3](https://github.com/adobe/spacecat-api-service/compare/v1.673.2...v1.673.3) (2026-07-21)
 
 
