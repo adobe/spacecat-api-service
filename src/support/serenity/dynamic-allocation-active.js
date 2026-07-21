@@ -183,6 +183,12 @@ export function createHeadroomGuard(transport, {
             return result;
           } catch (e2) {
             if (!isMeteredQuota(e2)) {
+              // A non-quota error mid-recovery still ENDS this cycle (Alicia Adriani review):
+              // record it as `abandoned` so a dashboard built on `recovered + exhausted +
+              // abandoned` as "total recovery cycles" doesn't silently undercount cycles cut
+              // short by an unrelated failure — distinct from `exhausted` (which specifically
+              // means "still a metered 405 after every attempt").
+              recordQuotaRetryOutcome('abandoned', { attempt, callSite });
               throw e2;
             }
             if (attempt >= maxAttempts || now() >= requestDeadline) {

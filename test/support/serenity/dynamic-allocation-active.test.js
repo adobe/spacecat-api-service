@@ -587,6 +587,44 @@ describe('dynamic-allocation-active — retryOnQuota emits QuotaRetryOutcome (My
     );
   });
 
+  it('abandoned: a non-quota error mid-loop still emits QuotaRetryOutcome("abandoned", { attempt, callSite }) (Alicia Adriani review)', async () => {
+    // Distinct from `exhausted` — this cycle wasn't cut short by a persistent metered 405, but by a
+    // genuinely unrelated failure. A dashboard summing recovered+exhausted+abandoned as "total
+    // recovery cycles" must not silently undercount this case.
+    const otherError = () => new SerenityTransportError(404, 'not found', { message: 'not found' });
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      log,
+    );
+    const notMetered = otherError();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405()); // initial call — enters recovery
+    fn.onCall(1).rejects(notMetered); // poll attempt 1 — non-quota, abandons the cycle
+    let caught;
+    try {
+      await guard.retryOnQuota(fn, { callSite: 'publishProject' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(notMetered);
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'abandoned',
+      { attempt: 1, callSite: 'publishProject' },
+    );
+  });
+
   it('sleep(backoffMs) is actually invoked between poll attempts, not skipped — catches a regression that drops the await', async () => {
     const recordQuotaRetryOutcome = sinon.stub();
     const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
