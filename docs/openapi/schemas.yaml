@@ -11809,7 +11809,7 @@ SerenityBrandPresenceStats:
 
 SerenityUrlInspectorStatsValues:
   type: object
-  description: The four URL Inspector KPI values, shared by the top-level `stats` and each `weeklyTrends[]` entry (`totalPrompts` excepted — see below).
+  description: The three URL-derived URL Inspector KPI values, shared by the top-level `stats` and each `weeklyTrends[]` entry. The fourth KPI card (`totalPrompts`) is served by the separate `/url-inspector/prompts/count` endpoint — see `SerenityUrlInspectorPromptsCount`.
   required: [uniqueUrls, totalCitations, totalPromptsCited]
   properties:
     uniqueUrls:
@@ -11821,15 +11821,16 @@ SerenityUrlInspectorStatsValues:
     totalPromptsCited:
       type: number
       description: Sum of each owned URL's `prompts_with_citation` count. An UPPER BOUND, not a true distinct-prompt count — Semrush exposes no distinct-prompts-cited element, so a prompt citing more than one owned URL is counted once per URL.
-    totalPrompts:
-      type: number
-      description: Total configured prompt count for the brand, from the Semrush Prompts element. NOT date-scoped (that element has no date filter) — present only in the top-level `stats`, deliberately omitted from each `weeklyTrends` entry to avoid implying a per-week count.
 
 SerenityUrlInspectorStats:
   type: object
   description: |
     URL Inspector stats KPI cards for a brand over a date range, backed by the
-    Semrush Elements API (Stats-per-URL, Prompts).
+    Semrush Elements API (Stats-per-URL). Split from `totalPrompts` (see
+    `/url-inspector/prompts/count`) so a brand with many Semrush projects
+    doesn't time out fetching all four cards in one request — this endpoint's
+    per-project Stats-per-URL fan-out (up to 8 weeks x N projects) is the slow
+    part; `totalPrompts` is a single, unscoped call and loads independently.
   required: [stats, weeklyTrends]
   properties:
     stats:
@@ -11858,6 +11859,18 @@ SerenityUrlInspectorStats:
           uniqueUrls: { type: number }
           totalCitations: { type: number }
           totalPromptsCited: { type: number }
+
+SerenityUrlInspectorPromptsCount:
+  type: object
+  description: |
+    URL Inspector "total prompts" KPI card, split out from
+    `/url-inspector/stats` (LLMO-6185 timeout follow-up) — backed by a single
+    Semrush Prompts element call with no per-project fan-out.
+  required: [totalPrompts]
+  properties:
+    totalPrompts:
+      type: number
+      description: Total configured prompt count for the brand, from the Semrush Prompts element. NOT date-scoped (that element has no date filter), so there is no weekly breakdown.
 
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 

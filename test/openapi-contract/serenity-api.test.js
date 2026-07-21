@@ -429,7 +429,6 @@ const FIXTURES = {
         uniqueUrls: 187,
         totalCitations: 964,
         totalPromptsCited: 312,
-        totalPrompts: 1250,
       },
       weeklyTrends: [
         {
@@ -440,6 +439,20 @@ const FIXTURES = {
           totalPromptsCited: 48,
         },
       ],
+    },
+  },
+  // Split from getSerenityUrlInspectorStats (LLMO-6185 timeout follow-up) — the
+  // controller calls service.getPrompts (shared with listPrompts) and reports
+  // only its `count`, so the fixture mimics getPrompts's real `{count, prompts}`
+  // shape rather than stubbing a dedicated service method.
+  getSerenityUrlInspectorPromptsCount: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getUrlInspectorPromptsCount',
+    serviceMethod: 'getPrompts',
+    handlerResult: {
+      count: 1250,
+      prompts: [],
     },
   },
 };

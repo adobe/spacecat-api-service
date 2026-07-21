@@ -61,7 +61,7 @@ const STATS_RESULT = {
 };
 const URL_INSPECTOR_STATS_RESULT = {
   stats: {
-    uniqueUrls: 187, totalCitations: 964, totalPromptsCited: 312, totalPrompts: 1250,
+    uniqueUrls: 187, totalCitations: 964, totalPromptsCited: 312,
   },
   weeklyTrends: [
     {
@@ -1155,7 +1155,7 @@ describe('ElementsController', () => {
       expect(body).to.deep.equal(URL_INSPECTOR_STATS_RESULT);
       const [workspaceId, params] = serviceStub.getUrlInspectorStats.firstCall.args;
       expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
-      expect(params.projectIds).to.deep.equal(['proj-1']);
+      expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-1' }]);
       expect(params.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
       expect(params.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
     });
@@ -1221,10 +1221,10 @@ describe('ElementsController', () => {
       expect(params.startDate).to.equal(addDaysToDate(todayIso, -28));
     });
 
-    it('derives projectIds from the resolved projects array, not raw brandSemrushProjects (aggregate view)', async () => {
+    it('derives projects from the resolved Markets-element array, not raw brandSemrushProjects (aggregate view)', async () => {
       // getOwnedUrlProjects (Markets-element-derived) resolves a DIFFERENT set
-      // than brandSemrushProjects (DB rows) — projectIds must follow the
-      // former, since that's what's actually used to scope the citation KPIs.
+      // than brandSemrushProjects (DB rows) — the citation KPIs must be scoped
+      // to the former, since that's what's actually used to scope Stats-per-URL.
       serviceStub.getOwnedUrlProjects.resolves([
         { region: 'US', projectId: 'proj-from-markets' },
       ]);
@@ -1234,7 +1234,6 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(200);
       const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
       expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-from-markets' }]);
-      expect(params.projectIds).to.deep.equal(['proj-from-markets']);
     });
 
     it('returns 400 for a malformed startDate', async () => {
@@ -1287,7 +1286,6 @@ describe('ElementsController', () => {
       );
       const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
       expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-us' }]);
-      expect(params.projectIds).to.deep.equal(['proj-us']);
     });
 
     it('returns 404 when region does not resolve to any Semrush market', async () => {
@@ -1370,6 +1368,92 @@ describe('ElementsController', () => {
       const ctx = urlInspectorStatsCtx();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(502);
+    });
+  });
+
+  // The 4th URL Inspector KPI card, split out of getUrlInspectorStats — shares
+  // that endpoint's auth/region-resolution scaffolding (see its tests above
+  // for siteId/503/snake_case-alias coverage of that shared logic), calling
+  // service.getPrompts instead of service.getUrlInspectorStats.
+  describe('getUrlInspectorPromptsCount', () => {
+    const promptsCountUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/prompts/count${qs}`;
+
+    const promptsCountCtx = (overrides = {}) => {
+      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' });
+      return fakeContext({
+        url: promptsCountUrl(),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: [project],
+        ...overrides,
+      });
+    };
+
+    it('returns 200 with { totalPrompts } scoped to the resolved projects (aggregate view)', async () => {
+      const ctx = promptsCountCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ totalPrompts: PROMPTS_RESULT.count });
+      const [workspaceId, params] = serviceStub.getPrompts.firstCall.args;
+      expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
+      expect(params.projectIds).to.deep.equal(['proj-1']);
+    });
+
+    it('resolves region to a single projectId via resolveRegionProjectId', async () => {
+      serviceStub.resolveRegionProjectId.resolves('proj-us');
+      const ctx = fakeContext({ url: promptsCountUrl('?region=US') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({ brandId: BRAND_ID, region: 'US' }),
+      );
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-us']);
+    });
+
+    it('passes categoryId through as a prefixed category__ tag', async () => {
+      const ctx = promptsCountCtx({ url: promptsCountUrl('?categoryId=Firefly') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getUrlInspectorPromptsCount(ctx);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.tags).to.deep.equal(['category__Firefly']);
+    });
+
+    it('returns 404 when the brand has no configured Semrush projects (empty aggregate view)', async () => {
+      serviceStub.getOwnedUrlProjects.resolves([]);
+      const ctx = fakeContext({ url: promptsCountUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(404);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('returns 404 when region does not resolve to any Semrush market', async () => {
+      serviceStub.resolveRegionProjectId.resolves(null);
+      const ctx = fakeContext({ url: promptsCountUrl('?region=ZZ') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 400 when siteId resolves to a different brand than :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: 'some-other-brand-id', name: 'Other Brand' });
+      const ctx = fakeContext({ url: promptsCountUrl('?siteId=site-of-other-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('propagates upstream errors through mapError', async () => {
+      serviceStub.getPrompts.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = promptsCountCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
       expect(res.status).to.equal(502);
     });
   });

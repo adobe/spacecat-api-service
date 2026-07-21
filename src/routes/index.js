@@ -260,6 +260,8 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': elementsController.getStats,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': elementsController.getUrlInspectorStats,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,

@@ -1071,14 +1071,19 @@ export default function ElementsController(context, log, env) {
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/stats
-   * URL Inspector stats KPI cards (totalPromptsCited, totalPrompts, uniqueUrls,
+   * 3 of the 4 URL Inspector stats KPI cards (totalPromptsCited, uniqueUrls,
    * totalCitations) plus a per-week sparkline breakdown, matching the response
    * shape of the Aurora/Postgres reference endpoint
-   * (docs/llmo-brandalf-apis/url-inspector-stats-api.md). Two known
-   * approximation gaps: `totalPromptsCited` sums a per-URL count (Semrush
-   * exposes no distinct prompts-cited element, so a prompt citing multiple owned
-   * URLs is overcounted), and `totalPrompts` is not date-scoped (the Semrush
-   * PROMPTS element has no date filter, unlike the Aurora RPC).
+   * (docs/llmo-brandalf-apis/url-inspector-stats-api.md) minus its
+   * `totalPrompts` field. The 4th card (`totalPrompts`) is served by
+   * {@link getUrlInspectorPromptsCount} on its own endpoint — split out
+   * because this endpoint's per-project Stats-per-URL fan-out (up to 8 weeks x
+   * N projects) is what was timing out, while `totalPrompts` is a single,
+   * unscoped Semrush call that always completes fast; bundling it here just
+   * made it wait on the slow cards. Known approximation gap:
+   * `totalPromptsCited` sums a per-URL count (Semrush exposes no distinct
+   * prompts-cited element, so a prompt citing multiple owned URLs is
+   * overcounted).
    */
   const getUrlInspectorStats = async (ctx) => {
     try {
@@ -1176,7 +1181,6 @@ export default function ElementsController(context, log, env) {
 
       const result = await service.getUrlInspectorStats(workspaceId, {
         projects,
-        projectIds,
         model: query.model || query.platform,
         startDate,
         endDate,
@@ -1184,6 +1188,75 @@ export default function ElementsController(context, log, env) {
       });
 
       return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
+   *     /url-inspector/prompts/count
+   * The 4th URL Inspector stats KPI card (`totalPrompts`), split out of
+   * `/url-inspector/stats` (see that handler's docstring for why) — a single
+   * Semrush PROMPTS element call, scoped to the brand's project(s) the same
+   * way `getUrlInspectorStats` scopes Stats-per-URL. No date range: the
+   * PROMPTS element has no date filter, so there is nothing to default/cap and
+   * no weekly breakdown to return.
+   */
+  const getUrlInspectorPromptsCount = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // Same region scoping as getUrlInspectorStats, so filtering the URL
+      // Inspector by region scopes this card's count to the same project(s).
+      let projectIds;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+        projectIds = [projectId];
+      } else {
+        const projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
+        projectIds = projects.map((p) => p.projectId).filter(hasText);
+        // Mirrors getUrlInspectorStats's guard: an empty list must not fall
+        // through to an unscoped (workspace-wide) Semrush query.
+        if (projectIds.length === 0) {
+          return notFound(`No Semrush projects configured for brand: ${brandId}`);
+        }
+      }
+
+      const category = query.categoryId || query.category;
+      const { count: totalPrompts } = await service.getPrompts(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        tags: category ? [`category__${category}`] : [],
+        projectIds,
+      });
+
+      return cachedOk({ totalPrompts });
     } catch (e) {
       return mapError(e, log);
     }
@@ -1200,5 +1273,6 @@ export default function ElementsController(context, log, env) {
     getMarketTrackingTrends,
     getStats,
     getUrlInspectorStats,
+    getUrlInspectorPromptsCount,
   };
 }
