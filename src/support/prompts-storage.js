@@ -660,6 +660,8 @@ export async function listPrompts({
       // this with a single canonical-column match (and adds case-folding, which raw
       // matching drops).
       const wanted = foldSourceValue(source);
+      // A value with no `_`/`-` (e.g. `gsc`) yields two identical variants that the
+      // Set collapses to one — a single-element `.in` is intentional, not a bug.
       const sourceVariants = [...new Set([wanted, wanted.replace(/-/g, '_')])];
       baseQuery = baseQuery.in('source', sourceVariants);
     }

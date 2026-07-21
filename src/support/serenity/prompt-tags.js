@@ -180,7 +180,14 @@ export const SERVER_OWNED_DIMENSIONS = Object.freeze([
   DIMENSION.SOURCE,
 ]);
 
-/** Every dimension a caller may address on the create-tag endpoint. */
+/**
+ * Every dimension a caller may address on the create-tag endpoint. This is a
+ * MEMBERSHIP set (used only for `.includes` validation), so its order is
+ * irrelevant and INTENTIONALLY differs from {@link DIMENSION_ROOT_NAMES} — that
+ * list is provisioning ORDER (`category, intent, origin, type, source`), whereas
+ * this is grouped open-then-closed (`category, source, intent, origin, type`).
+ * Do not assume the two share an order.
+ */
 export const ALL_DIMENSIONS = Object.freeze([...OPEN_DIMENSIONS, ...CLOSED_DIMENSIONS]);
 
 /**

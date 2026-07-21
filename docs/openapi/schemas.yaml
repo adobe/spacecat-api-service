@@ -6560,7 +6560,6 @@ V2Prompt:
         CANONICAL form (`lower(replace(source, '_', '-'))`), so `agentic_traffic`
         reads as `agentic-traffic`.
       example: "config"
-      default: "config"
     intent:
       type: [string, 'null']
       description: >-
