@@ -14,7 +14,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { SerenityTransportError } from './rest-transport.js';
+import { isSemrushTransportError } from './errors.js';
 import { resolveProjects } from './resolve-projects.js';
 
 /**
@@ -231,7 +231,7 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
   } catch (e) {
     // 409 = the benchmark already exists (race / duplicate brand name). Fall
     // through to re-list + match rather than failing the URL attach.
-    if (!(e instanceof SerenityTransportError && e.status === 409)) {
+    if (!(isSemrushTransportError(e) && e.status === 409)) {
       throw e;
     }
   }
@@ -300,7 +300,7 @@ export async function republishBestEffort(transport, workspaceId, projectId, log
   try {
     await transport.publishProject(workspaceId, projectId);
   } catch (e) {
-    if (e instanceof SerenityTransportError && e.status === 405) {
+    if (isSemrushTransportError(e) && e.status === 405) {
       log?.warn?.('brand-urls: republish skipped — quota 405, project left as draft', {
         workspaceId, projectId,
       });

@@ -1,3 +1,67 @@
+# [1.672.0](https://github.com/adobe/spacecat-api-service/compare/v1.671.0...v1.672.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= projection to GET /organizations/{organizationId}/sites ([#2856](https://github.com/adobe/spacecat-api-service/issues/2856)) ([10b30c2](https://github.com/adobe/spacecat-api-service/commit/10b30c2884485af445fa22f44c8a962dfcf4b1c8)), closes [#2840](https://github.com/adobe/spacecat-api-service/issues/2840)
+
+# [1.671.0](https://github.com/adobe/spacecat-api-service/compare/v1.670.0...v1.671.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** tolerant origin/source authorship-root resolver; rename source→origin (LLMO-6274) ([#2862](https://github.com/adobe/spacecat-api-service/issues/2862)) ([cad46af](https://github.com/adobe/spacecat-api-service/commit/cad46af2b700b1ad5dcadd175ad14f799b9e1f99))
+
+# [1.670.0](https://github.com/adobe/spacecat-api-service/compare/v1.669.0...v1.670.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** adopt the shared Project Engine facade + typed errors via a boundary adapter (LLMO-6379) ([#2863](https://github.com/adobe/spacecat-api-service/issues/2863)) ([5c9773c](https://github.com/adobe/spacecat-api-service/commit/5c9773ca73124ad851afd49d3ac8217b099e9675)), closes [spacecat-shared#1823](https://github.com/spacecat-shared/issues/1823)
+
+# [1.669.0](https://github.com/adobe/spacecat-api-service/compare/v1.668.1...v1.669.0) (2026-07-20)
+
+
+### Features
+
+* **llmo-akamai:** CUSTOM-default OAE onboarding (PUT deploy + caching/scope gates) ([#2850](https://github.com/adobe/spacecat-api-service/issues/2850)) ([e67e9c5](https://github.com/adobe/spacecat-api-service/commit/e67e9c5ea699e2ff501c02c2ff458c85b36c76bc)), closes [Hi#Level](https://github.com/Hi/issues/Level) [adobe/spacecat-shared#1825](https://github.com/adobe/spacecat-shared/issues/1825)
+
+## [1.668.1](https://github.com/adobe/spacecat-api-service/compare/v1.668.0...v1.668.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **elements:** bounded retry with backoff on the Semrush Elements transport (LLMO-5980) ([#2859](https://github.com/adobe/spacecat-api-service/issues/2859)) ([cd9b672](https://github.com/adobe/spacecat-api-service/commit/cd9b672cae9e82fbc21d288b36580a92c15de356)), closes [spacecat-api-service#2766](https://github.com/spacecat-api-service/issues/2766)
+* **serenity:** classify disguised-405 quota rejections as a stable 40… ([#2854](https://github.com/adobe/spacecat-api-service/issues/2854)) ([11b0bf2](https://github.com/adobe/spacecat-api-service/commit/11b0bf2b9c6ecda5881cc9448880b9b52996f4d7))
+
+# [1.668.0](https://github.com/adobe/spacecat-api-service/compare/v1.667.0...v1.668.0) (2026-07-20)
+
+
+### Features
+
+* map platform values sent to Semrush elements api for brand presence data ([#2855](https://github.com/adobe/spacecat-api-service/issues/2855)) ([d1eb929](https://github.com/adobe/spacecat-api-service/commit/d1eb92917fa207b4275711904a3d2be745848516))
+
+# [1.667.0](https://github.com/adobe/spacecat-api-service/compare/v1.666.0...v1.667.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** flag-flip readiness gates for dynamic AI allocation (LLMO-6190) ([#2813](https://github.com/adobe/spacecat-api-service/issues/2813)) ([03d305c](https://github.com/adobe/spacecat-api-service/commit/03d305c9188a546118a7ae6168033ed50055808b)), closes [#2764](https://github.com/adobe/spacecat-api-service/issues/2764)
+
+# [1.666.0](https://github.com/adobe/spacecat-api-service/compare/v1.665.1...v1.666.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= sparse-fieldset projection to list endpoints ([#2840](https://github.com/adobe/spacecat-api-service/issues/2840)) ([c5af373](https://github.com/adobe/spacecat-api-service/commit/c5af373090ea1caac32cd7ca25b26aaf5920882d))
+
+## [1.665.1](https://github.com/adobe/spacecat-api-service/compare/v1.665.0...v1.665.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **serenity:** stop the RELEASE_ALLOCATION zero-transfer silent no-op ([#2812](https://github.com/adobe/spacecat-api-service/issues/2812)) ([0d80fcf](https://github.com/adobe/spacecat-api-service/commit/0d80fcf5c79d338cc3d0aa6c0f75aff4e5ef83f9))
+
 # [1.665.0](https://github.com/adobe/spacecat-api-service/compare/v1.664.0...v1.665.0) (2026-07-19)
 
 
