@@ -251,6 +251,29 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(t.getWorkspaceResources.withArgs(CHILD)).to.have.been.calledOnce;
   });
 
+  it('ON, metered 405 with NO callSite passed: warns loudly instead of silently defaulting to an open-vocabulary metric value', async () => {
+    const spyLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      spyLog,
+    );
+    const fn = sinon.stub();
+    fn.onFirstCall().rejects(quota405());
+    fn.onSecondCall().resolves('recovered');
+    await guard.retryOnQuota(fn); // no { callSite } passed
+    expect(spyLog.warn).to.have.been.calledWith(
+      'SERENITY_ALLOC retryOnQuota called without a callSite label',
+      sinon.match({ subWorkspaceId: CHILD }),
+    );
+  });
+
   it('ON, metered 405 persists past the first retry: the SECOND poll attempt succeeds, fn called three times total', async () => {
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
@@ -515,6 +538,9 @@ describe('dynamic-allocation-active — retryOnQuota emits QuotaRetryOutcome (My
     fn.onCall(2).resolves('ok');
     const r = await guard.retryOnQuota(fn, { callSite: 'publishProject' });
     expect(r).to.equal('ok');
+    // `attempt` counts POLL-LOOP retries only (not the initial `fn()` call before the loop, and not
+    // the recovery `ensure()`): call 0 is the initial call, call 1 is poll attempt 1 (still fails),
+    // call 2 is poll attempt 2 (succeeds) — hence attempt: 2 below.
     expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
       'recovered',
       { attempt: 2, callSite: 'publishProject' },
@@ -553,9 +579,46 @@ describe('dynamic-allocation-active — retryOnQuota emits QuotaRetryOutcome (My
       caught = e;
     }
     expect(caught).to.equal(lastError);
+    // Same `attempt` semantics as the recovered case above: poll attempt 1 (call 1) still fails,
+    // poll attempt 2 (call 2, == maxAttempts) exhausts — hence attempt: 2.
     expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
       'exhausted',
       { attempt: 2, callSite: 'createOnePrompt' },
     );
+  });
+
+  it('sleep(backoffMs) is actually invoked between poll attempts, not skipped — catches a regression that drops the await', async () => {
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    // Deliberately does NOT go through `fastRetry()` here — that helper zeroes `backoffMs`, which
+    // would make the "called with the right delay" assertion below meaningless. Only `sleep` itself
+    // is stubbed (to resolve instantly instead of really waiting `backoffMs`); `backoffMs` stays at
+    // its real production default (3000ms) so the assertion actually proves the real value is used.
+    const sleep = sinon.stub().resolves();
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: { sleep },
+      },
+      log,
+    );
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(quota405());
+    fn.onCall(2).resolves('ok');
+    await guard.retryOnQuota(fn, { callSite: 'publishProject' });
+    // Exactly ONE inter-attempt wait: poll attempt 1 fails (sleep before attempt 2), poll attempt 2
+    // succeeds (no further sleep needed).
+    expect(sleep).to.have.been.calledOnceWith(3000);
   });
 });
