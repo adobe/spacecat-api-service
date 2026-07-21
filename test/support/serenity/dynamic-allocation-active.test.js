@@ -214,14 +214,26 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(t.getWorkspaceResources).to.not.have.been.called;
   });
 
-  it('ON, metered 405 then recovery + retry succeeds: fn called twice, ensure called once with includeDrafted', async () => {
+  // Injectable poll-retry timing (LLMO-6190 follow-up): no real sleeps in tests. `backoffMs: 0` +
+  // a no-op `sleep` let the loop iterate at test speed; `totalBudgetMs` is set generously high per
+  // test unless the test is specifically exercising the deadline cutoff.
+  const fastRetry = (overrides = {}) => ({
+    backoffMs: 0,
+    sleep: async () => {},
+    totalBudgetMs: 60_000,
+    ...overrides,
+  });
+
+  it('ON, metered 405 then recovery + retry succeeds on the FIRST poll attempt: fn called twice, ensure called ONCE (not per attempt)', async () => {
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
     });
     const guard = createHeadroomGuard(
       t,
-      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
       log,
     );
     const fn = sinon.stub();
@@ -231,30 +243,128 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(r).to.equal('recovered');
     expect(fn).to.have.been.calledTwice;
     expect(t.getWorkspaceResources).to.have.been.calledWith(CHILD);
+    // Round-2 SRE review: `ensure()` must fire exactly ONCE per recovery, not once per poll
+    // attempt — repeated re-checks buy nothing once the total is already correct, and only add
+    // per-child lock contention in a concurrent batch.
+    expect(t.transferWorkspaceResources).to.have.callCount(0); // already sufficient — a no-op read
+    expect(t.getWorkspaceResources.withArgs(CHILD)).to.have.been.calledOnce;
   });
 
-  it('ON, metered 405 persists on retry: the SECOND error propagates untouched, fn called exactly twice (no third call)', async () => {
+  it('ON, metered 405 persists past the first retry: the SECOND poll attempt succeeds, fn called three times total', async () => {
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
     });
     const guard = createHeadroomGuard(
       t,
-      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
       log,
     );
-    const secondError = quota405();
     const fn = sinon.stub();
-    fn.onFirstCall().rejects(quota405());
-    fn.onSecondCall().rejects(secondError);
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(quota405());
+    fn.onCall(2).resolves('recovered-on-second-poll-attempt');
+    const r = await guard.retryOnQuota(fn);
+    expect(r).to.equal('recovered-on-second-poll-attempt');
+    expect(fn).to.have.been.calledThrice;
+  });
+
+  it('ON, metered 405 exhausts all poll attempts: the LAST error propagates untouched, fn called exactly maxAttempts+1 times', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({ maxAttempts: 2 }),
+      },
+      log,
+    );
+    const lastError = quota405();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405()); // initial call, before the loop
+    fn.onCall(1).rejects(quota405()); // poll attempt 1
+    fn.onCall(2).rejects(lastError); // poll attempt 2 (== maxAttempts) — exhausted
     let caught;
     try {
       await guard.retryOnQuota(fn);
     } catch (e) {
       caught = e;
     }
-    expect(caught).to.equal(secondError);
-    expect(fn).to.have.been.calledTwice;
+    expect(caught).to.equal(lastError);
+    expect(fn).to.have.callCount(3);
+  });
+
+  it('ON, a NON-metered error surfaces mid-loop: propagates immediately, no further attempts', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      log,
+    );
+    const notMetered = otherError();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(notMetered);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(notMetered);
+    expect(fn).to.have.callCount(2);
+  });
+
+  it('ON, the shared deadline (not the attempt cap) stops retrying: exhausts after the deadline passes even with attempts still available', async () => {
+    // maxAttempts is generous, but `now()` is stubbed to jump straight past totalBudgetMs after the
+    // first poll attempt — the deadline, not the attempt count, must be what ends the loop (round-2
+    // SRE review: this is the seam that bounds a stacked-call-site request, not per-call attempts).
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    let callCount = 0;
+    const now = () => {
+      callCount += 1;
+      // 1st call: guard construction (t0). 2nd+ calls: inside the loop's deadline check — jump
+      // straight past the budget so the very first deadline check already fails.
+      return callCount <= 1 ? 0 : 1_000_000;
+    };
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({ maxAttempts: 10, totalBudgetMs: 9000, now }),
+      },
+      log,
+    );
+    const lastError = quota405();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(lastError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(lastError);
+    // initial call + exactly ONE poll attempt before the deadline cuts it off
+    expect(fn).to.have.callCount(2);
   });
 
   it('ON, the recovery ensure() itself throws (e.g. org pool exhausted): that error propagates and fn is NOT retried', async () => {
