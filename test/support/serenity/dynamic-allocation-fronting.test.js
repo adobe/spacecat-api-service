@@ -695,9 +695,9 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
   });
 
   // LLMO-6190 follow-up (live-verified ~9s Semrush gateway write-enforcement lag): the three
-  // metered WRITE call sites below (createProject, createPromptsByIds, createOnePrompt) are now
-  // also fronted by `headroom.retryOnQuota`, not just publish. These tests prove the wrapping is
-  // wired at each site — the poll-retry's own timing/backoff/deadline mechanics are unit-tested
+  // metered WRITE call sites below (createProject, createPromptsWithMetadata, createOnePrompt) are
+  // now also fronted by `headroom.retryOnQuota`, not just publish. These tests prove the wrapping
+  // is wired at each site — the poll-retry's own timing/backoff/deadline mechanics are unit-tested
   // with injectable fake timers in dynamic-allocation-active.test.js; every case here resolves on
   // the FIRST poll attempt (no real sleep triggered) so the suite stays fast.
 
@@ -723,7 +723,7 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
     expect(t.createProject).to.have.been.calledTwice;
   });
 
-  it('create-market with generateTopics: createPromptsByIds 405s once then a bounded top-up+retry succeeds', async () => {
+  it('create-market with generateTopics: createPromptsWithMetadata 405s once then a bounded top-up+retry succeeds', async () => {
     const createPromptsWithMetadata = sinon.stub();
     createPromptsWithMetadata.onFirstCall().rejects(quota405());
     createPromptsWithMetadata.onSecondCall().resolves({ items: [{ id: 'prompt-1' }] });
