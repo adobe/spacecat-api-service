@@ -26,6 +26,8 @@ import {
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
+  resolveSort,
+  buildUpdateMetadata,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
@@ -79,6 +81,9 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
   const tagIds = Array.isArray(query?.tagIds)
     ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
     : [];
+  // sort/order (LLMO-6289): validated against the metadata allow-list and
+  // forwarded upstream — kept in lockstep with the flat-mode twin.
+  const { sort, order } = resolveSort(query);
 
   const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
@@ -97,6 +102,8 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     page,
     limit,
     search,
+    sort,
+    order,
   });
   const items = Array.isArray(resp?.items) ? resp.items : [];
   let total;
@@ -126,6 +133,7 @@ export async function handleCreatePromptsSubworkspace(
   body,
   log,
   classifyPromptType,
+  callerId,
   { dynamicAllocation = false, parentWorkspaceId = '' } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
@@ -143,7 +151,7 @@ export async function handleCreatePromptsSubworkspace(
   const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
 
   // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
-  // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
+  // `createPromptsWithMetadata` (inside `createOnePrompt` below), NOT publish — a disguised 405
   // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
   // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
   // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
@@ -184,7 +192,7 @@ export async function handleCreatePromptsSubworkspace(
       // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
       // own per-item try/catch below still isolates a surviving failure to this one item.
       const semrushPromptId = await headroom.retryOnQuota(
-        () => createOnePrompt(transport, workspaceId, projectId, typed),
+        () => createOnePrompt(transport, workspaceId, projectId, typed, callerId),
         { callSite: 'createOnePrompt' },
       );
       return {
@@ -254,10 +262,12 @@ export async function handleCreatePromptsSubworkspace(
  * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — in-place edit.
  * Resolves the slice's project from the live listing, then edits the prompt IN
  * PLACE exactly like the flat-mode twin (see handleUpdatePrompt's contract):
- * `rename` first (the one op that can refuse — upstream 404 → promptNotFound,
- * 409 text collision → thrown for the controller's `conflict` mapping), then
- * the replace-mode batch tag write. The prompt id is preserved end to end and
- * echoed unchanged in the response; nothing is deleted on this path.
+ * the combined v3 `PATCH .../{id}` first (text `name` + `updated_*` metadata
+ * stamp in one request — the one op that can refuse: upstream 404 →
+ * promptNotFound, 409 text collision → thrown for the controller's `conflict`
+ * mapping), then the replace-mode batch tag write (v2, metadata-free). The
+ * prompt id is preserved end to end and echoed unchanged in the response;
+ * nothing is deleted on this path.
  */
 export async function handleUpdatePromptSubworkspace(
   transport,
@@ -266,6 +276,7 @@ export async function handleUpdatePromptSubworkspace(
   body,
   log,
   classifyPromptType,
+  callerId,
 ) {
   const parsedBody = parseUpdatePromptBody(body);
   if (!parsedBody.ok) {
@@ -305,7 +316,13 @@ export async function handleUpdatePromptSubworkspace(
   });
 
   try {
-    await transport.renamePrompt(workspaceId, projectId, semrushPromptId, nextText);
+    // Combined v3 write: text (`name`) + `updated_*` stamp in one request
+    // (replaces the v2 `rename`). Same refusal contract — 404 → promptNotFound,
+    // 409 (sibling text collision) → thrown for the controller's `conflict`.
+    await transport.patchPrompt(workspaceId, projectId, semrushPromptId, {
+      name: nextText,
+      metadata: buildUpdateMetadata(callerId),
+    });
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -334,7 +351,7 @@ export async function handleUpdatePromptSubworkspace(
     // The rename above already landed: the prompt's text has moved while its
     // tags are stale. Record the partial mutation before propagating, so the
     // generic upstream error the caller sees is attributable on-call.
-    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+    log?.warn?.('updatePromptTagsByIds failed after a successful text/metadata PATCH — text updated, tags stale', {
       semrushPromptId, projectId, error: e.message,
     });
     throw e;

@@ -48,6 +48,109 @@ export const BULK_CREATE_CONCURRENCY = 8;
 // of them. Defense-in-depth, not a correctness gate.
 export const BULK_PROMPTS_MAX_ITEMS = 500;
 
+// Server-owned prompt-authorship metadata (LLMO-6289, serenity-docs prompt-
+// authorship-metadata spec). The four keys stamped on Semrush's Adobe-owned
+// `metadata` JSONB column. Values are opaque caller ids (resolved by
+// resolveCallerId, capped at 100 chars — the upstream CHECK bound) and RFC 3339
+// UTC timestamps.
+//
+// SORT allow-list: the only two fields the with-metadata list read may sort on.
+// A `sort` outside this set is a 400 — the value is forwarded verbatim upstream,
+// so the allow-list is the injection guard, not merely input hygiene.
+export const SORTABLE_METADATA_FIELDS = ['metadata.created_at', 'metadata.updated_at'];
+export const SORT_ORDERS = ['asc', 'desc'];
+// created_by / updated_by carry a CHECK(length <= 100) upstream; a longer value
+// is a 400 (and rolls a batch back). resolveCallerId is the SINGLE resolution
+// point and caps here so no write path can exceed it.
+export const CALLER_ID_MAX_LENGTH = 100;
+
+/**
+ * Resolves the opaque caller id to stamp on a write, from the request's auth
+ * profile. CORRECTNESS-CRITICAL: authorship is the CALLER's identity, resolved
+ * from `authInfo.getProfile()` — NEVER from the bearer forwarded upstream, whose
+ * principal can differ from the caller after the promise-token exchange.
+ *
+ * `user_id` is preferred; `sub` is the fallback (both IMS profile claims). A
+ * missing/blank identity becomes the literal `unknown` (the spec's NULL-author
+ * sentinel, resolved to a display name downstream). Capped at
+ * {@link CALLER_ID_MAX_LENGTH} so a pathological claim can never trip the
+ * upstream length CHECK (which would 400 the write / roll a batch back).
+ *
+ * @param {object} ctx - the controller request context.
+ * @returns {string} the caller id, `unknown` when unresolved, ≤100 chars.
+ */
+export function resolveCallerId(ctx) {
+  const profile = ctx?.attributes?.authInfo?.getProfile?.();
+  const raw = profile?.user_id ?? profile?.sub;
+  const id = hasText(raw) ? String(raw) : 'unknown';
+  return id.slice(0, CALLER_ID_MAX_LENGTH);
+}
+
+/**
+ * Builds the `metadata` merge-patch payload for a CREATE: all four keys, with
+ * `created_*` and `updated_*` set to the SAME instant/caller (a create is its
+ * own first edit). Timestamps are RFC 3339 UTC (`new Date().toISOString()`).
+ *
+ * ONE stamping helper, shared by BOTH prompt twins (flat + subworkspace) and the
+ * AI-generation create — the metadata logic is never written twice.
+ *
+ * @param {string} callerId - already resolved + capped by {@link resolveCallerId}.
+ */
+export function buildCreateMetadata(callerId) {
+  const now = new Date().toISOString();
+  return {
+    created_at: now,
+    created_by: callerId,
+    updated_at: now,
+    updated_by: callerId,
+  };
+}
+
+/**
+ * Builds the `metadata` merge-patch payload for an EDIT: ONLY the `updated_*`
+ * pair (RFC 7396 merge semantics — absent keys are kept, so `created_*` survive
+ * untouched with no read-before-write). Timestamp is RFC 3339 UTC.
+ *
+ * @param {string} callerId - already resolved + capped by {@link resolveCallerId}.
+ */
+export function buildUpdateMetadata(callerId) {
+  return {
+    updated_at: new Date().toISOString(),
+    updated_by: callerId,
+  };
+}
+
+/**
+ * Validates + normalizes the `sort` / `order` list query params against the
+ * {@link SORTABLE_METADATA_FIELDS} allow-list. Returns `{}` when neither is
+ * supplied (the legacy unsorted read); `{ sort, order }` when a valid sort is
+ * requested (order defaults to `desc` — newest first for "Last modified");
+ * throws 400 for an unknown sort field or order.
+ *
+ * @param {object} query
+ * @returns {{ sort?: string, order?: string }}
+ */
+export function resolveSort(query) {
+  const sort = query?.sort;
+  const order = query?.order;
+  if (sort === undefined || sort === null || sort === '') {
+    return {};
+  }
+  if (!SORTABLE_METADATA_FIELDS.includes(sort)) {
+    throw new ErrorWithStatusCode(
+      `sort must be one of: ${SORTABLE_METADATA_FIELDS.join(', ')}`,
+      400,
+    );
+  }
+  const normalizedOrder = order === undefined || order === null || order === ''
+    ? 'desc'
+    : String(order).toLowerCase();
+  if (!SORT_ORDERS.includes(normalizedOrder)) {
+    throw new ErrorWithStatusCode('order must be one of: asc, desc', 400);
+  }
+  return { sort, order: normalizedOrder };
+}
+
 /**
  * Builds the prompt's tag list from the upstream item: one entry per tag,
  * carrying its id, bare name, parent id and root-first ancestry breadcrumb.
@@ -125,6 +228,11 @@ export function buildPromptDto(geoTargetId, languageCode, item) {
   if (!text) {
     return null;
   }
+  // Server-owned authorship metadata (LLMO-6289): the with-metadata list read
+  // carries Semrush's Adobe-owned `metadata` column inline on each item. Map its
+  // snake_case keys to the camelCase DTO fields; null when the item predates a
+  // stamp (an un-backfilled prompt) so the shape is stable for the UI's em-dash.
+  const metadata = item?.metadata;
   return {
     semrushPromptId: String(item?.id ?? ''),
     geoTargetId,
@@ -132,6 +240,10 @@ export function buildPromptDto(geoTargetId, languageCode, item) {
     text,
     tags: buildTagsOf(item),
     tagMap: buildTagMapOf(item),
+    createdAt: metadata?.created_at ?? null,
+    createdBy: metadata?.created_by ?? null,
+    updatedAt: metadata?.updated_at ?? null,
+    updatedBy: metadata?.updated_by ?? null,
   };
 }
 
@@ -173,6 +285,10 @@ export async function handleListPrompts(
   const tagIds = Array.isArray(query?.tagIds)
     ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
     : [];
+  // sort/order (LLMO-6289): validated against the metadata allow-list and
+  // forwarded upstream on the (now metadata-carrying) by_tags read. `{}` when
+  // unspecified — byte-for-byte the legacy unsorted call.
+  const { sort, order } = resolveSort(query);
 
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
@@ -207,6 +323,8 @@ export async function handleListPrompts(
       page,
       limit,
       search,
+      sort,
+      order,
     },
   );
   const items = Array.isArray(resp?.items) ? resp.items : [];
@@ -346,18 +464,24 @@ export function normalizePromptInput(input) {
  * — so every id must already be a known-good upstream tag id, resolved by the
  * caller and never guessed.
  *
+ * STAMPS create authorship (LLMO-6289): every create goes through the v3
+ * `createPromptsWithMetadata` write carrying `created_* = updated_* = now /
+ * callerId`. The metadata rides the same write as the create — nothing to
+ * sequence, no read-before-write.
+ *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {{ text: string, tagIds: string[] }} input
+ * @param {string} callerId - resolved caller id (see {@link resolveCallerId}).
  * @returns {Promise<string>} the new upstream prompt id, or '' if the
  *   response carried none.
  */
-export async function createOnePrompt(transport, semrushWorkspaceId, projectId, input) {
-  const resp = await transport.createPromptsByIds(
+export async function createOnePrompt(transport, semrushWorkspaceId, projectId, input, callerId) {
+  const resp = await transport.createPromptsWithMetadata(
     semrushWorkspaceId,
     projectId,
-    [input.text],
+    [{ name: input.text, metadata: buildCreateMetadata(callerId) }],
     input.tagIds,
   );
   return Array.isArray(resp?.items) && resp.items.length > 0
@@ -374,7 +498,7 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  *   - STRIPS every caller-supplied tag id that lives under the `type` root (the
  *     client may never set the value), and
  *   - APPENDS the pre-resolved upstream id of the server-computed value. The
- *     atomic `createPromptsByIds` 500s on an unresolved id, so it is resolved
+ *     atomic `createPromptsWithMetadata` 500s on an unresolved id, so it is resolved
  *     BEFORE the write.
  * The returned input carries the rewritten `tagIds`, so the caller's response
  * echo reflects the computed type without a refetch (decision 5).
@@ -507,6 +631,7 @@ export async function handleCreatePrompts(
   body,
   log,
   classifyPromptType,
+  callerId,
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -560,6 +685,7 @@ export async function handleCreatePrompts(
         semrushWorkspaceId,
         projectId,
         typed,
+        callerId,
       );
       return {
         created: {
@@ -637,17 +763,26 @@ export async function handleCreatePrompts(
  * side a single straight line and removes the per-request pagination that
  * "preserve-on-omit" semantics would force.
  *
- * The edit is IN PLACE (serenity-docs#63): `rename` writes the text and the
- * batch tag-reference write replaces the tag set, both preserving the prompt
- * id — the response echoes the UNCHANGED semrushPromptId, and everything keyed
- * to that id survives the edit. Nothing is deleted on this path, so there is
- * no data-loss window. Both writes run unconditionally: upstream has no
- * GET-by-id, so the handler cannot know what changed — and does not need to
- * (an unchanged-text rename is a documented `is_updated: false` no-op, and the
- * replace-mode tag write is idempotent). Rename runs FIRST because it is the
- * one operation that can refuse (409): a collision aborts the edit before any
- * mutation. A tag-write failure after a successful rename leaves a
- * half-applied edit (text updated, tags not) — retryable, nothing lost.
+ * The edit is IN PLACE (serenity-docs#63): the combined v3 `PATCH .../{id}`
+ * writes the text (as `name`) AND stamps the `updated_*` metadata pair in ONE
+ * request, then the batch tag-reference write (v2 `PUT .../tags`, metadata-free)
+ * replaces the tag set — both preserving the prompt id, so the response echoes
+ * the UNCHANGED semrushPromptId and everything keyed to that id survives the
+ * edit. Nothing is deleted on this path, so there is no data-loss window. Both
+ * writes run unconditionally: upstream has no GET-by-id, so the handler cannot
+ * know what changed — and does not need to (an unchanged-text combined PATCH
+ * still merge-patches the metadata, and the replace-mode tag write is
+ * idempotent). The combined PATCH runs FIRST because it is the one operation
+ * that can refuse (409): a collision aborts the edit before any mutation.
+ *
+ * STAMP (LLMO-6289): the `updated_*` bump rides the combined text PATCH — the
+ * SAME request as the text mutation, with NO read-before-write — so authorship
+ * is stamped on every edit. The tag PUT carries NO metadata (there is no
+ * metadata-carrying tag write upstream): its stamp is already covered by the
+ * combined PATCH that always runs in this handler. `created_*` are never sent,
+ * so merge-patch keeps them untouched. A tag-write failure after a successful
+ * PATCH leaves a half-applied edit (text + stamp landed, tags not) — retryable,
+ * nothing lost.
  *
  * Contract:
  *   - body missing text or tagIds, or carrying the retired `tags` key
@@ -673,6 +808,7 @@ export async function handleUpdatePrompt(
   body,
   log,
   classifyPromptType,
+  callerId,
 ) {
   // `semrushPromptId` is validated as non-empty at the controller boundary
   // (serenity.js:259) before this handler is invoked over HTTP, so no
@@ -725,7 +861,14 @@ export async function handleUpdatePrompt(
   });
 
   try {
-    await transport.renamePrompt(semrushWorkspaceId, projectId, semrushPromptId, nextText);
+    // Combined v3 write: sets the text (`name`) and stamps the `updated_*`
+    // metadata pair in one request (replaces the v2 `rename`). Same refusal
+    // contract as rename — 404 (unknown id) → promptNotFound, 409 (text
+    // collides with a sibling) → thrown for the controller's `conflict` mapping.
+    await transport.patchPrompt(semrushWorkspaceId, projectId, semrushPromptId, {
+      name: nextText,
+      metadata: buildUpdateMetadata(callerId),
+    });
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -751,10 +894,11 @@ export async function handleUpdatePrompt(
       { id: semrushPromptId, references: typed.tagIds, replace: true },
     ]);
   } catch (e) {
-    // The rename above already landed: the prompt's text has moved while its
-    // tags are stale. Record the partial mutation before propagating, so the
-    // generic upstream error the caller sees is attributable on-call.
-    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+    // The combined PATCH above already landed: the prompt's text + stamp have
+    // moved while its tags are stale. Record the partial mutation before
+    // propagating, so the generic upstream error the caller sees is
+    // attributable on-call.
+    log?.warn?.('updatePromptTagsByIds failed after a successful text/metadata PATCH — text updated, tags stale', {
       semrushPromptId, projectId, error: e.message,
     });
     throw e;

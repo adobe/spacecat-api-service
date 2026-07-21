@@ -197,6 +197,9 @@ describe('provisionBrandSubworkspace', () => {
       brandUrlSources: null,
       competitors: [],
       publishMode: 'require',
+      // Caller identity for the created_* stamp (LLMO-6289); the test context
+      // has no auth profile → the `unknown` sentinel.
+      callerId: 'unknown',
     });
     // The stub drives the sub-workspace title off the brand's name + id.
     expect(brandStub.getName()).to.equal('Acme');

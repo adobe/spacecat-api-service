@@ -1370,6 +1370,9 @@ describe('SerenityController', () => {
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
           // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
           dynamicAllocation: false,
+          // Caller identity for the created_* stamp (LLMO-6289); the test context
+          // has no auth profile, so it resolves to the `unknown` sentinel.
+          callerId: 'unknown',
         });
       // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
       // options bag — the same id given to ensureSubworkspace.
@@ -1983,6 +1986,9 @@ describe('SerenityController', () => {
         competitors: [],
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
         dynamicAllocation: false,
+        // Caller id resolved once for the batch; no auth profile in the test
+        // context → the `unknown` sentinel (LLMO-6289).
+        callerId: 'unknown',
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       expect(firstCall.args[7]).to.deep.equal(expectedOpts);

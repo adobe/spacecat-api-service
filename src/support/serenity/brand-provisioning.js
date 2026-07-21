@@ -20,6 +20,7 @@ import { isSemrushTransportError } from './errors.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { deleteAllProjects, releaseFullAllocation } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
+import { resolveCallerId } from './handlers/prompts.js';
 
 // Re-exported for callers/tests that drive brand provisioning. The tag
 // vocabularies themselves live in `prompt-tags.js` (single source of truth).
@@ -217,6 +218,11 @@ export async function provisionBrandSubworkspace(context, {
         publishMode: (Array.isArray(modelIds) && modelIds.length > 0) || generateTopics
           ? 'require'
           : 'best-effort',
+        // Caller identity for the created_* stamp on generated prompts (LLMO-6289),
+        // resolved from the request auth profile — never the forwarded upstream
+        // bearer. This create runs before the brand row exists; the caller
+        // (brands.js POST /brands) is the human/service provisioning the brand.
+        callerId: resolveCallerId(context),
       },
     );
   } catch (e) {
