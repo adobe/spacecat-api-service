@@ -456,7 +456,7 @@ describe('prompts-storage', () => {
       };
     }
 
-    it('filters source on the raw column across both drift spellings (WP-S2 interim)', async () => {
+    it('filters source on the source_canonical generated column', async () => {
       const eqCalls = [];
       await listPrompts({
         organizationId: ORG_ID,
@@ -464,12 +464,11 @@ describe('prompts-storage', () => {
         source: 'gsc',
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      // Matched on the raw `source` column (stock PostgREST can't evaluate an inline
-      // canonical expression). `gsc` has no `_`/`-` variance, so a single-value `.in`.
-      expect(eqCalls).to.deep.include({ column: 'source', values: ['gsc'] });
+      // Single equality on the DB-canonicalized column — no app-side variant expansion.
+      expect(eqCalls).to.deep.include({ column: 'source_canonical', value: 'gsc' });
     });
 
-    it('folds an underscore filter value and matches BOTH the hyphen and underscore forms', async () => {
+    it('folds the incoming filter value to canonical before matching source_canonical', async () => {
       const eqCalls = [];
       await listPrompts({
         organizationId: ORG_ID,
@@ -477,10 +476,11 @@ describe('prompts-storage', () => {
         source: 'CITATION_ATTEMPT',
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      // Folded to canonical, then matched on both spellings so a request for the
-      // displayed `citation-attempt` still finds rows stored as `citation_attempt`.
+      // The query-param value is folded (trim→lower→`_`→`-`) so it aligns with the
+      // generated column, which already stores the canonical form — one value, and
+      // a request for `citation_attempt`/`CITATION_ATTEMPT` finds `citation-attempt`.
       expect(eqCalls).to.deep.include({
-        column: 'source', values: ['citation-attempt', 'citation_attempt'],
+        column: 'source_canonical', value: 'citation-attempt',
       });
     });
 
@@ -3373,7 +3373,7 @@ describe('prompts-storage', () => {
       expect(result.items[0].source).to.equal('has:colon');
     });
 
-    it('sorts source on the raw column (WP-S2 interim; WP-S4 moves it to source_canonical)', async () => {
+    it('sorts source on the source_canonical generated column', async () => {
       const orderCalls = [];
       const recordingChain = (result) => {
         const chain = {
@@ -3408,7 +3408,7 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(orderCalls[0]).to.deep.equal({
-        column: 'source', opts: { ascending: true },
+        column: 'source_canonical', opts: { ascending: true },
       });
     });
   });

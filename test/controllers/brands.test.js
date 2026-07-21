@@ -4835,10 +4835,10 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
     });
 
-    it('forwards source param through to the prompts query as a raw-column filter', async () => {
+    it('forwards source param through to the prompts query as a source_canonical filter', async () => {
       // Recording client so the assertion fails if source stops being forwarded
-      // from the controller through to listPrompts' source filter (WP-S2 interim:
-      // matched on the raw `source` column, not a canonical SQL expression).
+      // from the controller through to listPrompts' source filter (matched on the
+      // `source_canonical` generated column).
       const eqCalls = [];
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake((table) => {
@@ -4874,7 +4874,7 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(200);
-      expect(eqCalls).to.deep.include({ column: 'source', values: ['gsc'] });
+      expect(eqCalls).to.deep.include({ column: 'source_canonical', value: 'gsc' });
     });
 
     it('returns prompt items from normalized tables', async () => {
