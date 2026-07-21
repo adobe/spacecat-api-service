@@ -80,13 +80,32 @@ describe('ForceOptimizeAtEdgeEnableCommand', () => {
       expect(sqsStub.sendMessage).to.not.have.been.called;
     });
 
-    it('posts site-not-found when the site cannot be resolved', async () => {
+    it('posts site-not-found when the site cannot be resolved by base URL', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(null);
       const command = ForceOptimizeAtEdgeEnableCommand(context);
       await command.handleExecution([SITE_URL_INPUT], slackContext);
 
       expect(slackContext.say).to.have.been.called;
       expect(sqsStub.sendMessage).to.not.have.been.called;
+    });
+
+    it('posts site-not-found when the site cannot be resolved by id', async () => {
+      dataAccessStub.Site.findById.resolves(null);
+      const command = ForceOptimizeAtEdgeEnableCommand(context);
+      await command.handleExecution([SITE_ID], slackContext);
+
+      expect(dataAccessStub.Site.findById).to.have.been.calledWith(SITE_ID);
+      expect(slackContext.say).to.have.been.called;
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+    });
+
+    it('warns and does not enqueue when Configuration.findLatest() returns nothing', async () => {
+      dataAccessStub.Configuration.findLatest.resolves(null);
+      const command = ForceOptimizeAtEdgeEnableCommand(context);
+      await command.handleExecution([SITE_URL_INPUT], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch('Could not load the current configuration');
     });
 
     it('enqueues the force-enable message when resolved by base URL', async () => {
@@ -99,7 +118,7 @@ describe('ForceOptimizeAtEdgeEnableCommand', () => {
         siteId: SITE_ID,
         forcedBy: 'U123ABC',
       });
-      expect(slackContext.say).to.have.been.calledWithMatch('force');
+      expect(slackContext.say).to.have.been.calledWithMatch('Triggered');
     });
 
     it('resolves the site by id when the input is not a URL', async () => {
@@ -115,12 +134,13 @@ describe('ForceOptimizeAtEdgeEnableCommand', () => {
       });
     });
 
-    it('posts an error message when enqueuing throws', async () => {
-      sqsStub.sendMessage.rejects(new Error('sqs down'));
+    it('posts an error message when enqueuing throws, logging the full error (with stack)', async () => {
+      const sqsError = new Error('sqs down');
+      sqsStub.sendMessage.rejects(sqsError);
       const command = ForceOptimizeAtEdgeEnableCommand(context);
       await command.handleExecution([SITE_URL_INPUT], slackContext);
 
-      expect(context.log.error).to.have.been.calledWithMatch('sqs down');
+      expect(context.log.error).to.have.been.calledWithMatch('Error in force-optimize-at-edge-enable:', sqsError);
       expect(slackContext.say).to.have.been.called;
     });
   });

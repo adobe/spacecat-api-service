@@ -75,6 +75,10 @@ function ForceOptimizeAtEdgeEnableCommand(context) {
 
       const siteId = site.getId();
       const config = await Configuration.findLatest();
+      if (!config) {
+        await say(':warning: Could not load the current configuration — cannot determine the imports queue. Please try again shortly.');
+        return;
+      }
 
       await sqs.sendMessage(config.getQueues().imports, {
         type: FORCE_OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
@@ -88,7 +92,7 @@ function ForceOptimizeAtEdgeEnableCommand(context) {
       );
       log.info(`force-optimize-at-edge-enable: queued for site ${siteId} by Slack user ${user}`);
     } catch (error) {
-      log.error(`Error in force-optimize-at-edge-enable: ${error.message}`);
+      log.error('Error in force-optimize-at-edge-enable:', error);
       await postErrorMessage(say, error);
     }
   };
