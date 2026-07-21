@@ -1371,6 +1371,19 @@ describe('StateAccessMappingsController', () => {
       expect(body.capabilities).to.include('llmo/can_manage_users');
     });
 
+    it('omits can_manage_users for an internal admin (no FACS claim)', async () => {
+      // Internal admins may not author bindings (blockInternalAdminWrite), so
+      // being an admin must NOT surface can_manage_users as assignable — only a
+      // real FACS can_manage_users claim does.
+      const { Controller } = await loadController();
+      const ctx = makeContext({ facsPermissions: [], isAdmin: true });
+      const res = await Controller(ctx).getProductCapabilities(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.capabilities).to.include('llmo/can_view');
+      expect(body.capabilities).to.not.include('llmo/can_manage_users');
+    });
+
     it('returns the catalog for ASO', async () => {
       const { Controller } = await loadController();
       const ctx = makeContext({ product: 'ASO' });

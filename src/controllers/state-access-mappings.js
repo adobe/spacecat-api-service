@@ -353,6 +353,22 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * True when the caller holds the FACS-layer `<product>/can_manage_users`
+   * **claim** itself — the internal-admin bypass does NOT count. Use this where
+   * the answer must reflect the caller's own grant authority rather than
+   * platform-operator reach: internal admins may not author/revoke bindings
+   * (see `blockInternalAdminWrite`), so being an admin must not surface
+   * `can_manage_users` as assignable in the capability catalog either.
+   *
+   * @param {object} ctx
+   * @param {string} product Uppercase product code.
+   * @returns {boolean}
+   */
+  function callerHoldsFacsManageUsersClaim(ctx, product) {
+    return !!ctx.attributes?.authInfo?.hasFacsPermission?.(`${product.toLowerCase()}/can_manage_users`);
+  }
+
+  /**
    * Resolves the caller's management authority for the product (hybrid-model
    * §8.3). Two tiers:
    *
@@ -990,11 +1006,14 @@ function StateAccessMappingsController(context) {
    * `PRODUCTS_CAPABILITIES[product]`, then shaped by the caller's management
    * authority (hybrid-model §8.3):
    *
-   *   - FACS-layer manager (or admin) → the full catalog, including
-   *     `can_manage_users` (only FACS managers may mint new managers).
-   *   - Otherwise (state-layer manager / any other caller) → the full catalog
-   *     **minus** `can_manage_users` — a state-layer manager can assign every
-   *     other capability but cannot grant management authority.
+   *   - FACS-layer `can_manage_users` claim holder → the full catalog, including
+   *     `can_manage_users` (only FACS managers may mint new managers). The
+   *     internal-admin bypass does NOT unlock this — an internal admin cannot
+   *     author bindings (see `blockInternalAdminWrite`), so `can_manage_users`
+   *     must not appear assignable for them either.
+   *   - Otherwise (state-layer manager, internal admin, any other caller) → the
+   *     full catalog **minus** `can_manage_users` — assignable of every other
+   *     capability but not management authority.
    */
   async function getProductCapabilities(ctx) {
     // Intentionally skips the PostgREST/IMS-org preamble used by the data
@@ -1006,7 +1025,7 @@ function StateAccessMappingsController(context) {
       return badRequest('x-product header is required and must reference a known product');
     }
     const catalog = getProductCapabilityCatalog(product);
-    if (callerHasFacsManageUsers(ctx, product)) {
+    if (callerHoldsFacsManageUsersClaim(ctx, product)) {
       return ok({ product, capabilities: catalog });
     }
     const manageCap = `${product.toLowerCase()}/can_manage_users`;
