@@ -282,7 +282,7 @@ linked Site per distinct market domain.)
 | 502 | `{ error: "serenityUpstreamError", message }` | Upstream returned a non-2xx; provider-specific detail is logged server-side, not echoed to the client |
 | 500 | `{ message }` | Unexpected error; logged with stack via `log.error` |
 
-`SerenityTransportError` from `src/support/serenity/rest-transport.js` carries the upstream `status` and `body` for server-side logging; the 502 envelope deliberately does not echo provider details.
+Upstream failures surface as one of two typed errors, both carrying the upstream `status` and `body` for server-side logging and both classified by `isSemrushTransportError` (`src/support/serenity/errors.js`): **`ProjectEngineApiError`** (from the shared `@adobe/spacecat-shared-project-engine-client` facade) for Project Engine calls, and **`SerenityTransportError`** (`src/support/serenity/rest-transport.js`) for the User Manager and brand-topics calls. On a Project Engine no-HTTP-response failure (timeout / network / missing-token 401) the original throw is carried as `.cause` and unwrapped at the error→HTTP seam so auth stays 401 and timeouts stay 502. The 502 envelope deliberately does not echo provider details.
 
 ## Observability (Splunk)
 

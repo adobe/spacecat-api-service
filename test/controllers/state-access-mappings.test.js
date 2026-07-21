@@ -1209,18 +1209,80 @@ describe('StateAccessMappingsController', () => {
       expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
     });
 
-    it('admin may grant can_manage_users', async () => {
+    it('a FACS-layer manager may grant can_manage_users', async () => {
       const created = makeRow({ granted_capabilities: ['llmo/can_manage_users'] });
       const { Controller } = await loadController({
         createFacsAccessMappings: sinon.stub().resolves({ created: [created], skipped: [] }),
       });
       const ctx = makeContext({
-        facsPermissions: [],
-        isAdmin: true,
+        // FACS-layer can_manage_users holder (not an internal admin) — the only
+        // caller permitted to grant can_manage_users (hybrid-model §8.3).
+        facsPermissions: ['llmo/can_manage_users'],
+        isAdmin: false,
         body: { ...manageBody, grantedCapabilities: ['llmo/can_manage_users'] },
       });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(201);
+    });
+  });
+
+  describe('internal admins may not write (create/update) mappings', () => {
+    const adminWriteBody = {
+      subjectType: 'user',
+      subjectId: 'someone@AdobeID',
+      resourceType: 'brand',
+      resourceId: VALID_UUID_RES,
+      grantedCapabilities: ['llmo/can_view'],
+    };
+
+    it('createMapping returns 403 for an internal admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        body: adminWriteBody,
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      // The block short-circuits before any DB write.
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('patchMapping returns 403 for an internal admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('deleteMapping (revoke access) returns 403 for an internal admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: true,
+        pathParams: { id: VALID_UUID_MAPPING },
+      });
+      const res = await Controller(ctx).deleteMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('an internal admin who also holds FACS can_manage_users is still blocked from create', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({
+        facsPermissions: ['llmo/can_manage_users'],
+        isAdmin: true,
+        body: adminWriteBody,
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
     });
   });
 
