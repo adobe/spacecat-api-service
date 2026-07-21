@@ -16,6 +16,9 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import { createElementsService } from '../../../src/support/elements/elements-service.js';
 import { ELEMENT_IDS } from '../../../src/support/elements/element-ids.js';
+import { INTENT_VALUE } from '../../../src/support/serenity/prompt-tags.js';
+
+const INTENT_VALUES = Object.values(INTENT_VALUE);
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -219,6 +222,103 @@ describe('createElementsService', () => {
       transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, sinon.match.any)
         .rejects(new Error('prompts upstream failure'));
       await expect(service.getPrompts('ws-1', {})).to.be.rejectedWith('prompts upstream failure');
+    });
+  });
+
+  describe('getPrompts — userIntent enrichment', () => {
+    const rawWith = (rows) => ({ type: 'table', blocks: { data: rows } });
+    const RAW_BASE = rawWith([
+      {
+        primary_intent: 'informational', prompt: 'p-info', prompt_topic: 'T1', volume: 10,
+      },
+      {
+        primary_intent: 'informational', prompt: 'p-comm', prompt_topic: 'T1', volume: 10,
+      },
+    ]);
+    // Matches a PROMPTS payload carrying a specific `intent__X` tag clause.
+    const withTag = (val) => sinon.match((payload) => Boolean(
+      payload?.filters?.advanced?.filters?.some((f) => f.col === 'tags' && f.val === val),
+    ));
+    // Matches the base call (no `intent__` tag clause).
+    const noIntentTag = sinon.match((payload) => !payload?.filters?.advanced?.filters
+      ?.some((f) => f.col === 'tags' && String(f.val).startsWith('intent__')));
+
+    beforeEach(() => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
+      // All intent-filtered calls return empty except Commercial, which claims p-comm.
+      INTENT_VALUES
+        .filter((v) => v !== 'Commercial')
+        .forEach((v) => transport.fetchElement
+          .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(`intent__${v}`)).resolves(rawWith([])));
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
+        .resolves(rawWith([{
+          primary_intent: 'informational', prompt: 'p-comm', prompt_topic: 'T1', volume: 10,
+        }]));
+    });
+
+    // Enrichment requires exactly one projectId (single slice).
+    const ENRICH = { enrichUserIntent: true, projectIds: ['proj-a'] };
+
+    it('stamps each row with its own intent (base + one call per intent value)', async () => {
+      const result = await service.getPrompts('ws-1', ENRICH);
+      const byPrompt = Object.fromEntries(result.prompts.map((p) => [p.prompt, p.userIntent]));
+      expect(byPrompt['p-comm']).to.equal('commercial');
+      expect(byPrompt['p-info']).to.equal('');
+      const promptCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      expect(promptCalls).to.have.length(1 + INTENT_VALUES.length);
+    });
+
+    it('does not enrich or make extra calls without the flag', async () => {
+      const result = await service.getPrompts('ws-1', { projectIds: ['proj-a'] });
+      const promptCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      expect(promptCalls).to.have.length(1);
+      expect(result.prompts[0]).to.not.have.property('userIntent');
+    });
+
+    it('skips enrichment when not scoped to exactly one projectId', async () => {
+      const result = await service.getPrompts('ws-1', { enrichUserIntent: true, projectIds: ['proj-a', 'proj-b'] });
+      const promptCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      expect(promptCalls).to.have.length(1);
+      expect(result.prompts[0]).to.not.have.property('userIntent');
+    });
+
+    it('joins on (prompt, prompt_topic) so identical text under different topics is labeled independently', async () => {
+      // Deterministic setup for this scenario only (unstubbed intent calls → empty).
+      transport.fetchElement.reset();
+      // Same prompt text in two topics → two distinct rows with different intents.
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(rawWith([
+        {
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Sofas', volume: 5,
+        },
+        {
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Recliners', volume: 5,
+        },
+      ]));
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
+        .resolves(rawWith([{
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Sofas', volume: 5,
+        }]));
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Navigational'))
+        .resolves(rawWith([{
+          primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Recliners', volume: 5,
+        }]));
+      const result = await service.getPrompts('ws-1', ENRICH);
+      const byTopic = Object.fromEntries(result.prompts.map((p) => [p.prompt_topic, p.userIntent]));
+      expect(byTopic.Sofas).to.equal('commercial');
+      expect(byTopic.Recliners).to.equal('navigational');
+    });
+
+    it('is non-fatal: a failing intent call degrades to blank userIntent', async () => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
+        .rejects(new Error('intent call failed'));
+      const result = await service.getPrompts('ws-1', ENRICH);
+      expect(result.count).to.equal(2);
+      result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
     });
   });
 

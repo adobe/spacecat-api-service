@@ -35,7 +35,7 @@ use(sinonChai);
 
 // Every generated prompt carries the two standard values (source=ai,
 // intent=Informational); the third tag is the per-prompt computed `type`.
-const STANDARD_IDS = [TAG_IDS.sourceAi, TAG_IDS.intentInformational];
+const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
 
 const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';

@@ -299,6 +299,7 @@ sites-with-latest-audit:
 sites-for-organization:
   parameters:
     - $ref: './parameters.yaml#/organizationId'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - organization

@@ -13,6 +13,7 @@
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import {
   isDynamicAllocationEnabled,
   createHeadroomGuard,
@@ -214,14 +215,26 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(t.getWorkspaceResources).to.not.have.been.called;
   });
 
-  it('ON, metered 405 then recovery + retry succeeds: fn called twice, ensure called once with includeDrafted', async () => {
+  // Injectable poll-retry timing (LLMO-6190 follow-up): no real sleeps in tests. `backoffMs: 0` +
+  // a no-op `sleep` let the loop iterate at test speed; `totalBudgetMs` is set generously high per
+  // test unless the test is specifically exercising the deadline cutoff.
+  const fastRetry = (overrides = {}) => ({
+    backoffMs: 0,
+    sleep: async () => {},
+    totalBudgetMs: 60_000,
+    ...overrides,
+  });
+
+  it('ON, metered 405 then recovery + retry succeeds on the FIRST poll attempt: fn called twice, ensure called ONCE (not per attempt)', async () => {
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
     });
     const guard = createHeadroomGuard(
       t,
-      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
       log,
     );
     const fn = sinon.stub();
@@ -231,30 +244,207 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(r).to.equal('recovered');
     expect(fn).to.have.been.calledTwice;
     expect(t.getWorkspaceResources).to.have.been.calledWith(CHILD);
+    // Round-2 SRE review: `ensure()` must fire exactly ONCE per recovery, not once per poll
+    // attempt — repeated re-checks buy nothing once the total is already correct, and only add
+    // per-child lock contention in a concurrent batch.
+    expect(t.transferWorkspaceResources).to.have.callCount(0); // already sufficient — a no-op read
+    expect(t.getWorkspaceResources.withArgs(CHILD)).to.have.been.calledOnce;
   });
 
-  it('ON, metered 405 persists on retry: the SECOND error propagates untouched, fn called exactly twice (no third call)', async () => {
+  it('ON, metered 405 with NO callSite passed: warns loudly instead of silently defaulting to an open-vocabulary metric value', async () => {
+    const spyLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
     });
     const guard = createHeadroomGuard(
       t,
-      { enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER },
-      log,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      spyLog,
     );
-    const secondError = quota405();
     const fn = sinon.stub();
     fn.onFirstCall().rejects(quota405());
-    fn.onSecondCall().rejects(secondError);
+    fn.onSecondCall().resolves('recovered');
+    await guard.retryOnQuota(fn); // no { callSite } passed
+    expect(spyLog.warn).to.have.been.calledWith(
+      'SERENITY_ALLOC retryOnQuota called without a callSite label',
+      sinon.match({ subWorkspaceId: CHILD }),
+    );
+  });
+
+  it('ON, metered 405 persists past the first retry: the SECOND poll attempt succeeds, fn called three times total', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      log,
+    );
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(quota405());
+    fn.onCall(2).resolves('recovered-on-second-poll-attempt');
+    const r = await guard.retryOnQuota(fn);
+    expect(r).to.equal('recovered-on-second-poll-attempt');
+    expect(fn).to.have.been.calledThrice;
+  });
+
+  it('ON, metered 405 exhausts all poll attempts: the LAST error propagates untouched, fn called exactly maxAttempts+1 times', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({ maxAttempts: 2 }),
+      },
+      log,
+    );
+    const lastError = quota405();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405()); // initial call, before the loop
+    fn.onCall(1).rejects(quota405()); // poll attempt 1
+    fn.onCall(2).rejects(lastError); // poll attempt 2 (== maxAttempts) — exhausted
     let caught;
     try {
       await guard.retryOnQuota(fn);
     } catch (e) {
       caught = e;
     }
-    expect(caught).to.equal(secondError);
-    expect(fn).to.have.been.calledTwice;
+    expect(caught).to.equal(lastError);
+    expect(fn).to.have.callCount(3);
+  });
+
+  it('ON, a NON-metered error surfaces mid-loop: propagates immediately, no further attempts', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      log,
+    );
+    const notMetered = otherError();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(notMetered);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(notMetered);
+    expect(fn).to.have.callCount(2);
+  });
+
+  it('ON, the shared deadline (not the attempt cap) stops retrying: exhausts after the deadline passes even with attempts still available', async () => {
+    // maxAttempts is generous, but `now()` is stubbed to jump straight past totalBudgetMs after the
+    // first poll attempt — the deadline, not the attempt count, must be what ends the loop (round-2
+    // SRE review: this is the seam that bounds a stacked-call-site request, not per-call attempts).
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    let callCount = 0;
+    const now = () => {
+      callCount += 1;
+      // 1st call: guard construction (t0). 2nd+ calls: inside the loop's deadline check — jump
+      // straight past the budget so the very first deadline check already fails.
+      return callCount <= 1 ? 0 : 1_000_000;
+    };
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({ maxAttempts: 10, totalBudgetMs: 9000, now }),
+      },
+      log,
+    );
+    const lastError = quota405();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(lastError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(lastError);
+    // initial call + exactly ONE poll attempt before the deadline cuts it off
+    expect(fn).to.have.callCount(2);
+  });
+
+  it('ON, the deadline is SHARED across two sequential retryOnQuota calls on the SAME guard, not recomputed per call (MysticatBot review)', async () => {
+    // This is the PR's key design intent: one guard is built per inbound request, and every wrap
+    // site sharing that guard instance (e.g. createProject -> createPromptsByIds ->
+    // publishProject in one create-market request) must share ONE budget. A regression that moved
+    // `requestDeadline` inside `retryOnQuota` itself (recomputing "now + totalBudgetMs" on every
+    // call) would pass every other test in this file, since they all call `retryOnQuota` only once
+    // per guard.
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    // A simple mutable clock the test advances directly, standing in for wall-clock time elapsing
+    // between two call sites in the same request (unrelated work — tag provisioning, etc.).
+    let clock = 0;
+    const now = () => clock;
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({
+          maxAttempts: 10, totalBudgetMs: 100, now,
+        }),
+      },
+      log,
+    );
+
+    // Call site A: recovers on the first poll attempt — well within budget, consumes no clock time.
+    const fnA = sinon.stub();
+    fnA.onFirstCall().rejects(quota405());
+    fnA.onSecondCall().resolves('a-ok');
+    expect(await guard.retryOnQuota(fnA, { callSite: 'A' })).to.equal('a-ok');
+
+    // Time passes between the two call sites (other work in the same request) — past the ORIGINAL
+    // guard's budget, even though `maxAttempts: 10` would otherwise allow many more poll attempts.
+    clock = 150;
+
+    // Call site B: if the deadline were shared (correct), it's already past — B exhausts on its
+    // very first poll attempt despite `maxAttempts: 10`. If a regression recomputed the deadline
+    // fresh inside this call (bug), B would get a full new 100ms budget from clock=150 and NOT
+    // exhaust here.
+    const lastError = quota405();
+    const fnB = sinon.stub();
+    fnB.onFirstCall().rejects(quota405());
+    fnB.onSecondCall().rejects(lastError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fnB, { callSite: 'B' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(lastError);
+    expect(fnB).to.have.callCount(2);
   });
 
   it('ON, the recovery ensure() itself throws (e.g. org pool exhausted): that error propagates and fn is NOT retried', async () => {
@@ -308,5 +498,165 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     await guard.retryOnQuota(fn);
     expect(fnStarted).to.equal(true);
     await blocker;
+  });
+});
+
+describe('dynamic-allocation-active — retryOnQuota emits QuotaRetryOutcome (MysticatBot review)', () => {
+  afterEach(() => {
+    sinon.restore();
+    clearResourceLocks();
+  });
+
+  const quota405 = () => new SerenityTransportError(405, 'Semrush POST .../publish failed: 405', '<html>405 Not Allowed</html>');
+  const fastRetry = (overrides = {}) => ({
+    backoffMs: 0,
+    sleep: async () => {},
+    totalBudgetMs: 60_000,
+    ...overrides,
+  });
+
+  it('recovered: emits QuotaRetryOutcome("recovered", { attempt, callSite }) with the attempt it resolved on', async () => {
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      log,
+    );
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(quota405());
+    fn.onCall(2).resolves('ok');
+    const r = await guard.retryOnQuota(fn, { callSite: 'publishProject' });
+    expect(r).to.equal('ok');
+    // `attempt` counts POLL-LOOP retries only (not the initial `fn()` call before the loop, and not
+    // the recovery `ensure()`): call 0 is the initial call, call 1 is poll attempt 1 (still fails),
+    // call 2 is poll attempt 2 (succeeds) — hence attempt: 2 below.
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'recovered',
+      { attempt: 2, callSite: 'publishProject' },
+    );
+  });
+
+  it('exhausted: emits QuotaRetryOutcome("exhausted", { attempt, callSite }) with the attempt it gave up on', async () => {
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({ maxAttempts: 2 }),
+      },
+      log,
+    );
+    const lastError = quota405();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(quota405());
+    fn.onCall(2).rejects(lastError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn, { callSite: 'createOnePrompt' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(lastError);
+    // Same `attempt` semantics as the recovered case above: poll attempt 1 (call 1) still fails,
+    // poll attempt 2 (call 2, == maxAttempts) exhausts — hence attempt: 2.
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'exhausted',
+      { attempt: 2, callSite: 'createOnePrompt' },
+    );
+  });
+
+  it('abandoned: a non-quota error mid-loop still emits QuotaRetryOutcome("abandoned", { attempt, callSite }) (Alicia Adriani review)', async () => {
+    // Distinct from `exhausted` — this cycle wasn't cut short by a persistent metered 405, but by a
+    // genuinely unrelated failure. A dashboard summing recovered+exhausted+abandoned as "total
+    // recovery cycles" must not silently undercount this case.
+    const otherError = () => new SerenityTransportError(404, 'not found', { message: 'not found' });
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, retryOnQuota: fastRetry(),
+      },
+      log,
+    );
+    const notMetered = otherError();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405()); // initial call — enters recovery
+    fn.onCall(1).rejects(notMetered); // poll attempt 1 — non-quota, abandons the cycle
+    let caught;
+    try {
+      await guard.retryOnQuota(fn, { callSite: 'publishProject' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(notMetered);
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'abandoned',
+      { attempt: 1, callSite: 'publishProject' },
+    );
+  });
+
+  it('sleep(backoffMs) is actually invoked between poll attempts, not skipped — catches a regression that drops the await', async () => {
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    // Deliberately does NOT go through `fastRetry()` here — that helper zeroes `backoffMs`, which
+    // would make the "called with the right delay" assertion below meaningless. Only `sleep` itself
+    // is stubbed (to resolve instantly instead of really waiting `backoffMs`); `backoffMs` stays at
+    // its real production default (3000ms) so the assertion actually proves the real value is used.
+    const sleep = sinon.stub().resolves();
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: { sleep },
+      },
+      log,
+    );
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(quota405());
+    fn.onCall(2).resolves('ok');
+    await guard.retryOnQuota(fn, { callSite: 'publishProject' });
+    // Exactly ONE inter-attempt wait: poll attempt 1 fails (sleep before attempt 2), poll attempt 2
+    // succeeds (no further sleep needed).
+    expect(sleep).to.have.been.calledOnceWith(3000);
   });
 });

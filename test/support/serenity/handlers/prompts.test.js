@@ -278,11 +278,11 @@ describe('handlers/prompts.js — handleListPrompts', () => {
               ],
             },
             {
-              id: TAG_IDS.sourceHuman,
+              id: TAG_IDS.originHuman,
               name: 'human',
               children_count: 0,
-              parent_id: TAG_IDS.sourceRoot,
-              path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+              parent_id: TAG_IDS.originRoot,
+              path: [{ id: TAG_IDS.originRoot, name: 'origin' }],
             },
           ],
         }],
@@ -296,9 +296,9 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
     const { tags } = result.items[0];
     expect(tags).to.have.lengthOf(2);
-    expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'source']);
+    expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'origin']);
     expect(tags[0].parentId).to.equal(TAG_IDS.categoryRunningShoes);
-    expect(tags[1].parentId).to.equal(TAG_IDS.sourceRoot);
+    expect(tags[1].parentId).to.equal(TAG_IDS.originRoot);
     // The deprecated name-keyed view collapses them; only one id survives.
     expect(Object.keys(result.items[0].tagMap)).to.deep.equal(['human']);
     // Listing prompts costs exactly ONE upstream call — no tag-tree walk.
@@ -1926,7 +1926,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       // The four roots are created at the root level, then `branded` beneath
       // the freshly-minted `type` root.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', 'intent', 'source', 'type',
+        'category', 'intent', 'origin', 'type',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
