@@ -428,14 +428,11 @@ const SORT_COLUMN_MAP = {
   origin: 'origin',
   status: 'status',
   updatedAt: 'updated_at',
-  // FIX (WP-S2 interim): sort on the RAW `source` column. Stock PostgREST (the
-  // backend) cannot order by an inline SQL expression like
-  // `lower(replace(source,'_','-'))` — it returns 400 — and there is no canonical
-  // column to name yet. WP-S4 adds a `source_canonical` generated column (+ its
-  // index) and ordering moves to that column name, so the two drift spellings order
-  // together; until then raw ordering only interleaves the `_`/`-` spellings of the
-  // same producer, which is cosmetic (source-dimension.md §3.1).
-  source: 'source',
+  // Sort on the `source_canonical` generated column (WP-S4:
+  // `GENERATED ALWAYS AS (lower(replace(source,'_','-'))) STORED`, btree-indexed),
+  // so the two drift spellings of a producer order together and the label — which
+  // lives in elmo, never on the server — plays no part (source-dimension.md §3.1).
+  source: 'source_canonical',
 };
 
 function mapRowToPrompt(row) {
@@ -517,11 +514,11 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
- * @param {string} [params.source] - Filter by source. Matched on the raw column
- * across both drift spellings (WP-S2 interim): `citation-attempt` also matches
- * `citation_attempt`. WP-S4 folds this to a single `source_canonical` column match.
+ * @param {string} [params.source] - Filter by source, matched on the
+ * `source_canonical` generated column: `citation-attempt` also matches rows
+ * stored as `citation_attempt` (drift spellings fold together, case-insensitive).
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
- * status, updatedAt)
+ * source, status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
@@ -650,20 +647,13 @@ export async function listPrompts({
     }
 
     if (hasText(source)) {
-      // FIX (WP-S2 interim): match on the RAW `source` column, not a canonical SQL
-      // expression — stock PostgREST 400s on `lower(replace(source,'_','-'))=eq.…`.
-      // To keep "filter by the value the grid shows" working across a producer's two
-      // drift spellings, fold the incoming value to canonical (shared
-      // `foldSourceValue` — the single definition of the transform) and match BOTH
-      // the hyphen and underscore forms, so `citation-attempt` also finds rows stored
-      // as `citation_attempt`. WP-S4's `source_canonical` generated column replaces
-      // this with a single canonical-column match (and adds case-folding, which raw
-      // matching drops).
-      const wanted = foldSourceValue(source);
-      // A value with no `_`/`-` (e.g. `gsc`) yields two identical variants that the
-      // Set collapses to one — a single-element `.in` is intentional, not a bug.
-      const sourceVariants = [...new Set([wanted, wanted.replace(/-/g, '_')])];
-      baseQuery = baseQuery.in('source', sourceVariants);
+      // Match on the `source_canonical` generated column (WP-S4) — the DB
+      // canonicalizes `lower(replace(source,'_','-'))` at write time, so a single
+      // equality on the folded incoming value catches every drift spelling AND is
+      // case-insensitive (`citation-attempt` finds rows stored `citation_attempt`
+      // or `Citation_Attempt`). Fold the query-param value with the same transform
+      // (`foldSourceValue` — the single definition) so the two sides align.
+      baseQuery = baseQuery.eq('source_canonical', foldSourceValue(source));
     }
 
     if (hasText(region)) {
