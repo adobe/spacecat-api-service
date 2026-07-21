@@ -15,7 +15,7 @@ import { expect } from 'chai';
 import {
   DIMENSION,
   DIMENSION_ROOT_NAMES,
-  SOURCE_VALUE,
+  ORIGIN_VALUE,
   INTENT_VALUE,
   TYPE_VALUE,
   CLOSED_DIMENSION_VALUES,
@@ -31,13 +31,13 @@ import {
 describe('serenity prompt-tags taxonomy', () => {
   describe('dimension roots', () => {
     it('has exactly four roots, all bare-named', () => {
-      expect([...DIMENSION_ROOT_NAMES]).to.deep.equal(['category', 'intent', 'source', 'type']);
+      expect([...DIMENSION_ROOT_NAMES]).to.deep.equal(['category', 'intent', 'origin', 'type']);
       DIMENSION_ROOT_NAMES.forEach((n) => expect(n).to.not.include(':'));
     });
 
     it('splits the roots into one open and three closed dimensions', () => {
       expect([...OPEN_DIMENSIONS]).to.deep.equal([DIMENSION.CATEGORY]);
-      expect([...CLOSED_DIMENSIONS]).to.deep.equal(['intent', 'source', 'type']);
+      expect([...CLOSED_DIMENSIONS]).to.deep.equal(['intent', 'origin', 'type']);
       expect([...ALL_DIMENSIONS].sort()).to.deep.equal([...DIMENSION_ROOT_NAMES].sort());
     });
 
@@ -63,9 +63,9 @@ describe('serenity prompt-tags taxonomy', () => {
     });
 
     it('carries the source and type vocabularies', () => {
-      expect([...closedValuesOf(DIMENSION.SOURCE)]).to.deep.equal(['ai', 'human']);
+      expect([...closedValuesOf(DIMENSION.ORIGIN)]).to.deep.equal(['ai', 'human']);
       expect([...closedValuesOf(DIMENSION.TYPE)]).to.deep.equal(['branded', 'non-branded']);
-      expect(SOURCE_VALUE.AI).to.equal('ai');
+      expect(ORIGIN_VALUE.AI).to.equal('ai');
       expect(TYPE_VALUE.NON_BRANDED).to.equal('non-branded');
     });
 
@@ -88,7 +88,7 @@ describe('serenity prompt-tags taxonomy', () => {
   describe('STANDARD_PROMPT_TAG_VALUES', () => {
     it('seeds source=ai + intent=Informational only (type is classified per prompt)', () => {
       expect(STANDARD_PROMPT_TAG_VALUES.map((t) => [t.dimension, t.name])).to.deep.equal([
-        ['source', 'ai'],
+        ['origin', 'ai'],
         ['intent', 'Informational'],
       ]);
     });

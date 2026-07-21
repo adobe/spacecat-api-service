@@ -37,13 +37,13 @@ import { republishBestEffort } from '../brand-urls.js';
  * POST /serenity/tags — create a prompt TAG on a single market.
  *
  * Every tag is BARE-NAMED and lives under one of the four dimension roots
- * (`category`, `intent`, `source`, `type`) on a market's project — the
+ * (`category`, `intent`, `origin`, `type`) on a market's project — the
  * `aio/tags` surface, via {@link createProjectTags}. A tag's dimension is its
  * root ancestor, never a prefix on its name, so `type` in the request body
  * names the dimension the value belongs to rather than something written into
  * the name.
  *
- * The three CLOSED dimensions (`intent` / `source` / `type`) have a fixed value
+ * The three CLOSED dimensions (`intent` / `origin` / `type`) have a fixed value
  * enum: `name` must be one of those values, no `parentId` is accepted (their
  * values are always direct children of the dimension root), and the create is
  * resolve-or-create — a small, project-wide-shared set every caller may need
