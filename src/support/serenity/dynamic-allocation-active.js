@@ -161,6 +161,15 @@ export function createHeadroomGuard(transport, {
         if (!isMeteredQuota(e)) {
           throw e;
         }
+        if (callSite === 'unknown') {
+          // A caller forgot to pass `{ callSite }` — every wrap site in this codebase does, so this
+          // is a code-review miss, not a runtime condition. Surfaced loudly (not just an 'unknown'
+          // metric value) so it gets fixed rather than quietly widening QuotaRetryOutcome's
+          // CallSite dimension with an open-vocabulary value.
+          log?.warn?.('SERENITY_ALLOC retryOnQuota called without a callSite label', {
+            subWorkspaceId: childId,
+          });
+        }
         log?.warn?.('SERENITY_ALLOC metered-405 — bounded top-up + poll-retry', {
           subWorkspaceId: childId, callSite,
         });

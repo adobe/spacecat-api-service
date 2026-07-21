@@ -1002,7 +1002,7 @@ export async function handleUpdateModelsSubworkspace(
     modelIds,
     { geoTargetId, languageCode },
     log,
-    // LLMO-6190 item 4: bounded top-up+retry if the sync's publish 405s as a disguised
+    // LLMO-6190 follow-up: bounded poll-retry if the sync's publish 405s as a disguised
     // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
     // when OFF.
     { wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }) },

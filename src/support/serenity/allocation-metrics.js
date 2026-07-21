@@ -166,6 +166,10 @@ export function recordMeteredQuotaClassifier(matched) {
  * @param {{ attempt: number, callSite: string }} dims - `attempt` is the 1-based attempt the
  *   poll-retry cycle resolved (outcome=recovered) or gave up on (outcome=exhausted); `callSite` is
  *   a short closed-vocabulary label identifying which wrapped write/publish this recovery was for.
+ *   `attempt` is a raw number, not pre-bucketed — it stays low-cardinality only because
+ *   `retryOnQuota`'s `maxAttempts` is small (3 today); if `maxAttempts` is ever raised
+ *   significantly, revisit whether `Attempt` should be capped/bucketed to hold the module's
+ *   low-cardinality dimension contract (see the module doc above).
  * @returns {void}
  */
 export function recordQuotaRetryOutcome(outcome, { attempt, callSite }) {
