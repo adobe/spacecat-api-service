@@ -307,6 +307,20 @@ export function isServerOwnedDimension(dimension) {
 }
 
 /**
+ * The bare canonical FOLD of a `source` value — trim, lowercase, `_` → `-`
+ * (source-dimension.md §3.1) — with none of {@link canonicalizeSource}'s safety
+ * guards. This is the SINGLE definition of the transform in this repo: both
+ * `canonicalizeSource` (read/tag-write boundary) and the v2 list `source` filter
+ * fold (prompts-storage.js) route through it so the spellings can never drift.
+ *
+ * @param {string} value - a `source` value (already known to be a string).
+ * @returns {string} the folded value.
+ */
+export function foldSourceValue(value) {
+  return value.trim().toLowerCase().replace(/_/g, '-');
+}
+
+/**
  * Canonicalizes a raw `prompts.source` value to its `source`-dimension tag name,
  * OR returns `null` when the value must not be tagged (source-dimension.md §3.1).
  *
@@ -329,7 +343,7 @@ export function canonicalizeSource(value) {
   if (typeof value !== 'string') {
     return null;
   }
-  const canonical = value.trim().toLowerCase().replace(/_/g, '-');
+  const canonical = foldSourceValue(value);
   if (canonical === ''
     || canonical.includes(':')
     || canonical.length > MAX_TAG_NAME_LEN

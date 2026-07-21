@@ -18,16 +18,7 @@ import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
 import { assertPermittedSource } from './prompt-sources.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
-import { canonicalizeSource } from './serenity/prompt-tags.js';
-
-// The SQL expression that canonicalizes `prompts.source` (source-dimension.md
-// §3.1: `lower(replace(source, '_', '-'))`). Both the `source` list filter and
-// the `source` sort key run through it so the two spellings of a producer
-// (`citation_attempt` / `citation-attempt`) filter and order together. The plain
-// `idx_prompts_source` btree cannot serve it; WP-S4 adds the matching
-// `idx_prompts_source_canonical` expression index. Mirrors `canonicalizeSource`'s
-// transform in SQL — the two must not drift.
-const SOURCE_CANONICAL_SQL = "lower(replace(source, '_', '-'))";
+import { canonicalizeSource, foldSourceValue } from './serenity/prompt-tags.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
 // live in `./intent.js` so the LLM intent classifier can reuse them without an
@@ -437,11 +428,14 @@ const SORT_COLUMN_MAP = {
   origin: 'origin',
   status: 'status',
   updatedAt: 'updated_at',
-  // `source` sorts on the CANONICAL form, not the raw column — the label lives in
-  // elmo and the server has never seen it, so ordering is on the slug and the two
-  // drift spellings order together (source-dimension.md §3.1). An object form
-  // marks it as a SQL expression rather than a bare column or a foreign-table sort.
-  source: { expression: SOURCE_CANONICAL_SQL },
+  // FIX (WP-S2 interim): sort on the RAW `source` column. Stock PostgREST (the
+  // backend) cannot order by an inline SQL expression like
+  // `lower(replace(source,'_','-'))` — it returns 400 — and there is no canonical
+  // column to name yet. WP-S4 adds a `source_canonical` generated column (+ its
+  // index) and ordering moves to that column name, so the two drift spellings order
+  // together; until then raw ordering only interleaves the `_`/`-` spellings of the
+  // same producer, which is cosmetic (source-dimension.md §3.1).
+  source: 'source',
 };
 
 function mapRowToPrompt(row) {
@@ -523,8 +517,9 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
- * @param {string} [params.source] - Filter by source, matched on the CANONICAL
- * form (source-dimension.md §3.1): `citation-attempt` also matches `citation_attempt`.
+ * @param {string} [params.source] - Filter by source. Matched on the raw column
+ * across both drift spellings (WP-S2 interim): `citation-attempt` also matches
+ * `citation_attempt`. WP-S4 folds this to a single `source_canonical` column match.
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
  * status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
@@ -628,10 +623,7 @@ export async function listPrompts({
     const sortCol = SORT_COLUMN_MAP[sort];
     if (sortCol) {
       const ascending = order === 'asc';
-      if (typeof sortCol === 'object') {
-        // A SQL expression (e.g. the canonical `source` fold), ordered directly.
-        baseQuery = baseQuery.order(sortCol.expression, { ascending });
-      } else if (sortCol.includes('(')) {
+      if (sortCol.includes('(')) {
         const [foreignTable, col] = sortCol.replace(')', '').split('(');
         baseQuery = baseQuery.order(col, { ascending, foreignTable });
       } else {
@@ -658,12 +650,18 @@ export async function listPrompts({
     }
 
     if (hasText(source)) {
-      // Filter on the CANONICAL form so `citation-attempt` matches rows stored as
-      // `citation_attempt` too (source-dimension.md §3.1). The incoming value is
-      // folded with the same transform as the column, and matched against the SQL
-      // expression rather than the raw column.
-      const wantedSource = String(source).trim().toLowerCase().replace(/_/g, '-');
-      baseQuery = baseQuery.eq(SOURCE_CANONICAL_SQL, wantedSource);
+      // FIX (WP-S2 interim): match on the RAW `source` column, not a canonical SQL
+      // expression — stock PostgREST 400s on `lower(replace(source,'_','-'))=eq.…`.
+      // To keep "filter by the value the grid shows" working across a producer's two
+      // drift spellings, fold the incoming value to canonical (shared
+      // `foldSourceValue` — the single definition of the transform) and match BOTH
+      // the hyphen and underscore forms, so `citation-attempt` also finds rows stored
+      // as `citation_attempt`. WP-S4's `source_canonical` generated column replaces
+      // this with a single canonical-column match (and adds case-folding, which raw
+      // matching drops).
+      const wanted = foldSourceValue(source);
+      const sourceVariants = [...new Set([wanted, wanted.replace(/-/g, '_')])];
+      baseQuery = baseQuery.in('source', sourceVariants);
     }
 
     if (hasText(region)) {
