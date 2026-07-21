@@ -1,3 +1,59 @@
+## [1.673.3](https://github.com/adobe/spacecat-api-service/compare/v1.673.2...v1.673.3) (2026-07-21)
+
+
+### Bug Fixes
+
+* Serenity sentiment date range + weekly bucketing | LLMO-6311 ([#2841](https://github.com/adobe/spacecat-api-service/issues/2841)) ([981e02c](https://github.com/adobe/spacecat-api-service/commit/981e02ce156e8db0e48d7f65c437b6ca9d3ce002))
+
+## [1.673.2](https://github.com/adobe/spacecat-api-service/compare/v1.673.1...v1.673.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* Prompt Research all-models volume + prompts-count | LLMO-6323 ([#2845](https://github.com/adobe/spacecat-api-service/issues/2845)) ([a4b9b66](https://github.com/adobe/spacecat-api-service/commit/a4b9b6699e9384c6b4699176814e4df7e51eb203)), closes [#2843](https://github.com/adobe/spacecat-api-service/issues/2843)
+
+## [1.673.1](https://github.com/adobe/spacecat-api-service/compare/v1.673.0...v1.673.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **serenity:** span the ~9s Semrush write-enforcement lag in retryOnQuota ([#2874](https://github.com/adobe/spacecat-api-service/issues/2874)) ([8083aa3](https://github.com/adobe/spacecat-api-service/commit/8083aa32026266122a05d785d65e449339e9d381))
+
+# [1.673.0](https://github.com/adobe/spacecat-api-service/compare/v1.672.1...v1.673.0) (2026-07-21)
+
+
+### Features
+
+* **serenity:** opt-in per-prompt userIntent on brand-presence prompts endpoint ([#2858](https://github.com/adobe/spacecat-api-service/issues/2858)) ([5909ba1](https://github.com/adobe/spacecat-api-service/commit/5909ba1281b699b2ce473a4b130d3ee6a7f339bf))
+
+## [1.672.1](https://github.com/adobe/spacecat-api-service/compare/v1.672.0...v1.672.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **state-mappings:** block internal admins from create/update/delete ([#2871](https://github.com/adobe/spacecat-api-service/issues/2871)) ([249a9cc](https://github.com/adobe/spacecat-api-service/commit/249a9ccf161a0d8dc321d91badafd7b782eb858d))
+
+# [1.672.0](https://github.com/adobe/spacecat-api-service/compare/v1.671.0...v1.672.0) (2026-07-20)
+
+
+### Features
+
+* **api:** add ?fields= projection to GET /organizations/{organizationId}/sites ([#2856](https://github.com/adobe/spacecat-api-service/issues/2856)) ([10b30c2](https://github.com/adobe/spacecat-api-service/commit/10b30c2884485af445fa22f44c8a962dfcf4b1c8)), closes [#2840](https://github.com/adobe/spacecat-api-service/issues/2840)
+
+# [1.671.0](https://github.com/adobe/spacecat-api-service/compare/v1.670.0...v1.671.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** tolerant origin/source authorship-root resolver; rename source→origin (LLMO-6274) ([#2862](https://github.com/adobe/spacecat-api-service/issues/2862)) ([cad46af](https://github.com/adobe/spacecat-api-service/commit/cad46af2b700b1ad5dcadd175ad14f799b9e1f99))
+
+# [1.670.0](https://github.com/adobe/spacecat-api-service/compare/v1.669.0...v1.670.0) (2026-07-20)
+
+
+### Features
+
+* **serenity:** adopt the shared Project Engine facade + typed errors via a boundary adapter (LLMO-6379) ([#2863](https://github.com/adobe/spacecat-api-service/issues/2863)) ([5c9773c](https://github.com/adobe/spacecat-api-service/commit/5c9773ca73124ad851afd49d3ac8217b099e9675)), closes [spacecat-shared#1823](https://github.com/spacecat-shared/issues/1823)
+
 # [1.669.0](https://github.com/adobe/spacecat-api-service/compare/v1.668.1...v1.669.0) (2026-07-20)
 
 
