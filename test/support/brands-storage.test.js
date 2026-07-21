@@ -1061,7 +1061,7 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row).to.not.have.property('semrush_sub_workspace_id');
     });
 
-    it('keeps the brand active without a site_id when a semrush_sub_workspace_id anchors it', async () => {
+    it('keeps the brand active with a null site_id when only a semrush_sub_workspace_id anchors it (no baseSiteId)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1080,10 +1080,12 @@ describe('brands-storage', () => {
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.status).to.equal('active');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
-      expect(brandsUpsert.row).to.not.have.property('site_id');
+      // A fresh create always writes an explicit site_id — null when no baseSiteId
+      // is supplied. The sub-workspace is what keeps it active (LLMO-6405).
+      expect(brandsUpsert.row.site_id).to.equal(null);
     });
 
-    it('ignores baseSiteId on a semrush-anchored create (never sets site_id, avoids 409)', async () => {
+    it('writes site_id from baseSiteId on a semrush-anchored create (anchored by BOTH — LLMO-6405)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null }, // no existing brand
@@ -1094,15 +1096,17 @@ describe('brands-storage', () => {
 
       await upsertBrand({
         organizationId: ORG_ID,
-        // baseSiteId would coincidentally match an onboarded site already owned by
-        // another brand; a semrush-anchored brand must NOT claim it as site_id.
-        brand: { name: 'Test', status: 'active', baseSiteId: 'collides-with-other-brand' },
+        // LLMO-6405: a Semrush brand now also carries its primary site — the UI's
+        // primary-URL step sends baseSiteId, so site_id is populated on every path.
+        brand: { name: 'Test', status: 'active', baseSiteId: 'primary-site-id' },
         postgrestClient: client,
         semrushSubWorkspaceId: 'ws-1',
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('site_id');
+      // The old anchoredBySemrush skip is removed — site_id IS written from
+      // baseSiteId even when a sub-workspace anchors the brand.
+      expect(brandsUpsert.row.site_id).to.equal('primary-site-id');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
       expect(brandsUpsert.row.status).to.equal('active');
     });
