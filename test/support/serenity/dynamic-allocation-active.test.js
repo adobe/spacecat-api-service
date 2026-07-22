@@ -351,7 +351,7 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(fn).to.have.callCount(2);
   });
 
-  it('ON, the shared deadline (not the attempt cap) stops retrying: exhausts after one poll attempt when the deadline passes before the next', async () => {
+  it('ON, the deadline takes priority OVER the attempt cap: exhausts after one poll attempt even though maxAttempts allows many more', async () => {
     // maxAttempts is generous, but `now()` is stubbed to jump past totalBudgetMs right after the
     // FIRST poll attempt's own deadline check — the deadline, not the attempt count, must be what
     // ends the loop (round-2 SRE review: this is the seam that bounds a stacked-call-site request,
@@ -394,12 +394,18 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
   });
 
   it('ON, the deadline is checked BEFORE the very first poll attempt, not only between retries: a budget already blown by ensure() skips the attempt entirely', async () => {
-    // Self-review finding: checking the deadline only inside the catch (i.e. only after a poll
-    // attempt already failed) meant the first attempt always ran regardless of how long `ensure()`
-    // itself took. Simulate `ensure()` alone having consumed the whole budget (e.g. queued behind
-    // other same-child recoveries) — `now()` is already past the deadline by the time the loop's
-    // first check runs, so `fn()` must NOT be called again at all, and the ORIGINAL triggering
-    // error (not a fabricated new one) propagates.
+    // Checking the deadline only inside the catch (i.e. only after a poll attempt already failed)
+    // meant the first attempt always ran regardless of how long `ensure()` itself took. Simulate
+    // `ensure()` alone having consumed the whole budget (e.g. queued behind other same-child
+    // recoveries) — `now()` is already past the deadline by the time the loop's first check runs,
+    // so `fn()` must NOT be called again at all, the ORIGINAL triggering error (not a fabricated
+    // new one) propagates, and the metric records the `attempt: 0` case this closes (MysticatBot
+    // review).
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
@@ -411,7 +417,7 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
       // (i.e. the loop's pre-attempt check) reports as already far past the budget.
       return nowCallCount <= 1 ? 0 : 1_000_000;
     };
-    const guard = createHeadroomGuard(
+    const guard = mockedCreateHeadroomGuard(
       t,
       {
         enabled: true,
@@ -431,6 +437,10 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     }
     expect(caught).to.equal(initialError);
     expect(fn).to.have.been.calledOnce; // only the initial call — no poll attempt was ever made
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'exhausted',
+      { attempt: 0, callSite: 'unknown' },
+    );
   });
 
   it('ON, the deadline is SHARED across two sequential retryOnQuota calls on the SAME guard, not recomputed per call (MysticatBot review)', async () => {

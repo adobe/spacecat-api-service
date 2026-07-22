@@ -60,8 +60,8 @@
  *   `recovered + exhausted + abandoned` as "total recovery cycles" doesn't silently undercount,
  *   per Alicia Adriani's review). `Attempt` (the 1-based poll attempt the cycle ended on, or `0`
  *   if the shared deadline was already exhausted before any poll attempt could even be made — see
- *   `retryOnQuota`'s pre-attempt deadline check, api-service#2882) and `CallSite` (a small closed
- *   set — `publishProject`, `createProject`, `createOnePrompt`,
+ *   `retryOnQuota`'s pre-attempt deadline check, adobe/spacecat-api-service#2882) and `CallSite`
+ *   (a small closed set — `publishProject`, `createProject`, `createOnePrompt`,
  *   `createPromptsByIds`, ...) together give the attempt-to-recovery distribution per write path,
  *   without which a rising `exhausted` rate or a shift toward later attempts is invisible until it
  *   becomes an incident (round-2 SRE review).
@@ -173,7 +173,7 @@ export function recordMeteredQuotaClassifier(matched) {
  * @param {{ attempt: number, callSite: string }} dims - `attempt` is the 1-based poll attempt the
  *   cycle resolved (recovered), gave up on (exhausted), or was cut short on by a non-quota error
  *   (abandoned) — OR `0` for `exhausted` specifically when the shared deadline was already blown
- *   before any poll attempt could be made (api-service#2882). `callSite` is a short
+ *   before any poll attempt could be made (adobe/spacecat-api-service#2882). `callSite` is a short
  *   closed-vocabulary label identifying which wrapped write/publish this recovery was for.
  *   `attempt` is a raw number, not pre-bucketed — it stays low-cardinality only because
  *   `retryOnQuota`'s `maxAttempts` is small (3 today); if `maxAttempts` is ever raised
