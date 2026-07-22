@@ -16,15 +16,15 @@ import { SITE_1_ID, SITE_3_ID } from '../seed-ids.js';
 /**
  * Shared Audit Policy contract tests (SITES-47306).
  *
- * GATED: exercises the real `wrpc_upsert_audit_policy` RPC — including the
+ * Exercises the real `wrpc_upsert_audit_policy` RPC — including the
  * `p_expected_version` optimistic-lock parameter and its `SQLSTATE 40000`
  * conflict path (40000, not 40001 — PostgREST v14.4 hangs on 40001, see
  * PostgREST/postgrest#3673) — against Postgres + PostgREST via the pinned data-service
  * image. That parameter (and `audit_policy_revision.effective_at`) ship in
- * mysticat-data-service PR #755, a follow-up on top of the B2 `audit_policy`
- * table (PR #753, merged). Cannot pass until: (a) #755 merges, (b) a new
- * data-service image is cut, (c) that image is pinned in docker-compose.yml,
- * and (d) this suite is flipped from `describe.skip` to `describe` here.
+ * mysticat-data-service PR #755 (merged), a follow-up on top of the B2
+ * `audit_policy` table (PR #753, merged). Was gated behind `describe.skip`
+ * until the data-service image pin in docker-compose.yml caught up past #755
+ * (bumped v5.57.0 -> v5.70.0, the release cut immediately after #755 merged).
  *
  * SITE_1_ID (ORG_1, accessible, LLMO-entitled) is used for the happy path;
  * SITE_3_ID (ORG_2, "denied") for the cross-org 403 check — see
@@ -34,7 +34,7 @@ import { SITE_1_ID, SITE_3_ID } from '../seed-ids.js';
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
  */
 export default function auditPolicyTests(getHttpClient, resetData) {
-  describe.skip('Audit Policy [GATED: needs data-service image with B2 + p_expected_version, SITES-47306]', () => {
+  describe('Audit Policy', () => {
     before(() => resetData());
 
     it('API-2: GET returns synthetic version 0 when no row exists', async () => {
