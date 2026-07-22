@@ -18,6 +18,7 @@ import nock from 'nock';
 import esmock from 'esmock';
 
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import { CloudManagerApiClient } from '@adobe/spacecat-shared-cloud-manager-client';
 import { AUTHORING_TYPES, DELIVERY_TYPES } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import {
@@ -522,6 +523,47 @@ describe('utils', () => {
 
       expect(site.setCode).not.to.have.been.called;
       expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
+    });
+
+    it('resolves AEM CS code config from a publish host via the CM Management API', async () => {
+      site.getCode.returns({});
+      const code = {
+        owner: '12345', repo: '67890', type: 'standard', url: 'https://git.cloudmanager.adobe.com/org/repo', ref: 'main',
+      };
+      const resolveCodeConfig = sandbox.stub().resolves(code);
+      const createFrom = sandbox.stub(CloudManagerApiClient, 'createFrom').returns({ resolveCodeConfig });
+      const context = { env: { CM_API_BASE: 'https://ssg-stage.private.adobe.io/api' } };
+
+      await updateCodeConfig(site, 'publish-p12345-e67890.adobeaemcloud.net', slackContext, log, context);
+
+      expect(createFrom).to.have.been.calledWith(context);
+      expect(resolveCodeConfig).to.have.been.calledWith('12345');
+      expect(site.setCode).to.have.been.calledWith(code);
+      expect(log.info).to.have.been.calledWithMatch(/Auto-resolved AEM CS code config/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/Auto-resolved AEM CS code config/);
+    });
+
+    it('skips AEM CS resolution and warns when the CM API is not configured', async () => {
+      site.getCode.returns({});
+      const createFrom = sandbox.stub(CloudManagerApiClient, 'createFrom').throws(new Error('CloudManagerApiClient requires CM_API_CLIENT_ID'));
+
+      await updateCodeConfig(site, 'publish-p12345-e67890.adobeaemcloud.net', slackContext, log, {});
+
+      expect(createFrom).to.have.been.called;
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.warn).to.have.been.calledWithMatch(/Cloud Manager API not configured/);
+    });
+
+    it('warns and skips when CM code config resolution fails', async () => {
+      site.getCode.returns({});
+      const resolveCodeConfig = sandbox.stub().rejects(new Error('HTTP 404'));
+      sandbox.stub(CloudManagerApiClient, 'createFrom').returns({ resolveCodeConfig });
+
+      await updateCodeConfig(site, 'publish-p12345-e67890.adobeaemcloud.net', slackContext, log, { env: {} });
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.warn).to.have.been.calledWithMatch(/Failed to resolve AEM CS code config for program 12345/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/Could not auto-resolve AEM CS code config/);
     });
   });
 

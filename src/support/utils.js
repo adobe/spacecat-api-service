@@ -13,6 +13,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
+import { CloudManagerApiClient } from '@adobe/spacecat-shared-cloud-manager-client';
 import URI from 'urijs';
 import {
   hasText,
@@ -1063,8 +1064,12 @@ export const autoResolveAuthorUrl = async (site, context) => {
  * @param {string} host - The host to check for pattern matching.
  * @param {Object} slackContext - The Slack context object with say function.
  * @param {Object} log - The logger.
+ * @param {Object} [context] - The Lambda context (env, etc.). Required to
+ *   resolve AEM CS code config via the Cloud Manager Management API. When the
+ *   CM API is not configured (env absent) or the lookup fails, code config
+ *   resolution is skipped without failing onboarding.
  */
-export const updateCodeConfig = async (site, host, slackContext, log) => {
+export const updateCodeConfig = async (site, host, slackContext, log, context) => {
   const { say } = slackContext;
 
   const existingCode = site.getCode() || {};
@@ -1095,7 +1100,33 @@ export const updateCodeConfig = async (site, host, slackContext, log) => {
     return;
   }
 
-  // TODO: Add AEM CS pattern code config resolution here
+  // AEM CS pattern: publish-p{programId}-e{environmentId}.adobeaemcloud.{com,net}
+  // The host encodes only program/environment — not the repo — so the code
+  // config (owner/repo/ref/type) must be resolved from the Cloud Manager
+  // Management API using the programId.
+  const csMatch = host.match(AEM_CS_PUBLISH_HOST_PATTERN);
+  if (csMatch) {
+    const [, programId] = csMatch;
+    let cmApiClient;
+    try {
+      cmApiClient = CloudManagerApiClient.createFrom(context || {});
+    } catch (error) {
+      // CM API not configured (missing env/creds) — skip without failing onboarding.
+      log.warn(`Cloud Manager API not configured; skipping AEM CS code config resolution for program ${programId}: ${error.message}`);
+      return;
+    }
+    try {
+      const code = await cmApiClient.resolveCodeConfig(programId);
+      site.setCode(code);
+      log.info(`Auto-resolved AEM CS code config from host '${host}' (program ${programId}): owner=${code.owner}, repo=${code.repo}, ref=${code.ref}, type=${code.type}`);
+      await say(`:white_check_mark: Auto-resolved AEM CS code config: owner=${code.owner}, repo=${code.repo}, ref=${code.ref}, type=${code.type}`);
+    } catch (error) {
+      log.warn(`Failed to resolve AEM CS code config for program ${programId}: ${error.message}`);
+      await say(`:warning: Could not auto-resolve AEM CS code config for program ${programId}: ${error.message}`);
+    }
+    return;
+  }
+
   log.debug(`Host '${host}' does not match a supported pattern for code config resolution`);
 };
 
@@ -1231,7 +1262,7 @@ const createSiteAndOrganization = async (
   }
 
   // Resolve code config from host (works for both user-provided and auto-resolved)
-  await updateCodeConfig(site, domainServingHost, slackContext, log);
+  await updateCodeConfig(site, domainServingHost, slackContext, log, context);
 
   Object.assign(reportLine, localReportLine);
   return { site, organizationId };
