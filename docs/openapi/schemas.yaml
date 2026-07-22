@@ -4174,6 +4174,15 @@ Fix:
     changeDetails:
       type: object
       additionalProperties: true
+      description: >-
+        Free-form, per-fix-type details of the applied change. For code-patch
+        opportunities (e.g. `cwv`) that raise a repository pull request, common
+        keys include `pullRequestUrl`, `issueUrl`, `issueNumber`, and
+        `patchType`. When the fix branch was pushed to the repository but the
+        pull request could not be created, `branchName` (string) holds the
+        pushed branch and `prCreationFailed` (boolean) is `true`, so the branch
+        can be surfaced and a PR opened manually. Content opportunities use keys
+        such as `sourceUrl`/`targetUrl`.
     status:
       $ref: '#/FixStatus'
 
