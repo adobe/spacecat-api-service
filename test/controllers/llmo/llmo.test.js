@@ -4323,9 +4323,12 @@ describe('LlmoController', () => {
   describe('getBrandClaims', () => {
     let brandClaimsContext;
     let mockGetSignedUrl;
+    let mockS3Send;
 
     beforeEach(() => {
       mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+      // HeadObject resolves by default → the object exists.
+      mockS3Send = sinon.stub().resolves({});
 
       brandClaimsContext = {
         ...mockContext,
@@ -4337,7 +4340,7 @@ describe('LlmoController', () => {
           ENV: 'dev',
         },
         s3: {
-          s3Client: {},
+          s3Client: { send: mockS3Send },
           s3Bucket: 'test-bucket',
           getSignedUrl: mockGetSignedUrl,
           GetObjectCommand: function MockGetObjectCommand(params) {
@@ -4402,15 +4405,17 @@ describe('LlmoController', () => {
     });
 
     it('should return 404 when S3 key not found', async () => {
-      const noSuchKeyError = new Error('The specified key does not exist');
-      noSuchKeyError.name = 'NoSuchKey';
-      mockGetSignedUrl.rejects(noSuchKeyError);
+      const notFoundError = new Error('Not Found');
+      notFoundError.name = 'NotFound';
+      mockS3Send.rejects(notFoundError);
 
       const result = await controller.getBrandClaims(brandClaimsContext);
 
       expect(result.status).to.equal(404);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
+      // Never sign a URL for a missing object.
+      expect(mockGetSignedUrl).to.not.have.been.called;
     });
 
     it('should return 404 when site is not found', async () => {
