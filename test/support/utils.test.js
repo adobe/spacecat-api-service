@@ -1747,7 +1747,47 @@ describe('utils', () => {
         'queue-url',
         'optimize-at-edge-enabled-marking',
         slackContext,
-        'site-1',
+        { siteId: 'site-1' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+      });
+    });
+
+    it('includes force and forcedBy in the message when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', force: true, forcedBy: 'jdoe' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+        force: true,
+        forcedBy: 'jdoe',
+      });
+    });
+
+    it('omits force and forcedBy when falsy/absent', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', force: false },
       );
 
       expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
@@ -1759,7 +1799,7 @@ describe('utils', () => {
   });
 
   describe('triggerGlobalImportRun', () => {
-    it('passes the siteId through to sendGlobalImportRunMessage when provided', async () => {
+    it('passes siteId/force/forcedBy through to sendGlobalImportRunMessage when provided', async () => {
       const sqs = { sendMessage: sinon.stub().resolves() };
       const config = { getQueues: () => ({ imports: 'queue-url' }) };
       const slackContext = { channelId: 'C1', threadTs: '123' };
@@ -1770,17 +1810,19 @@ describe('utils', () => {
         'optimize-at-edge-enabled-marking',
         slackContext,
         lambdaContext,
-        'site-1',
+        { siteId: 'site-1', force: true, forcedBy: 'jdoe' },
       );
 
       expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
         type: 'optimize-at-edge-enabled-marking',
         slackContext: { channelId: 'C1', threadTs: '123' },
         siteId: 'site-1',
+        force: true,
+        forcedBy: 'jdoe',
       });
     });
 
-    it('omits siteId when not provided', async () => {
+    it('omits siteId/force/forcedBy when no options are provided', async () => {
       const sqs = { sendMessage: sinon.stub().resolves() };
       const config = { getQueues: () => ({ imports: 'queue-url' }) };
       const slackContext = { channelId: 'C1', threadTs: '123' };
