@@ -44,6 +44,7 @@ import {
   recordHeadroomCheck, recordTopUpLatency, recordPoolFreeRatio, recordRejection,
   recordNotReadyRetry, recordReleaseOutcome,
 } from './allocation-metrics.js';
+import { alertPoolFreeThreshold } from './quota-alerts.js';
 
 /** @typedef {{ used: number, drafted: number, total: number }} AiDim */
 /** @typedef {{ projects: AiDim, prompts: AiDim }} AiTotals */
@@ -326,12 +327,18 @@ async function transferOnce(transport, workspaceId, totals, log) {
  *   (stale-low). Sizing from `used + drafted` is staleness-immune, so a just-drafted batch has the
  *   quota it needs the instant it publishes (plan §21). Prompts only — a project has
  *   no draft-then-publish metering seam.
+ * @param {object} [opts.env] request env — when supplied, feeds the org-pool early-warning Slack
+ *   alert (serenity-docs#72 §5) off this function's own advisory pool-free read; omitted by most
+ *   callers today (the alert is opt-in via `SERENITY_QUOTA_ALERTS_ENABLED`, and threading `env`
+ *   this deep is not yet done everywhere — see quota-alerts.js).
+ * @param {string} [opts.orgId] IMS org id, for the alert payload only.
  * @param {any} [log]
  * @returns {Promise<{ toppedUp: boolean, newTotal: { projects: number, prompts: number } }>}
  */
 export async function ensureAiHeadroom(transport, {
   subWorkspaceId, parentWorkspaceId, need,
   ceiling = {}, blocks = DEFAULT_BLOCKS, includeDrafted = false,
+  env, orgId,
 }, log) {
   // Fail LOUD on a missing sub-/parent-workspace id: an empty id is a fronting/wiring bug (the
   // caller failed to thread auth.workspaceId / auth.parentWorkspaceId), and silently reading `''`
@@ -382,6 +389,15 @@ export async function ensureAiHeadroom(transport, {
       log?.warn?.('SERENITY_ALLOC advisory pool-free low (proceeding; transfer 422 is authoritative)', {
         subWorkspaceId, dim, free, delta,
       });
+    }
+    // serenity-docs#72 §5 early-warning: gives this ALREADY-performed advisory read a consumer —
+    // no new transport call. Fire-and-forget; a no-op unless the caller threaded `env` (opt-in,
+    // see the JSDoc above) and the kill-switch is on.
+    if (env) {
+      // eslint-disable-next-line no-await-in-loop
+      await alertPoolFreeThreshold({
+        orgId, parentWorkspaceId, dimension: dim, free, total: master[dim].total,
+      }, env, log);
     }
   }
 

@@ -1441,6 +1441,8 @@ describe('SerenityController', () => {
           // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set — the
           // guard keeps its non-binding default.
           ceiling: undefined,
+          // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
+          orgId: ORG,
         });
       // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
       // options bag — the same id given to ensureSubworkspace.
@@ -2169,6 +2171,8 @@ describe('SerenityController', () => {
         dynamicAllocation: false,
         // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set.
         ceiling: undefined,
+        // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
+        orgId: ORG,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       // writeDeadline is computed ONCE at activate entry, so every market in the

@@ -780,6 +780,9 @@ function SerenityController(context, log, env) {
             // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             ceiling: brandAiCeiling(ctx),
+            // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+            // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+            orgId: ctx?.params?.spaceCatId,
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link), once its
@@ -1412,6 +1415,9 @@ function SerenityController(context, log, env) {
               // JIT units pool = the org parent passed positionally above; not duplicated here.
               dynamicAllocation: dynamicAllocationEnabled(ctx),
               ceiling: brandAiCeiling(ctx),
+              // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+              // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+              orgId: ctx?.params?.spaceCatId,
             },
           );
         } catch (e) {
