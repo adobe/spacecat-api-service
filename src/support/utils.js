@@ -40,6 +40,7 @@ import {
   PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
+import { createCloudManagerClient } from './cloud-manager.js';
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -1523,6 +1524,23 @@ export async function queueDeliveryConfigWriter(
         minutes,
         updateRedirects,
       };
+
+      // SITES-47815: the programId/environmentId above are derived by regex on
+      // the AEM CS hostname (extractDeliveryConfigFromPreviewUrl), never checked
+      // against Cloud Manager. Best-effort verify the program actually exists in
+      // CM via the connector Lambda (the service that can reach CM's private
+      // API). This runs post-ack, so its latency is off the Slack 3s window, and
+      // it degrades gracefully: when the connector is not configured/deployed/
+      // authorized it is a no-op and onboarding proceeds on the regex-derived
+      // values. `programVerified` is additive telemetry for the audit-worker.
+      const cloudManager = createCloudManagerClient(context);
+      const { verified, degraded } = await cloudManager.verifyProgram(String(programId));
+      redirectParams.programVerified = verified;
+      if (!verified && !degraded) {
+        log.warn(
+          `[delivery-config-writer] Cloud Manager did not verify program ${programId} for ${resolvedBaseURL}; proceeding on regex-derived delivery config.`,
+        );
+      }
     } else {
       log.info(
         `[delivery-config-writer] ${skipMessage}; CDN detection only.`,
