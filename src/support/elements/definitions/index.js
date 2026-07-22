@@ -31,6 +31,8 @@ export {
   INTENT_ENRICH_CONCURRENCY,
 } from './prompts.js';
 export { buildCitedDomainsPayload, transformCitedDomainsResponse } from './cited-domains.js';
+export { buildTopicPromptsPayload, transformTopicPromptsResponse } from './topic-prompts.js';
+export { aggregateTopicsFromPrompts } from './topics-insights.js';
 export {
   buildSentimentOverviewPayload,
   transformSentimentOverviewResponse,
@@ -41,6 +43,7 @@ export {
   transformOwnedUrlsResponse,
 } from './owned-urls.js';
 export { buildDomainUrlsPayload, transformDomainUrlsResponse } from './domain-urls.js';
+export { aggregateUrlInspectorStats } from './url-inspector-stats.js';
 export {
   buildMarketMentionsTrendPayload,
   buildMarketCitationsTrendPayload,

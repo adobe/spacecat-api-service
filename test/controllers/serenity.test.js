@@ -178,6 +178,9 @@ describe('SerenityController', () => {
   let updateBrandStub;
   let accessControlHasAccessStub;
   let ensureMarketSiteStub;
+  let resolveSiteDomainStub;
+  let unlinkMarketSiteIfOrphanedStub;
+  let getBrandBaseSiteIdStub;
   let exchangePromiseTokenStub;
   let linkSiteToLiveRowsStub;
   let tombstoneAllForBrandStub;
@@ -211,6 +214,9 @@ describe('SerenityController', () => {
     updateBrandStub = sinon.stub().resolves({ getId: () => BRAND, getStatus: () => 'active' });
     accessControlHasAccessStub = sinon.stub().resolves(true);
     ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
+    resolveSiteDomainStub = sinon.stub().resolves('resolved.example.com');
+    unlinkMarketSiteIfOrphanedStub = sinon.stub().resolves(true);
+    getBrandBaseSiteIdStub = sinon.stub().resolves(null);
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
@@ -289,9 +295,12 @@ describe('SerenityController', () => {
         getBrandUrlSources: getBrandUrlSourcesStub,
         getBrandCompetitors: getBrandCompetitorsStub,
         updateBrand: updateBrandStub,
+        getBrandBaseSiteId: getBrandBaseSiteIdStub,
       },
       '../../src/support/serenity/site-linkage.js': {
         ensureMarketSite: ensureMarketSiteStub,
+        resolveSiteDomain: resolveSiteDomainStub,
+        unlinkMarketSiteIfOrphaned: unlinkMarketSiteIfOrphanedStub,
       },
       '../../src/support/utils.js': {
         resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
@@ -1275,7 +1284,13 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listMarkets(fakeContext());
       expect(response.status).to.equal(200);
-      expect(handlers.handleListMarketsSubworkspace).to.have.been.calledOnceWithExactly({ name: 'transport' }, BRAND, 'subworkspace-ws-1');
+      // transport, brandId, workspaceId, then dataAccess + log (siteId enrichment).
+      expect(handlers.handleListMarketsSubworkspace).to.have.been.calledOnce;
+      const listArgs = handlers.handleListMarketsSubworkspace.firstCall.args;
+      expect(listArgs[0]).to.deep.equal({ name: 'transport' });
+      expect(listArgs[1]).to.equal(BRAND);
+      expect(listArgs[2]).to.equal('subworkspace-ws-1');
+      expect(listArgs[3]).to.exist; // ctx.dataAccess passed for siteId enrichment
       expect(handlers.handleListMarkets).to.not.have.been.called;
     });
 
@@ -1342,6 +1357,53 @@ describe('SerenityController', () => {
       }));
       expect(response.status).to.equal(409);
       expect(ensureMarketSiteStub).to.not.have.been.called;
+    });
+
+    it('createMarket derives brandDomain from a supplied siteId and links THAT site (LLMO-6405)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      resolveSiteDomainStub.resolves('acme.com');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', siteId: 'site-onboarded', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      expect(resolveSiteDomainStub).to.have.been.calledOnceWith(ctx.dataAccess, 'site-onboarded');
+      // Handler receives the derived brandDomain.
+      const handlerBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(handlerBody.brandDomain).to.equal('acme.com');
+      // ensureMarketSite links THAT site directly (siteId + derived domain).
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts).to.include({ siteId: 'site-onboarded', domain: 'acme.com' });
+    });
+
+    it('createMarket 400s when a supplied siteId does not resolve to a domain', async () => {
+      resolveSiteDomainStub.resolves(null);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', siteId: 'site-bad', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+      expect(ensureMarketSiteStub).to.not.have.been.called;
+    });
+
+    it('createMarket does NOT resolve siteId when brandDomain is supplied (regression: unchanged)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(resolveSiteDomainStub).to.not.have.been.called;
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts.domain).to.equal('x.com');
+      expect(opts.siteId).to.equal(undefined); // no siteId supplied → link by domain only
     });
 
     it('createMarket forwards the brand aliases so the project carries them', async () => {
@@ -1459,6 +1521,40 @@ describe('SerenityController', () => {
       }));
       const opts = handlers.handleDeleteMarketSubworkspace.firstCall.args[5];
       expect(opts.dynamicAllocation).to.equal(true);
+    });
+
+    it('deleteMarket unlinks the orphaned market site when the handler reports a deletedSiteId (LLMO-6405 R12)', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204, deletedSiteId: 'site-x' });
+      getBrandBaseSiteIdStub.resolves('primary-site'); // different from the deleted market site
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } });
+      const response = await controller.deleteMarket(ctx);
+      expect(response.status).to.equal(204);
+      expect(getBrandBaseSiteIdStub).to.have.been.calledOnceWith(ORG, BRAND);
+      expect(unlinkMarketSiteIfOrphanedStub).to.have.been.calledOnce;
+      const [passedCtx, args] = unlinkMarketSiteIfOrphanedStub.firstCall.args;
+      expect(passedCtx).to.equal(ctx);
+      expect(args).to.deep.equal({ brandId: BRAND, siteId: 'site-x', primarySiteId: 'primary-site' });
+    });
+
+    it('deleteMarket does NOT attempt an unlink when the handler reports no deletedSiteId', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204, deletedSiteId: null });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
+      expect(response.status).to.equal(204);
+      expect(getBrandBaseSiteIdStub).to.not.have.been.called;
+      expect(unlinkMarketSiteIfOrphanedStub).to.not.have.been.called;
+    });
+
+    it('deleteMarket skips the unlink (fail-safe) when the primary-site lookup fails', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204, deletedSiteId: 'site-x' });
+      getBrandBaseSiteIdStub.rejects(new Error('db down'));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
+      // Still a clean 204 (best-effort); the orphan link is left rather than risk
+      // removing the primary on an unknown primary-site.
+      expect(response.status).to.equal(204);
+      expect(unlinkMarketSiteIfOrphanedStub).to.not.have.been.called;
     });
 
     it('getMarket defaults the path slice to an empty object when ctx.params is absent post-auth', async () => {

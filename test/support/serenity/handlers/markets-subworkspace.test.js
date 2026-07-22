@@ -95,6 +95,18 @@ const createBody = {
   market: 'us', languageCode: 'en', brandDomain: 'example.com', brandNames: ['B'], brandDisplayName: 'B',
 };
 
+// A BrandSemrushProject mapping row stub for siteId-enrichment tests.
+function bspRow({
+  geo = 2840, lang = 'en', siteId = null, deletedAt = null,
+} = {}) {
+  return {
+    getGeoTargetId: () => geo,
+    getLanguageCode: () => lang,
+    getSiteId: () => siteId,
+    getDeletedAt: () => deletedAt,
+  };
+}
+
 describe('markets-subworkspace handlers', () => {
   afterEach(() => {
     sinon.restore();
@@ -114,6 +126,58 @@ describe('markets-subworkspace handlers', () => {
     it('returns an empty list for an empty workspace', async () => {
       const result = await handleListMarketsSubworkspace(makeTransport(), BRAND, WS);
       expect(result.items).to.deep.equal([]);
+    });
+
+    it('leaves siteId null when no dataAccess is supplied (best-effort)', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const result = await handleListMarketsSubworkspace(transport, BRAND, WS);
+      expect(result.items[0].siteId).to.equal(null);
+    });
+
+    it('enriches each slice with its siteId from the brand mapping rows (LLMO-6405)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({ geo: 2840, lang: 'en' }), proj({ id: 'p2', geo: 2276, lang: 'de' })],
+        }),
+      });
+      const dataAccess = {
+        BrandSemrushProject: {
+          allByBrandId: sinon.stub().resolves([
+            bspRow({ geo: 2840, lang: 'en', siteId: 'site-us' }),
+            bspRow({ geo: 2276, lang: 'de', siteId: null }),
+          ]),
+        },
+      };
+      const result = await handleListMarketsSubworkspace(transport, BRAND, WS, dataAccess, log);
+      const bySlice = Object.fromEntries(
+        result.items.map((m) => [`${m.geoTargetId}#${m.languageCode}`, m.siteId]),
+      );
+      expect(bySlice['2840#en']).to.equal('site-us');
+      expect(bySlice['2276#de']).to.equal(null);
+    });
+
+    it('ignores tombstoned mapping rows when enriching siteId', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const dataAccess = {
+        BrandSemrushProject: {
+          allByBrandId: sinon.stub().resolves([
+            bspRow({
+              geo: 2840, lang: 'en', siteId: 'site-dead', deletedAt: '2026-01-01T00:00:00Z',
+            }),
+          ]),
+        },
+      };
+      const result = await handleListMarketsSubworkspace(transport, BRAND, WS, dataAccess, log);
+      expect(result.items[0].siteId).to.equal(null);
+    });
+
+    it('leaves siteId null (never throws) when the mapping read fails', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const dataAccess = {
+        BrandSemrushProject: { allByBrandId: sinon.stub().rejects(new Error('db down')) },
+      };
+      const result = await handleListMarketsSubworkspace(transport, BRAND, WS, dataAccess, log);
+      expect(result.items[0].siteId).to.equal(null);
     });
   });
 
@@ -156,6 +220,44 @@ describe('markets-subworkspace handlers', () => {
       await expect(handleGetMarketSubworkspace(makeTransport(), BRAND, WS, 2840, 'zz9', log))
         .to.be.rejectedWith(/languageCode/);
     });
+
+    it('enriches the resolved slice with its siteId via a point-read (findBySlice, LLMO-6405)', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      // Detail reads ONE slice → point-read via findBySlice, not allByBrandId.
+      const findBySlice = sinon.stub().resolves(bspRow({ geo: 2840, lang: 'en', siteId: 'site-9' }));
+      const dataAccess = { BrandSemrushProject: { findBySlice } };
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log, dataAccess);
+      expect(result.siteId).to.equal('site-9');
+      expect(findBySlice).to.have.been.calledOnceWith(BRAND, 2840, 'en');
+    });
+
+    it('leaves siteId null for a tombstoned mapping row (findBySlice point-read)', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const dataAccess = {
+        BrandSemrushProject: {
+          findBySlice: sinon.stub().resolves(
+            bspRow({
+              geo: 2840, lang: 'en', siteId: 'site-dead', deletedAt: '2026-01-01T00:00:00Z',
+            }),
+          ),
+        },
+      };
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log, dataAccess);
+      expect(result.siteId).to.equal(null);
+    });
+
+    it('leaves siteId null (never throws) when the point-read fails', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const dataAccess = { BrandSemrushProject: { findBySlice: sinon.stub().rejects(new Error('db down')) } };
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log, dataAccess);
+      expect(result.siteId).to.equal(null);
+    });
+
+    it('leaves siteId null when no dataAccess is supplied', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
+      expect(result.siteId).to.equal(null);
+    });
   });
 
   describe('handleCreateMarketSubworkspace', () => {
@@ -174,6 +276,26 @@ describe('markets-subworkspace handlers', () => {
       });
       expect(transport.createProject).to.have.been.calledOnce;
       expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('accepts siteId in place of brandDomain — validation passes (LLMO-6405)', async () => {
+      // The controller derives brandDomain from siteId before dispatch; the
+      // handler's own validation must not reject a siteId-only body.
+      const transport = makeTransport();
+      const brand = makeBrand();
+      const body = {
+        market: 'us', languageCode: 'en', siteId: 'site-1', brandNames: ['B'], brandDisplayName: 'B',
+      };
+      const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, body, log);
+      expect(res.status).to.equal(201);
+    });
+
+    it('400s when neither brandDomain nor siteId is supplied (LLMO-6405)', async () => {
+      const res = await handleCreateMarketSubworkspace(makeTransport(), makeBrand(), PARENT, {
+        market: 'us', languageCode: 'en', brandNames: ['B'],
+      }, log);
+      expect(res.status).to.equal(400);
+      expect(res.body.message).to.match(/brandDomain or siteId/);
     });
 
     it('upserts the mapping row when options.dataAccess is supplied', async () => {
@@ -937,6 +1059,23 @@ describe('markets-subworkspace handlers', () => {
       const dataAccess = { BrandSemrushProject: { findBySemrushProjectId } };
       const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log, { dataAccess });
       expect(res.status).to.equal(204);
+    });
+
+    it('returns the tombstoned row siteId as deletedSiteId (LLMO-6405 R12)', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ id: 'gone-me' })] }) });
+      const row = {
+        getSiteId: () => 'site-42', setDeletedAt: sinon.stub(), save: sinon.stub().resolves(),
+      };
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      const dataAccess = { BrandSemrushProject: { findBySemrushProjectId } };
+      const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log, { dataAccess });
+      expect(res).to.deep.equal({ status: 204, deletedSiteId: 'site-42' });
+    });
+
+    it('returns deletedSiteId null when no dataAccess is supplied', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj({ id: 'gone-me' })] }) });
+      const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', log);
+      expect(res.deletedSiteId).to.equal(null);
     });
   });
 

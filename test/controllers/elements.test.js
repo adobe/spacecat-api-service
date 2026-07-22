@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 import { parseShowTrends, parseUserIntent } from '../../src/controllers/elements.js';
+import { addDaysToDate } from '../../src/support/elements/week-utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -57,6 +58,20 @@ const STATS_RESULT = {
     average_visibility_score: 48.77,
     total_citations: 158903,
   },
+};
+const URL_INSPECTOR_STATS_RESULT = {
+  stats: {
+    uniqueUrls: 187, totalCitations: 964, totalPromptsCited: 312,
+  },
+  weeklyTrends: [
+    {
+      weekStart: '2026-06-25',
+      weekEnd: '2026-07-01',
+      uniqueUrls: 42,
+      totalCitations: 155,
+      totalPromptsCited: 48,
+    },
+  ],
 };
 
 function fakeLog() {
@@ -186,6 +201,8 @@ describe('ElementsController', () => {
       getPrompts: sinon.stub().resolves(PROMPTS_RESULT),
       getWeeks: sinon.stub().resolves(WEEKS_RESULT),
       getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
+      getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
+      getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
       resolveRegionProjectId: sinon.stub().resolves(null),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
@@ -1117,6 +1134,388 @@ describe('ElementsController', () => {
       const ctx = statsCtx();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
+      expect(res.status).to.equal(502);
+    });
+  });
+
+  describe('getUrlInspectorStats', () => {
+    const urlInspectorStatsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/stats${qs}`;
+
+    // Most default-view assertions need the brand to own at least one Semrush
+    // project, or getUrlInspectorStats 404s (see the dedicated empty-projects
+    // test below) before ever reaching the service call.
+    const urlInspectorStatsCtx = (overrides = {}) => {
+      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' });
+      return fakeContext({
+        url: urlInspectorStatsUrl(),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: [project],
+        ...overrides,
+      });
+    };
+
+    it('returns 200 with the service result by default (aggregate view)', async () => {
+      const ctx = urlInspectorStatsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal(URL_INSPECTOR_STATS_RESULT);
+      const [workspaceId, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
+      expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-1' }]);
+      expect(params.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(params.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('returns 404 when the brand has no configured Semrush projects (empty aggregate view)', async () => {
+      serviceStub.getOwnedUrlProjects.resolves([]);
+      const ctx = fakeContext({ url: urlInspectorStatsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.message).to.match(/No Semrush projects configured for brand/);
+      expect(serviceStub.getUrlInspectorStats).to.not.have.been.called;
+    });
+
+    it('passes explicit startDate/endDate/model/platform/categoryId through to the service', async () => {
+      const ctx = urlInspectorStatsCtx({
+        url: urlInspectorStatsUrl('?startDate=2026-07-01&endDate=2026-07-14&model=search-gpt&platform=chatgpt&categoryId=Firefly'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.startDate).to.equal('2026-07-01');
+      expect(params.endDate).to.equal('2026-07-14');
+      expect(params.model).to.equal('search-gpt');
+      expect(params.category).to.equal('Firefly');
+    });
+
+    it('passes model and platform through as separate fields, not pre-merged (matches getStats/prompts-count convention)', async () => {
+      const ctx = urlInspectorStatsCtx({
+        url: urlInspectorStatsUrl('?platform=chatgpt'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.model).to.be.undefined;
+      expect(params.platform).to.equal('chatgpt');
+    });
+
+    it('defaults startDate/endDate to a 28-day trailing window when omitted', async () => {
+      const ctx = urlInspectorStatsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getUrlInspectorStats(ctx);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      const spanDays = (Date.parse(`${params.endDate}T00:00:00Z`)
+        - Date.parse(`${params.startDate}T00:00:00Z`)) / 86400000;
+      expect(spanDays).to.equal(28);
+    });
+
+    it('keeps an explicit startDate and only defaults endDate when endDate alone is omitted', async () => {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      // Pick an explicit startDate close enough to "today" that the resulting
+      // span still passes the 56-day cap, regardless of what "today" is.
+      const explicitStart = addDaysToDate(todayIso, -10);
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl(`?startDate=${explicitStart}`) });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.startDate).to.equal(explicitStart);
+      expect(params.endDate).to.equal(todayIso);
+    });
+
+    it('keeps an explicit endDate and only defaults startDate when startDate alone is omitted', async () => {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const explicitEnd = addDaysToDate(todayIso, -1);
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl(`?endDate=${explicitEnd}`) });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.endDate).to.equal(explicitEnd);
+      expect(params.startDate).to.equal(addDaysToDate(todayIso, -28));
+    });
+
+    it('derives projects from the resolved Markets-element array, not raw brandSemrushProjects (aggregate view)', async () => {
+      // getOwnedUrlProjects (Markets-element-derived) resolves a DIFFERENT set
+      // than brandSemrushProjects (DB rows) — the citation KPIs must be scoped
+      // to the former, since that's what's actually used to scope Stats-per-URL.
+      serviceStub.getOwnedUrlProjects.resolves([
+        { region: 'US', projectId: 'proj-from-markets' },
+      ]);
+      const ctx = urlInspectorStatsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-from-markets' }]);
+    });
+
+    it('returns 400 for a malformed startDate', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?startDate=not-a-date') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for a malformed endDate', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?endDate=not-a-date') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when startDate is after endDate', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?startDate=2026-07-14&endDate=2026-07-01') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the explicit date range exceeds 56 days', async () => {
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl('?startDate=2026-01-01&endDate=2026-12-31') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(400);
+      const body = await readBody(res);
+      expect(body.message).to.match(/Date range must not exceed 56 days/);
+      expect(serviceStub.getUrlInspectorStats).to.not.have.been.called;
+    });
+
+    it('allows an explicit date range of exactly 56 days', async () => {
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl('?startDate=2026-01-01&endDate=2026-02-26') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('resolves region to a single projectId via resolveRegionProjectId', async () => {
+      serviceStub.resolveRegionProjectId.resolves('proj-us');
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?region=US') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({ brandId: BRAND_ID, region: 'US' }),
+      );
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-us' }]);
+    });
+
+    it('returns 404 when region does not resolve to any Semrush market', async () => {
+      serviceStub.resolveRegionProjectId.resolves(null);
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?region=ZZ') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('treats region=all the same as an omitted region (aggregate view)', async () => {
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl('?region=all') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.resolveRegionProjectId).to.not.have.been.called;
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+    });
+
+    it('returns 400 when siteId does not resolve to any brand', async () => {
+      getBrandBySiteStub.resolves(null);
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?siteId=site-without-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when siteId resolves to a different brand than :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: 'some-other-brand-id', name: 'Other Brand' });
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?siteId=site-of-other-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(400);
+      const body = await readBody(res);
+      expect(body.message).to.match(/siteId does not belong to the specified brand/);
+    });
+
+    it('proceeds when siteId resolves to the same brand as :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl('?siteId=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('accepts the site_id snake_case alias for siteId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl('?site_id=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      expect(getBrandBySiteStub).to.have.been.calledWith(ORG_ID, 'site-of-this-brand');
+    });
+
+    it('returns the auth error when brandId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl(), params: { brandId: 'not-a-uuid' } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when the organization is not found', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl(), org: undefined });
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates upstream errors through mapError', async () => {
+      serviceStub.getUrlInspectorStats.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = urlInspectorStatsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(502);
+    });
+  });
+
+  // The 4th URL Inspector KPI card, split out of getUrlInspectorStats — shares
+  // that endpoint's auth/region-resolution scaffolding (see its tests above
+  // for siteId/503/snake_case-alias coverage of that shared logic), calling
+  // service.getPrompts instead of service.getUrlInspectorStats.
+  describe('getUrlInspectorPromptsCount', () => {
+    const promptsCountUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/prompts/count${qs}`;
+
+    const promptsCountCtx = (overrides = {}) => {
+      const project = makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' });
+      return fakeContext({
+        url: promptsCountUrl(),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: [project],
+        ...overrides,
+      });
+    };
+
+    it('returns 200 with { totalPrompts } scoped to the resolved projects (aggregate view)', async () => {
+      const ctx = promptsCountCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ totalPrompts: PROMPTS_RESULT.count });
+      const [workspaceId, params] = serviceStub.getPrompts.firstCall.args;
+      expect(workspaceId).to.equal(SUB_WORKSPACE_ID);
+      expect(params.projectIds).to.deep.equal(['proj-1']);
+    });
+
+    it('resolves region to a single projectId via resolveRegionProjectId', async () => {
+      serviceStub.resolveRegionProjectId.resolves('proj-us');
+      const ctx = fakeContext({ url: promptsCountUrl('?region=US') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({ brandId: BRAND_ID, region: 'US' }),
+      );
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-us']);
+    });
+
+    it('passes categoryId through as a prefixed category__ tag', async () => {
+      const ctx = promptsCountCtx({ url: promptsCountUrl('?categoryId=Firefly') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.getUrlInspectorPromptsCount(ctx);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.tags).to.deep.equal(['category__Firefly']);
+    });
+
+    it('returns 404 when the brand has no configured Semrush projects (empty aggregate view)', async () => {
+      serviceStub.getOwnedUrlProjects.resolves([]);
+      const ctx = fakeContext({ url: promptsCountUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(404);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('returns 404 when region does not resolve to any Semrush market', async () => {
+      serviceStub.resolveRegionProjectId.resolves(null);
+      const ctx = fakeContext({ url: promptsCountUrl('?region=ZZ') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 400 when siteId resolves to a different brand than :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: 'some-other-brand-id', name: 'Other Brand' });
+      const ctx = fakeContext({ url: promptsCountUrl('?siteId=site-of-other-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('proceeds when siteId resolves to the same brand as :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = promptsCountCtx({ url: promptsCountUrl('?siteId=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('accepts the site_id snake_case alias for siteId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = promptsCountCtx({ url: promptsCountUrl('?site_id=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+      expect(getBrandBySiteStub).to.have.been.calledWith(ORG_ID, 'site-of-this-brand');
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+    });
+
+    it('returns the auth error when brandId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl(), params: { brandId: 'not-a-uuid' } });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when the organization is not found', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl(), org: undefined });
+      ctx.dataAccess.Organization.findById.resolves(null);
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('propagates upstream errors through mapError', async () => {
+      serviceStub.getPrompts.rejects(new MockElementsTransportError(503, 'upstream down'));
+      const ctx = promptsCountCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
       expect(res.status).to.equal(502);
     });
   });

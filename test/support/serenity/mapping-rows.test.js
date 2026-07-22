@@ -163,6 +163,19 @@ describe('serenity mapping-rows', () => {
       expect(row.save).to.have.been.calledOnce;
     });
 
+    it('returns the tombstoned row siteId (LLMO-6405 R12); null when unmatched', async () => {
+      const row = fakeRow({ siteId: 'site-42' });
+      const found = { BrandSemrushProject: { findBySemrushProjectId: sinon.stub().resolves(row) } };
+      expect(await tombstoneMappingRow(found, 'proj-1', log)).to.deep.equal({ siteId: 'site-42' });
+
+      const notFound = sinon.stub().resolves(null);
+      const missing = { BrandSemrushProject: { findBySemrushProjectId: notFound } };
+      expect(await tombstoneMappingRow(missing, 'proj-1', log)).to.deep.equal({ siteId: null });
+
+      // A no-data-access / bad-input call also returns the { siteId: null } shape.
+      expect(await tombstoneMappingRow({}, 'proj-1', log)).to.deep.equal({ siteId: null });
+    });
+
     it('logs the alarmed token and swallows a save failure', async () => {
       const row = fakeRow();
       row.save.rejects(new Error('boom'));

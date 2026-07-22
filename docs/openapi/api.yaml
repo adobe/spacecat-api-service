@@ -180,8 +180,16 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topics'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics/{topicId}/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topic-prompts'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/stats:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/prompts/count:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
