@@ -1,3 +1,38 @@
+# [1.679.0](https://github.com/adobe/spacecat-api-service/compare/v1.678.0...v1.679.0) (2026-07-22)
+
+
+### Features
+
+* **llmo:** FACS-hybrid site authorization (hasLlmoCapabilityForSite) ([#2836](https://github.com/adobe/spacecat-api-service/issues/2836)) ([860fca5](https://github.com/adobe/spacecat-api-service/commit/860fca55d67b3b1f05ed1644db07aba72a7756a3))
+
+# [1.678.0](https://github.com/adobe/spacecat-api-service/compare/v1.677.1...v1.678.0) (2026-07-22)
+
+
+### Features
+
+* add content types in SR URL Inspector Filters response ([#2884](https://github.com/adobe/spacecat-api-service/issues/2884)) ([c89f08e](https://github.com/adobe/spacecat-api-service/commit/c89f08e74d885a9eccd21cbe6577bc5ce5320465))
+
+## [1.677.1](https://github.com/adobe/spacecat-api-service/compare/v1.677.0...v1.677.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **llmo:** dedupe brand-presence citation counts by execution_id ([#2881](https://github.com/adobe/spacecat-api-service/issues/2881)) ([49a727f](https://github.com/adobe/spacecat-api-service/commit/49a727f618325ac669489d7ede930d8dca9ef73b))
+
+# [1.677.0](https://github.com/adobe/spacecat-api-service/compare/v1.676.0...v1.677.0) (2026-07-22)
+
+
+### Features
+
+* **serenity:** org-flag brand-create mode, sub-workspace-only pending activation, site_id anchoring (LLMO-6405) ([#2878](https://github.com/adobe/spacecat-api-service/issues/2878)) ([a9d7a4a](https://github.com/adobe/spacecat-api-service/commit/a9d7a4a829094e21759f328be8c60c6cd440175e))
+
+# [1.676.0](https://github.com/adobe/spacecat-api-service/compare/v1.675.0...v1.676.0) (2026-07-22)
+
+
+### Features
+
+* added move site slack command ([#2795](https://github.com/adobe/spacecat-api-service/issues/2795)) ([3757f01](https://github.com/adobe/spacecat-api-service/commit/3757f019896b3810df023876300a191367a675da))
+
 # [1.675.0](https://github.com/adobe/spacecat-api-service/compare/v1.674.0...v1.675.0) (2026-07-22)
 
 

@@ -475,7 +475,7 @@ export default function ElementsController(context, log, env) {
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/filter-dimensions
    * Returns filter dimensions for the URL Inspector dashboard
-   * (brands, regions, topics, categories, page_intents, origins), scoped to
+   * (brands, regions, topics, categories, page_intents, origins, content_types), scoped to
    * that single brand.
    */
   const listUrlInspectorFilterDimensions = async (ctx) => {

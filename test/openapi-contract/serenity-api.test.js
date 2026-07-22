@@ -339,6 +339,7 @@ const FIXTURES = {
       categories: [],
       page_intents: [],
       origins: [],
+      content_types: [{ id: 'owned', label: 'Owned' }],
       tags: [],
     },
   },
