@@ -620,6 +620,18 @@ describe('getRouteHandlers', () => {
     getRedirects: sinon.stub(),
   };
 
+  const mockAuditPolicyController = {
+    getPolicy: sinon.stub(),
+    addExclusions: sinon.stub(),
+    removeExclusions: sinon.stub(),
+    addInclusions: sinon.stub(),
+    removeInclusions: sinon.stub(),
+    listRevisions: sinon.stub(),
+    getScopePages: sinon.stub(),
+    getScopeSummary: sinon.stub(),
+    getScopeSections: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -687,6 +699,7 @@ describe('getRouteHandlers', () => {
       mockProxyController,
       mockTaskManagementController,
       mockRedirectsController,
+      mockAuditPolicyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -1311,6 +1324,15 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'GET /sites/:siteId/audit-policy',
+      'POST /sites/:siteId/audit-policy/exclusions',
+      'POST /sites/:siteId/audit-policy/exclusions/delete',
+      'POST /sites/:siteId/audit-policy/inclusions',
+      'POST /sites/:siteId/audit-policy/inclusions/delete',
+      'GET /sites/:siteId/audit-policy/revisions',
+      'GET /sites/:siteId/audit-scope/pages',
+      'GET /sites/:siteId/audit-scope/summary',
+      'GET /sites/:siteId/audit-scope/sections',
       'GET /organizations/:organizationId/task-management/connections',
       'GET /organizations/:organizationId/task-management/connections/:connectionId',
       'GET /organizations/:organizationId/task-management/tickets',

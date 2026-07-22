@@ -1,3 +1,10 @@
+# [1.682.0](https://github.com/adobe/spacecat-api-service/compare/v1.681.0...v1.682.0) (2026-07-22)
+
+
+### Features
+
+* **audit-policy:** spacecat-api-service contract — policy CRUD + 501 scope stubs (SITES-47306) ([#2723](https://github.com/adobe/spacecat-api-service/issues/2723)) ([16370c1](https://github.com/adobe/spacecat-api-service/commit/16370c111f04c7f68ceb3a186a6f6fcad2298e36)), closes [#204](https://github.com/adobe/spacecat-api-service/issues/204) [Hi#level](https://github.com/Hi/issues/level) [#184](https://github.com/adobe/spacecat-api-service/issues/184) [#204](https://github.com/adobe/spacecat-api-service/issues/204) [#755](https://github.com/adobe/spacecat-api-service/issues/755)
+
 # [1.681.0](https://github.com/adobe/spacecat-api-service/compare/v1.680.1...v1.681.0) (2026-07-22)
 
 

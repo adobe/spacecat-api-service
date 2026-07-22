@@ -111,6 +111,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -179,6 +180,7 @@ export default function getRouteHandlers(
   proxyController,
   taskManagementController,
   redirectsController,
+  auditPolicyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -340,6 +342,17 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
     'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
     'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
+
+    // Audit Policy contract (SITES-47306). Static segments precede dynamic :auditType match.
+    'GET /sites/:siteId/audit-policy': auditPolicyController.getPolicy,
+    'POST /sites/:siteId/audit-policy/exclusions': auditPolicyController.addExclusions,
+    'POST /sites/:siteId/audit-policy/exclusions/delete': auditPolicyController.removeExclusions,
+    'POST /sites/:siteId/audit-policy/inclusions': auditPolicyController.addInclusions,
+    'POST /sites/:siteId/audit-policy/inclusions/delete': auditPolicyController.removeInclusions,
+    'GET /sites/:siteId/audit-policy/revisions': auditPolicyController.listRevisions,
+    'GET /sites/:siteId/audit-scope/pages': auditPolicyController.getScopePages,
+    'GET /sites/:siteId/audit-scope/summary': auditPolicyController.getScopeSummary,
+    'GET /sites/:siteId/audit-scope/sections': auditPolicyController.getScopeSections,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
