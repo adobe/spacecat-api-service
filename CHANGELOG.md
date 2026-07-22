@@ -1,3 +1,16 @@
+# [1.680.0](https://github.com/adobe/spacecat-api-service/compare/v1.679.1...v1.680.0) (2026-07-22)
+
+
+### Bug Fixes
+
+* **llmo:** 404 brand-claims when the S3 object is missing ([#2887](https://github.com/adobe/spacecat-api-service/issues/2887)) ([9004c4b](https://github.com/adobe/spacecat-api-service/commit/9004c4b7119fcf6c807ad1cbd56efbde1eb50bff))
+
+
+### Features
+
+* bind Semrush markets to SpaceCat Site entities (LLMO-6405) ([#2888](https://github.com/adobe/spacecat-api-service/issues/2888)) ([f4f891d](https://github.com/adobe/spacecat-api-service/commit/f4f891de904661bfa261330fda2f874d089bff09))
+* Serenity Data Insights topics + prompts endpoints | LLMO-6418 ([#2885](https://github.com/adobe/spacecat-api-service/issues/2885)) ([720e9f0](https://github.com/adobe/spacecat-api-service/commit/720e9f06046b08af426e4b62cea9f2a48587f660))
+
 ## [1.679.1](https://github.com/adobe/spacecat-api-service/compare/v1.679.0...v1.679.1) (2026-07-22)
 
 
