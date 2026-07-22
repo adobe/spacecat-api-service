@@ -2265,6 +2265,45 @@ describe('handlers/prompts.js — unified intent classification (serenity-docs#3
     expect(transport.listProjectTags).to.have.callCount(4);
     expect(c.tagIds).to.deep.equal(['z', TAG_IDS.intentCommercial]);
   });
+
+  // Strip-by-root, not strip-by-name (the intent twin of the `type` collision
+  // gate): a customer category may legitimately be named `Commercial` without
+  // being the `intent` value. Only ids beneath the `intent` root are the
+  // server's to overwrite, even when the computed intent shares that bare name.
+  it('leaves a same-named category tag alone while stripping the real intent value', async () => {
+    const decoyCategoryId = 'category-commercial-decoy';
+    const levels = dimensionTreeLevels();
+    levels[TAG_IDS.categoryRoot] = [
+      ...levels[TAG_IDS.categoryRoot],
+      {
+        id: decoyCategoryId,
+        name: 'Commercial',
+        parent_id: TAG_IDS.categoryRoot,
+        children_count: 0,
+        path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+      },
+    ];
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(levels),
+      createProjectTags: sinon.stub(),
+    };
+    // The server classifies this text's intent as `Commercial`.
+    const intentByText = new Map([['is Acme worth it?', 'Commercial']]);
+    const inject = makeIntentInjector(transport, WORKSPACE, intentByText, fakeLog());
+
+    // The caller supplies the decoy CATEGORY named `Commercial` plus a stale
+    // `intent` id; only the intent-root id is stripped and replaced.
+    const out = await inject('proj-1', {
+      text: 'is Acme worth it?',
+      geoTargetId: 2840,
+      tagIds: [decoyCategoryId, TAG_IDS.intentInformational],
+    });
+
+    // The `Commercial` CATEGORY survives; the intent-root id is stripped and the
+    // computed `Commercial` intent id injected.
+    expect(out.tagIds).to.deep.equal([decoyCategoryId, TAG_IDS.intentCommercial]);
+    expect(transport.createProjectTags).to.not.have.been.called;
+  });
 });
 
 describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)', () => {
