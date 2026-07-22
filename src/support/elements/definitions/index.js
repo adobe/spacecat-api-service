@@ -13,6 +13,10 @@
 export { buildBrandsPayload, transformBrandsToFilterDimensions } from './brands.js';
 export { buildMarketsPayload, transformMarketsToFilterDimensions } from './markets.js';
 export {
+  buildContentTypesPayload,
+  transformContentTypesToFilterDimensions,
+} from './content-types.js';
+export {
   buildTopicsPayload,
   transformTopicsForFilterDimensions,
   transformCategoriesToFilterDimensions,
