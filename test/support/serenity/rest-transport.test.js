@@ -986,9 +986,10 @@ describe('Semrush REST transport', () => {
   });
 
   describe('getProjectStatus', () => {
-    // LLMO-5492 / AC3 — the publish-completion read. Uses the v1 default project
-    // view (no draft/type=ai query) so `publish_status` is echoed faithfully.
-    it('GETs /v1/workspaces/{ws}/projects/{pid} with no body', async () => {
+    // LLMO-5492 / AC3 — the publish-completion read. Uses the draft view
+    // (draft=true) so a never-published project's `publish_status` is echoed
+    // faithfully (the live view empties a never-published draft, serenity-docs #12 §10).
+    it('GETs /v1/workspaces/{ws}/projects/{pid} with draft=true and no body', async () => {
       fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'live' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -997,8 +998,9 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
       expect(call.url).to.match(
-        new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}(\\?|$)`),
+        new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}\\?`),
       );
+      expect(call.url).to.include('draft=true');
       expect(call.body).to.equal(undefined);
       expect(out.publish_status).to.equal('live');
     });

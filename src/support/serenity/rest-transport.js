@@ -474,11 +474,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * @returns {Promise<object>} raw project JSON carrying `publish_status`.
      */
     async getProjectStatus(semrushWorkspaceId, projectId) {
+      // draft:'true' reads the draft view, which echoes `publish_status` for a
+      // never-published project; the live view (draft:'false') empties a
+      // never-published draft's config (serenity-docs #12 §10) so its status
+      // can't be read back. Matches getProject's default (draft:true).
       return projects.getProject(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId },
-            query: { draft: 'false', type: 'ai' },
+            query: { draft: 'true', type: 'ai' },
           },
         },
       );

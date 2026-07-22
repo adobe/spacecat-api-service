@@ -84,6 +84,11 @@ const sliceKey = (geoTargetId, languageCode) => `${Number(geoTargetId)}::${Strin
  *   project after publish (bounded to the Lambda budget; the unbounded ≤900s
  *   reconcile loop is the DRS/worker's job, not this Lambda's).
  * @param {number} [options.confirmIntervalMs=0] - Delay between confirm reads.
+ * @param {number} [options.deadlineMs] - Epoch-ms wall-time deadline (e.g. from
+ *   the Lambda's getRemainingTimeInMillis). When the remaining budget drops below
+ *   a safety margin, remaining projects are deferred to the worker reconcile
+ *   (publishPending, reason 'deadline') instead of risking a mid-publish timeout.
+ *   Omitted → unbounded (publish every project).
  * @returns {Promise<{prompts: object, models: Array, published: string[],
  *   publishPending: Array, publishSkipped: Array, publishFailed: Array}>}
  */
@@ -268,9 +273,30 @@ export async function finalizeSerenityProjects(
   //      - accepted but not confirmed live in-budget, OR status unreadable, OR
   //        no getProjectStatus            → publishPending (worker reconciles) —
   //        we never report an unconfirmed 202 as live.
-  const { confirmAttempts = 1, confirmIntervalMs = 0 } = options;
+  const {
+    confirmAttempts = 1, confirmIntervalMs = 0, deadlineMs,
+  } = options;
   const canConfirm = typeof transport.getProjectStatus === 'function';
-  for (const projectId of publishable) {
+  // Wall-time guard: publish is sequential (publish + bounded confirm per
+  // project), so a large brand could exceed the Lambda budget. When the caller
+  // supplies `deadlineMs` (epoch ms, e.g. from getRemainingTimeInMillis), stop
+  // publishing once the remaining budget drops below WALL_SAFETY_MS and hand the
+  // rest to the worker reconcile as `publishPending` (reason: 'deadline') rather
+  // than risk an abrupt timeout mid-publish. No deadline → unbounded (as today).
+  const WALL_SAFETY_MS = 5000;
+  for (let i = 0; i < publishable.length; i += 1) {
+    const projectId = publishable[i];
+    if (deadlineMs && Date.now() + WALL_SAFETY_MS >= deadlineMs) {
+      for (const remaining of publishable.slice(i)) {
+        publishPending.push({ projectId: remaining, status: null, reason: 'deadline' });
+      }
+      log?.warn?.(
+        'finalizeSerenityProjects: wall-time budget nearly exhausted — deferring '
+        + 'remaining publishes to the worker reconcile',
+        { brandId, deferred: publishable.length - i },
+      );
+      break;
+    }
     try {
       // eslint-disable-next-line no-await-in-loop
       await transport.publishProject(semrushWorkspaceId, projectId);

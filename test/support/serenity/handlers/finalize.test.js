@@ -234,4 +234,33 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(out.published).to.deep.equal(['proj-1']);
     expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
   });
+
+  it('defers remaining publishes to the reconcile when the wall-time budget is exhausted', async () => {
+    dataAccess.BrandSemrushProject.allByBrandId.resolves([
+      row('proj-1', 2840, 'en'),
+      row('proj-2', 2724, 'es'),
+    ]);
+    const body = {
+      prompts: [{ text: 'q', geoTargetId: 2840, languageCode: 'en' }],
+      models: [
+        { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
+        { geoTargetId: 2724, languageCode: 'es', modelIds: ['m1'] },
+      ],
+    };
+    // deadline already passed → the guard fires before the first publish.
+    const out = await finalizeSerenityProjects(
+      transport,
+      dataAccess,
+      BRAND,
+      WS,
+      body,
+      noopLog,
+      undefined,
+      { deadlineMs: Date.now() - 1 },
+    );
+    expect(transport.publishProject).to.not.have.been.called;
+    expect(out.published).to.be.empty;
+    expect(out.publishPending).to.have.lengthOf(2);
+    expect(out.publishPending.every((p) => p.reason === 'deadline')).to.be.true;
+  });
 });

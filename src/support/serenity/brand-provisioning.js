@@ -179,6 +179,20 @@ export async function provisionBrandSubworkspace(context, {
     }
   };
 
+  // LLMO-5492 publish-after-populate: defer-publish flag ON → leave the project a
+  // DRAFT ('skip') for a later finalize step (prompts + models pushed, published
+  // once). OFF (default) preserves inline publish: a project with models OR
+  // generated prompts has real units and must publish ('require'); an empty
+  // project would publish "empty units" (a disguised quota 405), so leave it a
+  // draft ('best-effort') instead of failing the create.
+  /** @type {'require' | 'best-effort' | 'skip'} */
+  let publishMode = 'best-effort';
+  if (isSerenityDeferPublishEnabled(context.env)) {
+    publishMode = 'skip';
+  } else if ((Array.isArray(modelIds) && modelIds.length > 0) || generateTopics) {
+    publishMode = 'require';
+  }
+
   let result;
   try {
     result = await handleCreateMarketSubworkspace(
@@ -210,21 +224,7 @@ export async function provisionBrandSubworkspace(context, {
         brandAliases,
         brandUrlSources,
         competitors,
-        // LLMO-5492 publish-after-populate: when the defer-publish flag is ON,
-        // leave the project a DRAFT ('skip') so a later finalize step pushes the
-        // DRS-generated prompts + models and publishes once. Flag OFF (default)
-        // preserves the inline-publish behavior byte-for-byte:
-        // A project with neither models nor generated prompts would publish
-        // "empty units", which Semrush rejects with a disguised quota 405
-        // (workspace doc §5). Tolerate that by leaving it a draft (best-effort)
-        // instead of failing the whole create; a project that has models OR
-        // prompts has real units and must publish (require).
-        // eslint-disable-next-line no-nested-ternary
-        publishMode: isSerenityDeferPublishEnabled(context.env)
-          ? 'skip'
-          : (((Array.isArray(modelIds) && modelIds.length > 0) || generateTopics)
-            ? 'require'
-            : 'best-effort'),
+        publishMode,
       },
     );
   } catch (e) {
