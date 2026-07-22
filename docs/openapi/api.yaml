@@ -186,6 +186,10 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topic-prompts'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/stats:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/prompts/count:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:

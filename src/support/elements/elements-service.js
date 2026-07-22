@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { ELEMENT_IDS } from './element-ids.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
@@ -55,6 +56,7 @@ import {
   transformStatsVisibilityResponse,
   buildStatsCitationsPayload,
   transformStatsCitationsResponse,
+  aggregateUrlInspectorStats,
 } from './definitions/index.js';
 
 // Bounds parallel per-week upstream fan-out for the /stats trends array (up to
@@ -630,6 +632,156 @@ export function createElementsService(transport, log) {
       }
 
       return response;
+    },
+
+    /**
+     * Fetches 3 of the 4 URL Inspector stats KPI cards
+     * (`GET .../url-inspector/stats`) — `uniqueUrls`, `totalCitations`,
+     * `totalPromptsCited` — plus a per-week breakdown, matching the response
+     * shape of the Aurora/Postgres reference endpoint
+     * (`docs/llmo-brandalf-apis/url-inspector-stats-api.md`) minus its
+     * `totalPrompts` field. The 4th card (`totalPrompts`) is served by
+     * {@link getPrompts} via the separate `/url-inspector/prompts/count`
+     * endpoint — split out because it has no per-project Stats-per-URL
+     * fan-out (this method's actual timeout/rate-limit cost) and no date
+     * scoping, so bundling it here only made the fast card wait on the slow
+     * ones. Known approximation gap: `totalPromptsCited` overcounts (see
+     * {@link aggregateUrlInspectorStats}).
+     *
+     * `uniqueUrls`/`totalCitations`/`totalPromptsCited` reuse the same
+     * Stats-per-URL element (9af5ed83) as `getOwnedUrls`, fanned out per project
+     * (region) like it — but WITHOUT the URL_TRENDS element (no per-URL trend
+     * needed here), via {@link aggregateUrlInspectorStats}.
+     *
+     * `weeklyTrends` reuses `splitDateRangeIntoWeeksBackward`, but with an
+     * ADAPTIVE week cap — `floor(STATS_FANOUT_CONCURRENCY / scopes.length)`,
+     * not the fixed 8-week cap `getBrandPresenceStats` uses — so the
+     * `(week x scope)` fan-out always fits in a single concurrency-bounded
+     * batch (one round-trip's worth of wall time) instead of needing multiple
+     * sequential batches on a brand with several markets. A single-project
+     * request still gets the full 8 weeks (8/1 = 8); a 3-project aggregate
+     * view gets only 2. `stats` (the aggregate card values) always covers the
+     * full requested range regardless — only the per-week breakdown narrows.
+     *
+
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {Array<{region?: string, projectId?: string}>} [params.projects] -
+     *   Projects to query for the citation KPIs. Empty → one unscoped
+     *   (workspace-wide) fetch.
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD.
+     * @param {string} [params.category] - Category tag filter.
+     * @returns {Promise<{stats: object, weeklyTrends: object[]}>} `stats` and
+     *   each `weeklyTrends` entry also carry `partial: boolean` — true when at
+     *   least one of the underlying Stats-per-URL calls for that
+     *   range/scope failed (see {@link fetchScopeStats}); the aggregate is
+     *   still returned, computed from whichever scopes succeeded.
+     */
+    async getUrlInspectorStats(workspaceId, {
+      projects = [], model, platform, startDate, endDate, category,
+    }) {
+      // Only fan out over scopes that actually resolved to a Semrush project
+      // id. A `projects` entry without one (e.g. a mixed array where one
+      // region failed to resolve upstream) would otherwise reach
+      // buildOwnedUrlsStatsPayload as `projectId: undefined` — an unscoped,
+      // workspace-wide (cross-brand) Stats-per-URL call — even though the
+      // caller's own empty-scope guard runs against a separately filtered
+      // list and would not catch it. `[{}]` (the deliberate unscoped
+      // single-call fallback) is untouched: it only applies when no
+      // `projects` were requested at all.
+      const scopes = projects.length > 0
+        ? projects.filter((p) => hasText(p?.projectId))
+        : [{}];
+      // Single flat bound across the WHOLE (week x project) fan-out. Nesting
+      // a per-week bound around a per-project bound (as an earlier version
+      // did) multiplies the two — weekConcurrency x projectConcurrency
+      // in-flight calls at once — well past what either constant alone
+      // documents, on the very endpoint that was split out because of
+      // Semrush timeouts/rate-limits (see this method's docstring).
+      const STATS_FANOUT_CONCURRENCY = 8;
+
+      // Per-scope, non-fatal: one failing project/week must not fail the
+      // whole KPI response — failure probability scales with markets x weeks
+      // on this fan-out (up to 9 ranges x N projects). Skip the failed scope
+      // and flag the aggregate as `partial` instead of rejecting.
+      const fetchScopeStats = async (rangeStart, rangeEnd, projectId) => {
+        try {
+          const stats = await transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.STATS_PER_URL,
+            buildOwnedUrlsStatsPayload({
+              model, platform, startDate: rangeStart, endDate: rangeEnd, category, projectId,
+            }),
+          );
+          return { stats };
+        } catch (e) {
+          log?.warn?.('url-inspector-stats: Stats-per-URL fetch failed, skipping scope', {
+            workspaceId, projectId, rangeStart, rangeEnd, error: e?.message,
+          });
+          return { stats: null, failed: true };
+        }
+      };
+
+      const aggregate = (results) => ({
+        ...aggregateUrlInspectorStats(results),
+        partial: results.some((r) => r.failed),
+      });
+
+      // This endpoint sits behind an API-Gateway-fronted route with a hard
+      // ~29-30s integration timeout that no Lambda-side setting can raise
+      // (the Lambda's own 900s timeout is irrelevant if the gateway kills the
+      // client-facing response first) — and a real measured Semrush
+      // Stats-per-URL call is already close to that ceiling on its own (see
+      // elements-transport.js's DEFAULT_TIMEOUT_MS). So a SECOND sequential
+      // round of concurrent calls (i.e. `weeks.length * scopes.length` tasks
+      // needing more than one `STATS_FANOUT_CONCURRENCY`-wide batch) reliably
+      // blows the budget. Cap the trended weeks so the fan-out below always
+      // fits in exactly one batch/round-trip: full 8-week trends for the
+      // common single-project case (8/1 = 8, unchanged), fewer weeks for a
+      // brand with more markets (e.g. 3 projects -> 2 weeks) rather than more
+      // sequential batches. This is narrower than the fixed 8-week cap used
+      // by getBrandPresenceStats, which has no per-project fan-out to compound.
+      const maxTrendWeeks = Math.max(
+        1,
+        Math.floor(STATS_FANOUT_CONCURRENCY / Math.max(scopes.length, 1)),
+      );
+      const weeks = splitDateRangeIntoWeeksBackward(startDate, endDate, undefined, maxTrendWeeks);
+
+      // The aggregate `stats` fetch and the weekly `weeklyTrends` fan-out are
+      // independent Semrush calls — run them CONCURRENTLY (not one after the
+      // other) so this endpoint costs one round-trip's worth of wall time,
+      // not two, against the same gateway ceiling.
+      const [stats, weekScopeResults] = await Promise.all([
+        mapWithConcurrency(
+          scopes,
+          STATS_FANOUT_CONCURRENCY,
+          ({ projectId }) => fetchScopeStats(startDate, endDate, projectId),
+        ).then(aggregate),
+        // Flattened (week, scope) task list under the ONE bound above — not a
+        // per-week map of per-project maps — so the fan-out cost is exactly
+        // `weeks.length * scopes.length` in-flight-bounded calls, never more.
+        mapWithConcurrency(
+          weeks.flatMap((week) => scopes.map((scope) => ({ week, scope }))),
+          STATS_FANOUT_CONCURRENCY,
+          ({ week, scope }) => fetchScopeStats(week.startDate, week.endDate, scope.projectId),
+        ),
+      ]);
+      // `weekScopeResults` is in (week, scope) order (flatMap preserves it),
+      // so each week's `scopes.length`-sized slice is contiguous.
+      //
+      // `weekStart`/`weekEnd` are the actual fetched window boundaries — NOT
+      // calendar-ISO-week-aligned (they're 7-day windows built backward from
+      // `endDate`, same as `getBrandPresenceStats`'s trends), so no `week`
+      // ("YYYY-Www") label is attached; that would misrepresent the boundary as
+      // Monday-Sunday when it may not be.
+      const weeklyTrends = weeks.map((week, i) => ({
+        weekStart: week.startDate,
+        weekEnd: week.endDate,
+        ...aggregate(weekScopeResults.slice(i * scopes.length, (i + 1) * scopes.length)),
+      }));
+
+      return { stats, weeklyTrends };
     },
   };
 }

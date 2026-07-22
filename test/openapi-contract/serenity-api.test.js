@@ -479,6 +479,46 @@ const FIXTURES = {
       ],
     },
   },
+  // Also served by ElementsController — see the note on
+  // listSerenityUrlInspectorFilterDimensions above.
+  getSerenityUrlInspectorStats: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getUrlInspectorStats',
+    serviceMethod: 'getUrlInspectorStats',
+    handlerResult: {
+      stats: {
+        uniqueUrls: 187,
+        totalCitations: 964,
+        totalPromptsCited: 312,
+        partial: false,
+      },
+      weeklyTrends: [
+        {
+          weekStart: '2026-06-25',
+          weekEnd: '2026-07-01',
+          uniqueUrls: 42,
+          totalCitations: 155,
+          totalPromptsCited: 48,
+          partial: false,
+        },
+      ],
+    },
+  },
+  // Split from getSerenityUrlInspectorStats (LLMO-6185 timeout follow-up) — the
+  // controller calls service.getPrompts (shared with listPrompts) and reports
+  // only its `count`, so the fixture mimics getPrompts's real `{count, prompts}`
+  // shape rather than stubbing a dedicated service method.
+  getSerenityUrlInspectorPromptsCount: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getUrlInspectorPromptsCount',
+    serviceMethod: 'getPrompts',
+    handlerResult: {
+      count: 1250,
+      prompts: [],
+    },
+  },
 };
 
 function makeAjv() {
@@ -547,6 +587,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
               createElementsService: () => ({
                 [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
                 resolveRegionProjectId: sinon.stub().resolves(null),
+                // Only consumed by getUrlInspectorStats's aggregate (no-region)
+                // path — without at least one project, it 404s before ever
+                // reaching the service call (mirrors getStats's BrandSemrushProject
+                // fixture above).
+                getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
               }),
             },
           },

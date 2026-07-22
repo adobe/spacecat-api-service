@@ -11996,6 +11996,85 @@ SerenityBrandPresenceStats:
             properties:
               stats: { $ref: '#/SerenityBrandPresenceStatsValues' }
 
+SerenityUrlInspectorStatsValues:
+  type: object
+  description: The URL-derived URL Inspector KPI values, shared by the top-level `stats` and each `weeklyTrends[]` entry. The fourth KPI card (`totalPrompts`) is served by the separate `/url-inspector/prompts/count` endpoint — see `SerenityUrlInspectorPromptsCount`.
+  required: [uniqueUrls, totalCitations, totalPromptsCited, partial]
+  properties:
+    uniqueUrls:
+      type: number
+      description: Distinct owned URLs cited in range, from the Semrush Stats-per-URL element.
+    totalCitations:
+      type: number
+      description: Total citations across owned URLs in range.
+    totalPromptsCited:
+      type: number
+      description: Sum of each owned URL's `prompts_with_citation` count. An UPPER BOUND, not a true distinct-prompt count — Semrush exposes no distinct-prompts-cited element, so a prompt citing more than one owned URL is counted once per URL.
+    partial:
+      type: boolean
+      description: True when at least one of the underlying per-project Stats-per-URL calls for this range failed and was skipped — the KPI values above are computed from whichever projects succeeded, not a full failure.
+
+SerenityUrlInspectorStats:
+  type: object
+  description: |
+    URL Inspector stats KPI cards for a brand over a date range, backed by the
+    Semrush Elements API (Stats-per-URL). Split from `totalPrompts` (see
+    `/url-inspector/prompts/count`) so a brand with many Semrush projects
+    doesn't time out fetching all four cards in one request — this endpoint's
+    per-project Stats-per-URL fan-out (up to 8 weeks x N projects) is the slow
+    part; `totalPrompts` is a single, unscoped call and loads independently.
+  required: [stats, weeklyTrends]
+  properties:
+    stats:
+      allOf:
+        - $ref: '#/SerenityUrlInspectorStatsValues'
+      description: Aggregated stats for the full `[startDate, endDate]` range.
+    weeklyTrends:
+      type: array
+      description: |
+        Always present (no opt-in flag). One entry per week, split backward
+        from `endDate` into up to 8 7-day weeks — capped independently of the
+        56-day request-range cap, so a caller can never request more weeks
+        than this returns.
+      items:
+        type: object
+        required: [weekStart, weekEnd, uniqueUrls, totalCitations, totalPromptsCited, partial]
+        properties:
+          weekStart:
+            type: string
+            format: date
+            description: Start of this 7-day window. NOT necessarily Monday — these windows are built backward from `endDate`, not calendar-ISO-week-aligned.
+          weekEnd:
+            type: string
+            format: date
+            description: End of this 7-day window.
+          uniqueUrls: { type: number }
+          totalCitations: { type: number }
+          totalPromptsCited: { type: number }
+          partial:
+            type: boolean
+            description: True when at least one of the underlying per-project Stats-per-URL calls for this week failed and was skipped.
+
+SerenityUrlInspectorPromptsCount:
+  type: object
+  description: |
+    URL Inspector "total prompts" KPI card, split out from
+    `/url-inspector/stats` (LLMO-6185 timeout follow-up) — backed by a single
+    Semrush Prompts element call with no per-project fan-out.
+
+    KNOWN, PERMANENT LIMITATION: no weekly trend. The Aurora/Postgres
+    reference endpoint returns this KPI WITH a per-week trend (a time-windowed
+    count of distinct active prompts that ran each week). The Semrush PROMPTS
+    element has no date parameter at all — it's a static, currently-configured
+    roster of prompts, not an execution log — so there is no upstream data to
+    bucket by week for this metric. This is a ceiling of the Semrush data
+    source, not a gap planned for a follow-up.
+  required: [totalPrompts]
+  properties:
+    totalPrompts:
+      type: number
+      description: Total configured prompt count for the brand, from the Semrush Prompts element. NOT date-scoped (that element has no date filter), so there is no weekly breakdown.
+
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
 ReferralTrafficSource:
