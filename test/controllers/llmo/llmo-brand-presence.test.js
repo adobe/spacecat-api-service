@@ -6572,6 +6572,54 @@ describe('llmo-brand-presence', () => {
       ];
       expect(aggregateDetailSources(rows)).to.have.lengthOf(2);
     });
+
+    it('does not double-count citations from multiple rows sharing the same execution_id', () => {
+      // A single execution can produce more than one brand_presence_sources row for
+      // the same URL (e.g. one row per inline citation marker in the answer) —
+      // citationCount must reflect distinct executions, not raw row count.
+      const rows = [
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(1);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 1 }]);
+    });
+
+    it('counts citations once per distinct execution_id', () => {
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', execution_id: 'exec-1', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-09', execution_id: 'exec-2', prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(2);
+    });
   });
 
   // ── createTopicDetailHandler ────────────────────────────────────────────────
