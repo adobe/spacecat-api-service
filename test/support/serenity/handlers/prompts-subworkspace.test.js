@@ -155,7 +155,10 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1', TAG_IDS.intentInformational]);
+      // A create is a user-authenticated write: the derived `origin` (`human`) is
+      // stamped (origin-dimension.md §3) and intent defaults to Informational (Azure
+      // unconfigured, serenity-docs#32), alongside the caller's tag.
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
       expect(result.published).to.equal(true);
     });
@@ -237,13 +240,17 @@ describe('prompts-subworkspace handlers', () => {
         }],
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.intentInformational,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+        TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         ['is Acme good?'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.intentInformational],
+        [
+          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+          TAG_IDS.intentInformational,
+        ],
       );
     });
 

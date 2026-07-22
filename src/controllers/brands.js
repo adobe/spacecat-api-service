@@ -49,6 +49,7 @@ import {
   getPromptStats,
   resolveBrandUuid,
   findPromptsBlockingRegionRemoval,
+  deriveV2PromptOrigin,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -62,11 +63,12 @@ import {
 } from '../support/brands-storage.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
-import { provisionBrandSubworkspace, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
-import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
@@ -227,17 +229,28 @@ function BrandsController(ctx, log, env) {
     // workspace/project UUIDs); never echo it to the client (body or x-error
     // header). Return a generic message and keep the detail to the log. Mirrors
     // the serenity controller's mapError hygiene.
-    if (error instanceof SerenityTransportError) {
-      const status = (error.status === 401 || error.status === 403) ? error.status : 502;
+    //
+    // A Project Engine call throws ProjectEngineApiError directly (LLMO-6386, adaptPE retired). On
+    // its no-HTTP-response path (timeout / exhausted network / missing-IMS-token 401) status is
+    // `undefined` and the original throw is carried as `.cause`; unwrap it — exactly as the retired
+    // adaptPE boundary rethrew that cause — so the auth 401 keeps mapping to 401 rather than
+    // flattening to the generic 502. See unwrapTransportCause (errors.js).
+    const err = unwrapTransportCause(error);
+    if (isSemrushTransportError(err)) {
+      const status = (err.status === 401 || err.status === 403) ? err.status : 502;
       const message = status === 502 ? 'Upstream request failed' : 'Upstream authorization failed';
       return createResponse({ message }, status, { [HEADER_ERROR]: message });
     }
-    if (error.status) {
-      return createResponse({ message: error.message }, error.status, {
-        [HEADER_ERROR]: error.message,
+    // Not a Semrush transport error: an app-level ErrorWithStatusCode (has `.status`), or a bare
+    // Error whose safe message passes through. `err` is unwrapTransportCause's `unknown` return;
+    // mirror the original any-typed access to `.status`/`.message` on the (unwrapped) error.
+    const appErr = /** @type {{ status?: number; message?: string }} */ (err);
+    if (appErr.status) {
+      return createResponse({ message: appErr.message }, appErr.status, {
+        [HEADER_ERROR]: appErr.message,
       });
     }
-    return internalServerError(error.message);
+    return internalServerError(appErr.message);
   }
 
   function validateBrandGuidanceFields(brandData = {}) {
@@ -561,10 +574,36 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
+      // `origin` is derived from the request PRINCIPAL, never trusted from the
+      // body (origin-dimension.md §3): a user (IMS/JWT) write is `human`, body
+      // ignored; a service principal (e.g. DRS via admin x-api-key, whose auth
+      // type is neither `ims` nor `jwt`) is believed. The auth type is read from
+      // the per-request context — the same source as `updatedBy` above — so it
+      // reflects the actual caller. Stamp it here so the store writes the derived
+      // value on insert; on update the stored origin is preserved (upsertPrompts)
+      // and never patched (updatePromptById).
+      //
+      // Fail SAFE to the least-privileged (USER) principal: an ABSENT or
+      // indeterminate auth type must NEVER fall through to the privileged service
+      // path that honours a body-supplied `origin`. Only a KNOWN non-user auth
+      // type (jwt/ims are user; anything else, e.g. DRS admin x-api-key, is
+      // service) is trusted as a service principal. `authWrapper` blocks
+      // unauthenticated requests today, but a future unwrapped caller (an internal
+      // queue consumer, re-ordered middleware) must not silently gain service
+      // privilege — hence `!authType → user`, and a non-function `getType` resolves
+      // to `undefined` (→ user) rather than throwing.
+      const { authInfo } = context.attributes ?? {};
+      const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
+      const isUserPrincipal = !authType || authType === 'jwt' || authType === 'ims';
+      const derivedPrompts = prompts.map((p) => ({
+        ...p,
+        origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
+      }));
+
       const { created, updated, prompts: outPrompts } = await upsertPrompts({
         organizationId: spaceCatId,
         brandUuid,
-        prompts,
+        prompts: derivedPrompts,
         postgrestClient,
         updatedBy,
         classifyIntent: classifyIntent ?? undefined,
@@ -1511,39 +1550,28 @@ function BrandsController(ctx, log, env) {
       const isPendingBrand = brandData.status === 'pending';
       const { semrushMarket } = brandData;
       const hasSemrushMarket = isNonEmptyObject(semrushMarket);
-      // generatePrompts (default false) gates topic/prompt generation ONLY. The
-      // wizard sends it as an explicit boolean for every Semrush-mode create, so
-      // its presence ALSO signals Semrush mode even when no market was picked —
-      // a bare "save and continue later" draft (location/language optional).
+      // generatePrompts (default false) gates topic/prompt generation for a supplied
+      // market ONLY; it no longer signals Semrush mode (see below).
       const generatePrompts = brandData.generatePrompts === true;
-      // The wizard always sends `generatePrompts` as an explicit boolean for a
-      // Semrush-mode create; a flat (non-Semrush) create omits it entirely. So
-      // the mere PRESENCE of the flag (true OR false) is itself a Semrush-mode
-      // signal — but see below: only trusted for a draft.
-      const hasGeneratePromptsFlag = typeof brandData.generatePrompts === 'boolean';
-      // A draft (pending) brand may legitimately be a "sub-workspace-only Semrush
-      // brand, save and continue later": no market, generatePrompts:false. The
-      // flag's presence is what marks it as Semrush mode (see
-      // normalizePendingSemrushProvisioning, which stashes a bare no-prompt draft).
-      const isSubworkspaceOnlyDraft = isPendingBrand && hasGeneratePromptsFlag;
-      // Semrush-mode detection. A LIVE create must carry a POSITIVE signal — a
-      // picked market, or generatePrompts:true (which itself requires a market,
-      // enforced below). We deliberately do NOT treat the mere presence of the
-      // flag as the signal on the live path: a flat caller that defensively sends
-      // `generatePrompts:false` must not be pulled into Semrush provisioning (it
-      // would 400 for a missing primary URL, or worse, provision a sub-workspace
-      // for a brand never meant to have one). Presence is trusted ONLY for a draft.
-      const isSemrushMode = hasSemrushMarket || generatePrompts || isSubworkspaceOnlyDraft;
-      // Serenity rollout gate. Provisioning a Semrush sub-workspace / project for a
-      // brand is a serenity-active operation. While serenity is inactive for the
-      // org, refuse a Semrush-mode create rather than provision upstream: the
-      // flag-gated UI won't request it, and an org still on the normal backend data
-      // must not get a sub-workspace before its rollout flag is flipped on. The
-      // helper is only consulted on the Semrush-mode path, so a plain (flat) create
-      // is unaffected. (Effective gate is flag AND workspace, same as /serenity/*.)
-      if (isSemrushMode && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+      // Semrush-mode detection (LLMO-6405). Mode is the ORG's serenity rollout flag,
+      // NOT the create body: market-scoped inputs (market, AI models, generate-prompts)
+      // have moved out of brand creation into market creation, so in a serenity-active
+      // org EVERY brand create is a Semrush create (§4.1 product invariant) — it
+      // provisions the brand's sub-workspace, and its markets are added afterwards from
+      // the Markets tab. A legacy body market/generatePrompts flag is still HONORED when
+      // present (a supplied market provisions its project as before) but no longer
+      // DECIDES the mode. A flat (brandalf) org is never serenity-active, so its creates
+      // stay flat and untouched. (Effective gate is still flag AND workspace, same as
+      // /serenity/* — resolveWorkspaceId inside provisioning 400s a workspace-less org.)
+      const serenityActive = await isSerenityActiveForOrg(context, spaceCatId, log);
+      // Safety: a non-serenity org must never be pulled into Semrush provisioning by a
+      // stray body field — reject an ACTUAL provisioning request (a supplied market, or
+      // generatePrompts:true). A bare generatePrompts:false from a flat caller is
+      // harmless and stays a flat create.
+      if (!serenityActive && (hasSemrushMarket || generatePrompts)) {
         return forbidden('Serenity is not active for this organization');
       }
+      const isSemrushMode = serenityActive;
       if (isSemrushMode) {
         let market;
         let languageCode;
@@ -1597,7 +1625,7 @@ function BrandsController(ctx, log, env) {
             markets,
             generatePrompts,
           };
-        } else {
+        } else if (hasSemrushMarket) {
           const brandDomain = brandDomainFromPayload(brandData);
           if (!brandDomain || !hasText(brandDomain)) {
             return badRequest('A primary URL is required to provision a Semrush brand');
@@ -1660,6 +1688,18 @@ function BrandsController(ctx, log, env) {
             geoTargetId: provisioned.geoTargetId,
             languageCode: provisioned.languageCode,
           };
+        } else {
+          // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
+          // no project is provisioned. Markets are added afterwards from the Markets
+          // tab. The brand is anchored by its primary site (baseSiteId, persisted by
+          // upsertBrand below) AND by its Semrush sub-workspace.
+          provisionedBrandId = randomUUID();
+          const bare = await provisionBrandSubworkspaceBare(context, {
+            spaceCatId,
+            brandId: provisionedBrandId,
+            brandName: brandData.name,
+          }, log);
+          provisionedWorkspaceId = bare.semrushSubWorkspaceId;
         }
       }
 
@@ -1713,7 +1753,11 @@ function BrandsController(ctx, log, env) {
       // whose catch releases the just-provisioned workspace; a throw here would
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
       // contract (its own catch-all swallows + logs), so this holds.
-      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
+      // Only when an initial MARKET was provisioned (project path) — a
+      // sub-workspace-only create (B) has no market domain to mirror, so it skips
+      // this. The brand's own primary site is set from baseSiteId by upsertBrand.
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)
+        && provisionedBrandDomain && hasText(provisionedBrandDomain)) {
         const linkedSiteId = await ensureMarketSite(context, {
           organizationId: spaceCatId,
           brandId: provisionedBrandId ?? undefined,

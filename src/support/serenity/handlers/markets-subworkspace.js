@@ -15,8 +15,9 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { SerenityTransportError } from '../rest-transport.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import {
+  ERROR_CODES, isUpstreamGone, isMeteredQuota, toQuotaExceededError,
+} from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import {
   resolveLocation,
@@ -214,7 +215,8 @@ function validateCreateBody(body) {
  *   classification (serenity-docs#32).
  * @param {number} [options.writeDeadline] - shared request-write deadline.
  * @param {object} log - logger.
- * @param {{ ensure: Function }} headroom - the caller's headroom guard (createHeadroomGuard) —
+ * @param {{ ensure: Function, retryOnQuota: Function }} headroom - the caller's headroom guard
+ *   (createHeadroomGuard) —
  *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
  *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
  *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
@@ -321,8 +323,15 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
   for (const { items, tagIds } of byTagSet.values()) {
+    // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
+    // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
+    // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
+    // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + type).
     // eslint-disable-next-line no-await-in-loop
-    await transport.createPromptsByIds(workspaceId, projectId, items, tagIds);
+    await headroom.retryOnQuota(
+      () => transport.createPromptsByIds(workspaceId, projectId, items, tagIds),
+      { callSite: 'createPromptsByIds' },
+    );
   }
   return { topicCount: selected.length, promptCount: texts.size };
 }
@@ -483,9 +492,15 @@ export async function handleCreateMarketSubworkspace(
     // PROJECT metering seam: ensure one project of headroom before creating a new project (no-op
     // when the flag is OFF). Not needed on the adopt-existing-draft branch above (no new project).
     await headroom.ensure({ projects: 1 });
-    const createResp = await transport.createProject(
-      workspaceId,
-      buildCreateProjectBody(body, location, languageId, aliasNames),
+    // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
+    // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
+    // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
+    const createResp = await headroom.retryOnQuota(
+      () => transport.createProject(
+        workspaceId,
+        buildCreateProjectBody(body, location, languageId, aliasNames),
+      ),
+      { callSite: 'createProject' },
     );
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
@@ -494,7 +509,7 @@ export async function handleCreateMarketSubworkspace(
   }
 
   // Provision the dimension-root taxonomy on the project (independent of prompts),
-  // so classification can later apply intent/source/type values per prompt and the
+  // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
   // exactly the four dimension roots, whether or not it has prompts yet.
@@ -635,15 +650,50 @@ export async function handleCreateMarketSubworkspace(
   // falls through to the existing swallow below, unchanged.
   let published = false;
   if (publishMode === 'require') {
-    await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
-    published = true;
-  } else if (publishMode === 'best-effort') {
     try {
-      await headroom.retryOnQuota(() => transport.publishProject(workspaceId, projectId));
+      await headroom.retryOnQuota(
+        () => transport.publishProject(workspaceId, projectId),
+        { callSite: 'publishProject' },
+      );
       published = true;
     } catch (e) {
-      if (e instanceof SerenityTransportError && e.status === 405) {
-        log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota 405, project left as draft', {
+      // Case 1 (serenity-docs#72 §2): the brand carve is exhausted (allocator OFF — production
+      // today), or `retryOnQuota`'s bounded poll-retry (LLMO-6190 follow-up) still didn't clear
+      // the disguised quota 405. Classify via `isMeteredQuota` (body-SHAPE check, not bare
+      // status — MysticatBot review) so a genuine app-level 405 Method-Not-Allowed (JSON body)
+      // is never mistaken for a quota rejection and hidden behind the wrong error token; this
+      // also gives the shared `MeteredQuotaClassifier` metric (LLMO-6191) a live call site.
+      // Surface a real quota match as the stable `quotaExceeded` 409 token instead of letting it
+      // fall through mapError's generic `serenityUpstreamError` 502 — a caller can then show the
+      // contractual-limit message and never retry a rejection that can't succeed.
+      if (isMeteredQuota(e)) {
+        log?.warn?.('handleCreateMarketSubworkspace: publish rejected — quota exceeded', {
+          workspaceId, projectId,
+        });
+        throw toQuotaExceededError();
+      }
+      throw e;
+    }
+  } else if (publishMode === 'best-effort') {
+    try {
+      await headroom.retryOnQuota(
+        () => transport.publishProject(workspaceId, projectId),
+        { callSite: 'publishProject' },
+      );
+      published = true;
+    } catch (e) {
+      if (isMeteredQuota(e)) {
+        // Swallowed by design (best-effort provisioning must not fail the brand create), but this
+        // IS a quota rejection and the event that creates the dark draft market a customer later
+        // trips over — serenity-docs#72 §5 requires it to alert even though nothing failed here.
+        // TODO(serenity-docs#72 step 2): fire the Slack alert here once the alerting mechanism
+        // lands; the call below is side-effect-only (its returned error is intentionally
+        // discarded, never thrown — best-effort swallows it) purely to run
+        // `recordRejection('quotaExceeded')` inside it, so the CloudWatch metric this alarm will
+        // key on fires here too, keeping the classifier + alerting signal consistent between
+        // this swallowed path and the `require` path above (MysticatBot review, non-blocking nit).
+        toQuotaExceededError();
+        log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota exceeded, project left as draft', {
           workspaceId, projectId,
         });
       } else {
@@ -846,7 +896,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
       }),
   ]);
   // Merge by ID, not by name. Names are unique only per (project, parent), so a
-  // sub-category `human` and the `source` value `human` are two distinct tags —
+  // sub-category `human` and the `origin` value `human` are two distinct tags —
   // keying by name silently drops one of them.
   const byId = new Map();
   // Both sources back-fill a missing upstream id with the tag's own name (a
@@ -857,8 +907,8 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // Placeholders are keyed by name, not by a synthetic composite: an id-less
   // entry carries ONLY its bare name (`id === name`), so two id-less tags sharing
   // a name are indistinguishable here — there is no id to tell a `category` value
-  // `human` from a `source` value `human` once both arrive without one. Keying by
-  // `(name, source)` would just emit two identical `{ id: name, name }` rows, a
+  // `human` from an `origin` value `human` once both arrive without one. Keying by
+  // `(name, dimension)` would just emit two identical `{ id: name, name }` rows, a
   // duplicate that is worse than the collapse. So they intentionally collapse to
   // one; the by-id merge above is what actually preserves two same-named tags,
   // and it fires whenever either carries a real upstream id (the common case).
@@ -1001,10 +1051,10 @@ export async function handleUpdateModelsSubworkspace(
     modelIds,
     { geoTargetId, languageCode },
     log,
-    // LLMO-6190 item 4: bounded top-up+retry if the sync's publish 405s as a disguised
+    // LLMO-6190 follow-up: bounded poll-retry if the sync's publish 405s as a disguised
     // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
     // when OFF.
-    { wrapPublish: (fn) => headroom.retryOnQuota(fn) },
+    { wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }) },
   );
 
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then

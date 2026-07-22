@@ -18,7 +18,8 @@ import {
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
-import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
@@ -164,26 +165,33 @@ function mapError(e, log) {
       status,
     );
   }
-  if (e instanceof SerenityTransportError) {
-    log.error('Serenity upstream error', e);
-    if (e.status === 401 || e.status === 403) {
-      // Do NOT echo e.message here: the transport error message embeds the full
+  // A Project Engine call now throws ProjectEngineApiError directly (LLMO-6386, adaptPE retired).
+  // On its no-HTTP-response path (per-attempt timeout / exhausted network / a missing-IMS-token
+  // 401) the status is `undefined` and the original throw is carried as `.cause` — the retired
+  // adaptPE boundary used to rethrow that cause, so unwrap it here to keep the mapping below
+  // yielding the SAME HTTP code (auth → 401, timeout → 502, raw network → 500). A bare undefined
+  // status would otherwise flatten all three to 502, silently regressing the auth response.
+  const err = unwrapTransportCause(e);
+  if (isSemrushTransportError(err)) {
+    log.error('Serenity upstream error', err);
+    if (err.status === 401 || err.status === 403) {
+      // Do NOT echo err.message here: the transport error message embeds the full
       // gateway URL (internal host + workspace/project UUIDs). Return a generic
       // message and keep the detail to the log.error above (matches the 502 branch).
       return createResponse(
-        { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
-        e.status,
+        { error: errorTokenForStatus(err.status), message: 'Upstream authorization failed' },
+        err.status,
       );
     }
-    if (e.status === 409) {
+    if (err.status === 409) {
       // An upstream refusal of a conflicting write (e.g. a prompt rename onto a
       // sibling prompt's exact text — serenity-docs#63) is the caller's to act
       // on, not an upstream outage: surface the status and the `conflict` token
       // instead of flattening it into the generic 502. Message stays redacted
       // for the same reason as the 401/403 branch above.
       return createResponse(
-        { error: errorTokenForStatus(e.status), message: 'Upstream rejected the request as a conflict' },
-        e.status,
+        { error: errorTokenForStatus(err.status), message: 'Upstream rejected the request as a conflict' },
+        err.status,
       );
     }
     return createResponse({
@@ -191,7 +199,7 @@ function mapError(e, log) {
       message: 'Upstream request failed',
     }, 502);
   }
-  log.error('Serenity controller error', e);
+  log.error('Serenity controller error', err);
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,
@@ -214,7 +222,9 @@ function mapError(e, log) {
  * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
  * we forward is validated AGAIN by the real Semrush gateway on every upstream
  * call (it rejects an invalid/expired/forged token with 401/403, which the
- * transport surfaces as a SerenityTransportError). This local check is only a
+ * transport surfaces as a typed Semrush error — ProjectEngineApiError for a
+ * Project Engine call, SerenityTransportError for a User Manager one — both
+ * classified by isSemrushTransportError). This local check is only a
  * fail-fast + shape guard so we do not forward a token Semrush will obviously
  * reject; it never substitutes for the upstream's own validation.
  *
@@ -1108,26 +1118,78 @@ function SerenityController(context, log, env) {
         ? body.brandDomain
         : hostnameFromUrlString(pendingSemrushProvisioning?.primaryUrl);
 
+      // ----- Pending-brand activation is ALWAYS sub-workspace-only (LLMO-6405) -----
+      // Markets are Semrush projects added afterwards from the Markets tab, never
+      // auto-created at activation — so a pending brand activates to just its
+      // sub-workspace (the anchor, persisted by ensureSubworkspace) plus a status
+      // flip, IGNORING any stashed primary URL for project creation. The brand's
+      // primary site (brands.site_id) was set at create. Reactivation of an already
+      // ACTIVE brand (body-driven markets) is handled by the branches below.
+      if (wasPending) {
+        const pendingWorkspaceId = await ensureSubworkspace(
+          transport,
+          brand,
+          auth.parentWorkspaceId ?? '',
+          1,
+          log,
+          {},
+          brandPointerReloader(ctx, auth.brandUuid),
+          {
+            dynamicAllocation: dynamicAllocationEnabled(ctx),
+          },
+        );
+        let pendingActivateSucceeded = true;
+        if (typeof brand.setStatus === 'function') {
+          brand.setStatus('active');
+        }
+        if (hadPendingSemrushProvisioning
+          && typeof brand.setPendingSemrushProvisioning === 'function') {
+          brand.setPendingSemrushProvisioning(null);
+        }
+        try {
+          await brand.save();
+        } catch (saveError) {
+          pendingActivateSucceeded = false;
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — sub-workspace ensured upstream but failed to persist active status', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: pendingWorkspaceId,
+            error: saveError?.message,
+          });
+        }
+        log.info('serenity activate: completed (pending → active, sub-workspace only)', {
+          brandId: auth.brandUuid,
+          semrushWorkspaceId: pendingWorkspaceId,
+          fullySucceeded: pendingActivateSucceeded,
+        });
+        if (pendingActivateSucceeded) {
+          return createResponse(
+            { brandId: auth.brandUuid, status: 'active', markets: [] },
+            200,
+          );
+        }
+        // Sub-workspace ensured upstream but the active flip did not persist — the
+        // brand stays pending; a retry converges (the sub-workspace 409s idempotently).
+        return createResponse(
+          {
+            brandId: auth.brandUuid,
+            status: 'pending',
+            error: 'serenityActivationIncomplete',
+            message: 'Sub-workspace provisioned but the active status could not be persisted.',
+            markets: [],
+          },
+          502,
+        );
+      }
+
       // ----- Sub-workspace-only activation (no primary URL → no project) -----
-      // A brand with no domain has nothing to provision a project against: just
-      // ensure its sub-workspace (which IS the active-brand anchor, persisted by
-      // ensureSubworkspace) and flip it active. This is the bare "save & continue
-      // later" draft; the user adds markets (projects) afterwards from the Markets
-      // tab. generatePrompts can't apply with no project, so reject the combo.
+      // Reactivation of an already-ACTIVE brand with no primary URL — a no-op flip.
+      // (A pending brand never reaches here; it returned above.) Ensure its
+      // sub-workspace and re-affirm active.
       if (!hasText(brandDomain)) {
-        // A URL/domain WAS supplied but did not resolve to a hostname → bad input,
-        // not a bare brand. Fail fast (a silent fallback would mask the typo and
-        // strand the user with a project-less brand they did not ask for).
+        // A URL/domain WAS supplied but did not resolve to a hostname → bad input.
+        // Fail fast (a silent fallback would mask the typo).
         if (suppliedUrlOrDomain) {
           throw new ErrorWithStatusCode('brandDomain is required to provision a Semrush market', 400);
-        }
-        // An ACTIVE brand must always be anchored by a primary site (brands.site_id);
-        // only a pending draft may be site-less. So a pending brand with no primary
-        // URL cannot be activated — reject and leave it pending until the user adds
-        // one. (An already-active brand re-supplying no URL is a no-op reactivation,
-        // handled by the flip-and-save below.)
-        if (wasPending) {
-          throw new ErrorWithStatusCode('A primary URL is required to activate a brand', 400);
         }
         if (generatePrompts) {
           throw new ErrorWithStatusCode('A primary URL is required to generate prompts', 400);
@@ -1148,13 +1210,11 @@ function SerenityController(context, log, env) {
         if (typeof brand.setStatus === 'function') {
           brand.setStatus('active');
         }
-        if (hadPendingSemrushProvisioning
-          && typeof brand.setPendingSemrushProvisioning === 'function') {
-          brand.setPendingSemrushProvisioning(null);
-        }
         try {
           await brand.save();
         } catch (saveError) {
+          // An already-active brand's re-flip failed transiently; it stays active
+          // (the flip was a no-op anyway). Log and return 207.
           bareSucceeded = false;
           log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — sub-workspace ensured upstream but failed to persist active status', {
             brandId: auth.brandUuid,
@@ -1162,35 +1222,14 @@ function SerenityController(context, log, env) {
             error: saveError?.message,
           });
         }
-        log.info('serenity activate: completed (sub-workspace only)', {
+        log.info('serenity activate: completed (sub-workspace only, active reactivation)', {
           brandId: auth.brandUuid,
           semrushWorkspaceId: bareWorkspaceId,
           fullySucceeded: bareSucceeded,
         });
-        if (bareSucceeded) {
-          return createResponse(
-            { brandId: auth.brandUuid, status: 'active', markets: [] },
-            200,
-          );
-        }
-        // Save failed: a pending draft stays pending (retryable, idempotent — the
-        // sub-workspace 409s on retry); an already-active brand is left active
-        // (the flip was a no-op anyway).
-        if (wasPending) {
-          return createResponse(
-            {
-              brandId: auth.brandUuid,
-              status: 'pending',
-              error: 'serenityActivationIncomplete',
-              message: 'Sub-workspace provisioned but the active status could not be persisted.',
-              markets: [],
-            },
-            502,
-          );
-        }
         return createResponse(
           { brandId: auth.brandUuid, status: 'active', markets: [] },
-          207,
+          bareSucceeded ? 200 : 207,
         );
       }
 
@@ -1450,43 +1489,11 @@ function SerenityController(context, log, env) {
         );
       }
 
-      // Not fully succeeded. A pending-draft activation that did not complete
-      // every step STAYS pending and returns an ERROR (HTTP 502: the upstream
-      // provisioning chain is incomplete) naming the failed step, with the
-      // per-market results so the caller can show specifics and retry.
-      if (wasPending) {
-        if (allMarketsLive && !siteLinked) {
-          // Every market is LIVE upstream, but the brand stays 'pending' because
-          // the brand_sites mirror did not link (a transient write error, or the
-          // type='serenity' migration not yet deployed — see
-          // SERENITY_MARKET_LINK_REJECTED in site-linkage.js). The brand is dark
-          // on our side despite live markets until a retry re-links. Emit a
-          // DISTINCT, greppable token so this strand is alertable rather than
-          // hidden in a generic 502; it self-heals on idempotent re-activate.
-          log.error('serenity activate: SERENITY_ACTIVATE_LINK_INCOMPLETE — all markets live upstream but brand_sites mirror failed; brand stays pending', {
-            brandId: auth.brandUuid,
-            semrushWorkspaceId: workspaceId,
-            marketsLive: marketsLiveCount,
-          });
-        }
-        const failureReason = !allMarketsLive
-          ? 'One or more markets failed to provision.'
-          : 'Markets were provisioned but could not be linked as sites (brand_sites).';
-        return createResponse(
-          {
-            brandId: auth.brandUuid,
-            status: 'pending',
-            error: 'serenityActivationIncomplete',
-            message: failureReason,
-            markets: results,
-          },
-          502,
-        );
-      }
-
-      // An already-active brand re-supplying markets (reactivation) is never
-      // downgraded: a single failed market is reported as 207 Multi-Status while
-      // the brand remains active.
+      // Not fully succeeded. The body-driven market path (reactivation / onboarding
+      // API) runs ONLY for a brand that is already ACTIVE — a pending brand activates
+      // sub-workspace-only above (LLMO-6405) and never reaches here. An already-active
+      // brand is never downgraded on a partial failure: a failed market is reported as
+      // 207 Multi-Status while the brand stays active.
       return createResponse(
         { brandId: auth.brandUuid, status: 'active', markets: results },
         207,

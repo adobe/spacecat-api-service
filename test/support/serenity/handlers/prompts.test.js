@@ -20,7 +20,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
-  makeTypeInjector,
+  makePromptTagInjector,
   makeIntentInjector,
   validateDeferPublish,
 } from '../../../../src/support/serenity/handlers/prompts.js';
@@ -280,11 +280,11 @@ describe('handlers/prompts.js — handleListPrompts', () => {
               ],
             },
             {
-              id: TAG_IDS.sourceHuman,
+              id: TAG_IDS.originHuman,
               name: 'human',
               children_count: 0,
-              parent_id: TAG_IDS.sourceRoot,
-              path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+              parent_id: TAG_IDS.originRoot,
+              path: [{ id: TAG_IDS.originRoot, name: 'origin' }],
             },
           ],
         }],
@@ -298,9 +298,9 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
     const { tags } = result.items[0];
     expect(tags).to.have.lengthOf(2);
-    expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'source']);
+    expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'origin']);
     expect(tags[0].parentId).to.equal(TAG_IDS.categoryRunningShoes);
-    expect(tags[1].parentId).to.equal(TAG_IDS.sourceRoot);
+    expect(tags[1].parentId).to.equal(TAG_IDS.originRoot);
     // The deprecated name-keyed view collapses them; only one id survives.
     expect(Object.keys(result.items[0].tagMap)).to.deep.equal(['human']);
     // Listing prompts costs exactly ONE upstream call — no tag-tree walk.
@@ -569,15 +569,23 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
+    // A create is a user-authenticated write: the derived `origin` (`human`) is
+    // stamped alongside the caller's tags (origin-dimension.md §3). No classifier
+    // is supplied here, so `type` is left untouched.
     expect(result.created).to.have.lengthOf(1);
     expect(result.created[0]).to.deep.equal({
       semrushPromptId: 'new-sem-id',
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'hello',
-      tagIds: ['tag-cat-1', 'tag-child-1', TAG_IDS.intentInformational],
+      tagIds: ['tag-cat-1', 'tag-child-1', TAG_IDS.originHuman, TAG_IDS.intentInformational],
     });
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['tag-cat-1', 'tag-child-1', TAG_IDS.intentInformational]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      ['hello'],
+      ['tag-cat-1', 'tag-child-1', TAG_IDS.originHuman, TAG_IDS.intentInformational],
+    );
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
   });
 
@@ -661,8 +669,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     expect(result.created[0].semrushPromptId).to.equal('');
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.intentInformational]);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
   });
 
   it('returns empty semrushPromptId (not the string "undefined") when createPromptsByIds returns an item with no id', async () => {
@@ -710,8 +718,8 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.intentInformational]);
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
+    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['hello'], ['keep', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
   });
 
   it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
@@ -734,9 +742,12 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.have.lengthOf(51);
+    // The MAX_TAG_IDS cap bounds the CALLER's tags (50); the server-derived
+    // `origin` (human) and classified `intent` (Informational) are injected on
+    // top, so the stored set is the 50 capped tags plus those two computed ids.
+    expect(result.created[0].tagIds).to.have.lengthOf(52);
     expect(result.created[0].tagIds).to.deep.equal(
-      [...tooMany.slice(0, 50), TAG_IDS.intentInformational],
+      [...tooMany.slice(0, 50), TAG_IDS.originHuman, TAG_IDS.intentInformational],
     );
   });
 
@@ -1832,7 +1843,10 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
       handleListTags, transport, dataAccess,
     } = setupCtx;
 
-    // Mutation: handleCreatePrompts pushes a new prompt → invalidate.
+    // Mutation: handleCreatePrompts pushes a new prompt → invalidate. The create
+    // path resolves the tag tree to stamp the derived `origin`, so the tree read
+    // must be stubbed for the create to succeed and reach the invalidation.
+    transport.listProjectTags = makeListProjectTagsStub();
     transport.createPromptsByIds = sinon.stub().resolves({
       page: 1, total: 1, items: [{ id: 'sem-new', name: 'fresh' }],
     });
@@ -1969,13 +1983,17 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.intentInformational,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+        TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WORKSPACE,
         'proj-us-en',
         ['is Acme good?'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.intentInformational],
+        [
+          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+          TAG_IDS.intentInformational,
+        ],
       );
       // The whole taxonomy already exists, so nothing is provisioned.
       expect(transport.createProjectTags).to.not.have.been.called;
@@ -2001,7 +2019,8 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.intentInformational,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originHuman,
+        TAG_IDS.intentInformational,
       ]);
     });
 
@@ -2040,7 +2059,8 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        decoyCategoryId, TAG_IDS.typeBranded, TAG_IDS.intentInformational,
+        decoyCategoryId, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+        TAG_IDS.intentInformational,
       ]);
     });
 
@@ -2064,20 +2084,25 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      // The four roots are created at the root level, then `branded` beneath
-      // the freshly-minted `type` root.
+      // The four roots are created at the root level, then `branded` beneath the
+      // freshly-minted `type` root, then `human` beneath the `origin` root — the
+      // create path stamps the derived origin as well as the computed type.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', 'intent', 'source', 'type',
+        'category', 'intent', 'origin', 'type',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
       expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'created::type' });
-      // Intent injection then resolves the (already-created) roots and mints the
-      // default `Informational` value beneath the freshly-minted `intent` root.
-      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['Informational']);
-      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::intent' });
+      // origin injection (the second half of the unified type+origin injector) mints
+      // `human` beneath the freshly-created `origin` root...
+      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['human']);
+      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::origin' });
+      // ...then intent injection mints the default `Informational` beneath `intent`.
+      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['Informational']);
+      expect(createProjectTags.getCall(3).args[3]).to.deep.equal({ parentId: 'created::intent' });
       expect(result.created[0].tagIds).to.deep.equal([
-        'tag-cat-1', 'created:created::type:branded', 'created:created::intent:Informational',
+        'tag-cat-1', 'created:created::type:branded', 'created:created::origin:human',
+        'created:created::intent:Informational',
       ]);
     });
   });
@@ -2144,13 +2169,13 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
     });
   });
 
-  describe('makeTypeInjector cache (serenity-docs#31)', () => {
+  describe('makePromptTagInjector type cache (serenity-docs#31)', () => {
     it('resolves each (project, type) once across a batch, re-resolving only on a new key', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const inject = makeTypeInjector(transport, WORKSPACE, classifyByBrandMention, fakeLog());
+      const inject = makePromptTagInjector(transport, WORKSPACE, classifyByBrandMention, fakeLog());
 
       // Resolving one (project, type) key reads two levels: the roots, then the
       // children of the `type` root.
@@ -2172,7 +2197,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
     it('passes the input through untouched when no classifier is supplied', async () => {
       const transport = { listProjectTags: sinon.stub(), createProjectTags: sinon.stub() };
-      const inject = makeTypeInjector(transport, WORKSPACE, undefined, fakeLog());
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog());
 
       const out = await inject('proj-1', { text: 'anything', geoTargetId: 2840, tagIds: ['x'] });
 
@@ -2306,5 +2331,172 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
         text: 'hi', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
       }],
     }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode, /deferPublish must be a boolean/);
+  });
+});
+
+// origin-dimension.md §3 (LLMO-6275): `origin` is derived from the write path,
+// never asserted by the user, and carries a create/update asymmetry — CREATE
+// injects the derived value; UPDATE never re-derives, preserving the stored one.
+// These are spec gates 5 (create arm), 7 and 8 on the Serenity tag path.
+describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', () => {
+  const project = () => makeProject({
+    semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+  });
+
+  // Gate 5 (create arm): a user-authenticated Serenity create derives origin =
+  // `human`, stripping any caller-supplied tag id beneath the origin root and
+  // injecting the resolved `human` id — a user may not assert who authored a prompt.
+  it('create strips a caller-supplied origin tag id and injects the derived human origin', async () => {
+    const dataAccess = makeDataAccess([project()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'best shoes' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'best shoes',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        // The caller tries to assert `ai`; the server ignores it and stamps `human`.
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.originAi],
+      }],
+    }, fakeLog(), classifyByBrandMention);
+
+    expect(result.created[0].tagIds).to.deep.equal([
+      TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originHuman,
+      TAG_IDS.intentInformational,
+    ]);
+    expect(result.created[0].tagIds).to.not.include(TAG_IDS.originAi);
+  });
+
+  // Gate 8: the strip is BY RESOLVED ROOT ID, never by name. A customer category
+  // legitimately named `ai` (a category-root descendant) must survive a create
+  // that also carries an origin-root id — a name-based strip would delete it.
+  it('leaves a customer category named "ai" alone while stripping the real origin value', async () => {
+    const dataAccess = makeDataAccess([project()]);
+    const decoyAiCategoryId = 'category-ai-decoy';
+    const levels = dimensionTreeLevels();
+    levels[TAG_IDS.categoryRoot] = [
+      ...levels[TAG_IDS.categoryRoot],
+      {
+        id: decoyAiCategoryId,
+        name: 'ai',
+        parent_id: TAG_IDS.categoryRoot,
+        children_count: 0,
+        path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+      },
+    ];
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(levels),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'is Acme good?',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: [decoyAiCategoryId, TAG_IDS.originAi],
+      }],
+    }, fakeLog(), classifyByBrandMention);
+
+    // The `ai` CATEGORY survives; only the origin-root id is stripped, and the
+    // derived origin is injected.
+    expect(result.created[0].tagIds).to.deep.equal([
+      decoyAiCategoryId, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+      TAG_IDS.intentInformational,
+    ]);
+  });
+
+  // Gate 7: editing a prompt must not relabel it. The stored origin the caller
+  // echoes back (`ai`) rides through the replace-mode tag write untouched — it is
+  // never re-derived to `human`, and `origin/human` is never injected on update.
+  it('update preserves the stored ai origin and never re-derives it', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project());
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      renamePrompt: sinon.stub().resolves({ id: 'ai-prompt', name: 'now mentions Acme', is_updated: true }),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleUpdatePrompt(transport, dataAccess, BRAND, WORKSPACE, 'ai-prompt', {
+      text: 'now mentions Acme',
+      geoTargetId: 2840,
+      languageCode: 'en',
+      tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.originAi],
+    }, fakeLog(), classifyByBrandMention);
+
+    expect(result.status).to.equal(200);
+    expect(result.body.tagIds).to.deep.equal([
+      TAG_IDS.categoryRunningShoes, TAG_IDS.originAi, TAG_IDS.typeBranded,
+      TAG_IDS.intentInformational,
+    ]);
+    expect(result.body.tagIds).to.not.include(TAG_IDS.originHuman);
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [{
+        id: 'ai-prompt',
+        references: [
+          TAG_IDS.categoryRunningShoes, TAG_IDS.originAi, TAG_IDS.typeBranded,
+          TAG_IDS.intentInformational,
+        ],
+        replace: true,
+      }],
+    );
+  });
+
+  describe('makePromptTagInjector origin asymmetry', () => {
+    it('create (originValue set): strips caller origin ids and appends the derived origin', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        originValue: 'human',
+      });
+
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.originAi],
+      });
+
+      expect(out.tagIds).to.deep.equal([TAG_IDS.categoryRunningShoes, TAG_IDS.originHuman]);
+    });
+
+    it('update (no originValue): leaves origin ids untouched and reads nothing', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog());
+
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.originAi],
+      });
+
+      expect(out.tagIds).to.deep.equal([TAG_IDS.categoryRunningShoes, TAG_IDS.originAi]);
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
+    it('memoizes origin resolution per project across a batch', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        originValue: 'human',
+      });
+
+      await inject('proj-1', { text: 'a', geoTargetId: 2840, tagIds: ['x'] });
+      const readsAfterFirst = transport.listProjectTags.callCount;
+      await inject('proj-1', { text: 'b', geoTargetId: 2840, tagIds: ['y'] });
+
+      // Same project => served from the per-project origin cache, no new reads.
+      expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
   });
 });

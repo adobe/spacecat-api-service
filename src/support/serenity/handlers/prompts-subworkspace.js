@@ -22,7 +22,7 @@ import {
   buildPromptDto,
   normalizePromptInput,
   createOnePrompt,
-  makeTypeInjector,
+  makePromptTagInjector,
   makeIntentInjector,
   validateDeferPublish,
   parseUpdatePromptBody,
@@ -34,6 +34,7 @@ import {
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
 } from './prompts.js';
+import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
@@ -146,7 +147,15 @@ export async function handleCreatePromptsSubworkspace(
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
+  // CREATE: user-authenticated write → derived `origin` is `human` (see the
+  // flat-mode twin handleCreatePrompts and origin-dimension.md §3).
+  const injectComputedTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
+    { originValue: ORIGIN_VALUE.HUMAN },
+  );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
   // per-item injection below.
@@ -196,10 +205,20 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip any caller-supplied type/intent + inject the computed ones.
-      let typed = await injectComputedType(projectId, input);
+      // Unified layer: strip caller-supplied type/origin/intent, then inject the
+      // computed type + derived origin (origin-dimension.md §3) and the classified
+      // intent (serenity-docs#32). The injectors act on disjoint dimensions.
+      let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
-      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
+      // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
+      // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
+      // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
+      // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
+      // own per-item try/catch below still isolates a surviving failure to this one item.
+      const semrushPromptId = await headroom.retryOnQuota(
+        () => createOnePrompt(transport, workspaceId, projectId, typed),
+        { callSite: 'createOnePrompt' },
+      );
       return {
         created: {
           semrushPromptId,
@@ -259,7 +278,7 @@ export async function handleCreatePromptsSubworkspace(
     workspaceId,
     affectedProjectIds,
     log,
-    (fn) => headroom.retryOnQuota(fn),
+    (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
   );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
@@ -320,9 +339,13 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
-  // Recompute the type AND intent tags from the NEW text BEFORE the delete (see
-  // the flat-mode twin): the unified layer must not run between delete and create.
-  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
+  // Recompute the type AND intent tags from the NEW text BEFORE any upstream write
+  // (see the flat-mode twin handleUpdatePrompt): the unified layer must run before
+  // the rename so a classification failure aborts cleanly with the prompt untouched
+  // (serenity-docs#31, #32). No `originValue`: origin is never re-derived on edit
+  // (origin-dimension.md §3 item 3); the stored origin the caller echoes rides
+  // through the replace-mode tag write untouched.
+  const injectComputedTags = makePromptTagInjector(transport, workspaceId, classifyPromptType, log);
   const intentByText = await classifyPromptIntents(
     [nextText],
     {
@@ -330,7 +353,7 @@ export async function handleUpdatePromptSubworkspace(
     },
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
-  let typed = await injectComputedType(projectId, {
+  let typed = await injectComputedTags(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
   });
   typed = await injectComputedIntent(projectId, typed);

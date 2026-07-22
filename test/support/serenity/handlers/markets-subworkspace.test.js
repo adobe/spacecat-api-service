@@ -27,6 +27,7 @@ import {
 } from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -34,7 +35,7 @@ use(sinonChai);
 
 // Every generated prompt carries the two standard values (source=ai,
 // intent=Informational); the third tag is the per-prompt computed `type`.
-const STANDARD_IDS = [TAG_IDS.sourceAi, TAG_IDS.intentInformational];
+const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
 
 const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';
@@ -458,9 +459,14 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.not.have.been.called;
     });
 
+    // Pinned disguised-405 shape (LLMO-6190, live-verified): a bare string/HTML body, never JSON —
+    // isMeteredQuota keys on this SHAPE, not the bare status, so tests must reproduce it faithfully
+    // rather than passing 'quota' as the (unused) `message` arg (MysticatBot review).
+    const quota405 = () => new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>');
+
     it('best-effort publish swallows a quota 405 and keeps the project a draft', async () => {
       const transport = makeTransport({
-        publishProject: sinon.stub().rejects(new SerenityTransportError(405, 'quota')),
+        publishProject: sinon.stub().rejects(quota405()),
       });
       const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' });
       expect(res.status).to.equal(201);
@@ -468,11 +474,99 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
+    // MysticatBot review (blocking): the best-effort branch's `toQuotaExceededError()` call is
+    // side-effect-only (its return value is discarded) purely to emit the `recordRejection`
+    // CloudWatch metric — assert that side effect directly so a future edit that drops the line
+    // as apparently-dead-code fails a test instead of silently going metric-blind. Spies on
+    // `toQuotaExceededError` itself (the entry's DIRECT dependency) rather than reaching two hops
+    // through to `allocation-metrics.js` (an errors.js-internal dependency esmock does not
+    // transitively override from this entry point), while still calling through to the real
+    // implementation so the emitted error/thrown-vs-swallowed behavior is unchanged.
+    it('best-effort publish emits the quotaExceeded rejection metric even though it swallows the error', async () => {
+      const errorsModule = await import('../../../../src/support/serenity/errors.js');
+      const toQuotaExceededError = sinon.spy(errorsModule.toQuotaExceededError);
+      const { handleCreateMarketSubworkspace: mocked } = await esmock(
+        '../../../../src/support/serenity/handlers/markets-subworkspace.js',
+        { '../../../../src/support/serenity/errors.js': { ...errorsModule, toQuotaExceededError } },
+      );
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(quota405()),
+      });
+      await mocked(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' });
+      expect(toQuotaExceededError).to.have.been.calledOnce;
+    });
+
     it('best-effort publish re-throws a non-405 upstream error', async () => {
       const transport = makeTransport({
         publishProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
       await expect(handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' })).to.be.rejectedWith(/boom/);
+    });
+
+    // MysticatBot review: isMeteredQuota keys on body SHAPE (string = disguised quota, JSON = a
+    // genuine app-level error), so a real "Method Not Allowed" (JSON body) must NOT be swallowed
+    // or misclassified as quotaExceeded — it must propagate as the ordinary 405 upstream error.
+    it('best-effort publish re-throws a genuine JSON-bodied 405 (not misclassified as quota)', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(
+          new SerenityTransportError(405, 'Method Not Allowed', { message: 'Method Not Allowed' }),
+        ),
+      });
+      await expect(
+        handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' }),
+      ).to.be.rejectedWith(/Method Not Allowed/);
+    });
+
+    // serenity-docs#72 §2/§4.1 — case 1 (brand carve exhausted, allocator OFF): a quota 405 on a
+    // REQUIRED publish must surface as the stable `quotaExceeded` 409 token, not the raw upstream
+    // 405 (which mapError would otherwise flatten into the generic 502 serenityUpstreamError).
+    it('require-mode publish maps a quota 405 to the quotaExceeded 409 token', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(quota405()),
+      });
+      const err = await handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { publishMode: 'require' },
+      ).then(() => null, (e) => e);
+      expect(err).to.not.equal(null);
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+    });
+
+    it('require-mode publish re-throws a non-405 upstream error unchanged', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      await expect(
+        handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'require' }),
+      ).to.be.rejectedWith(/boom/);
+    });
+
+    it('require-mode publish re-throws a genuine JSON-bodied 405 (not misclassified as quota)', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(
+          new SerenityTransportError(405, 'Method Not Allowed', { message: 'Method Not Allowed' }),
+        ),
+      });
+      const p = handleCreateMarketSubworkspace(
+        transport,
+        makeBrand(),
+        PARENT,
+        createBody,
+        log,
+        null,
+        null,
+        { publishMode: 'require' },
+      );
+      const err = await p.then(() => null, (e) => e);
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.status).to.equal(405);
     });
 
     it('attaches selected AI models and generated prompts by tag id before publish', async () => {
@@ -1459,7 +1553,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // the Informational default. Prompts are partitioned by their (type, intent)
   // id pair, one upstream call per distinct pair.
   it('generateAndAttachPrompts: applies the classified intent per prompt and defaults an unclassified one', async () => {
-    const SOURCE_AI_ID = TAG_IDS.sourceAi;
+    const SOURCE_AI_ID = TAG_IDS.originAi;
     const handler = await esmock(
       '../../../../src/support/serenity/handlers/markets-subworkspace.js',
       {

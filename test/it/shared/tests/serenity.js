@@ -320,7 +320,7 @@ export default function serenityTests(
       );
       expect(roots.status).to.equal(200);
       expect(roots.body.items.map((t) => t.name))
-        .to.have.members(['category', 'intent', 'source', 'type']);
+        .to.have.members(['category', 'intent', 'origin', 'type']);
       const categoryRoot = roots.body.items.find((t) => t.name === 'category');
       expect(res.body.parentId).to.equal(categoryRoot.id);
     });
@@ -475,20 +475,20 @@ export default function serenityTests(
       expect(res.status).to.equal(400);
     });
 
-    it('POST /serenity/tags resolves a closed-dimension tag idempotently (source/intent/type)', async () => {
+    it('POST /serenity/tags resolves a closed-dimension tag idempotently (origin/intent/type)', async () => {
       await createUsMarket();
       const first = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(first.status).to.equal(200);
-      expect(first.body).to.include({ type: 'source', name: 'ai' });
+      expect(first.body).to.include({ type: 'origin', name: 'ai' });
       expect(first.body.id).to.be.a('string').that.is.not.empty;
-      // The value hangs under the `source` root, never at the root level.
+      // The value hangs under the `origin` root, never at the root level.
       expect(first.body.parentId).to.be.a('string').that.is.not.empty;
 
       // Same closed-dimension value again — resolved, not re-created (no upstream collision).
       const second = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(second.status).to.equal(200);
       expect(second.body).to.include({ name: 'ai', id: first.body.id, created: false });
@@ -500,7 +500,7 @@ export default function serenityTests(
     it('PATCH /serenity/tags/:tagId 400s a rename of a closed-dimension value', async () => {
       await createUsMarket();
       const created = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(created.status).to.equal(200);
       const res = await getHttpClient().admin.patch(`${base}/tags/${created.body.id}`, {
@@ -533,14 +533,16 @@ export default function serenityTests(
       expect(created.status).to.equal(200);
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
-      // The write path now server-computes a branded/non-branded `type:` tag AND
-      // an intent:<Value> tag (serenity-docs#31, #32) and appends both to the
-      // supplied tagIds, so the created prompt carries the two supplied tags plus
-      // the two computed ones. Azure OpenAI is not configured in this IT
-      // environment, so intent classification deterministically defaults to
-      // `intent:Informational` (never null/omitted — see the fallback ladder).
+      // The write path server-stamps THREE dimensions the caller may not set: a
+      // branded/non-branded `type:` tag (classified from the text), the derived
+      // `origin:` tag (`human`, on a user-authenticated create — origin-dimension.md
+      // §3 / WP-O2b), AND an `intent:<Value>` tag (serenity-docs#31, #32). Azure
+      // OpenAI is not configured in this IT environment, so intent deterministically
+      // defaults to `intent:Informational` (never null/omitted — see the fallback
+      // ladder). So the created prompt carries the two supplied tags plus the three
+      // computed ones.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
-      expect(created.body.created[0].tagIds).to.have.lengthOf(4);
+      expect(created.body.created[0].tagIds).to.have.lengthOf(5);
       expect(created.body.failed).to.deep.equal([]);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
