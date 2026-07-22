@@ -216,4 +216,22 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(handleCreatePrompts).to.not.have.been.called;
     expect(out.published).to.deep.equal(['proj-1']);
   });
+
+  it('skips a brand project row with a blank semrushProjectId', async () => {
+    dataAccess.BrandSemrushProject.allByBrandId.resolves([
+      row('', 2724, 'es'), // blank id — must be skipped, never published
+      row('proj-1', 2840, 'en'),
+    ]);
+    const body = {
+      prompts: [{ text: 'q', geoTargetId: 2840, languageCode: 'en' }],
+      models: [
+        { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] },
+        { geoTargetId: 2724, languageCode: 'es', modelIds: ['m1'] },
+      ],
+    };
+    const out = await finalizeSerenityProjects(transport, dataAccess, BRAND, WS, body, noopLog);
+    // Only the real project is acted on; the blank-id row is dropped entirely.
+    expect(out.published).to.deep.equal(['proj-1']);
+    expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
+  });
 });
