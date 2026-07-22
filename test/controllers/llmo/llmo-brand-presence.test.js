@@ -6955,6 +6955,15 @@ describe('llmo-brand-presence', () => {
           url_id: 'u1',
           source_urls: { url: 'https://example.com', hostname: 'example.com' },
         },
+        // Same execution + same URL as a second brand_presence_sources row (e.g. the
+        // AI answer cited example.com twice) — must NOT double-count citationCount.
+        {
+          execution_id: 'exec-1',
+          execution_date: '2026-03-02',
+          content_type: 'web',
+          url_id: 'u1-dup',
+          source_urls: { url: 'https://example.com', hostname: 'example.com' },
+        },
         // null source_urls exercises the || {} fallback in flattenSourceRow
         {
           execution_id: 'exec-1',
@@ -6987,6 +6996,8 @@ describe('llmo-brand-presence', () => {
       expect(body.sources).to.have.lengthOf(2);
       const exampleSource = body.sources.find((s) => s.url === 'https://example.com');
       expect(exampleSource).to.exist;
+      // Only 1 execution (exec-1) exists for this topic, so citationCount must stay 1
+      // even though two brand_presence_sources rows reference it for that execution.
       expect(exampleSource.citationCount).to.equal(1);
     });
 
