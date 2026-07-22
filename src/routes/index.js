@@ -253,6 +253,11 @@ export default function getRouteHandlers(
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': elementsController.listSentimentOverview,
+    // Data Insights per-topic table (grouped from the prompts-by-topic element).
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': elementsController.listTopics,
+    // Data Insights per-prompt drill-down: :topicId is the URL-encoded topic NAME.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': elementsController.listTopicPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': elementsController.getMarketTrackingTrends,

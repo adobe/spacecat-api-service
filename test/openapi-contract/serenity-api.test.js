@@ -388,6 +388,67 @@ const FIXTURES = {
       }],
     },
   },
+  listSerenityBrandPresenceTopics: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listTopics',
+    serviceMethod: 'getTopics',
+    // getTopics resolves a FLAT array of per-topic aggregates; the controller wraps
+    // it into { topics, totalCount }.
+    handlerResult: [{
+      topic: 'Loveseats with Ottomans',
+      promptCount: 12,
+      brandMentions: 240,
+      brandCitations: 88,
+      volume: 67896,
+      averageVisibilityScore: 61.5,
+      averagePosition: 3.2,
+      averageSentiment: 0.64,
+      prompts: [{
+        prompt: 'best modular sofa',
+        topic: 'Loveseats with Ottomans',
+        primaryIntent: 'commercial',
+        region: 'US-en',
+        mentions: 30,
+        citations: 27,
+        visibility: 100,
+        position: 1,
+        sentiment: 0.72,
+        volume: 5658,
+      }],
+    }, {
+      topic: 'Recliners with USB Charging Ports',
+      promptCount: 4,
+      brandMentions: 0,
+      brandCitations: 0,
+      volume: 26396,
+      averageVisibilityScore: 0,
+      averagePosition: null,
+      averageSentiment: null,
+    }],
+  },
+  listSerenityBrandPresenceTopicPrompts: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listTopicPrompts',
+    serviceMethod: 'getTopicPrompts',
+    // :topicId is the URL-encoded topic NAME (Semrush topics have no UUID).
+    params: { topicId: 'Loveseats with Ottomans' },
+    // getTopicPrompts resolves a FLAT array of prompt rows; the controller wraps
+    // it into { topicId, prompts, totalCount, page, pageSize }.
+    handlerResult: [{
+      prompt: 'best modular sofa',
+      topic: 'Loveseats with Ottomans',
+      primaryIntent: 'commercial',
+      region: 'US-en',
+      mentions: 30,
+      citations: 27,
+      visibility: 100,
+      position: 1,
+      sentiment: 0.72,
+      volume: 5658,
+    }],
+  },
   // Also served by ElementsController — see the note on
   // listSerenityUrlInspectorFilterDimensions above.
   getSerenityBrandPresenceStats: {
@@ -476,6 +537,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             },
             '../../src/support/access-control-util.js': {
               default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+            },
+            // authorizeBrandSubWorkspace (used by listTopicPrompts) resolves the brand
+            // UUID via prompts-storage before resolving the sub-workspace.
+            '../../src/support/prompts-storage.js': {
+              resolveBrandUuid: () => Promise.resolve(BRAND),
             },
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({

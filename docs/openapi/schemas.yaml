@@ -11676,6 +11676,137 @@ SerenityBrandPresenceSentimentOverview:
             description: Stubbed empty (parity with the legacy contract).
             items: { type: object }
 
+SerenityBrandPresenceTopics:
+  type: object
+  description: |
+    Data Insights per-topic table, aggregated server-side from the Semrush "Prompts
+    by Topic" element (78864493) grouped by topic. `totalCount` is the number of topics.
+  required: [topics, totalCount]
+  properties:
+    totalCount:
+      type: integer
+      description: Number of topics returned.
+    topics:
+      type: array
+      description: One entry per topic, ordered by total search volume descending.
+      items:
+        type: object
+        required:
+          - topic
+          - promptCount
+          - brandMentions
+          - brandCitations
+          - volume
+          - averageVisibilityScore
+        properties:
+          topic:
+            type: string
+            description: Topic name (the identifier used by the drill-down `:topicId`).
+          promptCount:
+            type: integer
+            description: |
+              Number of prompts in the topic, from grouping the (unfiltered) prompts
+              element by topic. Reflects the returned population; it can lag the
+              per-topic drill-down's `totalCount` only if the workspace exceeds the
+              element's row cap (not observed at current data volumes).
+          brandMentions:
+            type: integer
+            description: Sum of brand mentions across the topic's prompts.
+          brandCitations:
+            type: integer
+            description: Sum of citations across the topic's prompts.
+          volume:
+            type: integer
+            description: Sum of search volume across the topic's prompts (feeds UI popularity bucketing).
+          averageVisibilityScore:
+            type: number
+            description: Mean visibility (0-100) over all prompts in the topic.
+          averagePosition:
+            type: [number, 'null']
+            description: |
+              Mean rank position over prompts that are ranked, or `null` when the topic
+              has no ranked prompt (the element's `-1` sentinel is excluded, not averaged).
+          averageSentiment:
+            type: [number, 'null']
+            description: |
+              Mean sentiment (0-1) over prompts that have sentiment, or `null` when none do.
+          prompts:
+            type: array
+            description: |
+              The topic's own per-prompt rows (sorted by volume desc), embedded so the
+              eager Data Insights table renders rows + drill-down from a single call.
+            items: { $ref: '#/SerenityBrandPresenceTopicPromptRow' }
+
+SerenityBrandPresenceTopicPrompts:
+  type: object
+  description: |
+    Per-prompt drill-down for a single Data Insights topic, sourced from the
+    Semrush "Prompts by Topic" element (78864493). One `prompts[]` entry per
+    prompt in the topic; `totalCount` is the full pre-pagination count and
+    `page`/`pageSize` echo the applied server-side slice.
+  required: [topicId, prompts, totalCount]
+  properties:
+    topicId:
+      type: string
+      description: The topic name this drill-down is scoped to (echoes the decoded `:topicId`).
+    totalCount:
+      type: integer
+      description: Total prompts for the topic before pagination.
+    page:
+      type: integer
+      description: Zero-based page index applied.
+    pageSize:
+      type: integer
+      description: Page size applied.
+    prompts:
+      type: array
+      description: One entry per prompt in this topic (for the current page).
+      items: { $ref: '#/SerenityBrandPresenceTopicPromptRow' }
+
+SerenityBrandPresenceTopicPromptRow:
+  type: object
+  description: A single prompt row within a Data Insights topic.
+  required:
+    - prompt
+    - topic
+    - mentions
+    - citations
+    - visibility
+    - volume
+  properties:
+    prompt:
+      type: string
+      description: The prompt text.
+    topic:
+      type: string
+      description: The topic name this prompt belongs to.
+    primaryIntent:
+      type: string
+      description: Semrush primary intent (e.g. informational, commercial, transactional).
+    region:
+      type: string
+      description: Semrush project title for the prompt's market (e.g. `US-en`).
+    mentions:
+      type: integer
+      description: Brand mentions for this prompt.
+    citations:
+      type: integer
+      description: Citations for this prompt.
+    visibility:
+      type: number
+      description: Visibility score (0-100).
+    position:
+      type: [number, 'null']
+      description: |
+        Average rank position, or `null` when unranked (the element's `-1`
+        "not answered / not ranked" sentinel is normalized to `null`).
+    sentiment:
+      type: [number, 'null']
+      description: Sentiment score (0-1), or `null` when the prompt has no sentiment.
+    volume:
+      type: integer
+      description: Search volume for the prompt.
+
 SerenityFilterDimensionItem:
   type: object
   description: |
