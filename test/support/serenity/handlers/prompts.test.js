@@ -2371,6 +2371,43 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
       }],
     }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode, /deferPublish must be a boolean/);
   });
+
+  it('reports published:false with a mixed created/failed batch (deferPublish, partial failure)', async () => {
+    const dataAccess = makeDataAccess([project()]);
+    // One prompt writes cleanly; the other 500s upstream. deferPublish is set, so
+    // neither the success nor the failure triggers a publish.
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      createPromptsByIds: sinon.stub().callsFake(async (_ws, _pid, texts) => {
+        if (texts[0] === 'boom') {
+          throw Object.assign(new Error('upstream failure'), { status: 500 });
+        }
+        return { page: 1, total: 1, items: [{ id: `new-${texts[0]}`, name: texts[0] }] };
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      deferPublish: true,
+      prompts: [
+        {
+          text: 'ok', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+        {
+          text: 'boom', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+      ],
+    }, fakeLog());
+
+    expect(result.published).to.equal(false);
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.created[0].text).to.equal('ok');
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].text).to.equal('boom');
+    expect(result.failed[0].status).to.equal(500);
+    // deferPublish means no publish regardless of the partial failure.
+    expect(transport.publishProject).to.not.have.been.called;
+  });
 });
 
 // origin-dimension.md §3 (LLMO-6275): `origin` is derived from the write path,
