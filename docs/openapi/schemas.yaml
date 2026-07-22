@@ -11655,7 +11655,11 @@ SerenityBrandPresenceTopics:
             description: Topic name (the identifier used by the drill-down `:topicId`).
           promptCount:
             type: integer
-            description: Number of prompts in the topic (from the element's sampled set).
+            description: |
+              Number of prompts in the topic, from grouping the (unfiltered) prompts
+              element by topic. Reflects the returned population; it can lag the
+              per-topic drill-down's `totalCount` only if the workspace exceeds the
+              element's row cap (not observed at current data volumes).
           brandMentions:
             type: integer
             description: Sum of brand mentions across the topic's prompts.

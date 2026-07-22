@@ -35,7 +35,6 @@
  *    per-topic endpoint — getTopicPrompts — serves lazy consumers of the same rows.)
  */
 
-/* c8 ignore start -- LLMO-6418 POC endpoint; excluded from coverage % (has unit tests) */
 function round2(n) {
   return Math.round(n * 100) / 100;
 }
@@ -55,7 +54,10 @@ export function aggregateTopicsFromPrompts(promptRows) {
 
   for (const r of rows) {
     const topic = typeof r?.topic === 'string' ? r.topic : '';
-    if (!topic) {
+    // Skip blank/whitespace-only topics (the drill-down controller rejects an empty
+    // topicId; keep the two paths consistent). The key stays the raw topic name so it
+    // still matches the drill-down's CBF_topic scoping.
+    if (!topic || !topic.trim()) {
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -99,11 +101,12 @@ export function aggregateTopicsFromPrompts(promptRows) {
       brandMentions: a.brandMentions,
       brandCitations: a.brandCitations,
       volume: a.volume,
-      averageVisibilityScore: a.promptCount ? round2(a.visSum / a.promptCount) : 0,
+      // promptCount is always >= 1 for a grouped topic (an entry is only created when a
+      // prompt is pushed), so the division is safe without a guard.
+      averageVisibilityScore: round2(a.visSum / a.promptCount),
       averagePosition: a.posN ? round2(a.posSum / a.posN) : null,
       averageSentiment: a.sentN ? round2(a.sentSum / a.sentN) : null,
       prompts: [...a.prompts].sort((p, q) => (Number(q.volume) || 0) - (Number(p.volume) || 0)),
     }))
     .sort((x, y) => y.volume - x.volume);
 }
-/* c8 ignore stop */

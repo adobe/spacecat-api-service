@@ -124,9 +124,11 @@ describe('topics-insights aggregation', () => {
       expect(t.promptCount).to.equal(3);
     });
 
-    it('skips rows with an empty topic', () => {
+    it('skips rows with an empty, whitespace-only, or non-string topic', () => {
       const out = aggregateTopicsFromPrompts([
         row({ topic: '', mentions: 99 }),
+        row({ topic: '   ', mentions: 99 }),
+        { mentions: 99 }, // no topic field at all (non-string)
         row({ topic: 'A', mentions: 1 }),
       ]);
       expect(out).to.have.length(1);

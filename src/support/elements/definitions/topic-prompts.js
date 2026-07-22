@@ -19,7 +19,7 @@ import { resolveElementModel } from '../constants.js';
  * This single rich element carries, PER PROMPT: mentions, citations, visibility,
  * position, sentiment, volume, primary_intent and prompt_topic — enough to back
  * BOTH the per-prompt drill-down (this file) and, grouped by prompt_topic, the
- * per-topic table (see topics.js). It is the element the live Brand Presence MFE
+ * per-topic table (see topics-insights.js). It is the element the live Brand Presence MFE
  * actually uses; the wiki's separate per-topic elements (0564b061/141adc88/324c9c6a)
  * are NOT used by the product (141adc88 currently 500s).
  *
@@ -41,12 +41,11 @@ import { resolveElementModel } from '../constants.js';
 /**
  * `position: -1` is the element's "not ranked / not answered" sentinel, and
  * `sentiment: null` means the prompt has no sentiment. Both are surfaced as `null`
- * so consumers (and the per-topic averages in topics.js) can exclude them rather
+ * so consumers (and the per-topic averages in topics-insights.js) can exclude them rather
  * than treat -1 as a real rank or null as 0.
  */
 const NO_POSITION = -1;
 
-/* c8 ignore start -- LLMO-6418 POC endpoint; excluded from coverage % (has unit tests) */
 function toNumberOrNull(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -56,7 +55,7 @@ function toNumberOrNull(value) {
  *
  * @param {object} [params]
  * @param {string} [params.topic] - Topic NAME to scope to (`CBF_topic`). When omitted,
- *   the element returns prompts across ALL topics (used by topics.js to group).
+ *   the element returns prompts across ALL topics (used by topics-insights.js to group).
  * @param {string} [params.model] - AI model filter (Semrush engine name or UI platform
  *   code). Translated + validated via {@link resolveElementModel}.
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
@@ -127,4 +126,3 @@ export function transformTopicPromptsResponse(raw) {
     };
   });
 }
-/* c8 ignore stop */

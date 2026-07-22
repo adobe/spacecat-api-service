@@ -281,7 +281,11 @@ export function createElementsService(transport, log) {
         ELEMENT_IDS.PROMPTS_BY_TOPIC,
         buildTopicPromptsPayload(params),
       );
-      return transformTopicPromptsResponse(raw);
+      // Sort by volume desc so the drill-down matches the order of the same topic's
+      // prompts embedded in getTopics (aggregateTopicsFromPrompts) — the element itself
+      // returns rows in an unspecified order.
+      return transformTopicPromptsResponse(raw)
+        .sort((a, b) => (Number(b.volume) || 0) - (Number(a.volume) || 0));
     },
     /* c8 ignore stop */
 
