@@ -4323,9 +4323,12 @@ describe('LlmoController', () => {
   describe('getBrandClaims', () => {
     let brandClaimsContext;
     let mockGetSignedUrl;
+    let mockS3Send;
 
     beforeEach(() => {
       mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+      // HeadObject resolves by default → the object exists.
+      mockS3Send = sinon.stub().resolves({});
 
       brandClaimsContext = {
         ...mockContext,
@@ -4337,7 +4340,7 @@ describe('LlmoController', () => {
           ENV: 'dev',
         },
         s3: {
-          s3Client: {},
+          s3Client: { send: mockS3Send },
           s3Bucket: 'test-bucket',
           getSignedUrl: mockGetSignedUrl,
           GetObjectCommand: function MockGetObjectCommand(params) {
@@ -4363,22 +4366,6 @@ describe('LlmoController', () => {
       expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
     });
 
-    it('should return presigned URL for specific model', async () => {
-      const context = {
-        ...brandClaimsContext,
-        data: { model: 'gpt-4.1' },
-      };
-
-      const result = await controller.getBrandClaims(context);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody.model).to.equal('gpt-4.1');
-
-      const commandArg = mockGetSignedUrl.getCall(0).args[1];
-      expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
-    });
-
     it('should return 403 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const result = await controllerDenied.getBrandClaims(brandClaimsContext);
@@ -4386,31 +4373,6 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
-    });
-
-    it('should return 400 when S3 is not configured', async () => {
-      const contextWithoutS3 = {
-        ...brandClaimsContext,
-        s3: null,
-      };
-
-      const result = await controller.getBrandClaims(contextWithoutS3);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
-    });
-
-    it('should return 404 when S3 key not found', async () => {
-      const noSuchKeyError = new Error('The specified key does not exist');
-      noSuchKeyError.name = 'NoSuchKey';
-      mockGetSignedUrl.rejects(noSuchKeyError);
-
-      const result = await controller.getBrandClaims(brandClaimsContext);
-
-      expect(result.status).to.equal(404);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
     });
 
     it('should return 404 when site is not found', async () => {

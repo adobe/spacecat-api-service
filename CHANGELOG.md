@@ -1,3 +1,10 @@
+## [1.679.1](https://github.com/adobe/spacecat-api-service/compare/v1.679.0...v1.679.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **ci:** bump mysticat-ci pin from [@v2](https://github.com/v2) to [@v3](https://github.com/v3) ([#2865](https://github.com/adobe/spacecat-api-service/issues/2865)) ([59c47dc](https://github.com/adobe/spacecat-api-service/commit/59c47dc77cd16092bb8e1b61ff015a7819ab431b)), closes [mysticat-ci#22](https://github.com/mysticat-ci/issues/22) [mysticat-ci#22](https://github.com/mysticat-ci/issues/22) [mysticat-ci#22](https://github.com/mysticat-ci/issues/22)
+
 # [1.679.0](https://github.com/adobe/spacecat-api-service/compare/v1.678.0...v1.679.0) (2026-07-22)
 
 
