@@ -1,3 +1,17 @@
+# [1.677.0](https://github.com/adobe/spacecat-api-service/compare/v1.676.0...v1.677.0) (2026-07-22)
+
+
+### Features
+
+* **serenity:** org-flag brand-create mode, sub-workspace-only pending activation, site_id anchoring (LLMO-6405) ([#2878](https://github.com/adobe/spacecat-api-service/issues/2878)) ([a9d7a4a](https://github.com/adobe/spacecat-api-service/commit/a9d7a4a829094e21759f328be8c60c6cd440175e))
+
+# [1.676.0](https://github.com/adobe/spacecat-api-service/compare/v1.675.0...v1.676.0) (2026-07-22)
+
+
+### Features
+
+* added move site slack command ([#2795](https://github.com/adobe/spacecat-api-service/issues/2795)) ([3757f01](https://github.com/adobe/spacecat-api-service/commit/3757f019896b3810df023876300a191367a675da))
+
 # [1.675.0](https://github.com/adobe/spacecat-api-service/compare/v1.674.0...v1.675.0) (2026-07-22)
 
 
