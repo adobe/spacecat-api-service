@@ -22,9 +22,11 @@ import {
   provisionDimensionTree,
   ensureClosedValue,
   resolveTypeValueInjection,
+  resolveClosedValueInjection,
   findTagsInTree,
   assertParentWithinDimension,
 } from '../../../src/support/serenity/tag-tree.js';
+import { DIMENSION } from '../../../src/support/serenity/prompt-tags.js';
 import {
   TAG_IDS,
   dimensionTreeLevels,
@@ -484,6 +486,45 @@ describe('serenity tag-tree', () => {
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
+    });
+  });
+
+  // FIX (MysticatBot nit): direct coverage of the generalized resolver. It was
+  // previously exercised only indirectly through the `resolveTypeValueInjection`
+  // wrapper and `makePromptTagInjector`; these tests hit it straight, for the
+  // `origin` dimension. NOTE: the actual gate-8 strip (dropping a caller-supplied
+  // id that collides by NAME but not by root) lives in `makePromptTagInjector`,
+  // not here — this resolver only returns the strip SET (`valueTagIds`), scoped to
+  // the dimension root. So these tests pin that the returned set is root-scoped;
+  // the strip behaviour itself is covered by the injector tests in prompts.test.js.
+  describe('resolveClosedValueInjection', () => {
+    it('resolves an `origin` value id plus EVERY id under the origin root (strip set)', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const res = await resolveClosedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'human', fakeLog());
+      expect(res.computedId).to.equal(TAG_IDS.originHuman);
+      // Strip set is every id under the ORIGIN root — the two closed values only.
+      expect(res.valueTagIds).to.have.members([TAG_IDS.originAi, TAG_IDS.originHuman]);
+      // REGRESSION GUARD (not active filter validation): a customer sub-category
+      // also named `human` (subCategoryHuman) lives under the CATEGORY root. The
+      // resolver only reads the ORIGIN root's children, so this id is excluded BY
+      // CONSTRUCTION rather than by any filter in the SUT — the assertion locks in
+      // that the strip set stays root-scoped (never widens to a name match) should
+      // the resolution ever change to read more of the tree.
+      expect(res.valueTagIds).to.not.include(TAG_IDS.subCategoryHuman);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('resolves the `ai` origin value id', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const res = await resolveClosedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'ai', fakeLog());
+      expect(res.computedId).to.equal(TAG_IDS.originAi);
+      expect(res.valueTagIds).to.have.members([TAG_IDS.originAi, TAG_IDS.originHuman]);
     });
   });
 

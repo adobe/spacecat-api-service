@@ -466,6 +466,170 @@ describe('provisionBrandSubworkspace', () => {
   });
 });
 
+describe('provisionBrandSubworkspaceBare', () => {
+  const TRANSPORT = { name: 'bare-transport' };
+  const bareParams = { spaceCatId: 'org-1', brandId: 'brand-1', brandName: 'Acme' };
+  let resolveWorkspaceId;
+  let ensureSubworkspace;
+  let deleteAllProjects;
+  let releaseFullAllocation;
+
+  beforeEach(() => {
+    resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
+    // Like the real ensureSubworkspace, resolve the new sub-workspace id AND set
+    // it on the brand stub via setSemrushSubWorkspaceId.
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      return NEW_WS;
+    });
+    deleteAllProjects = sinon.stub().resolves();
+    releaseFullAllocation = sinon.stub().resolves();
+  });
+
+  async function loadBareModule() {
+    return esmock('../../../src/support/serenity/brand-provisioning.js', {
+      '../../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId },
+      '../../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: () => TRANSPORT,
+        SerenityTransportError,
+      },
+      '../../../src/support/serenity/workspace-lifecycle.js': {
+        ensureSubworkspace,
+        deleteAllProjects,
+        releaseFullAllocation,
+      },
+    });
+  }
+
+  it('provisions the bare sub-workspace (marketCount 1) and returns its id — no project created', async () => {
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    const result = await provisionBrandSubworkspaceBare(buildContext(), bareParams);
+    expect(result).to.deep.equal({ semrushSubWorkspaceId: NEW_WS });
+    // Carved for a single future project (marketCount = 1), against the org parent.
+    expect(ensureSubworkspace).to.have.been.calledOnce;
+    expect(ensureSubworkspace.firstCall.args[0]).to.equal(TRANSPORT);
+    expect(ensureSubworkspace.firstCall.args[2]).to.equal(PARENT_WS);
+    expect(ensureSubworkspace.firstCall.args[3]).to.equal(1);
+    // Success → no allocation release.
+    expect(deleteAllProjects).to.not.have.been.called;
+    expect(releaseFullAllocation).to.not.have.been.called;
+  });
+
+  it('falls back to the captured workspace id when ensureSubworkspace returns nothing', async () => {
+    // Sets the stub id but returns undefined → resolved via capturedWorkspaceId.
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      return undefined;
+    });
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    const result = await provisionBrandSubworkspaceBare(buildContext(), bareParams);
+    expect(result).to.deep.equal({ semrushSubWorkspaceId: NEW_WS });
+  });
+
+  it('throws 502 when neither a returned nor a captured sub-workspace id is available', async () => {
+    ensureSubworkspace = sinon.stub().resolves(undefined); // never sets the stub id
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    try {
+      await provisionBrandSubworkspaceBare(buildContext(), bareParams);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(502);
+      expect(e.message).to.equal('Semrush provisioning returned no sub-workspace id');
+    }
+    expect(deleteAllProjects).to.not.have.been.called;
+  });
+
+  it('releases the captured sub-workspace allocation when ensureSubworkspace throws after creating it', async () => {
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS); // created upstream...
+      throw new SerenityTransportError(502, 'settle timeout'); // ...then failed
+    });
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    const log = { info: sinon.stub(), error: sinon.stub() };
+    try {
+      await provisionBrandSubworkspaceBare(buildContext(), bareParams, log);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(502);
+    }
+    // The orphaned (empty) sub-workspace's projects are emptied + allocation floored.
+    expect(deleteAllProjects).to.have.been.calledOnceWithExactly(TRANSPORT, NEW_WS);
+    expect(releaseFullAllocation).to.have.been.calledOnce;
+    expect(releaseFullAllocation.firstCall.args).to.deep.equal([TRANSPORT, NEW_WS, PARENT_WS, log]);
+    expect(log.info).to.have.been.called;
+  });
+
+  it('does NOT attempt a release when ensureSubworkspace throws before creating the sub-workspace', async () => {
+    ensureSubworkspace = sinon.stub().rejects(new SerenityTransportError(500, 'early boom'));
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    try {
+      await provisionBrandSubworkspaceBare(buildContext(), bareParams);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(500);
+    }
+    expect(deleteAllProjects).to.not.have.been.called;
+    expect(releaseFullAllocation).to.not.have.been.called;
+  });
+
+  it('swallows a release failure (logs at error) and re-throws the original error', async () => {
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      throw new SerenityTransportError(502, 'settle timeout');
+    });
+    deleteAllProjects = sinon.stub().rejects(new Error('release network error'));
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    const log = { info: sinon.stub(), error: sinon.stub() };
+    try {
+      await provisionBrandSubworkspaceBare(buildContext(), bareParams, log);
+      expect.fail('should have thrown');
+    } catch (e) {
+      // The ORIGINAL error is re-thrown, not the release failure.
+      expect(e.status).to.equal(502);
+    }
+    expect(log.error).to.have.been.called;
+    const [msg, meta] = log.error.firstCall.args;
+    expect(msg).to.include('failed to release');
+    expect(meta.semrushWorkspaceId).to.equal(NEW_WS);
+    expect(meta.error).to.equal('release network error');
+  });
+
+  it('throws 400 when brandName is missing', async () => {
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    try {
+      await provisionBrandSubworkspaceBare(buildContext(), { ...bareParams, brandName: '' });
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(400);
+      expect(e.message).to.equal('brandName is required for Semrush provisioning');
+    }
+  });
+
+  it('throws 400 when brandId is missing', async () => {
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    try {
+      await provisionBrandSubworkspaceBare(buildContext(), { ...bareParams, brandId: '' });
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(400);
+      expect(e.message).to.equal('brandId is required for Semrush provisioning');
+    }
+  });
+
+  it('throws 400 when the org has no parent Semrush workspace', async () => {
+    resolveWorkspaceId = sinon.stub().resolves(null);
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    try {
+      await provisionBrandSubworkspaceBare(buildContext(), bareParams);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e.status).to.equal(400);
+      expect(e.message).to.equal('Organization has no Semrush workspace configured');
+    }
+    expect(ensureSubworkspace).to.not.have.been.called;
+  });
+});
+
 describe('releaseProvisionedWorkspace', () => {
   function buildAuthedContext(extraEnv = {}) {
     return {
