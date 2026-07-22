@@ -32,7 +32,7 @@ import {
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
 } from './prompts.js';
-import { ORIGIN_VALUE } from '../prompt-tags.js';
+import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
@@ -141,14 +141,15 @@ export async function handleCreatePromptsSubworkspace(
   }
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: user-authenticated write → derived `origin` is `human` (see the
-  // flat-mode twin handleCreatePrompts and origin-dimension.md §3).
+  // CREATE: user-authenticated write → derived `origin` is `human` and producing
+  // `source` is the constant `config` (see the flat-mode twin handleCreatePrompts,
+  // origin-dimension.md §3, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
 
   // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is

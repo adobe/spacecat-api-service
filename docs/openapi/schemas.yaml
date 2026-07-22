@@ -6553,9 +6553,13 @@ V2Prompt:
       default: human
     source:
       type: string
-      description: The source system or process that created the prompt
+      readOnly: true
+      description: >-
+        The producing system (source-dimension.md). READ-ONLY: server-owned, with
+        no write surface — a create/update body cannot set it. Returned in its
+        CANONICAL form (`lower(replace(source, '_', '-'))`), so `agentic_traffic`
+        reads as `agentic-traffic`.
       example: "config"
-      default: "config"
     intent:
       type: [string, 'null']
       description: >-
@@ -6656,10 +6660,6 @@ V2PromptInput:
         principal (e.g. the generation pipeline) may assert it, validated against
         the enum. It is never patched on update — it is fixed by the writer that
         created the row (origin-dimension.md §3).
-    source:
-      type: string
-      description: The source system or process that created the prompt
-      default: "config"
     intent:
       type: string
       description: >-

@@ -41,8 +41,8 @@ import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
 } from '../resource-manager.js';
-import { DIMENSION, STANDARD_PROMPT_TAG_VALUES } from '../prompt-tags.js';
-import { provisionDimensionTree } from '../tag-tree.js';
+import { DIMENSION, STANDARD_PROMPT_TAG_VALUES, GENERATED_PROMPT_SOURCE_VALUE } from '../prompt-tags.js';
+import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
@@ -271,10 +271,10 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}) plus
- * a branded / non-branded `type` value derived from `brandNames` (brand name +
- * aliases). Returns the topic/prompt counts. A generation that yields nothing is
- * a clean no-op (no upstream write).
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}), the
+ * producing `source/semrush` value, and a branded / non-branded `type` value
+ * derived from `brandNames` (brand name + aliases). Returns the topic/prompt
+ * counts. A generation that yields nothing is a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
  * topic is a sub-category — a depth-3 descendant of a customer category — and
@@ -355,6 +355,19 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   const standardIds = STANDARD_PROMPT_TAG_VALUES.map(
     ({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)),
   );
+  // Stamp the producing system. This generator builds its prompts from Semrush's
+  // own `getBrandTopics`, so every generated prompt is `source/semrush` — the
+  // persisted SR-AI-Visibility key, a constant at THIS write site, NOT `config`
+  // (source-dimension.md §1 item 2). `source` is open, so the value is resolved-or-
+  // created on demand rather than pre-provisioned in `provisioned.values`.
+  const { id: sourceId } = await ensureServerOwnedValue(
+    transport,
+    workspaceId,
+    projectId,
+    DIMENSION.SOURCE,
+    GENERATED_PROMPT_SOURCE_VALUE,
+    log,
+  );
   const typeValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.TYPE));
 
   /** @type {Map<string, string[]>} bare type value → prompt texts */
@@ -380,7 +393,12 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
     // eslint-disable-next-line no-await-in-loop
     await headroom.retryOnQuota(
-      () => transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]),
+      () => transport.createPromptsByIds(
+        workspaceId,
+        projectId,
+        items,
+        [...standardIds, sourceId, typeId],
+      ),
       { callSite: 'createPromptsByIds' },
     );
   }
