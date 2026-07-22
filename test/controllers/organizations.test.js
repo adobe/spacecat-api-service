@@ -971,6 +971,79 @@ describe('Organizations Controller', () => {
     expect(resultSites[1]).to.have.property('id', 'site2');
   });
 
+  it('projects sites to the requested fields when ?fields= is passed', async () => {
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const mockEntitlement = {
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'abcd',
+      getTier: () => 'FREE_TRIAL',
+    };
+    const mockSiteEnrollments = [
+      {
+        getId: () => 'enrollment-1',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site1',
+      },
+      {
+        getId: () => 'enrollment-2',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site2',
+      },
+    ];
+
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
+    mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(mockSiteEnrollments);
+
+    const result = await organizationsController.getSitesForOrganization({
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      data: { fields: 'baseURL' },
+      ...context,
+    });
+    const resultSites = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(resultSites).to.be.an('array').with.lengthOf(2);
+    expect(Object.keys(resultSites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+  });
+
+  it('returns 400 when ?fields= matches no known site field', async () => {
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    const mockEntitlement = {
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'abcd',
+      getTier: () => 'FREE_TRIAL',
+    };
+    const mockSiteEnrollments = [
+      {
+        getId: () => 'enrollment-1',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site1',
+      },
+      {
+        getId: () => 'enrollment-2',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site2',
+      },
+    ];
+
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
+    mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(mockSiteEnrollments);
+
+    const result = await organizationsController.getSitesForOrganization({
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      data: { fields: 'nope' },
+      ...context,
+    });
+
+    expect(result.status).to.equal(400);
+    const error = await result.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   describe('getSitesForOrganization — ReBAC collection filter', () => {
     // Minimal chained PostgREST stub; resolves every read to the given rows.
     function fakeFacsPostgrest(rows) {

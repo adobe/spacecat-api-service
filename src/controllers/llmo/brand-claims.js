@@ -13,6 +13,7 @@
 import {
   badRequest, notFound,
 } from '@adobe/spacecat-shared-http-utils';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 
 /**
@@ -45,6 +46,14 @@ export async function handleBrandClaims(context) {
 
   try {
     const { getSignedUrl, GetObjectCommand } = s3;
+
+    // Presigning a GetObject URL is an offline operation and never checks that
+    // the object exists, so without this HeadObject the endpoint would happily
+    // hand out a URL that 404s on fetch. Verify existence first and return a
+    // clean 404 otherwise (mirrors getFanoutReport). This also lets callers use
+    // the endpoint as a cheap availability probe (e.g. an "all brands" view).
+    await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+
     const command = new GetObjectCommand({
       Bucket: bucketName,
       Key: s3Key,
@@ -60,7 +69,7 @@ export async function handleBrandClaims(context) {
       expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
   } catch (s3Error) {
-    if (s3Error.name === 'NoSuchKey') {
+    if (s3Error.name === 'NotFound' || s3Error.$metadata?.httpStatusCode === 404) {
       log.warn(`Brand claims file not found for site ${siteId} at ${s3Key}`);
       return notFound(`Brand claims data not found for site ${siteId}`);
     }

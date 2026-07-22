@@ -180,8 +180,16 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topics'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics/{topicId}/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topic-prompts'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/stats:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/prompts/count:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -367,6 +375,24 @@ paths:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
   /sites/{siteId}/agentic-page-types/{name}:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
+  /sites/{siteId}/audit-policy:
+    $ref: './audit-policy-api.yaml#/audit-policy'
+  /sites/{siteId}/audit-policy/exclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions'
+  /sites/{siteId}/audit-policy/exclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions-delete'
+  /sites/{siteId}/audit-policy/inclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions'
+  /sites/{siteId}/audit-policy/inclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions-delete'
+  /sites/{siteId}/audit-policy/revisions:
+    $ref: './audit-policy-api.yaml#/audit-policy-revisions'
+  /sites/{siteId}/audit-scope/pages:
+    $ref: './audit-policy-api.yaml#/audit-scope-pages'
+  /sites/{siteId}/audit-scope/summary:
+    $ref: './audit-policy-api.yaml#/audit-scope-summary'
+  /sites/{siteId}/audit-scope/sections:
+    $ref: './audit-policy-api.yaml#/audit-scope-sections'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:

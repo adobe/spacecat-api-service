@@ -186,9 +186,12 @@ export default function brandsTests(getHttpClient, resetData) {
     it('clears a pending brand baseSiteId so the freed site can be reused by another brand', async () => {
       const http = getHttpClient();
 
-      // 1. A brand with no anchor (no baseSiteId / no Semrush) is created pending.
+      // 1. A pending brand with no baseSiteId. Created explicitly pending: in a
+      //    serenity-active org every create is a Semrush create (LLMO-6405), so a
+      //    bare active create would provision a sub-workspace and land active rather
+      //    than falling back to the legacy no-anchor -> pending demotion.
       const createA = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
-        name: 'Pending URL Holder', region: ['US'],
+        name: 'Pending URL Holder', region: ['US'], status: 'pending',
       });
       expect(createA.status).to.equal(201);
       expect(createA.body.status).to.equal('pending');
@@ -207,7 +210,7 @@ export default function brandsTests(getHttpClient, resetData) {
 
       // 3. A second pending brand cannot claim the same site while A holds it.
       const createB = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
-        name: 'Wants Same URL', region: ['US'],
+        name: 'Wants Same URL', region: ['US'], status: 'pending',
       });
       expect(createB.status).to.equal(201);
       const brandBId = createB.body.id;

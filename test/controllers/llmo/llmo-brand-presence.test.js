@@ -6572,6 +6572,74 @@ describe('llmo-brand-presence', () => {
       ];
       expect(aggregateDetailSources(rows)).to.have.lengthOf(2);
     });
+
+    it('does not double-count citations from multiple rows sharing the same execution_id', () => {
+      // A single execution can produce more than one brand_presence_sources row for
+      // the same URL (e.g. one row per inline citation marker in the answer) —
+      // citationCount must reflect distinct executions, not raw row count.
+      const rows = [
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(1);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 1 }]);
+    });
+
+    it('counts citations once per distinct execution_id', () => {
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', execution_id: 'exec-1', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-09', execution_id: 'exec-2', prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(2);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 2 }]);
+    });
+
+    it('counts each row independently when execution_id is missing', () => {
+      // Rows without an execution_id (not expected in practice) always count,
+      // since there's no id to dedupe against.
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', execution_id: null, prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(3);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 3 }]);
+    });
   });
 
   // ── createTopicDetailHandler ────────────────────────────────────────────────
@@ -6887,6 +6955,15 @@ describe('llmo-brand-presence', () => {
           url_id: 'u1',
           source_urls: { url: 'https://example.com', hostname: 'example.com' },
         },
+        // Same execution + same URL as a second brand_presence_sources row (e.g. the
+        // AI answer cited example.com twice) — must NOT double-count citationCount.
+        {
+          execution_id: 'exec-1',
+          execution_date: '2026-03-02',
+          content_type: 'web',
+          url_id: 'u1-dup',
+          source_urls: { url: 'https://example.com', hostname: 'example.com' },
+        },
         // null source_urls exercises the || {} fallback in flattenSourceRow
         {
           execution_id: 'exec-1',
@@ -6919,6 +6996,8 @@ describe('llmo-brand-presence', () => {
       expect(body.sources).to.have.lengthOf(2);
       const exampleSource = body.sources.find((s) => s.url === 'https://example.com');
       expect(exampleSource).to.exist;
+      // Only 1 execution (exec-1) exists for this topic, so citationCount must stay 1
+      // even though two brand_presence_sources rows reference it for that execution.
       expect(exampleSource.citationCount).to.equal(1);
     });
 
