@@ -32,6 +32,9 @@ import {
   INTENT_ENRICH_CONCURRENCY,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
+  buildTopicPromptsPayload,
+  transformTopicPromptsResponse,
+  aggregateTopicsFromPrompts,
   buildSentimentOverviewPayload,
   transformSentimentOverviewResponse,
   buildOwnedUrlsStatsPayload,
@@ -260,6 +263,49 @@ export function createElementsService(transport, log) {
       );
       return transformSentimentOverviewResponse(raw);
     },
+
+    /**
+     * Fetches the per-prompt drill-down for a single topic from the rich
+     * PROMPTS_BY_TOPIC element (78864493), scoped by `CBF_topic` (the topic name).
+     * Single call (no fan-out); returns a flat array of per-prompt rows. Pagination
+     * is applied client-side by the controller (Semrush has no server-side paging).
+     *
+     * @param {string} workspaceId - Semrush sub-workspace UUID (projects/prompts live here).
+     * @param {object} params - Query params (topic, model/platform, startDate, endDate, projectId).
+     * @returns {Promise<Array<object>>} Per-prompt rows (see transformTopicPromptsResponse).
+     */
+    /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+    async getTopicPrompts(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.PROMPTS_BY_TOPIC,
+        buildTopicPromptsPayload(params),
+      );
+      return transformTopicPromptsResponse(raw);
+    },
+    /* c8 ignore stop */
+
+    /**
+     * Fetches the Data Insights per-TOPIC table. Uses the SAME PROMPTS_BY_TOPIC element
+     * (78864493) as getTopicPrompts but with NO topic filter (all topics), then groups
+     * the per-prompt rows by topic and aggregates server-side (see aggregateTopicsFromPrompts).
+     * Single upstream call; no fan-out.
+     *
+     * @param {string} workspaceId - Semrush sub-workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate, projectId).
+     * @returns {Promise<Array<object>>} Per-topic aggregate rows.
+     */
+    /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+    async getTopics(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.PROMPTS_BY_TOPIC,
+        // Omit `topic` so the element returns prompts across ALL topics to group.
+        buildTopicPromptsPayload({ ...params, topic: undefined }),
+      );
+      return aggregateTopicsFromPrompts(transformTopicPromptsResponse(raw));
+    },
+    /* c8 ignore stop */
 
     /**
      * Resolves a URL Inspector `region` code (e.g. `US`) to its Semrush `project_id` for the

@@ -665,6 +665,169 @@ export default function ElementsController(context, log, env) {
   /* c8 ignore stop */
 
   /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics
+   * Data Insights per-topic table. Backed by the rich PROMPTS_BY_TOPIC element
+   * (78864493) fetched across ALL topics, grouped by topic and aggregated
+   * server-side (promptCount, brandMentions/citations, avg visibility/position/sentiment).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts}).
+   * Region (optional) resolves to a `CBF_project`; absent → all of the brand's markets.
+   * Returns the full topic list (`{ topics, totalCount }`); the table paginates client-side.
+   *
+   * Query params (all optional): `model`/`platform` (default search-gpt), `region`,
+   * `startDate`/`endDate` (YYYY-MM-DD).
+   */
+  /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+  const listTopics = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId } = ctx?.params ?? {};
+      const { workspaceId } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is optional; when present it must be a valid, ordered YYYY-MM-DD pair.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) || hasText(endDate)) {
+        if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+          return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+        }
+        if (startDate > endDate) {
+          return badRequest('startDate must not be after endDate');
+        }
+      }
+
+      const service = await buildService(ctx);
+
+      // Region scoping: resolve the UI region code to its Semrush project id (Markets
+      // element) and pass it as CBF_project. region=all/absent → all markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          [{ id: brandId }],
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      }
+
+      const topics = await service.getTopics(workspaceId, {
+        model: query.model || query.platform,
+        startDate: hasText(startDate) ? startDate : undefined,
+        endDate: hasText(endDate) ? endDate : undefined,
+        projectId,
+      });
+
+      return cachedOk({ topics, totalCount: topics.length });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts
+   * Data Insights per-prompt drill-down for a single topic. Backed by the rich
+   * PROMPTS_BY_TOPIC element (78864493), scoped by `CBF_topic` = the topic NAME
+   * (`:topicId` is the URL-encoded topic name, not a UUID — Semrush topics have no id).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listPrompts} —
+   * projects/prompts live only there). Region (optional) resolves to a `CBF_project`
+   * via the Markets element; absent → all of the brand's markets. Pagination is
+   * client-side (Semrush has no server-side paging); `totalCount` is the full count.
+   *
+   * Query params (all optional): `model`/`platform` (default search-gpt), `region`,
+   * `startDate`/`endDate` (YYYY-MM-DD), `page` (0-based), `pageSize` (1..1000, default 50).
+   */
+  /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+  const listTopicPrompts = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId, topicId } = ctx?.params ?? {};
+      const { workspaceId } = auth;
+
+      // :topicId is the URL-encoded topic NAME. enrichPathInfo already decodes path
+      // params, but decode defensively in case a caller double-encodes.
+      let topic = topicId;
+      try {
+        topic = decodeURIComponent(topicId);
+      } catch { /* keep raw when not a valid encoding */ }
+      if (!hasText(topic)) {
+        return badRequest('topicId (topic name) is required');
+      }
+
+      const query = extractQuery(ctx);
+
+      // Date range is optional here (unlike the aggregate endpoints); when present it
+      // must be a valid, ordered YYYY-MM-DD pair — never forward a malformed date.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) || hasText(endDate)) {
+        if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+          return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+        }
+        if (startDate > endDate) {
+          return badRequest('startDate must not be after endDate');
+        }
+      }
+
+      const service = await buildService(ctx);
+
+      // Region scoping: resolve the UI region code to its Semrush project id (via the
+      // Markets element) and pass it as CBF_project. region=all/absent → all markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          [{ id: brandId }],
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      }
+
+      const allPrompts = await service.getTopicPrompts(workspaceId, {
+        topic,
+        model: query.model || query.platform,
+        startDate: hasText(startDate) ? startDate : undefined,
+        endDate: hasText(endDate) ? endDate : undefined,
+        projectId,
+      });
+
+      // Client-side pagination (mirrors listOwnedUrls); totalCount is the full count.
+      const page = Math.max(0, Number.parseInt(query.page, 10) || 0);
+      const pageSize = Math.min(Math.max(1, Number.parseInt(query.pageSize, 10) || 50), 1000);
+      const totalCount = allPrompts.length;
+      const offset = page * pageSize;
+      const prompts = allPrompts.slice(offset, offset + pageSize);
+
+      return cachedOk({
+        topicId: topic, prompts, totalCount, page, pageSize,
+      });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/owned-urls
    * The URL Inspector "Your cited URLs" table. Hybrid: per-URL citations +
@@ -1093,6 +1256,8 @@ export default function ElementsController(context, log, env) {
     listPrompts,
     listCitedDomains,
     listSentimentOverview,
+    listTopics,
+    listTopicPrompts,
     listOwnedUrls,
     listDomainUrls,
     getMarketTrackingTrends,
