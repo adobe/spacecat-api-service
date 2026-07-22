@@ -19,6 +19,7 @@ import {
   listBrands,
   getBrandById,
   getBrandIdentity,
+  getBrandBaseSiteId,
   getBrandAliases,
   getBrandUrlSources,
   getBrandCompetitors,
@@ -502,6 +503,38 @@ describe('brands-storage', () => {
 
       await expect(getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand identity');
+    });
+  });
+
+  describe('getBrandBaseSiteId', () => {
+    it('returns null when postgrestClient is missing', async () => {
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, null)).to.be.null;
+    });
+
+    it('returns null when brandId is empty', async () => {
+      expect(await getBrandBaseSiteId(ORG_ID, '', { from: () => {} })).to.be.null;
+    });
+
+    it('returns the brand primary site_id', async () => {
+      const query = createChainableQuery({ data: { site_id: 'primary-site-1' }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient)).to.equal('primary-site-1');
+    });
+
+    it('returns null when the brand has no primary site (or is not found)', async () => {
+      const noRow = createChainableQuery({ data: null, error: null });
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(noRow) }))
+        .to.be.null;
+      const nullSite = createChainableQuery({ data: { site_id: null }, error: null });
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(nullSite) }))
+        .to.be.null;
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand primary site');
     });
   });
 

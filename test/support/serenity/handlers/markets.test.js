@@ -40,7 +40,7 @@ const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
 
 function makeProject({
-  semrushProjectId, geoTargetId, languageCode, remove,
+  semrushProjectId, geoTargetId, languageCode, remove, siteId = null,
 }) {
   return {
     getSemrushProjectId: () => semrushProjectId,
@@ -48,6 +48,7 @@ function makeProject({
     getLanguageCode: () => languageCode,
     getCreatedAt: () => '2026-05-28T10:00:00Z',
     getUpdatedAt: () => '2026-05-28T10:00:00Z',
+    getSiteId: () => siteId,
     remove: remove || sinon.stub().resolves(),
   };
 }
@@ -58,6 +59,11 @@ function makeDataAccess(projects) {
       allByBrandId: sinon.stub().resolves(projects),
       findBySlice: sinon.stub(),
       create: sinon.stub(),
+    },
+    // Site data-access — used by the siteId → domain derivation on the flat
+    // create path (LLMO-6405 Phase 2). Individual tests configure findById.
+    Site: {
+      findById: sinon.stub(),
     },
   };
 }
@@ -112,6 +118,7 @@ describe('handlers/markets.js — handleListMarkets', () => {
       languageCode: 'en',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
+      siteId: null,
     });
     expect(result.items[0]).not.to.have.property('semrushProjectId');
     expect(result.items[0]).not.to.have.property('semrushLocationId');
@@ -131,6 +138,20 @@ describe('handlers/markets.js — handleListMarkets', () => {
 
     const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
     expect(result.items).to.have.lengthOf(1);
+  });
+
+  it('surfaces each market siteId from the mapping rows (LLMO-6405)', async () => {
+    const rows = [
+      makeProject({
+        semrushProjectId: 'p-us', geoTargetId: 2840, languageCode: 'en', siteId: 'site-us',
+      }),
+      makeProject({
+        semrushProjectId: 'p-de', geoTargetId: 2276, languageCode: 'de', siteId: null,
+      }),
+    ];
+    const dataAccess = makeDataAccess(rows);
+    const result = await handleListMarkets({}, dataAccess, BRAND, WORKSPACE);
+    expect(result.items.map((m) => m.siteId)).to.deep.equal(['site-us', null]);
   });
 });
 
@@ -218,6 +239,72 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       domain: 'adobe.com',
     });
     expect(upstreamBody.brand_names).to.deep.equal(['Adobe']);
+  });
+
+  it('derives brandDomain from a supplied siteId when brandDomain is absent (LLMO-6405)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://acme.com/path' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(dataAccess.Site.findById).to.have.been.calledOnceWith('site-42');
+    // The Semrush project domain is the hostname resolved from the site base_url.
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('acme.com');
+  });
+
+  it('prefers an explicit brandDomain over the siteId (does not read the Site)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: 'site-42', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(dataAccess.Site.findById).to.not.have.been.called;
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('adobe.com');
+  });
+
+  it('400s when a supplied siteId does not resolve to a site domain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.Site.findById.resolves(null); // unknown site
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: 'site-missing', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('400s (validation) when neither brandDomain nor siteId is supplied', async () => {
+    const dataAccess = makeDataAccess([]);
+    const result = await handleCreateMarket({}, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandNames: ['Adobe'],
+    }, fakeLog());
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/brandDomain or siteId/);
   });
 
   // Branch coverage: validateCreateBody has a "name provided but invalid"
@@ -627,6 +714,23 @@ describe('handlers/markets.js — handleDeleteMarket', () => {
     expect(remove).to.have.been.calledOnce;
   });
 
+  it('returns the deleted market siteId (LLMO-6405 R12) and null for a missing slice', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en', siteId: 'site-77',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(row);
+    const transport = { deleteProject: sinon.stub().resolves() };
+
+    const linked = await handleDeleteMarket(transport, dataAccess, BRAND, WORKSPACE, 2840, 'en', fakeLog());
+    expect(linked).to.deep.equal({ status: 204, deletedSiteId: 'site-77' });
+
+    // Missing slice → idempotent 204 with no site to clean up.
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const missing = await handleDeleteMarket(transport, dataAccess, BRAND, WORKSPACE, 2840, 'en', fakeLog());
+    expect(missing).to.deep.equal({ status: 204, deletedSiteId: null });
+  });
+
   it('treats upstream 404 as already-gone success', async () => {
     const remove = sinon.stub().resolves();
     const row = makeProject({
@@ -740,7 +844,19 @@ describe('handlers/markets.js — handleGetMarket', () => {
       semrushProjectId: 'proj-us-en',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
+      siteId: null,
     });
+  });
+
+  it('surfaces the market siteId when the mapping row is linked (LLMO-6405)', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en', siteId: 'site-77',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(row);
+
+    const result = await handleGetMarket(dataAccess, BRAND, 2840, 'en');
+    expect(result.siteId).to.equal('site-77');
   });
 });
 

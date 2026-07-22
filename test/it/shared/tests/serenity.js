@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
+  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
 } from '../seed-ids.js';
 
 /**
@@ -205,10 +205,11 @@ export default function serenityTests(
       expect(res.body.error).to.equal('invalidRequest');
     });
 
-    it('POST /serenity/markets 400s when brandDomain/brandNames are missing', async () => {
+    it('POST /serenity/markets 400s when brandDomain/siteId/brandNames are missing', async () => {
       const res = await getHttpClient().admin.post(`${base}/markets`, { market: 'US', languageCode: 'en' });
       expect(res.status).to.equal(400);
-      expect(res.body.message).to.match(/brandDomain is required/i);
+      // brandDomain OR siteId is now required (LLMO-6405 Phase 2).
+      expect(res.body.message).to.match(/brandDomain or siteId is required/i);
     });
 
     it('POST /serenity/markets 400s when market is not an ISO-2 country code', async () => {
@@ -286,6 +287,28 @@ export default function serenityTests(
 
     it('DELETE /serenity/markets/:geo/:lang returns 204 after a create', async () => {
       await createUsMarket();
+      const del = await getHttpClient().admin.delete(`${base}/markets/${US_GEO}/en`);
+      expect(del.status).to.equal(204);
+    });
+
+    it('POST /serenity/markets accepts a siteId in place of brandDomain (LLMO-6405)', async () => {
+      // SITE_1 is an onboarded ORG_1 Site; the controller derives brandDomain from
+      // its base_url and links THAT site to the new market.
+      const res = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_1_ID, brandNames: ['Test Brand'],
+      });
+      expect(res.status).to.equal(201);
+      expect(res.body.geoTargetId).to.equal(US_GEO);
+      expect(res.body.languageCode).to.equal('en');
+    });
+
+    it('DELETE /serenity/markets/:geo/:lang removes a siteId-linked market and cleans up (LLMO-6405 R12)', async () => {
+      // Create via siteId (links SITE_1), then delete: the last market on that
+      // non-primary site is removed, so its brand_sites 'serenity' link is unlinked.
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_1_ID, brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
       const del = await getHttpClient().admin.delete(`${base}/markets/${US_GEO}/en`);
       expect(del.status).to.equal(204);
     });
@@ -612,6 +635,25 @@ export default function serenityTests(
       expect(slice.status).to.equal('live');
       // The listed slice is the same project the create returned.
       expect(slice.semrushProjectId).to.equal(created.body.projectId);
+      // The market DTO carries the SpaceCat Site identity (LLMO-6405 Phase 2).
+      // A domain-based create mirrors the domain to a Site and links the mapping
+      // row, so the slice surfaces that siteId (string; never absent).
+      expect(slice).to.have.property('siteId');
+      expect(slice.siteId).to.be.a('string');
+    });
+
+    it('GET /serenity/markets surfaces the linked siteId for a siteId-based create (LLMO-6405)', async () => {
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_1_ID, brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+      const res = await getHttpClient().admin.get(`${base}/markets`);
+      const slice = res.body.items.find(
+        (m) => m.geoTargetId === US_GEO && m.languageCode === 'en',
+      );
+      expect(slice).to.exist;
+      // The market is bound to the exact Site the caller supplied.
+      expect(slice.siteId).to.equal(SITE_1_ID);
     });
 
     it('GET /serenity/markets/:geo/:lang resolves a created+published market', async () => {

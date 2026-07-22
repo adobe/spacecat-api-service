@@ -61,6 +61,54 @@ import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
 // existing market), vs a leftover draft that a retry should adopt and resume.
 const LIVE_STATES = new Set(['live', 'live_with_unpublished_updates']);
 
+/**
+ * Best-effort `"geoTargetId#languageCode" → siteId` index built from the brand's
+ * LIVE `brand_to_semrush_projects` rows. Sub-workspace markets are enumerated
+ * live (no mapping consulted for the slice itself), but the SpaceCat Site
+ * identity lives only on the mapping row, so the read/get handlers enrich the
+ * live slices with it here (LLMO-6405 Phase 2). No-op-safe: if data-access or
+ * the model is missing, or the read throws, returns an empty index (every slice
+ * then reports `siteId: null`); NEVER throws — a market read must not fail on a
+ * best-effort enrichment.
+ *
+ * @param {any} dataAccess - `ctx.dataAccess` (reads `dataAccess.BrandSemrushProject`).
+ * @param {string} brandId - the brand UUID.
+ * @param {any} [log] - logger.
+ * @returns {Promise<Map<string, string>>} slice-key → siteId (live, linked rows only).
+ */
+async function buildMarketSiteIdIndex(dataAccess, brandId, log) {
+  const index = new Map();
+  const BrandSemrushProject = dataAccess?.BrandSemrushProject;
+  if (!BrandSemrushProject || typeof BrandSemrushProject.allByBrandId !== 'function'
+      || !brandId || !hasText(brandId)) {
+    return index;
+  }
+  try {
+    const rows = await BrandSemrushProject.allByBrandId(brandId);
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+      const siteId = row.getSiteId ? row.getSiteId() : null;
+      // Skip tombstoned rows and rows with no linked site.
+      if ((row.getDeletedAt && row.getDeletedAt()) || !siteId || !hasText(siteId)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const lang = hasText(row.getLanguageCode()) ? String(row.getLanguageCode()).toLowerCase() : '';
+      index.set(`${row.getGeoTargetId()}#${lang}`, siteId);
+    }
+  } catch (e) {
+    log?.warn?.('serenity markets (subworkspace): siteId enrichment read failed (non-fatal)', {
+      brandId, error: e?.message,
+    });
+  }
+  return index;
+}
+
+/** Slice-key for the siteId index — matches buildMarketSiteIdIndex's keying. */
+function marketSiteIdKey(geoTargetId, languageCode) {
+  const lang = hasText(languageCode) ? String(languageCode).toLowerCase() : '';
+  return `${geoTargetId}#${lang}`;
+}
+
 function validateSlice(geoTargetId, languageCode) {
   if (normalizeGeoTargetId(geoTargetId) === null) {
     throw new ErrorWithStatusCode('geoTargetId must be a positive integer', 400);
@@ -70,9 +118,33 @@ function validateSlice(geoTargetId, languageCode) {
   }
 }
 
-/** GET /serenity/markets (subworkspace) — one live listing of the subworkspace. */
-export async function handleListMarketsSubworkspace(transport, brandId, workspaceId) {
-  return { items: await listMarkets(transport, workspaceId, brandId) };
+/**
+ * GET /serenity/markets (subworkspace) — one live listing of the subworkspace,
+ * enriched with each market's SpaceCat Site identity (siteId) from the brand's
+ * mapping rows (LLMO-6405 Phase 2). `projectToSlice` has no DB access, so the
+ * enrichment happens here; a missing/failed read leaves every siteId null.
+ *
+ * @param {any} transport - Serenity transport.
+ * @param {string} brandId - the brand UUID.
+ * @param {string} workspaceId - the brand's sub-workspace id.
+ * @param {any} [dataAccess] - `ctx.dataAccess`; when absent, siteId stays null.
+ * @param {any} [log] - logger.
+ */
+export async function handleListMarketsSubworkspace(
+  transport,
+  brandId,
+  workspaceId,
+  dataAccess,
+  log,
+) {
+  const items = await listMarkets(transport, workspaceId, brandId);
+  const siteIdIndex = await buildMarketSiteIdIndex(dataAccess, brandId, log);
+  return {
+    items: items.map((slice) => ({
+      ...slice,
+      siteId: siteIdIndex.get(marketSiteIdKey(slice.geoTargetId, slice.languageCode)) ?? null,
+    })),
+  };
 }
 
 /**
@@ -87,6 +159,7 @@ export async function handleGetMarketSubworkspace(
   geoTargetId,
   languageCode,
   log,
+  dataAccess,
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
@@ -107,7 +180,11 @@ export async function handleGetMarketSubworkspace(
     });
   }
   const slice = projectToSlice(project, brandId);
-  return { ...slice, initialized };
+  // Enrich with the SpaceCat Site identity from the brand's mapping rows
+  // (LLMO-6405 Phase 2), best-effort — null when unavailable.
+  const siteIdIndex = await buildMarketSiteIdIndex(dataAccess, brandId, log);
+  const siteId = siteIdIndex.get(marketSiteIdKey(slice.geoTargetId, slice.languageCode)) ?? null;
+  return { ...slice, initialized, siteId };
 }
 
 // De-duplicates name strings case-insensitively (trim + lowercase key),
@@ -165,8 +242,10 @@ function validateCreateBody(body) {
   if (normalizeLanguageCode(body?.languageCode) === null) {
     errors.push('languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$');
   }
-  if (!hasText(body?.brandDomain)) {
-    errors.push('brandDomain is required');
+  // brandDomain OR siteId (LLMO-6405 Phase 2): the controller derives brandDomain
+  // from a supplied siteId (this handler has no Site access), so accept either.
+  if (!hasText(body?.brandDomain) && !hasText(body?.siteId)) {
+    errors.push('brandDomain or siteId is required');
   }
   if (!Array.isArray(body?.brandNames) || body.brandNames.length === 0
       || !body.brandNames.every(hasText)) {
@@ -722,7 +801,7 @@ export async function handleDeleteMarketSubworkspace(
   const lang = normalizeLanguageCode(languageCode);
   const project = await resolveProject(transport, workspaceId, Number(geoTargetId), lang, log);
   if (!project) {
-    return { status: 204 };
+    return { status: 204, deletedSiteId: null };
   }
   try {
     await transport.deleteProject(workspaceId, project.id);
@@ -731,8 +810,13 @@ export async function handleDeleteMarketSubworkspace(
       throw e;
     }
   }
+  // Tombstone the mapping row and capture the deleted market's linked Site
+  // (LLMO-6405 R12) in one read, so the controller can reference-count and unlink
+  // an orphaned brand_sites row. Best-effort — never fails a successful delete.
+  let deletedSiteId = null;
   if (dataAccess) {
-    await tombstoneMappingRow(dataAccess, project.id, log);
+    const tombstoned = await tombstoneMappingRow(dataAccess, project.id, log);
+    deletedSiteId = tombstoned?.siteId ?? null;
   }
   if (dynamicAllocation) {
     // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
@@ -748,7 +832,7 @@ export async function handleDeleteMarketSubworkspace(
       failFast: true,
     }, log);
   }
-  return { status: 204 };
+  return { status: 204, deletedSiteId };
 }
 
 /**

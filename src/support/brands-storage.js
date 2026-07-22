@@ -631,6 +631,37 @@ export async function getBrandIdentity(organizationId, brandId, postgrestClient)
 }
 
 /**
+ * Reads a brand's PRIMARY site id (`brands.site_id`) — the site that anchors the
+ * brand shell itself (as opposed to a market-mirror site linked via
+ * `brand_sites`). Used by the serenity market-delete cleanup (LLMO-6405 R12) to
+ * ensure the brand's primary site link is never removed when its last market is
+ * deleted. Lightweight single-column read; returns null when the brand has no
+ * primary site (a serenity shell before activation) or is not found.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<string|null>} the brand's primary site id, or null.
+ */
+export async function getBrandBaseSiteId(organizationId, brandId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to get brand primary site: ${error.message}`);
+  }
+  return data?.site_id ?? null;
+}
+
+/**
  * Reads a brand's aliases (the `brand_aliases` rows) — the extra names the brand
  * is known by, beyond its display name — each with its `regions`. Returned as
  * `{ name, regions }[]` (empty when the brand has none), the shape the Semrush

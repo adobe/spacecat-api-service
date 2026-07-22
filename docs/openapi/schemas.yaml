@@ -11262,6 +11262,16 @@ SerenityMarket:
       oneOf:
         - type: string
         - type: 'null'
+    siteId:
+      description: |
+        The SpaceCat Site UUID this market is bound to (LLMO-6405 Phase 2) — the
+        Site whose base_url is the market's domain. Additive; surfaced in BOTH
+        flat and sub-workspace modes. Null when the market is not (yet) linked to
+        a Site (a market predating the site-linkage backfill, or one never linked).
+      oneOf:
+        - type: string
+          format: uuid
+        - type: 'null'
 
 SerenityMarketListResponse:
   type: object
@@ -11437,7 +11447,15 @@ SerenityDeactivateResponse:
 
 SerenityCreateMarketRequest:
   type: object
-  required: [market, languageCode, brandDomain, brandNames]
+  description: |
+    Creates a market (a (geoTargetId, languageCode) Semrush project) for a brand.
+
+    Supply EITHER `brandDomain` (a raw domain) OR `siteId` (an already-onboarded
+    SpaceCat Site whose base_url is the market's domain). When `siteId` is given
+    and `brandDomain` is omitted, the server derives `brandDomain` from the Site
+    and, in sub-workspace mode, links THAT Site to the market directly (LLMO-6405
+    Phase 2). At least one of the two is required.
+  required: [market, languageCode, brandNames]
   properties:
     name:
       type: string
@@ -11458,7 +11476,17 @@ SerenityCreateMarketRequest:
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     brandDomain:
       type: string
-      description: Brand domain the upstream should track (e.g. adobe.com).
+      description: |
+        Brand domain the upstream should track (e.g. adobe.com). Optional when
+        `siteId` is supplied — the server derives it from the Site's base_url.
+        Required when `siteId` is absent.
+    siteId:
+      type: string
+      format: uuid
+      description: |
+        SpaceCat Site UUID to bind this market to (LLMO-6405 Phase 2). When
+        provided, the server derives `brandDomain` from the Site and links the
+        Site to the market. Supply this OR `brandDomain`.
     brandNames:
       type: array
       minItems: 1

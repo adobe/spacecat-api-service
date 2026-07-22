@@ -13,7 +13,12 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import { ensureMarketSite, SERENITY_BRAND_SITE_TYPE } from '../../../src/support/serenity/site-linkage.js';
+import {
+  ensureMarketSite,
+  resolveSiteDomain,
+  unlinkMarketSiteIfOrphaned,
+  SERENITY_BRAND_SITE_TYPE,
+} from '../../../src/support/serenity/site-linkage.js';
 
 const ORG = 'org-1';
 const BRAND = 'brand-1';
@@ -34,8 +39,8 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     upsertStub = sinon.stub().resolves({ error: null });
     fromStub = sinon.stub().returns({ upsert: upsertStub });
     postgrestClient = { from: fromStub };
-    Site = { findByBaseURL: sinon.stub(), create: sinon.stub() };
-    log = { warn: sinon.spy(), error: sinon.spy() };
+    Site = { findByBaseURL: sinon.stub(), findById: sinon.stub(), create: sinon.stub() };
+    log = { warn: sinon.spy(), error: sinon.spy(), info: sinon.spy() };
     ctx = { dataAccess: { Site, services: { postgrestClient } } };
   });
 
@@ -210,5 +215,214 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     });
     expect(result).to.equal(null);
     expect(log.warn).to.have.been.calledOnce;
+  });
+
+  describe('siteId fast path (LLMO-6405)', () => {
+    it('links a known same-org site directly, skipping the domain find-or-create', async () => {
+      Site.findById.resolves(siteModel('site-known'));
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, siteId: 'site-known', updatedBy: 'tester', log,
+      });
+      expect(result).to.equal('site-known');
+      expect(Site.findById).to.have.been.calledOnceWith('site-known');
+      expect(Site.findByBaseURL).to.not.have.been.called;
+      expect(Site.create).to.not.have.been.called;
+      const [row] = upsertStub.firstCall.args;
+      expect(row).to.include({ site_id: 'site-known', type: SERENITY_BRAND_SITE_TYPE, brand_id: BRAND });
+    });
+
+    it('takes precedence over domain (ignores domain when siteId is present)', async () => {
+      Site.findById.resolves(siteModel('site-known'));
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, siteId: 'site-known', domain: 'other.com', log,
+      });
+      expect(result).to.equal('site-known');
+      expect(Site.findByBaseURL).to.not.have.been.called;
+    });
+
+    it('warns + null when Site.findById is unavailable', async () => {
+      ctx.dataAccess.Site = { findByBaseURL: sinon.stub() }; // no findById
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, siteId: 'site-x', log,
+      });
+      expect(result).to.equal(null);
+      expect(log.warn).to.have.been.calledOnce;
+    });
+
+    it('warns + null when the supplied site is not found', async () => {
+      Site.findById.resolves(null);
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, siteId: 'site-missing', log,
+      });
+      expect(result).to.equal(null);
+      expect(log.warn).to.have.been.calledOnce;
+      expect(upsertStub).to.not.have.been.called;
+    });
+
+    it('warns + null (no link) when the supplied site belongs to another org', async () => {
+      Site.findById.resolves(siteModel('site-x', 'org-2'));
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, siteId: 'site-x', log,
+      });
+      expect(result).to.equal(null);
+      expect(upsertStub).to.not.have.been.called;
+      expect(log.warn).to.have.been.calledOnce;
+    });
+
+    it('swallows a Site.findById rejection (null, logs error)', async () => {
+      Site.findById.rejects(new Error('timeout'));
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, siteId: 'site-x', log,
+      });
+      expect(result).to.equal(null);
+      expect(log.error).to.have.been.calledOnce;
+    });
+
+    it('returns null (link not written) when the brand_sites upsert errors on the siteId path', async () => {
+      Site.findById.resolves(siteModel('site-known'));
+      upsertStub.resolves({ error: { message: 'conflict' } });
+      const result = await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, siteId: 'site-known', log,
+      });
+      expect(result).to.equal(null);
+      expect(log.warn).to.have.been.calledOnce;
+    });
+  });
+});
+
+describe('serenity site-linkage: resolveSiteDomain', () => {
+  let Site;
+  let log;
+  let dataAccess;
+
+  beforeEach(() => {
+    Site = { findById: sinon.stub() };
+    log = { warn: sinon.spy(), error: sinon.spy() };
+    dataAccess = { Site };
+  });
+
+  afterEach(() => sinon.restore());
+
+  it('resolves a site id to its bare hostname (strips scheme/path)', async () => {
+    Site.findById.resolves({ getBaseURL: () => 'https://www.acme.com/markets/fr' });
+    const result = await resolveSiteDomain(dataAccess, 'site-1', log);
+    expect(result).to.equal('www.acme.com');
+    expect(Site.findById).to.have.been.calledOnceWith('site-1');
+  });
+
+  it('returns null for missing siteId', async () => {
+    expect(await resolveSiteDomain(dataAccess, '', log)).to.equal(null);
+    expect(await resolveSiteDomain(dataAccess, null, log)).to.equal(null);
+    expect(Site.findById).to.not.have.been.called;
+  });
+
+  it('warns + null when Site data-access is unavailable', async () => {
+    const result = await resolveSiteDomain({ Site: {} }, 'site-1', log);
+    expect(result).to.equal(null);
+    expect(log.warn).to.have.been.calledOnce;
+  });
+
+  it('warns + null when the site is not found', async () => {
+    Site.findById.resolves(null);
+    const result = await resolveSiteDomain(dataAccess, 'site-missing', log);
+    expect(result).to.equal(null);
+    expect(log.warn).to.have.been.calledOnce;
+  });
+
+  it('swallows a lookup rejection (null, logs warn)', async () => {
+    Site.findById.rejects(new Error('timeout'));
+    const result = await resolveSiteDomain(dataAccess, 'site-1', log);
+    expect(result).to.equal(null);
+    expect(log.warn).to.have.been.calledOnce;
+  });
+});
+
+describe('serenity site-linkage: unlinkMarketSiteIfOrphaned', () => {
+  let deleteEq;
+  let fromStub;
+  let postgrestClient;
+  let allByBrandId;
+  let log;
+  let ctx;
+
+  // Chainable brand_sites delete: .delete().eq().eq().eq() → awaitable { error }.
+  function makeDeleteChain(result = { error: null }) {
+    const chain = {};
+    chain.eq = sinon.stub().returns(chain);
+    chain.then = (resolve) => resolve(result);
+    return chain;
+  }
+
+  function row({ siteId, deletedAt = null }) {
+    return { getSiteId: () => siteId, getDeletedAt: () => deletedAt };
+  }
+
+  beforeEach(() => {
+    const chain = makeDeleteChain();
+    deleteEq = chain.eq;
+    fromStub = sinon.stub().returns({ delete: sinon.stub().returns(chain) });
+    postgrestClient = { from: fromStub };
+    allByBrandId = sinon.stub();
+    log = { warn: sinon.spy(), error: sinon.spy(), info: sinon.spy() };
+    ctx = { dataAccess: { BrandSemrushProject: { allByBrandId }, services: { postgrestClient } } };
+  });
+
+  afterEach(() => sinon.restore());
+
+  it('removes the link when the deleted market was the LAST live one on the site', async () => {
+    // Only a tombstoned row remains for this site → zero live references.
+    allByBrandId.resolves([row({ siteId: 'site-x', deletedAt: '2026-01-01T00:00:00Z' })]);
+    const removed = await unlinkMarketSiteIfOrphaned(ctx, { brandId: BRAND, siteId: 'site-x', primarySiteId: 'primary-1' }, log);
+    expect(removed).to.equal(true);
+    expect(fromStub).to.have.been.calledOnceWith('brand_sites');
+    // brand_id, site_id, type='serenity'
+    expect(deleteEq).to.have.been.calledWith('brand_id', BRAND);
+    expect(deleteEq).to.have.been.calledWith('site_id', 'site-x');
+    expect(deleteEq).to.have.been.calledWith('type', SERENITY_BRAND_SITE_TYPE);
+    expect(log.info).to.have.been.calledOnce;
+  });
+
+  it('keeps the link when another LIVE market still shares the site', async () => {
+    allByBrandId.resolves([row({ siteId: 'site-x' })]); // a live row still points at it
+    const removed = await unlinkMarketSiteIfOrphaned(ctx, { brandId: BRAND, siteId: 'site-x', primarySiteId: 'primary-1' }, log);
+    expect(removed).to.equal(false);
+    expect(fromStub).to.not.have.been.called;
+  });
+
+  it('never unlinks the brand PRIMARY site', async () => {
+    const removed = await unlinkMarketSiteIfOrphaned(ctx, { brandId: BRAND, siteId: 'primary-1', primarySiteId: 'primary-1' }, log);
+    expect(removed).to.equal(false);
+    expect(allByBrandId).to.not.have.been.called;
+    expect(fromStub).to.not.have.been.called;
+  });
+
+  it('no-ops (false) when siteId or brandId is missing', async () => {
+    expect(await unlinkMarketSiteIfOrphaned(ctx, { brandId: BRAND, siteId: '' }, log)).to.equal(false);
+    expect(await unlinkMarketSiteIfOrphaned(ctx, { brandId: '', siteId: 'site-x' }, log)).to.equal(false);
+    expect(await unlinkMarketSiteIfOrphaned(ctx, undefined, log)).to.equal(false);
+    expect(fromStub).to.not.have.been.called;
+  });
+
+  it('no-ops (false) when data-access or postgrest client is unavailable', async () => {
+    const noModel = { dataAccess: { services: { postgrestClient } } };
+    expect(await unlinkMarketSiteIfOrphaned(noModel, { brandId: BRAND, siteId: 'site-x' }, log)).to.equal(false);
+    const noClient = { dataAccess: { BrandSemrushProject: { allByBrandId }, services: {} } };
+    expect(await unlinkMarketSiteIfOrphaned(noClient, { brandId: BRAND, siteId: 'site-x' }, log)).to.equal(false);
+  });
+
+  it('returns false + warns when the delete write errors', async () => {
+    allByBrandId.resolves([]);
+    const chain = makeDeleteChain({ error: { message: 'boom' } });
+    fromStub.returns({ delete: sinon.stub().returns(chain) });
+    const removed = await unlinkMarketSiteIfOrphaned(ctx, { brandId: BRAND, siteId: 'site-x', primarySiteId: null }, log);
+    expect(removed).to.equal(false);
+    expect(log.warn).to.have.been.calledWithMatch('SERENITY_MARKET_UNLINK_FAILED');
+  });
+
+  it('returns false + logs (never throws) when the reference-count read throws', async () => {
+    allByBrandId.rejects(new Error('db down'));
+    const removed = await unlinkMarketSiteIfOrphaned(ctx, { brandId: BRAND, siteId: 'site-x', primarySiteId: null }, log);
+    expect(removed).to.equal(false);
+    expect(log.error).to.have.been.calledWithMatch('SERENITY_MARKET_UNLINK_FAILED');
   });
 });
