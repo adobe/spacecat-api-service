@@ -16,7 +16,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 import { resolveTypeValueInjection, resolveIntentValueInjection, resolveClosedValueInjection } from '../tag-tree.js';
@@ -261,7 +261,11 @@ export async function handleListPrompts(
  *   behavior). The subworkspace create-prompts caller passes `headroom.retryOnQuota` (LLMO-6190
  *   item 4) so a disguised metered-405 gets ONE bounded top-up+retry per project BEFORE it is
  *   recorded as a failure; flat-mode callers omit this param, so flat mode is untouched.
- * @returns {Promise<Array<{ projectId: string, message: string }>>}
+ * @returns {Promise<Array<{ projectId: string, message: string, code?: string }>>} `code` is set
+ *   to `ERROR_CODES.QUOTA_EXCEEDED` when the residual publish failure (after any retry
+ *   `wrapPublish` already attempted) is a classified disguised-quota 405 (`isMeteredQuota`,
+ *   serenity-docs#72 §4.1) — callers use this to surface the stable 409 token instead of a
+ *   generic embedded `publish: <message>` failure record.
  */
 export async function publishAffected(
   transport,
@@ -280,7 +284,11 @@ export async function publishAffected(
       await wrapPublish(() => transport.publishProject(semrushWorkspaceId, pid));
     } catch (e) {
       log?.warn?.('publishProject failed', { projectId: pid, error: e.message });
-      errors.push({ projectId: pid, message: redactUpstreamMessage(e) });
+      errors.push({
+        projectId: pid,
+        message: redactUpstreamMessage(e),
+        ...(isMeteredQuota(e) ? { code: ERROR_CODES.QUOTA_EXCEEDED } : {}),
+      });
     }
   }));
   return errors;
@@ -798,14 +806,26 @@ export async function handleCreatePrompts(
     affectedProjectIds,
     log,
   );
-  // publishAffected returns already-redacted { projectId, message } records;
+  // publishAffected returns already-redacted { projectId, message, code? } records;
   // pubErr is a record, not a raw error, so pubErr.message is safe to surface.
   for (const pubErr of publishErrors) {
-    failed.push({
-      text: '',
-      status: 502,
-      message: `publish: ${pubErr.message}`,
-    });
+    if (pubErr.code === ERROR_CODES.QUOTA_EXCEEDED) {
+      // serenity-docs#72 §4.1: a quota rejection must surface as the stable 409 token, never as
+      // a generic embedded `publish: <message>` 502 record — the caller (UI) needs this to show
+      // the contractual-limit message instead of a generic partial-import failure.
+      failed.push({
+        text: '',
+        status: 409,
+        error: ERROR_CODES.QUOTA_EXCEEDED,
+        message: pubErr.message,
+      });
+    } else {
+      failed.push({
+        text: '',
+        status: 502,
+        message: `publish: ${pubErr.message}`,
+      });
+    }
   }
 
   return {
@@ -1091,13 +1111,22 @@ export async function handleBulkDeletePrompts(
     Array.from(projectsToPublish),
     log,
   );
-  // pubErr is an already-redacted { projectId, message } record (see above).
+  // pubErr is an already-redacted { projectId, message, code? } record (see above).
   publishErrors.forEach((pubErr) => {
-    failed.push({
-      semrushPromptId: '',
-      status: 502,
-      message: `publish: ${pubErr.message}`,
-    });
+    if (pubErr.code === ERROR_CODES.QUOTA_EXCEEDED) {
+      failed.push({
+        semrushPromptId: '',
+        status: 409,
+        error: ERROR_CODES.QUOTA_EXCEEDED,
+        message: pubErr.message,
+      });
+    } else {
+      failed.push({
+        semrushPromptId: '',
+        status: 502,
+        message: `publish: ${pubErr.message}`,
+      });
+    }
   });
 
   return { deleted, failed };

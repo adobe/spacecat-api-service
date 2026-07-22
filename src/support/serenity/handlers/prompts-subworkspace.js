@@ -293,10 +293,18 @@ export async function handleCreatePromptsSubworkspace(
     log,
     (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
   );
-  // publishAffected returns { projectId, message } records whose message is
+  // publishAffected returns { projectId, message, code? } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
   for (const pubErr of publishErrors) {
-    failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
+    if (pubErr.code === ERROR_CODES.QUOTA_EXCEEDED) {
+      // serenity-docs#72 §4.1: a quota rejection must surface as the stable 409 token, never as
+      // a generic embedded `publish: <message>` 502 record.
+      failed.push({
+        text: '', status: 409, error: ERROR_CODES.QUOTA_EXCEEDED, message: pubErr.message,
+      });
+    } else {
+      failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
+    }
   }
 
   return {
@@ -512,9 +520,15 @@ export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId
     Array.from(projectsToPublish),
     log,
   );
-  // pubErr is an already-redacted { projectId, message } record (see above).
+  // pubErr is an already-redacted { projectId, message, code? } record (see above).
   publishErrors.forEach((pubErr) => {
-    failed.push({ semrushPromptId: '', status: 502, message: `publish: ${pubErr.message}` });
+    if (pubErr.code === ERROR_CODES.QUOTA_EXCEEDED) {
+      failed.push({
+        semrushPromptId: '', status: 409, error: ERROR_CODES.QUOTA_EXCEEDED, message: pubErr.message,
+      });
+    } else {
+      failed.push({ semrushPromptId: '', status: 502, message: `publish: ${pubErr.message}` });
+    }
   });
 
   return { deleted, failed };
