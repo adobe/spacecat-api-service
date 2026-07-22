@@ -151,9 +151,13 @@ export function createHeadroomGuard(transport, {
     // per-child lock contention (round-2 SRE review) — so `ensure()` is called exactly ONCE, up
     // front, and the actual fix is the WAIT between retries, not a repeated top-up.
     //
-    // Bounded by whichever comes first: `maxAttempts`, or the shared `requestDeadline` above. A
-    // non-metered error (or a second/subsequent metered error once bounded) propagates untouched —
-    // this never masks a genuinely non-retryable failure, it only spans the known settle lag.
+    // Bounded by whichever comes first: `maxAttempts`, or the shared `requestDeadline` above — the
+    // deadline is checked BEFORE every attempt (including the first poll attempt, not only between
+    // retries), so a slow `ensure()` call (e.g. queued behind other same-child recoveries on
+    // `withResourceLock`'s own safety valve) can't silently blow past the shared budget before the
+    // budget is ever consulted. A non-metered error (or a second/subsequent metered error once
+    // bounded) propagates untouched — this never masks a genuinely non-retryable failure, it only
+    // spans the known settle lag.
     retryOnQuota: async (fn, { callSite = 'unknown' } = {}) => {
       try {
         return await fn();
@@ -174,8 +178,23 @@ export function createHeadroomGuard(transport, {
           subWorkspaceId: childId, callSite,
         });
         await ensure({}, { includeDrafted: true });
-        let attempt = 1;
+        let attempt = 0;
+        let lastError = e;
         for (;;) {
+          // Checked BEFORE every attempt, including the first (not just between retries): if
+          // `ensure()` itself already consumed the whole shared budget (e.g. it queued behind
+          // other same-child recoveries on `withResourceLock`'s own up-to-10s safety valve), don't
+          // spend a further `fn()` call on top of an already-blown deadline. This closes a real
+          // gap found on self-review: checking the deadline only inside the catch (i.e. only after
+          // a poll attempt had already failed) meant the FIRST attempt always ran regardless of
+          // how long `ensure()` took, so the shared per-request budget this deadline exists to
+          // enforce (see the comment above) wasn't actually a hard cap — exactly the
+          // stacked-call-site compounding-latency risk the deadline was built to close.
+          if (now() >= requestDeadline) {
+            recordQuotaRetryOutcome('exhausted', { attempt, callSite });
+            throw lastError;
+          }
+          attempt += 1;
           try {
             // eslint-disable-next-line no-await-in-loop
             const result = await fn();
@@ -191,13 +210,13 @@ export function createHeadroomGuard(transport, {
               recordQuotaRetryOutcome('abandoned', { attempt, callSite });
               throw e2;
             }
-            if (attempt >= maxAttempts || now() >= requestDeadline) {
+            lastError = e2;
+            if (attempt >= maxAttempts) {
               recordQuotaRetryOutcome('exhausted', { attempt, callSite });
               throw e2;
             }
             // eslint-disable-next-line no-await-in-loop
             await sleep(backoffMs);
-            attempt += 1;
           }
         }
       }

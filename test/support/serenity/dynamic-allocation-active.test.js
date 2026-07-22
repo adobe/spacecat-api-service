@@ -351,10 +351,14 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(fn).to.have.callCount(2);
   });
 
-  it('ON, the shared deadline (not the attempt cap) stops retrying: exhausts after the deadline passes even with attempts still available', async () => {
-    // maxAttempts is generous, but `now()` is stubbed to jump straight past totalBudgetMs after the
-    // first poll attempt — the deadline, not the attempt count, must be what ends the loop (round-2
-    // SRE review: this is the seam that bounds a stacked-call-site request, not per-call attempts).
+  it('ON, the shared deadline (not the attempt cap) stops retrying: exhausts after one poll attempt when the deadline passes before the next', async () => {
+    // maxAttempts is generous, but `now()` is stubbed to jump past totalBudgetMs right after the
+    // FIRST poll attempt's own deadline check — the deadline, not the attempt count, must be what
+    // ends the loop (round-2 SRE review: this is the seam that bounds a stacked-call-site request,
+    // not per-call attempts). The deadline is checked BEFORE every attempt (self-review finding):
+    // 1st `now()` call = guard construction; 2nd = the deadline check before poll attempt 1 (still
+    // within budget, so attempt 1 runs and fails); 3rd = the deadline check before poll attempt 2
+    // (now past budget, so it never runs).
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
@@ -362,9 +366,7 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     let callCount = 0;
     const now = () => {
       callCount += 1;
-      // 1st call: guard construction (t0). 2nd+ calls: inside the loop's deadline check — jump
-      // straight past the budget so the very first deadline check already fails.
-      return callCount <= 1 ? 0 : 1_000_000;
+      return callCount <= 2 ? 0 : 1_000_000;
     };
     const guard = createHeadroomGuard(
       t,
@@ -389,6 +391,46 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(caught).to.equal(lastError);
     // initial call + exactly ONE poll attempt before the deadline cuts it off
     expect(fn).to.have.callCount(2);
+  });
+
+  it('ON, the deadline is checked BEFORE the very first poll attempt, not only between retries: a budget already blown by ensure() skips the attempt entirely', async () => {
+    // Self-review finding: checking the deadline only inside the catch (i.e. only after a poll
+    // attempt already failed) meant the first attempt always ran regardless of how long `ensure()`
+    // itself took. Simulate `ensure()` alone having consumed the whole budget (e.g. queued behind
+    // other same-child recoveries) — `now()` is already past the deadline by the time the loop's
+    // first check runs, so `fn()` must NOT be called again at all, and the ORIGINAL triggering
+    // error (not a fabricated new one) propagates.
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    let nowCallCount = 0;
+    const now = () => {
+      nowCallCount += 1;
+      // 1st call: guard construction (t0=0, so requestDeadline=9000). Every call after that
+      // (i.e. the loop's pre-attempt check) reports as already far past the budget.
+      return nowCallCount <= 1 ? 0 : 1_000_000;
+    };
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({ maxAttempts: 10, totalBudgetMs: 9000, now }),
+      },
+      log,
+    );
+    const initialError = quota405();
+    const fn = sinon.stub().rejects(initialError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(initialError);
+    expect(fn).to.have.been.calledOnce; // only the initial call — no poll attempt was ever made
   });
 
   it('ON, the deadline is SHARED across two sequential retryOnQuota calls on the SAME guard, not recomputed per call (MysticatBot review)', async () => {
@@ -429,22 +471,20 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     // guard's budget, even though `maxAttempts: 10` would otherwise allow many more poll attempts.
     clock = 150;
 
-    // Call site B: if the deadline were shared (correct), it's already past — B exhausts on its
-    // very first poll attempt despite `maxAttempts: 10`. If a regression recomputed the deadline
-    // fresh inside this call (bug), B would get a full new 100ms budget from clock=150 and NOT
-    // exhaust here.
-    const lastError = quota405();
-    const fnB = sinon.stub();
-    fnB.onFirstCall().rejects(quota405());
-    fnB.onSecondCall().rejects(lastError);
+    // Call site B: if the deadline were shared (correct), it's already past — the deadline check
+    // before B's first poll attempt fails immediately, so B never even gets a poll attempt, only
+    // its initial call. If a regression recomputed the deadline fresh inside this call (bug), B
+    // would get a full new 100ms budget from clock=150 and NOT exhaust here.
+    const initialErrorB = quota405();
+    const fnB = sinon.stub().rejects(initialErrorB);
     let caught;
     try {
       await guard.retryOnQuota(fnB, { callSite: 'B' });
     } catch (e) {
       caught = e;
     }
-    expect(caught).to.equal(lastError);
-    expect(fnB).to.have.callCount(2);
+    expect(caught).to.equal(initialErrorB);
+    expect(fnB).to.have.been.calledOnce;
   });
 
   it('ON, the recovery ensure() itself throws (e.g. org pool exhausted): that error propagates and fn is NOT retried', async () => {
