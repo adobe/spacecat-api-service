@@ -6495,6 +6495,15 @@ akamai-property-ref:
       description: >-
         (deploy only) Optional property version to copy the new version from. Defaults to the
         property's latest version.
+    fetcherKey:
+      type: string
+      maxLength: 256
+      description: >-
+        Optional customer-owned secret (e.g. `openssl rand -hex 32`). When provided, it is set as
+        the `x-edgeoptimize-fetcher-key` incoming request header so the customer can allowlist it
+        (with the `AdobeEdgeOptimize/1.0` user agent) in their Akamai Bot Manager / WAF. Omit to
+        skip. The customer generates and owns the value; it is not stored server-side.
+      example: '3b1e...redacted...'
 
 akamai-property:
   type: object

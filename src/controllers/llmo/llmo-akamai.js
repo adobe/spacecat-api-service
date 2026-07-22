@@ -286,6 +286,22 @@ function LlmoAkamaiController(ctx) {
   };
 
   /**
+   * Validates the optional, customer-owned fetcherKey. It's a secret the customer generates and
+   * owns (we only forward it as the x-edgeoptimize-fetcher-key header), so we stay lenient: reject
+   * only a non-string or an implausibly long value.
+   * @returns {Response|null} a badRequest to block, or null when absent/valid
+   */
+  const validateFetcherKey = (fetcherKey) => {
+    if (fetcherKey === undefined || fetcherKey === null || fetcherKey === '') {
+      return null;
+    }
+    if (typeof fetcherKey !== 'string' || fetcherKey.trim().length > 256) {
+      return badRequest('fetcherKey must be a string of at most 256 characters');
+    }
+    return null;
+  };
+
+  /**
    * Safety guard (mirrors the POC's _enforce_guard): before any mutation/activation, confirm the
    * target property actually serves the site's own domain on an active hostname. This prevents an
    * onboarding call from touching a property that belongs to a different site.
@@ -374,7 +390,7 @@ function LlmoAkamaiController(ctx) {
    *
    * @returns {{ cfg: object } | { error: Response }}
    */
-  const buildCfgFromTree = (host, apiKey, ruleTree, edgeDomain) => {
+  const buildCfgFromTree = (host, apiKey, ruleTree, edgeDomain, fetcherKey) => {
     const ssl = getDefaultOriginSsl(ruleTree);
     if (!ssl || ssl.verificationMode !== 'CUSTOM') {
       const mode = ssl?.verificationMode || 'an unknown mode';
@@ -388,9 +404,11 @@ function LlmoAkamaiController(ctx) {
     const addCaching = !defaultRuleHasCaching(ruleTree);
     // originHostname routes AI-bot traffic to the env-appropriate Edge Optimize worker
     // (dev/stage/live.edgeoptimize.net) via EDGE_OPTIMIZE_EDGE_DOMAIN; falls back to prod default.
+    // fetcherKey (optional, customer-owned) adds the x-edgeoptimize-fetcher-key header for Bot
+    // Manager allowlisting.
     return {
       cfg: buildRuleConfig({
-        hostname: host, apiKey, addCaching, originHostname: edgeDomain,
+        hostname: host, apiKey, addCaching, originHostname: edgeDomain, fetcherKey,
       }),
     };
   };
@@ -477,10 +495,14 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex } = context.data;
+    const { insertIndex, fetcherKey } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
+    }
+    const fetcherKeyError = validateFetcherKey(fetcherKey);
+    if (fetcherKeyError) {
+      return fetcherKeyError;
     }
 
     try {
@@ -491,7 +513,13 @@ function LlmoAkamaiController(ctx) {
 
       // Enforce the CUSTOM-default scope gate and decide the caching behavior from the actual tree.
       const edgeDomain = context.env?.EDGE_OPTIMIZE_EDGE_DOMAIN;
-      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree, edgeDomain);
+      const { cfg, error: gateError } = buildCfgFromTree(
+        host,
+        apiKey,
+        ruleTree,
+        edgeDomain,
+        fetcherKey,
+      );
       if (gateError) {
         return gateError;
       }
@@ -582,10 +610,14 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex, baseVersion: rawBaseVersion } = context.data;
+    const { insertIndex, baseVersion: rawBaseVersion, fetcherKey } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
+    }
+    const fetcherKeyError = validateFetcherKey(fetcherKey);
+    if (fetcherKeyError) {
+      return fetcherKeyError;
     }
     // Optional: copy from a specific version instead of the latest. PAPI versions start at 1, so
     // reject 0 here (it passes DECIMAL_INT_RE) for a clean 400 instead of an opaque PAPI 404/500 —
@@ -628,7 +660,13 @@ function LlmoAkamaiController(ctx) {
         groupId,
       );
       const edgeDomain = context.env?.EDGE_OPTIMIZE_EDGE_DOMAIN;
-      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree, edgeDomain);
+      const { cfg, error: gateError } = buildCfgFromTree(
+        host,
+        apiKey,
+        ruleTree,
+        edgeDomain,
+        fetcherKey,
+      );
       if (gateError) {
         return gateError;
       }

@@ -363,6 +363,31 @@ describe('LlmoAkamaiController', () => {
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
     });
 
+    it('sets the x-edgeoptimize-fetcher-key header when a fetcherKey is supplied', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, fetcherKey: 'fk-secret-abc' }));
+      expect(res.status).to.equal(200);
+      const [, , , , merged] = mockAkamaiClient.updateRuleTree.firstCall.args;
+      const headers = [];
+      const collect = (rule) => {
+        (rule.behaviors || []).forEach((b) => {
+          if (b.name === 'modifyIncomingRequestHeader') {
+            headers.push(b.options);
+          }
+        });
+        (rule.children || []).forEach(collect);
+      };
+      collect(merged.rules.children.find((c) => c.name === 'Optimize at Edge'));
+      const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
+      expect(fetcher).to.exist;
+      expect(fetcher.headerValue).to.equal('fk-secret-abc');
+    });
+
+    it('rejects a fetcherKey longer than 256 characters', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, fetcherKey: 'x'.repeat(257) }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
     it('rejects baseVersion 0 (PAPI versions start at 1)', async () => {
       const res = await controller.deploy(withData({ ...propertyRef, baseVersion: 0 }));
       expect(res.status).to.equal(400);

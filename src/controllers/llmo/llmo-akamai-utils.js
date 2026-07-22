@@ -605,15 +605,20 @@ export function redactApiKey(tree) {
  * @param {string} [params.originHostname] - the Edge Optimize worker host to route AI-bot traffic
  *   to. Defaults to the prod worker; pass `env.EDGE_OPTIMIZE_EDGE_DOMAIN` so a dev/stage deployment
  *   routes to dev/stage.edgeoptimize.net. The `matchSan` (`*.edgeoptimize.net`) covers all three.
+ * @param {string} [params.fetcherKey] - optional customer-owned secret. When provided, it's set as
+ *   the `x-edgeoptimize-fetcher-key` incoming request header (forwarded as-is) so the customer can
+ *   allowlist it (with the `AdobeEdgeOptimize/1.0` user agent) in their Akamai Bot Manager/WAF.
+ *   The customer generates and owns this value; we only inject what they pass.
  * @returns {object} config consumable by buildParentRule/mergeIntoTree
  */
 export function buildRuleConfig({
-  hostname, apiKey, addCaching = false, originHostname,
+  hostname, apiKey, addCaching = false, originHostname, fetcherKey,
 }) {
   const d = EDGE_OPTIMIZE_DEFAULTS;
   const resolvedOriginHost = (typeof originHostname === 'string' && originHostname.trim())
     ? originHostname.trim()
     : d.origin.hostname;
+  const trimmedFetcherKey = typeof fetcherKey === 'string' ? fetcherKey.trim() : '';
   return {
     match: {
       userAgents: [...d.userAgents],
@@ -625,6 +630,8 @@ export function buildRuleConfig({
     incomingRequestHeaders: {
       ...d.incomingRequestHeaders,
       'x-edgeoptimize-api-key': apiKey,
+      // Only add the fetcher-key header when the customer supplied a value (Bot Manager allowlist).
+      ...(trimmedFetcherKey ? { 'x-edgeoptimize-fetcher-key': trimmedFetcherKey } : {}),
     },
     outgoingRequestHeaders: { ...d.outgoingRequestHeaders },
     removeIncomingResponseHeaders: [...d.removeIncomingResponseHeaders],
