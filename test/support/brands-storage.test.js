@@ -507,12 +507,22 @@ describe('brands-storage', () => {
   });
 
   describe('getBrandBaseSiteId', () => {
-    it('returns null when postgrestClient is missing', async () => {
-      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, null)).to.be.null;
+    // Can't-scope-the-query cases THROW (not return null) so a best-effort caller's
+    // catch fails safe and skips primary-site-dependent cleanup, rather than
+    // proceeding with a null primary that would disable the guard (LLMO-6405 review).
+    it('throws when postgrestClient is missing', async () => {
+      await expect(getBrandBaseSiteId(ORG_ID, BRAND_ID, null))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
     });
 
-    it('returns null when brandId is empty', async () => {
-      expect(await getBrandBaseSiteId(ORG_ID, '', { from: () => {} })).to.be.null;
+    it('throws when brandId is empty', async () => {
+      await expect(getBrandBaseSiteId(ORG_ID, '', { from: () => {} }))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
+    });
+
+    it('throws when organizationId is missing (fail-safe: unresolved, not "no primary")', async () => {
+      await expect(getBrandBaseSiteId('', BRAND_ID, { from: () => {} }))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
     });
 
     it('returns the brand primary site_id', async () => {

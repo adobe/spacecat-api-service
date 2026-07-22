@@ -644,8 +644,13 @@ export async function getBrandIdentity(organizationId, brandId, postgrestClient)
  * @returns {Promise<string|null>} the brand's primary site id, or null.
  */
 export async function getBrandBaseSiteId(organizationId, brandId, postgrestClient) {
-  if (!postgrestClient?.from || !hasText(brandId)) {
-    return null;
+  // Can't scope the query without all three → THROW (not return null) so a
+  // best-effort caller's catch treats it as "primary unresolved" and skips
+  // primary-site-dependent cleanup. Returning null here would be ambiguous with a
+  // successfully-resolved "brand has no primary site" and would silently disable
+  // the primary-site guard in the delete-orphan-unlink path (LLMO-6405 review).
+  if (!postgrestClient?.from || !hasText(brandId) || !hasText(organizationId)) {
+    throw new Error('getBrandBaseSiteId: organizationId, brandId, and a postgrest client are all required');
   }
 
   const { data, error } = await postgrestClient

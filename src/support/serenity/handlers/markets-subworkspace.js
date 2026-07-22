@@ -180,10 +180,23 @@ export async function handleGetMarketSubworkspace(
     });
   }
   const slice = projectToSlice(project, brandId);
-  // Enrich with the SpaceCat Site identity from the brand's mapping rows
-  // (LLMO-6405 Phase 2), best-effort — null when unavailable.
-  const siteIdIndex = await buildMarketSiteIdIndex(dataAccess, brandId, log);
-  const siteId = siteIdIndex.get(marketSiteIdKey(slice.geoTargetId, slice.languageCode)) ?? null;
+  // Enrich with the SpaceCat Site identity (LLMO-6405 Phase 2), best-effort. Detail
+  // reads ONE slice, so point-read that slice's mapping row via findBySlice rather
+  // than loading every brand mapping row (buildMarketSiteIdIndex is reserved for
+  // the amortized list path). Never throws — siteId stays null on any miss.
+  let siteId = null;
+  const BrandSemrushProject = dataAccess?.BrandSemrushProject;
+  if (BrandSemrushProject && typeof BrandSemrushProject.findBySlice === 'function') {
+    try {
+      const row = await BrandSemrushProject.findBySlice(brandId, Number(geoTargetId), lang);
+      const rowSiteId = row && !row.getDeletedAt?.() ? (row.getSiteId?.() ?? null) : null;
+      siteId = rowSiteId && hasText(rowSiteId) ? rowSiteId : null;
+    } catch (e) {
+      log?.warn?.('serenity market (subworkspace): siteId point-read failed (non-fatal)', {
+        brandId, error: e?.message,
+      });
+    }
+  }
   return { ...slice, initialized, siteId };
 }
 

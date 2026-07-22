@@ -221,15 +221,36 @@ describe('markets-subworkspace handlers', () => {
         .to.be.rejectedWith(/languageCode/);
     });
 
-    it('enriches the resolved slice with its siteId (LLMO-6405)', async () => {
+    it('enriches the resolved slice with its siteId via a point-read (findBySlice, LLMO-6405)', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      // Detail reads ONE slice → point-read via findBySlice, not allByBrandId.
+      const findBySlice = sinon.stub().resolves(bspRow({ geo: 2840, lang: 'en', siteId: 'site-9' }));
+      const dataAccess = { BrandSemrushProject: { findBySlice } };
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log, dataAccess);
+      expect(result.siteId).to.equal('site-9');
+      expect(findBySlice).to.have.been.calledOnceWith(BRAND, 2840, 'en');
+    });
+
+    it('leaves siteId null for a tombstoned mapping row (findBySlice point-read)', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
       const dataAccess = {
         BrandSemrushProject: {
-          allByBrandId: sinon.stub().resolves([bspRow({ geo: 2840, lang: 'en', siteId: 'site-9' })]),
+          findBySlice: sinon.stub().resolves(
+            bspRow({
+              geo: 2840, lang: 'en', siteId: 'site-dead', deletedAt: '2026-01-01T00:00:00Z',
+            }),
+          ),
         },
       };
       const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log, dataAccess);
-      expect(result.siteId).to.equal('site-9');
+      expect(result.siteId).to.equal(null);
+    });
+
+    it('leaves siteId null (never throws) when the point-read fails', async () => {
+      const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const dataAccess = { BrandSemrushProject: { findBySlice: sinon.stub().rejects(new Error('db down')) } };
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log, dataAccess);
+      expect(result.siteId).to.equal(null);
     });
 
     it('leaves siteId null when no dataAccess is supplied', async () => {
