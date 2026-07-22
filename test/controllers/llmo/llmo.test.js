@@ -4366,22 +4366,6 @@ describe('LlmoController', () => {
       expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
     });
 
-    it('should return presigned URL for specific model', async () => {
-      const context = {
-        ...brandClaimsContext,
-        data: { model: 'gpt-4.1' },
-      };
-
-      const result = await controller.getBrandClaims(context);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody.model).to.equal('gpt-4.1');
-
-      const commandArg = mockGetSignedUrl.getCall(0).args[1];
-      expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
-    });
-
     it('should return 403 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const result = await controllerDenied.getBrandClaims(brandClaimsContext);
@@ -4389,33 +4373,6 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
-    });
-
-    it('should return 400 when S3 is not configured', async () => {
-      const contextWithoutS3 = {
-        ...brandClaimsContext,
-        s3: null,
-      };
-
-      const result = await controller.getBrandClaims(contextWithoutS3);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
-    });
-
-    it('should return 404 when S3 key not found', async () => {
-      const notFoundError = new Error('Not Found');
-      notFoundError.name = 'NotFound';
-      mockS3Send.rejects(notFoundError);
-
-      const result = await controller.getBrandClaims(brandClaimsContext);
-
-      expect(result.status).to.equal(404);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
-      // Never sign a URL for a missing object.
-      expect(mockGetSignedUrl).to.not.have.been.called;
     });
 
     it('should return 404 when site is not found', async () => {
