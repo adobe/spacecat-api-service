@@ -1,3 +1,10 @@
+## [1.680.1](https://github.com/adobe/spacecat-api-service/compare/v1.680.0...v1.680.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **serenity:** check retryOnQuota's shared deadline before every attempt ([#2882](https://github.com/adobe/spacecat-api-service/issues/2882)) ([8fa5a7d](https://github.com/adobe/spacecat-api-service/commit/8fa5a7d8777b98748e75e52f37e648b2a3536cf5)), closes [#2874](https://github.com/adobe/spacecat-api-service/issues/2874)
+
 # [1.680.0](https://github.com/adobe/spacecat-api-service/compare/v1.679.1...v1.680.0) (2026-07-22)
 
 
