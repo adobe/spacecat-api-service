@@ -678,18 +678,13 @@ export async function resolveIntentValueInjection(
   wantValue,
   log,
 ) {
-  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const intentRootId = rootIdOf(roots, DIMENSION.INTENT);
-  const { byName } = await ensureChildren(
+  const { computedId, valueTagIds } = await resolveClosedValueInjection(
     transport,
     semrushWorkspaceId,
     projectId,
-    intentRootId,
-    [wantValue],
+    DIMENSION.INTENT,
+    wantValue,
     log,
   );
-  return {
-    computedId: /** @type {string} */ (byName.get(wantValue)),
-    intentTagIds: [...byName.values()],
-  };
+  return { computedId, intentTagIds: valueTagIds };
 }
