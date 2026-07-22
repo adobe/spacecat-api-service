@@ -62,6 +62,28 @@ export const PROMPT_BLOCK = 100;
 /** @type {Blocks} */
 export const DEFAULT_BLOCKS = Object.freeze({ projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK });
 
+/**
+ * PLACEHOLDER per-brand ceiling (LLMO-6190 item 2 — flag-flip readiness). `ensureAiHeadroom`'s
+ * `ceiling` param throws `brandAiLimit` (409) once a top-up would push a dim's `total` past the
+ * cap, but NO product/sizing number exists yet for what a brand's real ceiling should be — an
+ * explicit open item in the original design doc. This default is threaded through
+ * {@link createHeadroomGuard} (dynamic-allocation-active.js) so the flag-flip readiness criterion
+ * "a per-brand ceiling in force" is satisfied, but it is deliberately set ASTRONOMICALLY high — far
+ * above any org's whole Semrush pool — so it is *effectively non-enforcing*: the org pool
+ * exhausts (transfer's authoritative 422, mapped to `orgPoolExhausted`) long before any brand's
+ * per-dim `total` approaches these numbers. A brand cannot be spuriously 409'd by this fabricated
+ * value; it exists so the enforcement PATH is wired and covered by a test, not to cap anyone today.
+ *
+ * REPLACE with a real product/sizing number (and likely real per-brand configurability — a Brand
+ * field or config source, neither of which exists today) once product specifies one; don't invent
+ * that data-model change speculatively here.
+ * @type {Blocks}
+ */
+export const DEFAULT_BRAND_AI_CEILING = Object.freeze({
+  projects: 1_000_000,
+  prompts: 1_000_000_000,
+});
+
 /** The AI dimensions this allocator moves. */
 const DIMS = Object.freeze(/** @type {const} */ (['projects', 'prompts']));
 

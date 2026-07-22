@@ -22,7 +22,7 @@ import {
   buildPromptDto,
   normalizePromptInput,
   createOnePrompt,
-  makeTypeInjector,
+  makePromptTagInjector,
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
@@ -32,6 +32,7 @@ import {
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
 } from './prompts.js';
+import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
@@ -140,7 +141,28 @@ export async function handleCreatePromptsSubworkspace(
   }
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
+  // CREATE: user-authenticated write → derived `origin` is `human` (see the
+  // flat-mode twin handleCreatePrompts and origin-dimension.md §3).
+  const injectComputedTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
+    { originValue: ORIGIN_VALUE.HUMAN },
+  );
+
+  // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
+  // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
+  // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
+  // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
+  // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
+  // under). No-op when the flag is OFF.
+  const headroom = createHeadroomGuard(
+    transport,
+    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    log,
+  );
+  await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const { value: input, reason } = normalizePromptInput(raw);
@@ -163,9 +185,18 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip any caller-supplied type + inject the computed one.
-      const typed = await injectComputedType(projectId, input);
-      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
+      // Unified layer: strip any caller-supplied type/origin + inject the
+      // computed type and the derived origin (`human`).
+      const typed = await injectComputedTags(projectId, input);
+      // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
+      // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
+      // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
+      // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
+      // own per-item try/catch below still isolates a surviving failure to this one item.
+      const semrushPromptId = await headroom.retryOnQuota(
+        () => createOnePrompt(transport, workspaceId, projectId, typed),
+        { callSite: 'createOnePrompt' },
+      );
       return {
         created: {
           semrushPromptId,
@@ -208,21 +239,18 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
-  // PROMPT metering seam: the just-created prompts are drafted synchronously across the affected
-  // projects of THIS child; size headroom from `used + drafted` (includeDrafted, staleness-immune)
-  // before the publish. One workspace-level top-up covers all affected projects (the allocation is
-  // per sub-workspace, not per project). No-op when the flag is OFF; skipped when nothing was
-  // created so the OFF path and the empty path issue zero headroom reads.
-  if (affectedProjectIds.length > 0) {
-    const headroom = createHeadroomGuard(
-      transport,
-      { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
-      log,
-    );
-    await headroom.ensure({}, { includeDrafted: true });
-  }
-
-  const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
+  // LLMO-6190 item 4: route each project's publish through `headroom.retryOnQuota` — a bounded
+  // top-up+retry if it STILL 405s as a disguised metered-quota rejection despite the pre-write
+  // sizing above (e.g. a raced concurrent write on the same child). `publishAffected` nests this
+  // per-project, so a surviving 405 after the retry still lands in `publishErrors` for that project
+  // rather than throwing. `headroom` is always defined (a genuine no-op when the flag is OFF).
+  const publishErrors = await publishAffected(
+    transport,
+    workspaceId,
+    affectedProjectIds,
+    log,
+    (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
+  );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
   for (const pubErr of publishErrors) {
@@ -281,8 +309,11 @@ export async function handleUpdatePromptSubworkspace(
   // Recompute the type tag from the NEW text BEFORE any upstream write (see
   // the flat-mode twin): a classification failure aborts cleanly with the
   // prompt completely untouched.
-  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
-  const typed = await injectComputedType(projectId, {
+  // No `originValue`: origin is never re-derived on edit (origin-dimension.md §3
+  // item 3); the stored origin the caller echoes rides through untouched. See the
+  // flat-mode twin handleUpdatePrompt.
+  const injectComputedTags = makePromptTagInjector(transport, workspaceId, classifyPromptType, log);
+  const typed = await injectComputedTags(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
   });
 

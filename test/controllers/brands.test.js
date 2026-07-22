@@ -15,6 +15,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -1017,6 +1018,83 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
+    it('createPromptsByBrand honours a SERVICE principal\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
+      // A non-ims/non-jwt principal (e.g. DRS via admin x-api-key) is believed:
+      // its asserted `origin` rides through to the store. Deleting or ignoring it
+      // would relabel every DRS-written prompt `human` on its next upsert.
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: { authInfo: { getType: () => 'apikey', profile: { email: 'drs@service' } } },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('ai');
+    });
+
+    it('createPromptsByBrand coerces a USER principal\'s origin: ai to human (body ignored, never rejected)', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('human');
+    });
+
     it('createPromptsByBrand persists normalized intent from the request body', async () => {
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const insertStub = sandbox.stub()
@@ -1052,6 +1130,138 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(201);
       const inserted = insertStub.firstCall.args[0];
       expect(inserted[0].intent).to.equal('transactional');
+    });
+
+    // origin-dimension.md §3 gate 5 (v2 API arm): a USER principal may not assert
+    // `origin` — the body value is ignored and `human` is derived and stored.
+    it('createPromptsByBrand ignores a user-supplied origin and stores human (gate 5)', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const userContext = {
+        ...context,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      };
+      const response = await brandsController.createPromptsByBrand({
+        ...userContext,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        // The user tries to assert `ai`; the server ignores it and derives `human`.
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(insertStub.firstCall.args[0][0].origin).to.equal('human');
+    });
+
+    // origin-dimension.md §3 gate 6: a SERVICE principal (auth type neither `ims`
+    // nor `jwt`, e.g. DRS via admin x-api-key) IS believed — its `origin: 'ai'` is
+    // honoured and stored. A regression here silently relabels every generated
+    // prompt `human` on its next upsert (DRS contract).
+    it('createPromptsByBrand honours a service principal origin=ai (gate 6)', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const serviceContext = {
+        ...context,
+        attributes: { authInfo: { getType: () => 'legacyApiKey', profile: {} } },
+      };
+      const response = await brandsController.createPromptsByBrand({
+        ...serviceContext,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(insertStub.firstCall.args[0][0].origin).to.equal('ai');
+    });
+
+    // FIX (MysticatBot nit): direct controller coverage of the fail-safe branch
+    // (`!authType → user`, brands.js:584). An ABSENT or indeterminate auth type
+    // must NEVER reach the privileged service path — a body-asserted `origin: 'ai'`
+    // is coerced to `human`. Previously this branch was only exercised indirectly
+    // via the `deriveV2PromptOrigin` unit tests, not through the controller wiring.
+    [
+      { label: 'authInfo entirely absent (attributes: {})', attributes: {} },
+      { label: 'authInfo present but getType is not a function', attributes: { authInfo: { profile: {} } } },
+    ].forEach(({ label, attributes }) => {
+      it(`createPromptsByBrand fails safe to human when ${label} (gate 5 fail-safe)`, async () => {
+        const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+        const insertStub = sandbox.stub()
+          .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+          if (table === 'llmo_customer_config') {
+            chain.maybeSingle = sandbox.stub()
+              .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          return chain;
+        });
+
+        const response = await brandsController.createPromptsByBrand({
+          ...context,
+          attributes,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          // A body-asserted `ai` must NOT be honoured for an unattributable caller.
+          data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(201);
+        expect(insertStub.firstCall.args[0][0].origin).to.equal('human');
+      });
     });
 
     it('createPromptsByBrand returns 400 when prompts not an array', async () => {
@@ -6220,6 +6430,70 @@ describe('Brands Controller', () => {
       // The internal gateway URL must not leak via body or header.
       expect(JSON.stringify(body)).to.not.contain('gw.internal');
       expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+    });
+
+    // LLMO-6386: the brand-edit re-sync runs Project Engine calls, which now throw
+    // ProjectEngineApiError directly (adaptPE retired). createErrorResponse must redact it to the
+    // same generic 502 as the SerenityTransportError case — the raw "Project Engine ..." message
+    // (and any body) must never reach the client.
+    it('redacts a ProjectEngineApiError upstream failure to a generic 502 on brand-edit re-sync', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const syncStub = sinon.stub().rejects(
+        new ProjectEngineApiError(502, 'POST', { secret: 'leak' }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(502);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).to.not.match(/leak/);
+      expect(JSON.stringify(body)).to.not.match(/Project Engine/);
+    });
+
+    // The auth-preservation crux: a no-HTTP-response Project Engine failure (missing IMS token)
+    // is a status-undefined ProjectEngineApiError carrying the 401 SerenityTransportError as
+    // `.cause`. createErrorResponse must unwrap it so the response stays 401 (not flattened).
+    it('unwraps a status-undefined ProjectEngineApiError to preserve the auth 401 on brand-edit re-sync', async () => {
+      const updateBrandStub = sinon.stub().resolves({
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      });
+      const authCause = new SerenityTransportError(401, 'Missing IMS bearer token');
+      const syncStub = sinon.stub().rejects(
+        new ProjectEngineApiError(undefined, 'POST', null, { cause: authCause }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(401);
+      const body = await response.json();
+      expect(body.message).to.equal('Upstream authorization failed');
     });
 
     it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {

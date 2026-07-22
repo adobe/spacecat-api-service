@@ -16,8 +16,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
-import { SerenityTransportError } from '../rest-transport.js';
+import { ERROR_CODES, isUpstreamGone, isSemrushTransportError } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
 
@@ -890,7 +889,7 @@ export async function listGlobalModelCatalog(transport) {
       page += 1;
     }
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;
@@ -929,7 +928,7 @@ export async function listLanguageCatalog(transport) {
     const resp = await transport.listLanguages();
     rawItems = Array.isArray(resp?.items) ? resp.items : [];
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;
@@ -1052,6 +1051,11 @@ export async function handleListModels(
  * it false when the caller batches its own publish afterwards (brand-create
  * stages models + prompts and publishes once, best-effort) — otherwise this
  * inner publish runs on an unpublishable (e.g. unit-less) project and throws.
+ *
+ * `wrapPublish` (default identity — a plain call, byte-for-byte the pre-existing behavior) wraps
+ * the inner `publishProject` call. The subworkspace update-models caller passes
+ * `headroom.retryOnQuota` (LLMO-6190 item 4) so a disguised metered-405 gets ONE bounded
+ * top-up+retry; flat-mode callers omit this param, so flat mode is untouched.
  */
 export async function syncModelsForProject(
   transport,
@@ -1060,7 +1064,7 @@ export async function syncModelsForProject(
   modelIds,
   logCtx,
   log,
-  { publish = true } = {},
+  { publish = true, wrapPublish = (fn) => fn() } = {},
 ) {
   const ctx = logCtx || {};
   // Fetch current assignments: catalog-id → assignment-id mapping
@@ -1132,7 +1136,7 @@ export async function syncModelsForProject(
   // Only reached when something actually changed (the no-op path returned above).
   // Skipped when the caller batches its own publish (brand-create, see jsdoc).
   if (publish) {
-    await transport.publishProject(semrushWorkspaceId, projectId);
+    await wrapPublish(() => transport.publishProject(semrushWorkspaceId, projectId));
   }
 
   // Return the refreshed model list

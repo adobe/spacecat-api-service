@@ -51,6 +51,18 @@
  *   quota classifier (`isMeteredQuota`, errors.js) fires. NOTE: as of this PR `isMeteredQuota` has
  *   no production call site yet (see errors.js doc comment) — this metric exists so a future
  *   caller gets observability for free, but will read zero until one is wired up.
+ * - `QuotaRetryOutcome` (Count, dims: Outcome=recovered|exhausted|abandoned, Attempt, CallSite) —
+ *   LLMO-6190 follow-up: `retryOnQuota`'s (dynamic-allocation-active.js) poll-retry recovery from
+ *   a disguised metered-405, one emission per bounded recovery cycle regardless of how it ends —
+ *   `recovered` (a retry succeeded), `exhausted` (still a metered 405 after every attempt or the
+ *   shared deadline), or `abandoned` (a genuinely non-quota error cut the cycle short before
+ *   either of the above — distinct from `exhausted` so a dashboard summing
+ *   `recovered + exhausted + abandoned` as "total recovery cycles" doesn't silently undercount,
+ *   per Alicia Adriani's review). `Attempt` (the 1-based attempt the cycle ended on) and
+ *   `CallSite` (a small closed set — `publishProject`, `createProject`, `createOnePrompt`,
+ *   `createPromptsByIds`, ...) together give the attempt-to-recovery distribution per write path,
+ *   without which a rising `exhausted` rate or a shift toward later attempts is invisible until it
+ *   becomes an incident (round-2 SRE review).
  *
  * Pager-worthy vs dashboard-only (per the original design doc, restated here for the alarm
  * author): `AllocationRejection{Reason=orgPoolExhausted|brandAiLimit}` is EXPECTED under normal
@@ -126,7 +138,7 @@ export function recordPoolFreeRatio(dim, free, total) {
 }
 
 /**
- * @param {'orgPoolExhausted'|'brandAiLimit'|'workspaceBusy'} reason
+ * @param {'orgPoolExhausted'|'brandAiLimit'|'workspaceBusy'|'quotaExceeded'} reason
  * @returns {void}
  */
 export function recordRejection(reason) {
@@ -152,4 +164,22 @@ export function recordReleaseOutcome(reason) {
  */
 export function recordMeteredQuotaClassifier(matched) {
   emit({ name: 'MeteredQuotaClassifier', dimensions: { Matched: matched } });
+}
+
+/**
+ * @param {'recovered'|'exhausted'|'abandoned'} outcome
+ * @param {{ attempt: number, callSite: string }} dims - `attempt` is the 1-based attempt the
+ *   poll-retry cycle resolved (recovered), gave up on (exhausted), or was cut short on by a
+ *   non-quota error (abandoned); `callSite` is a short closed-vocabulary label identifying which
+ *   wrapped write/publish this recovery was for. `attempt` is a raw number, not pre-bucketed — it
+ *   stays low-cardinality only because `retryOnQuota`'s `maxAttempts` is small (3 today); if
+ *   `maxAttempts` is ever raised significantly, revisit whether `Attempt` should be capped/bucketed
+ *   to hold the module's low-cardinality dimension contract (see the module doc above).
+ * @returns {void}
+ */
+export function recordQuotaRetryOutcome(outcome, { attempt, callSite }) {
+  emit({
+    name: 'QuotaRetryOutcome',
+    dimensions: { Outcome: outcome, Attempt: attempt, CallSite: callSite },
+  });
 }

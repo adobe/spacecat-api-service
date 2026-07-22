@@ -43,6 +43,7 @@ import {
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -474,7 +475,11 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -541,8 +546,12 @@ function SuggestionsController(ctx, sqs, env) {
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
 
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,
@@ -603,7 +612,11 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -669,8 +682,12 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,

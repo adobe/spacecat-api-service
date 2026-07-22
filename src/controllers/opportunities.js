@@ -27,6 +27,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { OpportunityDto } from '../dto/opportunity.js';
 import { isValidLocale } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
@@ -119,7 +120,11 @@ function OpportunitiesController(ctx) {
     const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
-    return ok(opptys);
+    const { list, error } = applyFieldProjection(opptys, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -155,7 +160,11 @@ function OpportunitiesController(ctx) {
     const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
-    return ok(opptys);
+    const { list, error } = applyFieldProjection(opptys, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**

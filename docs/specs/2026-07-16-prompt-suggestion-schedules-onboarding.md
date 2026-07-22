@@ -54,6 +54,32 @@ DRS; the immediate run is best-effort.
 - **Tenant identity.** Only `siteId` crosses the boundary. No `imsOrgId`/`orgId`
   is threaded — DRS derives the isolation key from `siteId` server-side.
 
+## Tier gating
+
+Whether a pipeline is registered as a **recurring schedule** or run **once**
+depends on the site's paying tier, resolved by `isPayingLlmoSite(site, context)`:
+
+| Tier | Behavior per pipeline |
+|---|---|
+| **PAID** | Recurring `createSchedule` (immediate first run) — the durable outcome is the server-side schedule row. |
+| **FREE_TRIAL / non-paid** | One-shot `submitJob` — a single on-demand run, no recurring schedule. The three providers are on-demand-capable, so a trial site still gets its first suggestions without committing recurring Fargate load. |
+| **Indeterminate** (no entitlement, or the tier lookup throws/hangs) | Treated as trial (one-shot). |
+
+- **Fail-safe-to-trial.** `isPayingLlmoSite` returns `false` (and logs a WARN)
+  when the LLMO entitlement is absent or the lookup throws, so a site whose paying
+  status is unknown never gets a recurring, fleet-wide Fargate schedule.
+- **Latency bound on the lookup.** The `isPayingLlmoSite` call is itself wrapped in
+  `settleWithin(..., TIER_LOOKUP_TIMEOUT_MS = 5000ms)`, **defaulting to `false`
+  (trial) on timeout**. Its internal try/catch handles rejections but not a hung
+  tier service; the wrap caps that hang so a slow tier service cannot push the
+  synchronous onboarding response past the CDN first-byte timeout. This is
+  separate from, and runs before, the `settleWithin(..., 8000ms)` that bounds the
+  schedule-registration step.
+- **Error wording.** The per-pipeline catch reports the branch accurately —
+  "…prompt-suggestion (schedule)" for the paying `createSchedule` failure,
+  "…prompt-suggestion (one-shot run)" for the trial `submitJob` failure — since
+  either failure means the site needs a manual trigger.
+
 ## Dependency / deployment order
 
 `createSchedule` ships in `@adobe/spacecat-shared-drs-client@1.14.0` (spacecat-shared PR #1816), which is not yet published. Therefore:

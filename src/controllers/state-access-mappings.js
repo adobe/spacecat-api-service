@@ -454,6 +454,26 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * Blocks internal admins from **mutating** state-layer bindings — create,
+   * update (PATCH), and delete/revoke (DELETE empties the capability set).
+   * Grants must originate from a real FACS-layer or state-layer
+   * `can_manage_users` holder in the customer org so every mutation carries an
+   * accountable `created_by` / `updated_by` — an internal admin identity is a
+   * platform-operator bypass (see `callerHasFacsManageUsers`), not an org
+   * manager, and must never author or revoke customer ReBAC grants. Reads
+   * (list / history / capabilities / audit) are unaffected.
+   *
+   * @param {object} ctx
+   * @returns {Response|null} `forbidden` when the caller is an internal admin.
+   */
+  function blockInternalAdminWrite(ctx) {
+    if (ctx.attributes?.authInfo?.isAdmin?.()) {
+      return forbidden('Internal admins may not create, update, or delete access mappings');
+    }
+    return null;
+  }
+
+  /**
    * Read-scope rule for list / history (hybrid-model §3, mac-state-layer):
    * **org-wide reads admit FACS-layer `can_manage_users` only**. An org-wide
    * manager reads anything in the org; a state-layer manager must scope the read
@@ -651,6 +671,10 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
+    const adminBlock = blockInternalAdminWrite(ctx);
+    if (adminBlock) {
+      return adminBlock;
+    }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
     if (gateErr) {
@@ -724,8 +748,10 @@ function StateAccessMappingsController(context) {
         createdBy,
       });
       if (result.created.length === 0 && result.skipped.length > 0) {
-        // Active duplicate already exists. Surface the existing row id for
-        // idempotent client handling — look it up by the natural key.
+        // Active duplicate already exists — upsert semantics: overwrite the
+        // existing binding's capabilities with the request's set rather than
+        // rejecting the call. Look the row up by its natural key, then replace
+        // its capabilities via the same capability-edit RPC PATCH uses.
         const existing = await listFacsAccessMappings(postgrestClient, {
           imsOrgId,
           product,
@@ -736,13 +762,49 @@ function StateAccessMappingsController(context) {
           limit: 1,
         });
         const conflictId = existing[0]?.id ?? null;
-        return createResponse(
-          {
-            message: 'Active access mapping already exists for this subject and resource',
-            id: conflictId,
-          },
-          409,
-        );
+        // Defensive: the active row vanished (revoked) between the insert
+        // conflict and this read. Nothing to update — surface the conflict.
+        if (!conflictId) {
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: null,
+            },
+            409,
+          );
+        }
+        const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
+          id: conflictId,
+          imsOrgId,
+          product,
+          grantedCapabilities: capabilitiesToStore,
+          updatedBy: createdBy,
+        });
+        if (!updated) {
+          // Same race as above, observed one layer down (the RPC filters on
+          // `revoked_at IS NULL`). Surface the conflict rather than a 500.
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: conflictId,
+            },
+            409,
+          );
+        }
+        await emitAuditEvent(ctx, {
+          imsOrgId,
+          product,
+          operation: 'update_capabilities',
+          outcome: 'allow',
+          statusCode: 200,
+          mappingId: updated.id,
+          bindingSubjectType: updated.subject_type,
+          bindingSubjectId: updated.subject_id,
+          resourceType: updated.resource_type,
+          resourceId: updated.resource_id,
+          grantedCapabilities: capabilitiesToStore,
+        });
+        return ok(toMappingDto(updated));
       }
       const createdRow = result.created[0];
       await emitAuditEvent(ctx, {
@@ -781,6 +843,10 @@ function StateAccessMappingsController(context) {
     const pre = preamble(ctx);
     if (pre.error) {
       return pre.error;
+    }
+    const adminBlock = blockInternalAdminWrite(ctx);
+    if (adminBlock) {
+      return adminBlock;
     }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
@@ -881,6 +947,10 @@ function StateAccessMappingsController(context) {
     const pre = preamble(ctx);
     if (pre.error) {
       return pre.error;
+    }
+    const adminBlock = blockInternalAdminWrite(ctx);
+    if (adminBlock) {
+      return adminBlock;
     }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
