@@ -181,15 +181,9 @@ export function createHeadroomGuard(transport, {
         let attempt = 0;
         let lastError = e;
         for (;;) {
-          // Checked BEFORE every attempt, including the first (not just between retries): if
-          // `ensure()` itself already consumed the whole shared budget (e.g. it queued behind
-          // other same-child recoveries on `withResourceLock`'s own up-to-10s safety valve), don't
-          // spend a further `fn()` call on top of an already-blown deadline. This closes a real
-          // gap found on self-review: checking the deadline only inside the catch (i.e. only after
-          // a poll attempt had already failed) meant the FIRST attempt always ran regardless of
-          // how long `ensure()` took, so the shared per-request budget this deadline exists to
-          // enforce (see the comment above) wasn't actually a hard cap — exactly the
-          // stacked-call-site compounding-latency risk the deadline was built to close.
+          // Checked BEFORE every attempt, including the first — an already-blown deadline (e.g.
+          // `ensure()` itself ate the whole budget queued behind another same-child recovery) must
+          // not spend a further `fn()` call on top of it. See the header comment above for why.
           if (now() >= requestDeadline) {
             recordQuotaRetryOutcome('exhausted', { attempt, callSite });
             throw lastError;
@@ -202,16 +196,17 @@ export function createHeadroomGuard(transport, {
             return result;
           } catch (e2) {
             if (!isMeteredQuota(e2)) {
-              // A non-quota error mid-recovery still ENDS this cycle (Alicia Adriani review):
-              // record it as `abandoned` so a dashboard built on `recovered + exhausted +
-              // abandoned` as "total recovery cycles" doesn't silently undercount cycles cut
-              // short by an unrelated failure — distinct from `exhausted` (which specifically
-              // means "still a metered 405 after every attempt").
+              // A non-quota error mid-recovery still ENDS this cycle — `abandoned` is distinct
+              // from `exhausted` (still a metered 405 after every attempt) so a dashboard summing
+              // recovered+exhausted+abandoned as "total cycles" doesn't undercount.
               recordQuotaRetryOutcome('abandoned', { attempt, callSite });
               throw e2;
             }
             lastError = e2;
-            if (attempt >= maxAttempts) {
+            // Bail here too, BEFORE sleeping, if the sleep would itself run past the deadline —
+            // an unconditional sleep could otherwise overshoot the budget by up to a full
+            // `backoffMs` doing nothing useful.
+            if (attempt >= maxAttempts || now() + backoffMs >= requestDeadline) {
               recordQuotaRetryOutcome('exhausted', { attempt, callSite });
               throw e2;
             }

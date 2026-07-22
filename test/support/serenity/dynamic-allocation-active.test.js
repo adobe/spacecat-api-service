@@ -665,6 +665,64 @@ describe('dynamic-allocation-active — retryOnQuota emits QuotaRetryOutcome (My
     );
   });
 
+  it('ON, a sleep that WOULD overshoot the deadline is skipped entirely: bails at the current attempt instead of sleeping uselessly (Alicia Adriani review)', async () => {
+    // Sequence of now() calls: 1st = construction (t0=0, budget=1000 => deadline=1000). 2nd = the
+    // pre-attempt check before poll attempt 1 (still within budget). 3rd = the pre-sleep check
+    // after poll attempt 1 fails: now()=950, backoffMs=3000 => 950+3000=3950 >= 1000 — sleeping
+    // would badly overshoot the deadline, so the fix must bail HERE, without ever calling sleep,
+    // rather than sleeping the full 3000ms only to bail at the next loop-top check anyway.
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    let nowCallCount = 0;
+    const now = () => {
+      nowCallCount += 1;
+      if (nowCallCount === 1) {
+        return 0; // construction
+      }
+      if (nowCallCount === 2) {
+        return 100; // pre-attempt check before poll attempt 1
+      }
+      return 950; // pre-sleep check after poll attempt 1 fails
+    };
+    const sleep = sinon.stub().resolves();
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: {
+          maxAttempts: 5, backoffMs: 3000, totalBudgetMs: 1000, now, sleep,
+        },
+      },
+      log,
+    );
+    const lastError = quota405();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(lastError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn, { callSite: 'publishProject' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(lastError);
+    expect(fn).to.have.callCount(2); // initial call + exactly one poll attempt
+    expect(sleep).to.not.have.been.called;
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'exhausted',
+      { attempt: 1, callSite: 'publishProject' },
+    );
+  });
+
   it('sleep(backoffMs) is actually invoked between poll attempts, not skipped — catches a regression that drops the await', async () => {
     const recordQuotaRetryOutcome = sinon.stub();
     const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
