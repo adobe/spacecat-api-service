@@ -395,6 +395,83 @@ export default function ElementsController(context, log, env) {
   }
 
   /**
+   * Shared scaffolding for the two URL Inspector KPI endpoints
+   * (`getUrlInspectorStats`, `getUrlInspectorPromptsCount`): org/brand auth,
+   * the optional `siteId` -> brand ownership cross-check, and region ->
+   * project(s) resolution (including the empty-scope 404 guard). Both
+   * endpoints need the exact same security-relevant checks (siteId
+   * ownership, cross-brand project scoping) — keeping them in one place
+   * means a fix to one can't silently miss the other (PR #2861 review: the
+   * `/prompts/count` copy had already drifted to skip test coverage the
+   * `/stats` copy had).
+   *
+   * @param {object} ctx - Request context.
+   * @returns {Promise<{error: Response}|{workspaceId: string, brand: object,
+   *   brandId: string, query: object, service: object, projects: object[],
+   *   projectIds: string[]}>} `projects` carries `{ region, projectId }`
+   *   entries (only populated resolving region/aggregate view); `projectIds`
+   *   is always the flat, `hasText`-filtered list of Semrush project ids.
+   */
+  async function resolveUrlInspectorScope(ctx) {
+    const auth = await authorizeOrg(ctx);
+    if (auth.error) {
+      return { error: auth.error };
+    }
+    const { spaceCatId, brandId } = ctx?.params ?? {};
+    const { workspaceId, brand } = auth;
+    const query = extractQuery(ctx);
+
+    const siteId = query.siteId || query.site_id;
+    if (hasText(siteId)) {
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+      if (!resolved || resolved.id !== brand.id) {
+        return { error: badRequest('siteId does not belong to the specified brand') };
+      }
+    }
+
+    const service = await buildService(ctx);
+    const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+    const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+    // Scope per project (region): a specific region → that one project; otherwise
+    // all the brand's markets — mirrors listOwnedUrls/listDomainUrls.
+    let projects;
+    let projectIds;
+    const { region } = query;
+    if (hasText(region) && region.toLowerCase() !== 'all') {
+      const projectId = await service.resolveRegionProjectId(workspaceId, {
+        brandId, region, brandSemrushProjects,
+      });
+      if (!hasText(projectId)) {
+        return { error: notFound(`No Semrush market found for region: ${region}`) };
+      }
+      projects = [{ region, projectId }];
+      projectIds = [projectId];
+    } else {
+      projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
+      // Derived from the SAME resolved `projects` array (not re-filtered from
+      // brandSemrushProjects) — a project can exist in the DB rows but not
+      // resolve via the Markets element (or vice versa), and using two
+      // different sources here would scope the two KPI endpoints to
+      // different project sets.
+      projectIds = projects.map((p) => p.projectId).filter(hasText);
+      // An empty list here must not silently fall through to an unscoped
+      // (workspace-wide) Semrush query (mirrors getStats's Decision 4.1) —
+      // if this brand has no sub-workspace of its own yet, `workspaceId`
+      // resolves to the org's shared parent, so an unscoped call would
+      // return every brand/project in that parent, not just this one.
+      if (projectIds.length === 0) {
+        return { error: notFound(`No Semrush projects configured for brand: ${brandId}`) };
+      }
+    }
+
+    return {
+      workspaceId, brand, brandId, query, service, projects, projectIds,
+    };
+  }
+
+  /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/filter-dimensions
    * Returns filter dimensions for the URL Inspector dashboard
@@ -1106,22 +1183,13 @@ export default function ElementsController(context, log, env) {
    */
   const getUrlInspectorStats = async (ctx) => {
     try {
-      const auth = await authorizeOrg(ctx);
-      if (auth.error) {
-        return auth.error;
+      const scope = await resolveUrlInspectorScope(ctx);
+      if (scope.error) {
+        return scope.error;
       }
-      const { spaceCatId, brandId } = ctx?.params ?? {};
-      const { workspaceId, brand } = auth;
-      const query = extractQuery(ctx);
-
-      const siteId = query.siteId || query.site_id;
-      if (hasText(siteId)) {
-        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
-        if (!resolved || resolved.id !== brand.id) {
-          return badRequest('siteId does not belong to the specified brand');
-        }
-      }
+      const {
+        workspaceId, query, service, projects,
+      } = scope;
 
       // Date range is optional (defaults to a 28-day trailing window) — matches
       // every other *stats* endpoint (getStats, both Aurora stats endpoints),
@@ -1151,10 +1219,12 @@ export default function ElementsController(context, log, env) {
           endDate = defaultRange.endDate;
         }
       }
-      // Bound the span at 56 days (8 weeks) — matches getStats (brand-presence),
-      // and keeps `stats` covering exactly the same window `weeklyTrends` does
-      // (weeklyTrends is capped to the most recent 8 weeks regardless — see
-      // getUrlInspectorStats in elements-service.js).
+      // Bound the span at 56 days (8 weeks) — matches getStats (brand-presence).
+      // `weeklyTrends` may cover a NARROWER window than this on a multi-project
+      // aggregate view (its per-week cap adapts to project count so the
+      // service's fan-out fits one gateway-safe round-trip — see
+      // getUrlInspectorStats in elements-service.js); `stats` always covers the
+      // full requested range regardless.
       const MAX_RANGE_DAYS = 56;
       const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
         - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
@@ -1162,45 +1232,10 @@ export default function ElementsController(context, log, env) {
         return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
       }
 
-      const service = await buildService(ctx);
-      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
-      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
-
-      // Scope per project (region): a specific region → that one project; otherwise
-      // all the brand's markets — mirrors listOwnedUrls/listDomainUrls.
-      let projects;
-      let projectIds;
-      const { region } = query;
-      if (hasText(region) && region.toLowerCase() !== 'all') {
-        const projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region, brandSemrushProjects,
-        });
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${region}`);
-        }
-        projects = [{ region, projectId }];
-        projectIds = [projectId];
-      } else {
-        projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
-        // Derived from the SAME resolved `projects` array used for the citation
-        // KPIs (not re-filtered from brandSemrushProjects) — a project can exist
-        // in the DB rows but not resolve via the Markets element (or vice versa),
-        // and using two different sources here would scope the PROMPTS element
-        // to a different project set than Stats-per-URL.
-        projectIds = projects.map((p) => p.projectId).filter(hasText);
-        // An empty list here must not silently fall through to an unscoped
-        // (workspace-wide) Semrush query (mirrors getStats's Decision 4.1) —
-        // if this brand has no sub-workspace of its own yet, `workspaceId`
-        // resolves to the org's shared parent, so an unscoped call would
-        // return every brand/project in that parent, not just this one.
-        if (projectIds.length === 0) {
-          return notFound(`No Semrush projects configured for brand: ${brandId}`);
-        }
-      }
-
       const result = await service.getUrlInspectorStats(workspaceId, {
         projects,
-        model: query.model || query.platform,
+        model: query.model,
+        platform: query.platform,
         startDate,
         endDate,
         category: query.categoryId || query.category,
@@ -1221,51 +1256,33 @@ export default function ElementsController(context, log, env) {
    * way `getUrlInspectorStats` scopes Stats-per-URL. No date range: the
    * PROMPTS element has no date filter, so there is nothing to default/cap and
    * no weekly breakdown to return.
+   *
+   * **Known, PERMANENT limitation: no weekly trend for `totalPrompts`.** The
+   * Aurora/Postgres reference endpoint
+   * (`docs/llmo-brandalf-apis/url-inspector-stats-api.md`) returns
+   * `totalPrompts` WITH a per-week trend, via `rpc_url_inspector_total_prompts`
+   * — a time-windowed count of distinct active prompts that ran each week.
+   * The Semrush PROMPTS element has no equivalent: it is a static, currently-
+   * configured-prompt roster (filterable by model/tag/project, but not by
+   * date), not an execution log, so there is no upstream data to bucket by
+   * week. This is not a gap to close later with more work — it's a ceiling of
+   * the Semrush data model. (An earlier version tried to route around this by
+   * repeating the all-time total in every `weeklyTrends` entry; that was
+   * flagged in review as misleading — a caller would read
+   * `weeklyTrends[i].totalPrompts` as "prompts that week" — so it was split
+   * into this dedicated, trend-less endpoint instead of fabricating a
+   * per-week series.) The consuming UI (project-elmo-ui#2479) renders this
+   * KPI card as a static number with no sparkline, unlike its 3 siblings.
    */
   const getUrlInspectorPromptsCount = async (ctx) => {
     try {
-      const auth = await authorizeOrg(ctx);
-      if (auth.error) {
-        return auth.error;
+      const scope = await resolveUrlInspectorScope(ctx);
+      if (scope.error) {
+        return scope.error;
       }
-      const { spaceCatId, brandId } = ctx?.params ?? {};
-      const { workspaceId, brand } = auth;
-      const query = extractQuery(ctx);
-
-      const siteId = query.siteId || query.site_id;
-      if (hasText(siteId)) {
-        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
-        if (!resolved || resolved.id !== brand.id) {
-          return badRequest('siteId does not belong to the specified brand');
-        }
-      }
-
-      const service = await buildService(ctx);
-      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
-      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
-
-      // Same region scoping as getUrlInspectorStats, so filtering the URL
-      // Inspector by region scopes this card's count to the same project(s).
-      let projectIds;
-      const { region } = query;
-      if (hasText(region) && region.toLowerCase() !== 'all') {
-        const projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region, brandSemrushProjects,
-        });
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${region}`);
-        }
-        projectIds = [projectId];
-      } else {
-        const projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
-        projectIds = projects.map((p) => p.projectId).filter(hasText);
-        // Mirrors getUrlInspectorStats's guard: an empty list must not fall
-        // through to an unscoped (workspace-wide) Semrush query.
-        if (projectIds.length === 0) {
-          return notFound(`No Semrush projects configured for brand: ${brandId}`);
-        }
-      }
+      const {
+        workspaceId, query, service, projectIds,
+      } = scope;
 
       const category = query.categoryId || query.category;
       const { count: totalPrompts } = await service.getPrompts(workspaceId, {

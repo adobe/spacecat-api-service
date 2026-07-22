@@ -429,6 +429,7 @@ const FIXTURES = {
         uniqueUrls: 187,
         totalCitations: 964,
         totalPromptsCited: 312,
+        partial: false,
       },
       weeklyTrends: [
         {
@@ -437,6 +438,7 @@ const FIXTURES = {
           uniqueUrls: 42,
           totalCitations: 155,
           totalPromptsCited: 48,
+          partial: false,
         },
       ],
     },

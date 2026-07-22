@@ -1194,6 +1194,18 @@ describe('ElementsController', () => {
       expect(params.category).to.equal('Firefly');
     });
 
+    it('passes model and platform through as separate fields, not pre-merged (matches getStats/prompts-count convention)', async () => {
+      const ctx = urlInspectorStatsCtx({
+        url: urlInspectorStatsUrl('?platform=chatgpt'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.model).to.be.undefined;
+      expect(params.platform).to.equal('chatgpt');
+    });
+
     it('defaults startDate/endDate to a 28-day trailing window when omitted', async () => {
       const ctx = urlInspectorStatsCtx();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
@@ -1453,6 +1465,39 @@ describe('ElementsController', () => {
     it('returns 400 when siteId resolves to a different brand than :brandId', async () => {
       getBrandBySiteStub.resolves({ id: 'some-other-brand-id', name: 'Other Brand' });
       const ctx = fakeContext({ url: promptsCountUrl('?siteId=site-of-other-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('proceeds when siteId resolves to the same brand as :brandId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = promptsCountCtx({ url: promptsCountUrl('?siteId=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('accepts the site_id snake_case alias for siteId', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Adobe Brand' });
+      const ctx = promptsCountCtx({ url: promptsCountUrl('?site_id=site-of-this-brand') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+      expect(getBrandBySiteStub).to.have.been.calledWith(ORG_ID, 'site-of-this-brand');
+    });
+
+    it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl(), postgrestClient: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(503);
+      const body = await readBody(res);
+      expect(body.error).to.equal('configurationError');
+    });
+
+    it('returns the auth error when brandId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl(), params: { brandId: 'not-a-uuid' } });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorPromptsCount(ctx);
       expect(res.status).to.equal(400);
