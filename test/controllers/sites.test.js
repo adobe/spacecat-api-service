@@ -6711,7 +6711,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 200 via imsOrg path when non-admin has visible entitlement and enrolled site', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(false);
       context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
       mockTierClientStub.getFirstEnrollment.resolves({
@@ -6995,7 +6995,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 404 with aso_pre_onboard for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(false);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
@@ -7017,7 +7017,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(true);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
@@ -7040,7 +7040,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 404 for PRE_ONBOARD-tier site via imsOrg path for non-admin', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(false);
       context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
 
@@ -7064,7 +7064,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 200 for PRE_ONBOARD-tier site via imsOrg path for admin', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(true);
       context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
 
@@ -7090,7 +7090,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 404 with no_entitlement_for_product for admin when organizationId path has no entitlement', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(true);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
@@ -7109,7 +7109,7 @@ describe('Sites Controller', () => {
     });
 
     it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(true);
       context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
 
@@ -7194,7 +7194,7 @@ describe('Sites Controller', () => {
       beforeEach(() => {
         [org] = testOrganizations;
         mockCtx = { dataAccess: mockDataAccess, log: { warn: sandbox.stub() } };
-        mockAccessControlUtil = { hasAdminAccess: sandbox.stub().returns(false) };
+        mockAccessControlUtil = { hasAdminReadAccess: sandbox.stub().returns(false) };
         sandbox.stub(org, 'getConfig').returns(makeConfigWithDefault(SITE_IDS[0]));
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockTierClientStub.getAllEnrollment.resolves({
@@ -7255,7 +7255,7 @@ describe('Sites Controller', () => {
       });
 
       it('returns data when the configured site is on a non-customer-visible tier for admin', async () => {
-        mockAccessControlUtil.hasAdminAccess.returns(true);
+        mockAccessControlUtil.hasAdminReadAccess.returns(true);
         mockTierClientStub.getAllEnrollment.resolves({
           entitlement: { getTier: () => 'PRE_ONBOARD' },
           enrollments: [{ getId: () => 'enrollment-1' }],
@@ -7529,7 +7529,7 @@ describe('Sites Controller', () => {
       it('internal caller accessing CUSTOMER site (admin) with PRE_ONBOARD + not enrolled → 404 site_not_enrolled', async () => {
         // Caller-based check: bypass fires even when the site lives in a customer org.
         // PRE_ONBOARD tier check skipped for internal caller; no enrollment → site_not_enrolled.
-        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(true);
         context.data = {
           siteId: SITE_IDS[1],
           imsOrg: CUSTOMER_ORG_IMS_ID,
@@ -7550,7 +7550,7 @@ describe('Sites Controller', () => {
       });
 
       it('internal caller accessing CUSTOMER site (admin) with PRE_ONBOARD + enrolled → 200', async () => {
-        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminReadAccess').returns(true);
         context.data = {
           siteId: SITE_IDS[1],
           imsOrg: CUSTOMER_ORG_IMS_ID,
