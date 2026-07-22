@@ -1,3 +1,10 @@
+# [1.683.0](https://github.com/adobe/spacecat-api-service/compare/v1.682.0...v1.683.0) (2026-07-22)
+
+
+### Features
+
+* **run-global-import:** scope a global import to a single site, with an optional --force ([#2860](https://github.com/adobe/spacecat-api-service/issues/2860)) ([0390aa5](https://github.com/adobe/spacecat-api-service/commit/0390aa5b8a3519a4a2f4ef21ad1e97590ee5bf0c)), closes [#813](https://github.com/adobe/spacecat-api-service/issues/813)
+
 # [1.682.0](https://github.com/adobe/spacecat-api-service/compare/v1.681.0...v1.682.0) (2026-07-22)
 
 
