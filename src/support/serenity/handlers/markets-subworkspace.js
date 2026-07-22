@@ -283,6 +283,19 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // the `intent` vocabulary provisioned above, so its id is a Map lookup — no
   // extra upstream call.
   const allTexts = [...texts];
+  // The cap is a designed budget bound, not an error: texts beyond it are not
+  // classified and take the seeded `Informational` default (see the partition
+  // below). Emit one line when it binds so a silently-defaulted tail is
+  // observable rather than invisible (serenity-docs#32 observability).
+  if (allTexts.length > AI_GEN_CLASSIFY_MAX) {
+    log?.info?.('generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational', {
+      workspaceId,
+      projectId,
+      total: allTexts.length,
+      classified: AI_GEN_CLASSIFY_MAX,
+      defaultedByCap: allTexts.length - AI_GEN_CLASSIFY_MAX,
+    });
+  }
   const intentByText = await classifyPromptIntents(
     allTexts.slice(0, AI_GEN_CLASSIFY_MAX),
     {
