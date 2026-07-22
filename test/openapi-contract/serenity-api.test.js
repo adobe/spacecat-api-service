@@ -129,6 +129,7 @@ const FIXTURES = {
       }],
       skipped: [],
       failed: [],
+      published: true,
     },
     data: {
       prompts: [{
