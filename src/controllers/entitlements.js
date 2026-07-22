@@ -25,13 +25,55 @@ import {
 
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 
 import { EntitlementDto } from '../dto/entitlement.js';
 import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { ensurePromptSuggestionSchedules } from '../support/prompt-suggestion-schedules.js';
 
 const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
 const FREE_TRIAL_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+const PAID_TIER = EntitlementModel.TIERS.PAID;
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
+
+/**
+ * Best-effort reaction to a trial→paid LLMO transition: (re)provisions the site's
+ * recurring DRS prompt-suggestion schedules. Never throws — the entitlement
+ * operation must succeed regardless of this side-effect (mirrors the best-effort
+ * schedule registration on the onboarding path). The dedicated endpoint
+ * (`POST /sites/:siteId/prompt-suggestion-schedules`) is the reusable equivalent;
+ * this inlines the same shared helper so an admin tier flip is not silently
+ * missed while the fulfillment-worker call + reconciler are still follow-ups.
+ *
+ * @param {object} context - Request context (for DrsClient + log).
+ * @param {string} siteId - Site UUID.
+ * @param {object} log - Logger.
+ * @returns {Promise<void>}
+ */
+async function reactToLlmoTrialToPaid(context, siteId, log) {
+  try {
+    const drsClient = DrsClient.createFrom(context);
+    if (!drsClient.isConfigured()) {
+      log.debug(`[prompt-suggestion-schedules] DRS not configured, skipping trial→paid reaction for site ${siteId}`);
+      return;
+    }
+    const { results, allSucceeded } = await ensurePromptSuggestionSchedules({
+      drsClient,
+      siteId,
+      isPaying: true,
+      log,
+    });
+    const summary = results.map((r) => `${r.providerId}:${r.status}`).join(',');
+    if (allSucceeded) {
+      log.info(`[prompt-suggestion-schedules] trial→paid provisioned recurring schedules site_id=${siteId} results=${summary}`);
+    } else {
+      log.error(`[prompt-suggestion-schedules] trial→paid: one or more pipelines failed site_id=${siteId} results=${summary}`);
+    }
+  } catch (e) {
+    log.error(`[prompt-suggestion-schedules] trial→paid reaction failed for site ${siteId}: ${e.message}`);
+  }
+}
 
 /**
  * Entitlements controller. Provides methods to read entitlements by organization.
@@ -185,7 +227,23 @@ function EntitlementsController(ctx) {
         site,
         productCode,
       );
+      // Read the prior tier BEFORE the create so we can detect a trial→paid
+      // transition without changing the shared createEntitlement return shape
+      // (mirrors resolveProvisioningTier in support/tier-provisioning.js).
+      const existing = await tierClient.checkValidEntitlement();
+      const prevTier = existing.entitlement?.getTier?.() ?? null;
+
       const { entitlement, siteEnrollment } = await tierClient.createEntitlement(tier);
+
+      // LLMO trial→paid: (re)provision recurring prompt-suggestion schedules.
+      // Best-effort — never fails the entitlement op.
+      const resultTier = entitlement?.getTier?.();
+      if (productCode === LLMO_PRODUCT_CODE
+        && prevTier !== PAID_TIER
+        && resultTier === PAID_TIER) {
+        await reactToLlmoTrialToPaid(context, siteId, context.log);
+      }
+
       return created({
         entitlement: EntitlementDto.toJSON(entitlement),
         siteEnrollment: SiteEnrollmentDto.toJSON(siteEnrollment),

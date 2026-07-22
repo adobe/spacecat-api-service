@@ -654,6 +654,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-onboard-site'
   /sites/{siteId}/llmo/offboard:
     $ref: './llmo-api.yaml#/llmo-offboard'
+  /sites/{siteId}/prompt-suggestion-schedules:
+    $ref: './llmo-api.yaml#/llmo-prompt-suggestion-schedules'
   /sites/{siteId}/llmo/opportunities-reviewed:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
   /sites/{siteId}/llmo/brand-claims:
