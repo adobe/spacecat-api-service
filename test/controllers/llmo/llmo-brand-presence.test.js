@@ -6619,6 +6619,26 @@ describe('llmo-brand-presence', () => {
       ];
       const [entry] = aggregateDetailSources(rows);
       expect(entry.citationCount).to.equal(2);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 2 }]);
+    });
+
+    it('counts each row independently when execution_id is missing', () => {
+      // Rows without an execution_id (not expected in practice) always count,
+      // since there's no id to dedupe against.
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', execution_id: null, prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(3);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 3 }]);
     });
   });
 
