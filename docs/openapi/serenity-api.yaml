@@ -1063,18 +1063,20 @@ v2-serenity-url-inspector-filter-dimensions:
     summary: Filter dimensions for the Serenity URL Inspector dashboard
     description: |
       Returns the option universe for the URL Inspector Brand/Region/Topic/
-      Category/Intent/Origin filter dropdowns, sourced from the Semrush Brands,
-      Markets, and Topics elements (not from Adobe Postgres). Unlike the
-      cascading `/brand-presence/filter-dimensions` endpoint, this read is not
-      itself filtered by any of the dimensions it returns — it defines what
-      those dropdowns can show.
+      Category/Intent/Origin/Content-Type filter dropdowns, sourced from the
+      Semrush Brands, Markets, Topics, and Content Types elements (not from
+      Adobe Postgres). Unlike the cascading `/brand-presence/filter-dimensions`
+      endpoint, this read is not itself filtered by any of the dimensions it
+      returns — it defines what those dropdowns can show.
 
       `topics`/`categories`/`page_intents`/`origins` are derived from the same
       underlying Topics element response, split apart by their `topic__`/
       `category__`/`intent__`/`source__` tag prefix. Any other tag prefix Semrush
       introduces later (e.g. `type__branded`) surfaces automatically as an extra
       array property keyed by that prefix. Bare prefix declarations with no
-      value (e.g. a lone `category` row) are ignored — see
+      value (e.g. a lone `category` row) are ignored. `content_types` is
+      sourced from a separate Content Types element (Semrush `domain_type`
+      values) scoped to the same `model`/date window — see
       `SerenityUrlInspectorFilterDimensions`.
     operationId: listSerenityUrlInspectorFilterDimensions
     security:
@@ -1116,6 +1118,20 @@ v2-serenity-url-inspector-filter-dimensions:
         required: false
         description: Semrush project UUID to scope the Topics element to a specific market.
         schema: { type: string, format: uuid }
+      - name: startDate
+        in: query
+        required: false
+        description: |
+          ISO date (`YYYY-MM-DD`) scoping the Content Types element's date window.
+          Defaults to 28 days before `endDate`.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: |
+          ISO date (`YYYY-MM-DD`) scoping the Content Types element's date window.
+          Defaults to today.
+        schema: { type: string, format: date }
     responses:
       '200':
         description: Filter dimensions retrieved.

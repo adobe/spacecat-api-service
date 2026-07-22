@@ -20,6 +20,7 @@ export const ELEMENT_IDS = Object.freeze({
   BRANDS: 'b178ce4e-6471-4430-9a32-8228ce72b2e6',
   MARKETS: '478968a7-8851-4daf-83f7-2e8fb6185ddc',
   TOPICS: 'ba3b19c1-22d4-460a-8dc3-1ff05c360852',
+  CONTENT_TYPES: 'd1f9e6ec-9128-4b1b-b767-d86f93f54237',
   // Superseded by a new element with the same semantics but a shape aligned to
   // Mentions/Visibility/Citations (CBF_ws_brand + CBF_model + optional
   // CBF_project OR-list, all wrapped in their own `or` blocks) — see

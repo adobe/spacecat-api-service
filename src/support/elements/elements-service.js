@@ -19,6 +19,8 @@ import {
   transformBrandsToFilterDimensions,
   buildMarketsPayload,
   transformMarketsToFilterDimensions,
+  buildContentTypesPayload,
+  transformContentTypesToFilterDimensions,
   buildTopicsPayload,
   transformTopicsForFilterDimensions,
   transformCategoriesToFilterDimensions,
@@ -84,10 +86,15 @@ export function createElementsService(transport, log) {
       spacecatBrands = [],
       brandSemrushProjects = [],
     ) {
-      const [rawTopics, rawBrands, rawMarkets] = await Promise.all([
+      const [rawTopics, rawBrands, rawMarkets, rawContentTypes] = await Promise.all([
         transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, buildTopicsPayload(params)),
         transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
         transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, buildMarketsPayload({})),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.CONTENT_TYPES,
+          buildContentTypesPayload(params),
+        ),
       ]);
       const result = {
         brands: transformBrandsToFilterDimensions(rawBrands, spacecatBrands),
@@ -96,6 +103,7 @@ export function createElementsService(transport, log) {
         categories: transformCategoriesToFilterDimensions(rawTopics),
         page_intents: transformIntentsToFilterDimensions(rawTopics),
         origins: transformOriginsToFilterDimensions(rawTopics),
+        content_types: transformContentTypesToFilterDimensions(rawContentTypes),
       };
       // Merge any tag types not covered above (e.g. `type:branded`) under their own
       // prefix key, and plain prefix-less tags under `tags` — see
