@@ -310,6 +310,14 @@ const routeFacsCapabilities = {
       // Strategy / opportunity review (state changes against configured content)
       'PUT /sites/:siteId/llmo/strategy': 'llmo/can_configure',
       'PUT /sites/:siteId/llmo/opportunities-reviewed': 'llmo/can_configure',
+      // Audit Policy (SITES-47306) — the controller accepts either ASO or LLMO
+      // entitlement (hasProductAccess(ac, site, 'ASO') || (..., 'LLMO')), so
+      // these routes must exist here too or facsWrapper 403s LLMO-only callers
+      // before the controller's own entitlement check ever runs.
+      'POST /sites/:siteId/audit-policy/exclusions': 'llmo/can_configure',
+      'POST /sites/:siteId/audit-policy/exclusions/delete': 'llmo/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions': 'llmo/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions/delete': 'llmo/can_configure',
 
       // ---- Deploy --------------------------------------------------------
       // Edge-source optimization writes. Read-side endpoints stay under can_view.
@@ -320,6 +328,13 @@ const routeFacsCapabilities = {
       // Top-level LLMO surfaces
       'GET /v2/regions': 'llmo/can_view',
       'GET /llmo/agentic-traffic/global': 'llmo/can_view',
+      // Audit Policy / Audit Scope (SITES-47306) — see the Configure-section
+      // comment above on why these are dual-registered with ASO.
+      'GET /sites/:siteId/audit-policy': 'llmo/can_view',
+      'GET /sites/:siteId/audit-policy/revisions': 'llmo/can_view',
+      'GET /sites/:siteId/audit-scope/pages': 'llmo/can_view',
+      'GET /sites/:siteId/audit-scope/summary': 'llmo/can_view',
+      'GET /sites/:siteId/audit-scope/sections': 'llmo/can_view',
       // Body-based queries that read sheet data (S2S: site:read).
       'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'llmo/can_view',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'llmo/can_view',
@@ -940,6 +955,10 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type/:channel': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/exclusions': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/exclusions/delete': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions/delete': 'aso/can_configure',
 
       // ---- Manage users (state-layer management endpoints) ---------------
       'GET /state/access-mappings': 'aso/can_manage_users',
@@ -972,6 +991,13 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/top-pages/:source': 'aso/can_view',
       'GET /sites/:siteId/top-pages/:source/:geo': 'aso/can_view',
       'GET /sites/:siteId/user-activities': 'aso/can_view',
+
+      // Audit Policy / Audit Scope (SITES-47306)
+      'GET /sites/:siteId/audit-policy': 'aso/can_view',
+      'GET /sites/:siteId/audit-policy/revisions': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/pages': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/summary': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/sections': 'aso/can_view',
 
       // Audits
       'GET /sites/:siteId/audits': 'aso/can_view',
