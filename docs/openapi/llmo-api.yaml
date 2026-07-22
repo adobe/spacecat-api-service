@@ -6497,6 +6497,7 @@ akamai-property-ref:
         property's latest version.
     fetcherKey:
       type: string
+      minLength: 1
       maxLength: 256
       description: >-
         Optional customer-owned secret (e.g. `openssl rand -hex 32`). When provided, it is set as

@@ -287,16 +287,24 @@ function LlmoAkamaiController(ctx) {
 
   /**
    * Validates the optional, customer-owned fetcherKey. It's a secret the customer generates and
-   * owns (we only forward it as the x-edgeoptimize-fetcher-key header), so we stay lenient: reject
-   * only a non-string or an implausibly long value.
+   * owns (we only forward it as the x-edgeoptimize-fetcher-key header). We stay lenient on content
+   * but enforce: a string, ≤256 chars (matches the OpenAPI maxLength on the RAW value), not blank,
+   * and no control characters (it becomes an HTTP header — reject CR/LF/control-char injection).
    * @returns {Response|null} a badRequest to block, or null when absent/valid
    */
   const validateFetcherKey = (fetcherKey) => {
     if (fetcherKey === undefined || fetcherKey === null || fetcherKey === '') {
       return null;
     }
-    if (typeof fetcherKey !== 'string' || fetcherKey.trim().length > 256) {
+    if (typeof fetcherKey !== 'string' || fetcherKey.length > 256) {
       return badRequest('fetcherKey must be a string of at most 256 characters');
+    }
+    if (fetcherKey.trim() === '') {
+      return badRequest('fetcherKey must not be blank');
+    }
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001F\u007F]/.test(fetcherKey)) {
+      return badRequest('fetcherKey must not contain control characters');
     }
     return null;
   };
