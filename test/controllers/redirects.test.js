@@ -165,6 +165,58 @@ describe('RedirectsController', () => {
     expect(bodyStub.called).to.be.false;
   });
 
+  // Happy-path structured log lines. The 4xx branches (no-site / no-entitlement
+  // / not-enrolled) already emit `log.info`; the 200 and 304 branches used to
+  // emit only the EMF metric envelope, so a `level=info` Splunk search would
+  // never surface cache-hit or served-body traffic. Regression fixtures for
+  // that gap — both message text and structured metadata are asserted so a
+  // rename or field-drop trips the test rather than the on-call dashboard.
+  it('emits log.info on 200 with service + bytes + etagPresent metadata', async () => {
+    const overlay = 'example.com/old https://www.example.com/new\n';
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+
+    await controller.getRedirects(requestContext);
+
+    expect(mockContext.log.info.calledWith(
+      '[aso-overlay] served 200 with body',
+      sinon.match({ service: SERVICE, bytes: overlay.length, etagPresent: true }),
+    )).to.be.true;
+  });
+
+  it('emits log.info on 200 with etagPresent=false when S3 omits ETag', async () => {
+    // Guard so a future refactor cannot flip the flag on/off silently — the
+    // on-call sidecar-bug dashboard filters on this exact field.
+    const overlay = 'a b\n';
+    mockS3.s3Client.send.resolves({
+      Body: { transformToString: sandbox.stub().resolves(overlay) },
+    });
+
+    await controller.getRedirects(requestContext);
+
+    expect(mockContext.log.info.calledWith(
+      '[aso-overlay] served 200 with body',
+      sinon.match({ service: SERVICE, etagPresent: false }),
+    )).to.be.true;
+  });
+
+  it('emits log.info on 304 with service metadata', async () => {
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('') },
+    });
+    withIfNoneMatch(ETAG);
+
+    await controller.getRedirects(requestContext);
+
+    expect(mockContext.log.info.calledWith(
+      '[aso-overlay] served 304 not-modified',
+      sinon.match({ service: SERVICE }),
+    )).to.be.true;
+  });
+
   it('accepts a mixed-case if-none-match header (HTTP header names are case-insensitive)', async () => {
     mockS3.s3Client.send.resolves({
       ETag: ETAG,
