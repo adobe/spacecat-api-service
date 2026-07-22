@@ -522,8 +522,8 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the LLMO config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the LLMO config'));
       }
 
       // Support gzip-compressed request bodies (Content-Type: application/gzip)
@@ -624,8 +624,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can add questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add questions'));
     }
     const { site, config } = siteValidation;
 
@@ -673,8 +673,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can remove questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can remove questions'));
     }
     const { site, config } = siteValidation;
 
@@ -699,8 +699,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can update questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update questions'));
     }
     const { site, config } = siteValidation;
 
@@ -739,8 +739,8 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can add customer intent');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add customer intent'));
       }
       const { site, config } = siteValidation;
 
@@ -856,8 +856,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN logs filter');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the CDN logs filter'));
       }
 
       if (!isObject(data)) {
@@ -890,8 +890,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN bucket config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the CDN bucket config'));
       }
 
       if (!isObject(data)) {
@@ -940,8 +940,8 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can onboard');
+      if (!accessControlUtil.hasLlmoAdminCapability()) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can onboard'));
       }
 
       // Validate required fields
@@ -1486,8 +1486,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the edge optimize config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the edge optimize config'));
       }
 
       if (!await accessControlUtil.isOwnerOfSite(site)) {
@@ -1800,8 +1800,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can get the edge optimize config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can get the edge optimize config'));
       }
 
       const baseURL = site.getBaseURL();
@@ -2049,8 +2049,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can add staging domains');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add staging domains'));
       }
 
       if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
@@ -2133,8 +2133,8 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the query index');
+      if (!accessControlUtil.hasLlmoAdminCapability()) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the query index'));
       }
 
       if (!data || typeof data !== 'object') {
