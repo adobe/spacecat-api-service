@@ -54,6 +54,18 @@ const RAW_TOPICS = {
   },
 };
 
+const RAW_CONTENT_TYPES = {
+  blocks: {
+    value: [
+      { value: 'Other' },
+      { value: 'Social' },
+      { value: 'Earned' },
+      { value: 'Owned' },
+      { value: 'Benchmark Competitors' },
+    ],
+  },
+};
+
 describe('createElementsService', () => {
   let transport;
   let service;
@@ -74,25 +86,41 @@ describe('createElementsService', () => {
       transport.fetchElement
         .withArgs('ws-1', ELEMENT_IDS.MARKETS, sinon.match.any)
         .resolves(RAW_MARKETS);
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.CONTENT_TYPES, sinon.match.any)
+        .resolves(RAW_CONTENT_TYPES);
     });
 
-    it('calls fetchElement three times (topics, brands, markets)', async () => {
+    it('calls fetchElement four times (topics, brands, markets, content types)', async () => {
       await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(transport.fetchElement).to.have.been.calledThrice;
+      expect(transport.fetchElement.callCount).to.equal(4);
     });
 
-    it('fetches TOPICS, BRANDS and MARKETS in parallel', async () => {
+    it('fetches TOPICS, BRANDS, MARKETS and CONTENT_TYPES in parallel', async () => {
       await service.getUrlInspectorFilterDimensions('ws-1', {});
       const calledIds = transport.fetchElement.getCalls().map((c) => c.args[1]);
       expect(calledIds).to.include(ELEMENT_IDS.TOPICS);
       expect(calledIds).to.include(ELEMENT_IDS.BRANDS);
       expect(calledIds).to.include(ELEMENT_IDS.MARKETS);
+      expect(calledIds).to.include(ELEMENT_IDS.CONTENT_TYPES);
     });
 
-    it('returns an object with brands, regions, topics, categories, page_intents, origins, type, tags keys', async () => {
+    it('returns an object with brands, regions, topics, categories, page_intents, origins, content_types, type, tags keys', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
       expect(result).to.have.all.keys([
-        'brands', 'regions', 'topics', 'categories', 'page_intents', 'origins', 'type', 'tags',
+        'brands', 'regions', 'topics', 'categories', 'page_intents', 'origins',
+        'content_types', 'type', 'tags',
+      ]);
+    });
+
+    it('content_types contains the transformed content-type filter dimensions', async () => {
+      const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
+      expect(result.content_types).to.deep.equal([
+        { id: 'other', label: 'Other' },
+        { id: 'social', label: 'Social' },
+        { id: 'earned', label: 'Earned' },
+        { id: 'owned', label: 'Owned' },
+        { id: 'benchmark_competitors', label: 'Benchmark Competitors' },
       ]);
     });
 
