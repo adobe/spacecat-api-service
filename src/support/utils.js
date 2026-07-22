@@ -251,21 +251,26 @@ export const sendInternalReportRunMessage = async (
 
 /**
  * Sends a message to run a global import job to the provided SQS queue.
- * Global imports don't require a siteId - they run across all data.
+ * Global imports don't require a siteId - they run across all data - but an optional siteId
+ * scopes the run to just that one site (e.g. for an ad hoc re-check), when the target handler
+ * supports it.
  *
  * @param {Object} sqs - The SQS service object.
  * @param {string} queueUrl - The SQS queue URL.
  * @param {string} importType - The type of global import to run.
  * @param {Object} slackContext - The Slack context for notifications.
+ * @param {string} [siteId] - Optional site ID to scope the run to a single site.
  */
 export const sendGlobalImportRunMessage = async (
   sqs,
   queueUrl,
   importType,
   slackContext,
+  siteId,
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   slackContext,
+  ...(siteId && { siteId }),
 });
 
 export const sendReportTriggerMessage = async (
@@ -458,18 +463,21 @@ export const triggerInternalReportRun = async (
 );
 
 /**
- * Triggers a global import run (imports that don't require a siteId).
+ * Triggers a global import run (imports that don't require a siteId, though an optional
+ * siteId can scope the run to a single site for handlers that support it).
  *
  * @param {Object} config - The configuration object.
  * @param {string} importType - The type of global import to run.
  * @param {Object} slackContext - The Slack context for notifications.
  * @param {Object} lambdaContext - The Lambda context with SQS service.
+ * @param {string} [siteId] - Optional site ID to scope the run to a single site.
  */
 export const triggerGlobalImportRun = async (
   config,
   importType,
   slackContext,
   lambdaContext,
+  siteId,
 ) => sendGlobalImportRunMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
@@ -478,6 +486,7 @@ export const triggerGlobalImportRun = async (
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
   },
+  siteId,
 );
 
 /**

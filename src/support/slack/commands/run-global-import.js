@@ -39,9 +39,12 @@ function runGlobalImportCommand(context) {
     id: 'run-global-import',
     name: 'Run Global Import',
     description: 'Run a global import job that operates across all data. '
-      + 'These imports do not require a specific site URL.',
+      + 'These imports do not require a specific site URL, but an optional siteId scopes '
+      + 'the run to just that one site for handlers that support it.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType}\n\nAvailable types: \`${GLOBAL_IMPORTS.join('\`, \`')}\``,
+    usageText: `${PHRASES[0]} {importType} [siteId]\n\nAvailable types: \`${GLOBAL_IMPORTS.join('\`, \`')}\`\n`
+      + 'Optional `siteId`: scope the run to a single site instead of all data (currently only '
+      + '`optimize-at-edge-enabled-marking` uses it).',
   });
 
   /**
@@ -55,7 +58,7 @@ function runGlobalImportCommand(context) {
     const config = await Configuration.findLatest();
 
     try {
-      const [importType] = args;
+      const [importType, siteId] = args;
 
       if (!importType || importType === '') {
         await say(baseCommand.usage());
@@ -86,9 +89,12 @@ function runGlobalImportCommand(context) {
         importType,
         slackContext,
         context,
+        siteId,
       );
 
-      await say(`:adobe-run: Triggered global import: *${importType}*`);
+      await say(siteId
+        ? `:adobe-run: Triggered global import: *${importType}* for site \`${siteId}\``
+        : `:adobe-run: Triggered global import: *${importType}*`);
     } catch (error) {
       log.error(`Error running global import: ${error.message}`);
       await postErrorMessage(say, error);
