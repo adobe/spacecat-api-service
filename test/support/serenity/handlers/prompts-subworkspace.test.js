@@ -202,7 +202,9 @@ describe('prompts-subworkspace handlers', () => {
         prompts: [{
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
-      }, log, undefined, { dynamicAllocation: true, parentWorkspaceId: 'parent-ws' });
+      }, log, undefined, undefined, undefined, {
+        dynamicAllocation: true, parentWorkspaceId: 'parent-ws',
+      });
       expect(result.created).to.have.length(1);
       expect(transport.getWorkspaceResources).to.have.been.calledOnceWith(WS);
       expect(transport.getWorkspaceResources)
