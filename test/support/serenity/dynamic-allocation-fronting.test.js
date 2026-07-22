@@ -414,7 +414,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: false,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.getWorkspaceResources).to.not.have.been.called;
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
@@ -424,7 +426,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
     // failFast: ONE transfer, no settle-poll status check.
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
@@ -443,7 +447,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
   });
 
@@ -452,7 +458,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.getWorkspaceResources).to.not.have.been.called;
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
@@ -464,7 +472,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
   });
 
   it('ON + release hits a genuinely UNEXPECTED error: propagates, matching the model-update seam\'s identical (uncaught) release call — deliberately not special-cased here', async () => {
