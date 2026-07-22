@@ -79,11 +79,21 @@ export const SERENITY_BRAND_SITE_TYPE = 'serenity';
  * @param {string} [opts.siteId] - a known SpaceCat Site UUID to link directly
  *   (skips the domain → Site find-or-create). Takes precedence over `domain`.
  * @param {string} [opts.updatedBy] - audit actor for the brand_sites row.
+ * @param {boolean} [opts.requireLink=true] - whether the `brand_sites` mirror
+ *   write must succeed for a non-null return. `true` (activate / brand-create):
+ *   the mirror is a REQUIRED step — a failed/absent mirror returns null (so the
+ *   caller can keep the brand pending). `false` (market-create, LLMO-6405): the
+ *   mirror is best-effort — return the resolved Site id even if the mirror write
+ *   didn't land, so the caller can still bind the market↔site on
+ *   `brand_to_semrush_projects` (the DTO's source of truth), which is independent
+ *   of the secondary raw-PostgREST mirror.
  * @param {object} [opts.log] - logger.
- * @returns {Promise<string|null>} the site id ONLY when the brand_sites link was
- *   established; null otherwise — bad input, data-access unavailable, cross-org,
- *   no postgrest client, or a failed link write (the site may exist in those
- *   cases, but a non-null return always means "linked").
+ * @returns {Promise<string|null>} the resolved market Site id, or null. With
+ *   `requireLink=true` a non-null return means the brand_sites link was
+ *   established; with `requireLink=false` it means the Site was ensured (found/
+ *   created) and belongs to the brand's org, regardless of the mirror write.
+ *   Always null on bad input, data-access unavailable, a cross-org site, or an
+ *   unresolvable domain.
  */
 export async function ensureMarketSite(ctx, {
   organizationId,
@@ -91,6 +101,7 @@ export async function ensureMarketSite(ctx, {
   domain,
   siteId,
   updatedBy = 'serenity-market',
+  requireLink = true,
   log,
 } = {}) {
   if (!organizationId || !hasText(organizationId) || !brandId || !hasText(brandId)) {
@@ -100,10 +111,11 @@ export async function ensureMarketSite(ctx, {
   const Site = ctx?.dataAccess?.Site;
   const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
 
-  // Shared best-effort brand_sites link write. Returns the linked site id, or
-  // null when the link could not be established (no client / write error). Used
-  // by BOTH the siteId fast path and the domain path so the row shape and the
-  // 23514 alert-token handling stay identical across them.
+  // Shared brand_sites mirror write. Returns the linked site id on success, or
+  // null (no client / write error). Callers combine this with `requireLink` to
+  // decide the return (see the return sites below). Kept shared so the row shape
+  // and the 23514 alert-token handling stay identical across the siteId fast path
+  // and the domain path.
   const writeBrandSiteLink = async (linkSiteId) => {
     if (!postgrestClient?.from) {
       // Site ensured/known, but no client to write the brand_sites link → not linked.
@@ -171,7 +183,15 @@ export async function ensureMarketSite(ctx, {
         });
         return null;
       }
-      return await writeBrandSiteLink(site.getId());
+      const linked = await writeBrandSiteLink(site.getId());
+      // When requireLink is false (market-create, LLMO-6405), return the resolved
+      // site id EVEN IF the best-effort brand_sites mirror write didn't land — the
+      // caller binds the market↔site on brand_to_semrush_projects (the DTO's source
+      // of truth, via linkSiteToLiveRows on the data-access model), which must be
+      // recorded independent of the secondary raw-PostgREST mirror. When requireLink
+      // is true (activate / brand-create) the mirror is a required step, so a failed
+      // mirror still returns null (contract preserved).
+      return (linked || !requireLink) ? site.getId() : null;
     } catch (e) {
       log?.error?.('ensureMarketSite: failed to link supplied site (non-fatal)', {
         brandId, siteId, error: e.message,
@@ -236,12 +256,14 @@ export async function ensureMarketSite(ctx, {
         siteOrg: site.getOrganizationId(),
         brandOrg: organizationId,
       });
-      // Return null: the site exists but no brand_sites link was established, so a
-      // caller must not read this as a successful mirror.
+      // Cross-org: the Site is not this brand's, so bind nothing.
       return null;
     }
 
-    return await writeBrandSiteLink(resolvedSiteId);
+    // See the fast-path note: requireLink=false returns the resolved id even if
+    // the best-effort brand_sites mirror write failed (LLMO-6405).
+    const linked = await writeBrandSiteLink(resolvedSiteId);
+    return (linked || !requireLink) ? resolvedSiteId : null;
   } catch (e) {
     log?.error?.('ensureMarketSite: failed to ensure site for market domain (non-fatal)', {
       brandId, domain, error: e.message,

@@ -146,6 +146,27 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     expect(log.warn).to.have.been.calledOnce;
   });
 
+  it('requireLink:false — returns the resolved site id even when the brand_sites mirror write fails (domain path, LLMO-6405)', async () => {
+    Site.findByBaseURL.resolves(siteModel('site-9'));
+    upsertStub.resolves({ error: { message: 'conflict' } });
+    const result = await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'acme.com', requireLink: false, log,
+    });
+    // Market-create binds the mapping row (DTO source of truth) regardless of the
+    // best-effort mirror, so the resolved site id is returned despite the failure.
+    expect(result).to.equal('site-9');
+    expect(log.warn).to.have.been.calledOnce;
+  });
+
+  it('requireLink:false — returns the supplied site id when no postgrest client is available (fast path, LLMO-6405)', async () => {
+    ctx.dataAccess.services = {}; // no postgrestClient → mirror write skipped
+    Site.findById.resolves(siteModel('site-supplied'));
+    const result = await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, siteId: 'site-supplied', requireLink: false, log,
+    });
+    expect(result).to.equal('site-supplied');
+  });
+
   it('swallows a Site.create failure (returns null, logs error)', async () => {
     Site.findByBaseURL.resolves(null);
     Site.create.rejects(new Error('db down'));

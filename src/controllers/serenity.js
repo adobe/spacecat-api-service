@@ -768,10 +768,16 @@ function SerenityController(context, log, env) {
             // domain→Site find-or-create); the client already holds the identity.
             siteId: suppliedSiteId ?? undefined,
             updatedBy: 'serenity-create-market',
+            // Market-create: the brand_sites mirror is best-effort, so bind the
+            // market↔site on the mapping row (what the DTO surfaces) even if that
+            // secondary mirror write doesn't land (LLMO-6405). Unlike activate, a
+            // mirror hiccup must not leave the just-created market with no siteId.
+            requireLink: false,
             log,
           });
-          // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
-          // never overwrites an existing link.
+          // Bind the market↔site on the live mapping rows — the DTO's source of
+          // truth (surfaced by the sub-workspace list/get enrichment). Scope-guarded
+          // to unlinked live rows (mapping-rows.js); never overwrites an existing link.
           await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
         }
       } else {
