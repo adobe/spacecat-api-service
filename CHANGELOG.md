@@ -1,3 +1,10 @@
+# [1.675.0](https://github.com/adobe/spacecat-api-service/compare/v1.674.0...v1.675.0) (2026-07-22)
+
+
+### Features
+
+* emit log.info on 200/304 branches for happy-path visibility (SITES-48140) ([#2880](https://github.com/adobe/spacecat-api-service/issues/2880)) ([271a362](https://github.com/adobe/spacecat-api-service/commit/271a36237ed5dbc88bc900bd1bf604f880946b3c)), closes [#675](https://github.com/adobe/spacecat-api-service/issues/675)
+
 # [1.674.0](https://github.com/adobe/spacecat-api-service/compare/v1.673.3...v1.674.0) (2026-07-21)
 
 
