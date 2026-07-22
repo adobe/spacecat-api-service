@@ -180,6 +180,24 @@ export function parseShowTrends(q) {
 }
 
 /**
+ * True when the `userIntent`/`user_intent` query param opts into per-prompt
+ * intent enrichment on the brand-presence prompts endpoint. Same boolean
+ * parsing as {@link parseShowTrends} (the HTTP path only ever yields strings;
+ * the boolean/number branch is unit-test-only).
+ */
+export function parseUserIntent(q) {
+  const v = q?.userIntent ?? q?.user_intent;
+  if (v === true || v === 1) {
+    return true;
+  }
+  if (typeof v === 'string') {
+    const s = v.toLowerCase().trim();
+    return s === 'true' || s === '1';
+  }
+  return false;
+}
+
+/**
  * Extracts and validates the IMS bearer token from the inbound Authorization header.
  * Throws 401 if missing or if the caller authenticated via a non-IMS mechanism.
  *
@@ -373,14 +391,14 @@ export default function ElementsController(context, log, env) {
 
   async function buildService(ctx) {
     const imsToken = await resolveElementsImsToken(ctx);
-    return createElementsService(createElementsTransport({ env, imsToken }));
+    return createElementsService(createElementsTransport({ env, imsToken }), log);
   }
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/filter-dimensions
    * Returns filter dimensions for the URL Inspector dashboard
-   * (brands, regions, topics, categories, page_intents, origins), scoped to
+   * (brands, regions, topics, categories, page_intents, origins, content_types), scoped to
    * that single brand.
    */
   const listUrlInspectorFilterDimensions = async (ctx) => {
@@ -477,6 +495,7 @@ export default function ElementsController(context, log, env) {
         platform: query.platform,
         tags: splitCsv(query.tag),
         projectIds: splitCsv(query.projectId || query.project_id),
+        enrichUserIntent: parseUserIntent(query),
       });
       return ok(result);
     } catch (e) {

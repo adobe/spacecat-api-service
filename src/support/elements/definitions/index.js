@@ -13,6 +13,10 @@
 export { buildBrandsPayload, transformBrandsToFilterDimensions } from './brands.js';
 export { buildMarketsPayload, transformMarketsToFilterDimensions } from './markets.js';
 export {
+  buildContentTypesPayload,
+  transformContentTypesToFilterDimensions,
+} from './content-types.js';
+export {
   buildTopicsPayload,
   transformTopicsForFilterDimensions,
   transformCategoriesToFilterDimensions,
@@ -21,7 +25,11 @@ export {
   transformOtherTagsForFilterDimensions,
 } from './topics.js';
 export { buildWeeksPayload, transformWeeksResponse } from './weeks.js';
-export { buildPromptsPayload, transformPromptsResponse } from './prompts.js';
+export {
+  buildPromptsPayload,
+  transformPromptsResponse,
+  INTENT_ENRICH_CONCURRENCY,
+} from './prompts.js';
 export { buildCitedDomainsPayload, transformCitedDomainsResponse } from './cited-domains.js';
 export {
   buildSentimentOverviewPayload,

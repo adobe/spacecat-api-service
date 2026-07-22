@@ -972,13 +972,6 @@ export async function upsertBrand({
     row.pending_semrush_provisioning = pendingSemrushProvisioning;
   }
 
-  // A Semrush-anchored create (serenity-first, semrushSubWorkspaceId set) is
-  // NEVER anchored by a SpaceCat site: its primary URL is the Semrush project
-  // domain, which may coincidentally match an onboarded site. Setting site_id
-  // from that match would collide with the site's existing primary brand (409
-  // brands_base_site_unique) — so ignore baseSiteId entirely on this path.
-  const anchoredBySemrush = hasText(semrushSubWorkspaceId);
-
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
@@ -988,20 +981,25 @@ export async function upsertBrand({
   // In both cases we always write an explicit site_id — or null to clear the
   // deleted brand's stale anchor so it cannot survive the ON CONFLICT UPDATE
   // and collide with whichever brand now owns that site.
-  if (!anchoredBySemrush) {
-    if (existing === null) {
-      row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
-    } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
-      row.site_id = brand.baseSiteId;
-    } else if (
-      hasText(brand.baseSiteId)
-      && hasText(existing.site_id)
-      && existing.site_id !== brand.baseSiteId
-    ) {
-      log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
-        + `(org ${organizationId}) — primary site is immutable `
-        + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
-    }
+  // LLMO-6405: a Semrush-anchored (serenity-first) create now ALSO carries a
+  // primary site — the UI's primary-URL step selects an onboarded Site and sends
+  // its baseSiteId, so brands.site_id is populated on every path (a Semrush brand
+  // is anchored by BOTH its sub-workspace AND its primary site). The previous skip
+  // (which left Semrush brands' site_id NULL) is removed; a genuine collision with
+  // another brand's primary site still surfaces as the brands_base_site_unique 409
+  // handled below.
+  if (existing === null) {
+    row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
+  } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
+    row.site_id = brand.baseSiteId;
+  } else if (
+    hasText(brand.baseSiteId)
+    && hasText(existing.site_id)
+    && existing.site_id !== brand.baseSiteId
+  ) {
+    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+      + `(org ${organizationId}) — primary site is immutable `
+      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
   }
 
   const { data: upserted, error } = await postgrestClient

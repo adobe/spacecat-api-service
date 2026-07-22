@@ -533,11 +533,13 @@ export default function serenityTests(
       expect(created.status).to.equal(200);
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
-      // The write path now server-computes a branded/non-branded `type:` tag and
-      // appends it to the supplied tagIds, so the created prompt carries the two
-      // supplied tags plus one computed type tag.
+      // The write path server-stamps two dimensions the caller may not set: a
+      // branded/non-branded `type:` tag (classified from the text) AND, on a
+      // user-authenticated create, the derived `origin:` tag (`human`) —
+      // origin-dimension.md §3 (WP-O2b). So the created prompt carries the two
+      // supplied tags plus one computed `type` tag plus one derived `origin` tag.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
-      expect(created.body.created[0].tagIds).to.have.lengthOf(3);
+      expect(created.body.created[0].tagIds).to.have.lengthOf(4);
       expect(created.body.failed).to.deep.equal([]);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list

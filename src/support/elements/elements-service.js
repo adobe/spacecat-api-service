@@ -13,11 +13,14 @@
 import { ELEMENT_IDS } from './element-ids.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
+import { INTENT_VALUE } from '../serenity/prompt-tags.js';
 import {
   buildBrandsPayload,
   transformBrandsToFilterDimensions,
   buildMarketsPayload,
   transformMarketsToFilterDimensions,
+  buildContentTypesPayload,
+  transformContentTypesToFilterDimensions,
   buildTopicsPayload,
   transformTopicsForFilterDimensions,
   transformCategoriesToFilterDimensions,
@@ -28,6 +31,7 @@ import {
   transformWeeksResponse,
   buildPromptsPayload,
   transformPromptsResponse,
+  INTENT_ENRICH_CONCURRENCY,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
   buildSentimentOverviewPayload,
@@ -60,8 +64,9 @@ const STATS_TRENDS_WEEK_CONCURRENCY = 4;
  * payload builders and response transformers.
  *
  * @param {object} transport - Elements transport created by createElementsTransport().
+ * @param {object} [log] - Optional logger (`{ warn }`) for non-fatal degradation paths.
  */
-export function createElementsService(transport) {
+export function createElementsService(transport, log) {
   return {
     /**
      * Fetches filter dimensions for the URL Inspector dashboard.
@@ -78,10 +83,15 @@ export function createElementsService(transport) {
       spacecatBrands = [],
       brandSemrushProjects = [],
     ) {
-      const [rawTopics, rawBrands, rawMarkets] = await Promise.all([
+      const [rawTopics, rawBrands, rawMarkets, rawContentTypes] = await Promise.all([
         transport.fetchElement(workspaceId, ELEMENT_IDS.TOPICS, buildTopicsPayload(params)),
         transport.fetchElement(workspaceId, ELEMENT_IDS.BRANDS, buildBrandsPayload(params)),
         transport.fetchElement(workspaceId, ELEMENT_IDS.MARKETS, buildMarketsPayload({})),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.CONTENT_TYPES,
+          buildContentTypesPayload(params),
+        ),
       ]);
       const result = {
         brands: transformBrandsToFilterDimensions(rawBrands, spacecatBrands),
@@ -90,6 +100,7 @@ export function createElementsService(transport) {
         categories: transformCategoriesToFilterDimensions(rawTopics),
         page_intents: transformIntentsToFilterDimensions(rawTopics),
         origins: transformOriginsToFilterDimensions(rawTopics),
+        content_types: transformContentTypesToFilterDimensions(rawContentTypes),
       };
       // Merge any tag types not covered above (e.g. `type:branded`) under their own
       // prefix key, and plain prefix-less tags under `tags` — see
@@ -135,17 +146,82 @@ export function createElementsService(transport) {
     /**
      * Fetches the prompts matching the given filters, plus their count.
      *
+     * When `params.enrichUserIntent` is set (and the query is scoped to exactly
+     * one `projectId` — see below), each returned row also carries its OWN intent
+     * (`userIntent`). The intent isn't a column on the PROMPTS element, so it's
+     * derived with one `intent__<value>`-filtered call per Semrush intent, run in
+     * parallel and joined back to the base rows.
+     *
+     * Enrichment is non-fatal per intent value: each call catches its own failure
+     * and contributes nothing, so one failing intent drops only that intent's rows.
+     * The base call still propagates on failure. Without the flag, response shape
+     * and upstream call count are unchanged.
+     *
+     * SINGLE-SLICE ONLY: the join key is `(prompt, prompt_topic)` — the strongest
+     * identifier the element row exposes (it carries no `semrushPromptId`, geo, or
+     * language). That tuple is unique only WITHIN one project (= one geo+language
+     * slice), so enrichment is skipped unless exactly one `projectId` is requested;
+     * across markets the same text could map to different intents and no row field
+     * could disambiguate it. (A stable per-row id from upstream would lift this.)
+     *
      * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} params - Filter parameters (model/platform, topics, projectIds).
+     * @param {object} params - Filter parameters (model/platform, tags, projectIds,
+     *   and `enrichUserIntent`).
      * @returns {Promise<{count: number, prompts: object[]}>} `{ count, prompts }`.
      */
     async getPrompts(workspaceId, params) {
-      const raw = await transport.fetchElement(
-        workspaceId,
-        ELEMENT_IDS.PROMPTS,
-        buildPromptsPayload(params),
+      const { enrichUserIntent, ...promptParams } = params ?? {};
+      const basePromise = transport
+        .fetchElement(workspaceId, ELEMENT_IDS.PROMPTS, buildPromptsPayload(promptParams))
+        .then(transformPromptsResponse);
+
+      // Enrich only when opted in AND scoped to a single slice (see the join-key
+      // note above); otherwise return the base rows unchanged.
+      if (!enrichUserIntent || (promptParams.projectIds ?? []).length !== 1) {
+        return basePromise;
+      }
+
+      // `(prompt, prompt_topic)` join key — unique within the single requested slice.
+      const rowKey = (row) => `${row?.prompt ?? ''} ${row?.prompt_topic ?? ''}`;
+
+      // Base call + one intent-filtered call per intent value, in parallel
+      // (~one extra round-trip). Each intent call degrades independently.
+      const intentPromise = mapWithConcurrency(
+        Object.values(INTENT_VALUE),
+        INTENT_ENRICH_CONCURRENCY,
+        async (value) => {
+          const key = value.toLowerCase();
+          try {
+            const raw = await transport.fetchElement(
+              workspaceId,
+              ELEMENT_IDS.PROMPTS,
+              buildPromptsPayload({ ...promptParams, tags: [...(promptParams.tags ?? []), `intent__${value}`] }),
+            );
+            return { key, rows: transformPromptsResponse(raw).prompts };
+          } catch (e) {
+            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`, { workspaceId, error: e?.message });
+            return { key, rows: [] };
+          }
+        },
       );
-      return transformPromptsResponse(raw);
+
+      const [base, intentResults] = await Promise.all([basePromise, intentPromise]);
+
+      // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
+      // tag, so within a single slice it appears in at most one filtered result.
+      const intentByRow = new Map();
+      for (const { key, rows } of intentResults) {
+        for (const row of rows) {
+          intentByRow.set(rowKey(row), key);
+        }
+      }
+
+      const prompts = base.prompts.map((p) => ({
+        ...p,
+        userIntent: intentByRow.get(rowKey(p)) ?? '',
+      }));
+      // `count` mirrors the base response (currently equals the row count).
+      return { count: base.count, prompts };
     },
 
     /**
@@ -172,10 +248,12 @@ export function createElementsService(transport) {
      * element (f4153af8…), transformed into the legacy Brand Presence
      * `sentiment-overview` contract `{ weeklyTrends: [...] }`.
      *
-     * Single call (like getCitedDomains, not a per-project fan-out): the element returns
-     * an aggregate daily sentiment breakdown that we roll up to ISO weeks. Region scoping,
-     * when requested, is a top-level `project_id` on the payload (resolved by the controller
-     * via resolveRegionProjectId); region=all/absent → the brand's whole sub-workspace.
+     * Single call (like getCitedDomains, not a per-project fan-out): with
+     * `auto_bucketing: 'week'` the element returns weekly sentiment buckets directly
+     * (server-side, honoring the requested date range) — no daily→weekly rollup here.
+     * Region scoping, when requested, is a `CBF_project` (Semrush project id) advanced
+     * filter (resolved by the controller via resolveRegionProjectId); region=all/absent →
+     * the brand's whole sub-workspace.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, startDate, endDate, category,

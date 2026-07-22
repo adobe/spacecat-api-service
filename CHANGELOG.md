@@ -1,3 +1,71 @@
+## [1.677.1](https://github.com/adobe/spacecat-api-service/compare/v1.677.0...v1.677.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **llmo:** dedupe brand-presence citation counts by execution_id ([#2881](https://github.com/adobe/spacecat-api-service/issues/2881)) ([49a727f](https://github.com/adobe/spacecat-api-service/commit/49a727f618325ac669489d7ede930d8dca9ef73b))
+
+# [1.677.0](https://github.com/adobe/spacecat-api-service/compare/v1.676.0...v1.677.0) (2026-07-22)
+
+
+### Features
+
+* **serenity:** org-flag brand-create mode, sub-workspace-only pending activation, site_id anchoring (LLMO-6405) ([#2878](https://github.com/adobe/spacecat-api-service/issues/2878)) ([a9d7a4a](https://github.com/adobe/spacecat-api-service/commit/a9d7a4a829094e21759f328be8c60c6cd440175e))
+
+# [1.676.0](https://github.com/adobe/spacecat-api-service/compare/v1.675.0...v1.676.0) (2026-07-22)
+
+
+### Features
+
+* added move site slack command ([#2795](https://github.com/adobe/spacecat-api-service/issues/2795)) ([3757f01](https://github.com/adobe/spacecat-api-service/commit/3757f019896b3810df023876300a191367a675da))
+
+# [1.675.0](https://github.com/adobe/spacecat-api-service/compare/v1.674.0...v1.675.0) (2026-07-22)
+
+
+### Features
+
+* emit log.info on 200/304 branches for happy-path visibility (SITES-48140) ([#2880](https://github.com/adobe/spacecat-api-service/issues/2880)) ([271a362](https://github.com/adobe/spacecat-api-service/commit/271a36237ed5dbc88bc900bd1bf604f880946b3c)), closes [#675](https://github.com/adobe/spacecat-api-service/issues/675)
+
+# [1.674.0](https://github.com/adobe/spacecat-api-service/compare/v1.673.3...v1.674.0) (2026-07-21)
+
+
+### Bug Fixes
+
+* **deps:** trigger prod deploy for spacecat-shared-data-access 4.11.0 (LLMO-6401) ([#2879](https://github.com/adobe/spacecat-api-service/issues/2879)) ([038e4da](https://github.com/adobe/spacecat-api-service/commit/038e4da8ec872b1fabc1ab7e9bd7b387da22dbe6))
+
+
+### Features
+
+* **serenity:** derive + inject prompt origin server-side — WP-O2b (LLMO-6275) ([#2866](https://github.com/adobe/spacecat-api-service/issues/2866)) ([331071f](https://github.com/adobe/spacecat-api-service/commit/331071f3abea736dc41bc46cd1a4a5ff9cd3162f)), closes [#2825](https://github.com/adobe/spacecat-api-service/issues/2825) [#2867](https://github.com/adobe/spacecat-api-service/issues/2867)
+
+## [1.673.3](https://github.com/adobe/spacecat-api-service/compare/v1.673.2...v1.673.3) (2026-07-21)
+
+
+### Bug Fixes
+
+* Serenity sentiment date range + weekly bucketing | LLMO-6311 ([#2841](https://github.com/adobe/spacecat-api-service/issues/2841)) ([981e02c](https://github.com/adobe/spacecat-api-service/commit/981e02ce156e8db0e48d7f65c437b6ca9d3ce002))
+
+## [1.673.2](https://github.com/adobe/spacecat-api-service/compare/v1.673.1...v1.673.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* Prompt Research all-models volume + prompts-count | LLMO-6323 ([#2845](https://github.com/adobe/spacecat-api-service/issues/2845)) ([a4b9b66](https://github.com/adobe/spacecat-api-service/commit/a4b9b6699e9384c6b4699176814e4df7e51eb203)), closes [#2843](https://github.com/adobe/spacecat-api-service/issues/2843)
+
+## [1.673.1](https://github.com/adobe/spacecat-api-service/compare/v1.673.0...v1.673.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **serenity:** span the ~9s Semrush write-enforcement lag in retryOnQuota ([#2874](https://github.com/adobe/spacecat-api-service/issues/2874)) ([8083aa3](https://github.com/adobe/spacecat-api-service/commit/8083aa32026266122a05d785d65e449339e9d381))
+
+# [1.673.0](https://github.com/adobe/spacecat-api-service/compare/v1.672.1...v1.673.0) (2026-07-21)
+
+
+### Features
+
+* **serenity:** opt-in per-prompt userIntent on brand-presence prompts endpoint ([#2858](https://github.com/adobe/spacecat-api-service/issues/2858)) ([5909ba1](https://github.com/adobe/spacecat-api-service/commit/5909ba1281b699b2ce473a4b130d3ee6a7f339bf))
+
 ## [1.672.1](https://github.com/adobe/spacecat-api-service/compare/v1.672.0...v1.672.1) (2026-07-21)
 
 

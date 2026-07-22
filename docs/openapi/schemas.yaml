@@ -6510,6 +6510,12 @@ V2PromptListResponse:
 V2Prompt:
   type: object
   description: A prompt with brand, category, and topic enrichment
+  # FIX (MysticatBot suggestion): `origin` is required (non-nullable) in the
+  # response — it is NOT NULL in production and `mapRowToPrompt` returns it
+  # verbatim with no fallback (origin-dimension.md §2.3 / §3 item 4), so
+  # SDK-generated types must reflect it as always-present, never optional.
+  required:
+    - origin
   properties:
     id:
       type: string
@@ -6643,6 +6649,13 @@ V2PromptInput:
       type: string
       enum: [ai, human]
       default: human
+      description: >-
+        Who authored the prompt's text. SERVICE-PRINCIPAL-ONLY and read-only for
+        end users: a user-authenticated request (IMS/JWT) has this field IGNORED
+        (never rejected) and the value derived as `human`; only a service
+        principal (e.g. the generation pipeline) may assert it, validated against
+        the enum. It is never patched on update — it is fixed by the writer that
+        created the row (origin-dimension.md §3).
     source:
       type: string
       description: The source system or process that created the prompt
@@ -7857,6 +7870,14 @@ V2BrandInput:
       type: array
       items:
         $ref: '#/V2BrandCompetitor'
+    baseSiteId:
+      type: string
+      format: uuid
+      description: >-
+        Id of the brand's primary SpaceCat Site — an existing onboarded site or one
+        onboarded inline. Written to `brands.site_id` as the brand's primary-URL
+        anchor. Sent on every create (a Serenity brand is anchored by BOTH its
+        sub-workspace and this primary Site).
 
 V2BrandUpdateInput:
   type: object
@@ -11280,25 +11301,27 @@ SerenityMarketDetail:
 SerenityActivateRequest:
   type: object
   description: |
-    Activates a brand into sub-workspace mode: ensures the brand's own
-    Semrush sub-workspace exists (creating + resourcing it on first call),
-    then per supplied market creates-or-resumes a draft and publishes it once.
+    Activates a brand into sub-workspace mode.
 
-    All fields are optional. A pending (draft) brand activated from the wizard
-    sends an EMPTY body `{}` and every value is read from its stashed
-    `pending_semrush_provisioning` (primary URL, markets, generatePrompts). A
-    reactivation of an already-live brand re-supplies them in the body (the body
-    wins when present; there is no stored market memory otherwise). When no
-    primary URL/domain is available at all, a sub-workspace-only brand is
-    activated (no project). With a domain but no market, a single US/EN fallback
-    project is provisioned.
+    A PENDING (draft) brand activates SUB-WORKSPACE-ONLY: it ensures the brand's
+    own Semrush sub-workspace and flips the brand active, with NO project. The
+    wizard's approve sends an EMPTY body `{}`; any `markets`/`brandDomain` (or the
+    legacy `pending_semrush_provisioning` stash) are IGNORED for provisioning. The
+    brand is anchored by its primary site (`brands.site_id`, set at create), and
+    markets are added afterwards from the Markets tab.
+
+    An ALREADY-ACTIVE brand (reactivation / onboarding API) provisions the markets
+    supplied in the body: per market it creates-or-resumes a draft project and
+    publishes it once. With a `brandDomain` but no `markets`, a single US/EN
+    fallback project is provisioned. An active brand is never downgraded on a
+    partial failure (207 Multi-Status). All fields are optional.
   properties:
     generatePrompts:
       type: boolean
       description: >-
-        Whether to generate topics/prompts for the provisioned project(s).
-        Overrides the stashed value; defaults to the stash (else false). Requires
-        a primary URL/domain (a project) — true with no domain is rejected (400).
+        Whether to generate topics/prompts for a supplied market's project
+        (already-active brand only). Ignored for a pending brand, which activates
+        sub-workspace-only with no project.
     brandDomain:
       type: string
       description: Primary domain for the brand's upstream projects.
@@ -11337,10 +11360,8 @@ SerenityActivateRequest:
             items:
               type: string
             description: >-
-              Optional AI model (LLM) ids to attach to this market's project.
-              When omitted here, the markets stashed on the pending brand supply
-              them (a draft activated from the wizard carries per-market LLMs in
-              pending_semrush_provisioning).
+              Optional AI model (LLM) ids to attach to this market's project
+              (already-active brand reactivation).
 
 SerenityActivateResponse:
   type: object
@@ -11649,18 +11670,19 @@ SerenityUrlInspectorFilterDimensions:
   type: object
   description: |
     Filter dimensions for the Serenity (Semrush Elements-backed) URL Inspector
-    dashboard, sourced from the Semrush Brands, Markets, and Topics elements.
+    dashboard, sourced from the Semrush Brands, Markets, Topics, and Content
+    Types elements.
 
-    `brands`, `regions`, `topics`, `categories`, `page_intents`, `origins`, and
-    `tags` are always present (empty array when Semrush has no data). Any
-    additional Semrush tag prefix not already covered by the fixed dimensions
-    (e.g. a future `type__branded` tag) surfaces as an extra dynamic array
-    property keyed by that prefix — this is why the schema allows
-    `additionalProperties`. Prefixes that would collide with one of the fixed
-    keys above are routed into `tags` instead of clobbering that key. Bare
-    prefix declarations with no value (e.g. a lone `category` row) are ignored
-    entirely and never appear in any dimension.
-  required: [brands, regions, topics, categories, page_intents, origins, tags]
+    `brands`, `regions`, `topics`, `categories`, `page_intents`, `origins`,
+    `content_types`, and `tags` are always present (empty array when Semrush
+    has no data). Any additional Semrush tag prefix not already covered by the
+    fixed dimensions (e.g. a future `type__branded` tag) surfaces as an extra
+    dynamic array property keyed by that prefix — this is why the schema
+    allows `additionalProperties`. Prefixes that would collide with one of the
+    fixed keys above are routed into `tags` instead of clobbering that key.
+    Bare prefix declarations with no value (e.g. a lone `category` row) are
+    ignored entirely and never appear in any dimension.
+  required: [brands, regions, topics, categories, page_intents, origins, content_types, tags]
   properties:
     brands:
       type: array
@@ -11705,6 +11727,14 @@ SerenityUrlInspectorFilterDimensions:
     origins:
       type: array
       description: Distinct `source__`-prefixed tags. `id` is the original `source__`-prefixed tag value.
+      items: { $ref: '#/SerenityFilterDimensionItem' }
+    content_types:
+      type: array
+      description: |
+        Available content types (Semrush `domain_type` values, e.g. Owned,
+        Other, Social, Earned, Benchmark Competitors). `id` is derived from
+        `label` (lowercased, spaces replaced with underscores) — Semrush has
+        no stable content-type id.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     tags:
       type: array
