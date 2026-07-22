@@ -336,8 +336,10 @@ describe('prompts-subworkspace handlers', () => {
     });
 
     // serenity-docs#72 §4.1: a residual disguised-405 quota rejection on the publish leg must
-    // surface as the stable 409 quotaExceeded token, never the generic embedded `publish:` record.
-    it('appends a 409 quotaExceeded failure (not a generic publish: record) for a disguised quota 405', async () => {
+    // surface as the stable 409 quotaExceeded token, never the generic embedded `publish:`
+    // record — and (§4.1 atomicity) the staged prompt must be rolled back (deleted), never left
+    // as an unpublished draft.
+    it('rolls back the staged prompt and appends a 409 quotaExceeded failure for a disguised quota 405', async () => {
       const transport = makeTransport({
         publishProject: sinon.stub().rejects(
           new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
@@ -348,11 +350,14 @@ describe('prompts-subworkspace handlers', () => {
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log);
-      expect(result.created).to.have.length(1);
+      expect(result.created).to.have.length(0);
       expect(result.failed).to.have.length(1);
       expect(result.failed[0].status).to.equal(409);
       expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
       expect(result.failed[0].message).to.not.match(/^publish:/);
+      expect(result.failed[0].text).to.equal('p');
+      expect(transport.deletePromptsByIds)
+        .to.have.been.calledOnceWith(WS, 'p-us-en', ['new-prompt']);
     });
   });
 

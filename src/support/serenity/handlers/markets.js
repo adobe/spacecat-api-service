@@ -16,7 +16,9 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone, isSemrushTransportError } from '../errors.js';
+import {
+  ERROR_CODES, isMeteredQuota, isUpstreamGone, isSemrushTransportError, toQuotaExceededError,
+} from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
 import { resolveSiteDomain } from '../site-linkage.js';
@@ -1168,7 +1170,21 @@ export async function syncModelsForProject(
   // Only reached when something actually changed (the no-op path returned above).
   // Skipped when the caller batches its own publish (brand-create, see jsdoc).
   if (publish) {
-    await wrapPublish(() => transport.publishProject(semrushWorkspaceId, projectId));
+    try {
+      await wrapPublish(() => transport.publishProject(semrushWorkspaceId, projectId));
+    } catch (e) {
+      // serenity-docs#72 §4.1: a model-set-change publish is a metered write too — a residual
+      // disguised-405 quota rejection (after wrapPublish's own retry, when wired) must surface as
+      // the stable 409 quotaExceeded token, never propagate raw into mapError's generic 502. This
+      // is the shared core for BOTH the flat and sub-workspace PUT /models callers.
+      if (isMeteredQuota(e)) {
+        log?.warn?.('handleUpdateModels: publish rejected — quota exceeded', {
+          ...ctx, semrushWorkspaceId, projectId,
+        });
+        throw toQuotaExceededError();
+      }
+      throw e;
+    }
   }
 
   // Return the refreshed model list
