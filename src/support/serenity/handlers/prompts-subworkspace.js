@@ -159,8 +159,13 @@ export async function handleCreatePromptsSubworkspace(
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
   // per-item injection below.
+  // Classify the TRIMMED text: `makeIntentInjector` looks up the map by
+  // `input.text`, which `normalizePromptInput` has already trimmed, so the
+  // classify key must be trimmed to match — otherwise a whitespace-padded prompt
+  // (common in CSV import) misses the map and silently defaults to Informational
+  // despite a real classification.
   const intentByText = await classifyPromptIntents(
-    inputs.map((raw) => String(raw?.text || '')),
+    inputs.map((raw) => String(raw?.text || '').trim()),
     {
       env,
       log,

@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   handleListPrompts,
@@ -2574,5 +2575,52 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
       expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
+  });
+});
+
+// Regression (Alicia review, serenity-docs#32): the create paths must classify the
+// TRIMMED text. `makeIntentInjector` looks up the classification map by `input.text`,
+// which `normalizePromptInput` has already trimmed — so if the classify input is NOT
+// trimmed, a whitespace-padded prompt misses the map and silently defaults to
+// Informational despite a real classification. The fake classifier below keys its
+// result by exactly the text it receives (like the real `classifyIntents`), so an
+// un-trimmed classify input would reintroduce the miss and fail this test.
+describe('handlers/prompts.js — intent classify/lookup key alignment (serenity-docs#32)', () => {
+  const project = () => makeProject({
+    semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+  });
+
+  it('classifies the trimmed text so a whitespace-padded prompt keeps its real (non-default) intent', async () => {
+    const { handleCreatePrompts: handleCreate } = await esmock(
+      '../../../../src/support/serenity/handlers/prompts.js',
+      {
+        '../../../../src/support/serenity/intent-classification.js': {
+          classifyPromptIntents: async (texts) => new Map(
+            texts.map((t) => [t, /buy/i.test(t) ? 'Transactional' : 'Informational']),
+          ),
+        },
+      },
+    );
+
+    const dataAccess = makeDataAccess([project()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'buy now' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreate(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: '   buy now   ', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog(), classifyByBrandMention);
+
+    // The padded prompt resolves to Transactional (its real classification), NOT the
+    // Informational default — proving the classify key was trimmed to match the
+    // injector's `input.text` lookup.
+    expect(result.created[0].tagIds).to.include(TAG_IDS.intentTransactional);
+    expect(result.created[0].tagIds).to.not.include(TAG_IDS.intentInformational);
   });
 });
