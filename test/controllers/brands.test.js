@@ -5217,14 +5217,17 @@ describe('Brands Controller', () => {
       it('creates a bare sub-workspace (no project) when no market is supplied (serenity-active)', async () => {
         // LLMO-6405: market-scoped inputs moved to market creation, so a serenity-active
         // create with no market provisions just the sub-workspace (no project) — the
-        // market-based project provisioner is never called.
+        // market-based project provisioner is never called, and there is no market
+        // domain to mirror, so ensureMarketSite is skipped.
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const ensureMarketSiteStub = sinon.stub().resolves('site-x');
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub,
           provisionBrandSubworkspaceBare: bareStub,
           upsertBrand: upsertStub,
+          ensureMarketSite: ensureMarketSiteStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5238,10 +5241,37 @@ describe('Brands Controller', () => {
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
         expect(bareStub.called).to.equal(true);
+        // No market domain on the bare path → the Site mirror is skipped.
+        expect(ensureMarketSiteStub.called).to.equal(false);
         const upsertArgs = upsertStub.firstCall.args[0];
         // Anchored by BOTH the bare sub-workspace and the primary site.
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-bare');
         expect(upsertArgs.brand.baseSiteId).to.equal('site-123');
+      });
+
+      it('surfaces a bare sub-workspace provisioning failure and does not write the brand', async () => {
+        // The bare sub-workspace is provisioned BEFORE the brand row is written; if
+        // that upstream call throws, the create surfaces the error and never persists
+        // a brand row (provisionedWorkspaceId stays null, so no compensation fires).
+        const bareStub = sinon.stub().rejects(new Error('Semrush provisioning failed'));
+        const upsertStub = sinon.stub().resolves({ id: 'x', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' }),
+          provisionBrandSubworkspaceBare: bareStub,
+          upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(bareStub.called).to.equal(true);
+        expect(response.status).to.equal(500);
+        expect(upsertStub.called).to.equal(false);
       });
 
       it('does a flat create (no Semrush provisioning) when the org is not serenity-active', async () => {
@@ -5707,10 +5737,31 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
-      it('STILL enters Semrush mode for a PENDING draft with generatePrompts:false and no market', async () => {
-        // The boolean-presence signal is preserved for drafts: a pending brand
-        // with generatePrompts:false and no market is a legitimate
-        // sub-workspace-only Semrush draft and must stash deferred provisioning.
+      it('403s a non-serenity org that requests generatePrompts:true (no market)', async () => {
+        // The guard rejects an ACTUAL provisioning request from a non-serenity org —
+        // a supplied market OR generatePrompts:true, not just a market.
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'X' });
+        const controller = await buildCreateController({
+          upsertBrand: upsertStub,
+          isSerenityActiveForOrg: sinon.stub().resolves(false),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'X', generatePrompts: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(403);
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('stashes deferred provisioning for a PENDING serenity-active create (generatePrompts:false, no market)', async () => {
+        // In a serenity-active org a pending create is a Semrush create (the org flag
+        // decides mode, not the generatePrompts flag): it provisions nothing yet and
+        // stashes the deferred-provisioning blob for activation.
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'Draft', status: 'pending' });
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
         const controller = await buildCreateController({
